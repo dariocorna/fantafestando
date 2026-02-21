@@ -2,14 +2,13 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Pannello Amministrazione', () => {
     test.beforeEach(async ({ page }) => {
-        await page.goto('/admin/events');
+        await page.goto('/admin');
     });
 
     test('navigazione pagine admin senza errori 404', async ({ page, isMobile }) => {
         const navItems = [
             { title: 'Dashboard', url: /\/admin$/, path: '/admin' },
             { title: 'Catalogo', url: /\/admin\/catalog/, path: '/admin/catalog' },
-            { title: 'Eventi', url: /\/admin\/events/, path: '/admin/events' },
             { title: 'Storico Ordini', url: /\/admin\/orders/, path: '/admin/orders' },
             { title: 'Impostazioni', url: /\/admin\/settings/, path: '/admin/settings' },
         ];
@@ -28,8 +27,8 @@ test.describe('Pannello Amministrazione', () => {
         }
     });
 
-    test('creazione nuova festa e attivazione globale', async ({ page }) => {
-        await page.goto('/admin/events');
+    test('creazione nuova festa e attivazione globale', async ({ page, isMobile }) => {
+        await page.goto('/admin/settings/events');
 
         // Apri dialog
         await page.click('#new-event-btn');
