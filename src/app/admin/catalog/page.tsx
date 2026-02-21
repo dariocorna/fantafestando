@@ -1,7 +1,7 @@
 import dbConnect from "@/lib/mongoose";
 import Category from "@/models/Category";
 import Product from "@/models/Product";
-import Event from "@/models/Event";
+import { getAdminContextEventId } from "@/lib/events";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,9 +26,14 @@ import { revalidatePath } from "next/cache";
 
 export default async function AdminCatalog() {
     await dbConnect();
-    const events = await Event.find({}).lean();
-    const categories = await Category.find({}).lean();
-    const products = await Product.find({}).populate('categoryId').lean();
+    const currentEventId = await getAdminContextEventId();
+
+    if (!currentEventId) {
+        return <div className="text-center p-10 text-muted-foreground">Nessuna festa attiva o selezionata. Seleziona una festa dalla barra in alto.</div>;
+    }
+
+    const categories = await Category.find({ eventId: currentEventId }).lean();
+    const products = await Product.find({ eventId: currentEventId }).populate('categoryId').lean();
 
     async function createCategory(formData: FormData) {
         "use server"
@@ -115,14 +120,7 @@ export default async function AdminCatalog() {
                                     <DialogTitle>Aggiungi Categoria</DialogTitle>
                                 </DialogHeader>
                                 <div className="grid gap-4 py-4">
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="eventId">Evento</Label>
-                                        <select name="eventId" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background" required>
-                                            {events.map((e: any) => (
-                                                <option key={e._id.toString()} value={e._id.toString()}>{e.name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
+                                    <input type="hidden" name="eventId" value={currentEventId} />
                                     <div className="grid gap-2">
                                         <Label htmlFor="cat-name">Nome</Label>
                                         <Input id="cat-name" name="name" placeholder="Primi, Bar..." required />
@@ -149,7 +147,6 @@ export default async function AdminCatalog() {
                             <TableHead>Nome</TableHead>
                             <TableHead>Colore</TableHead>
                             <TableHead>IP Stampante</TableHead>
-                            <TableHead>Evento</TableHead>
                             <TableHead className="w-[80px]">Azioni</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -159,7 +156,6 @@ export default async function AdminCatalog() {
                                 <TableCell className="font-medium">{cat.name}</TableCell>
                                 <TableCell><div className={`w-4 h-4 rounded-full ${cat.uiColor}`} /></TableCell>
                                 <TableCell>{cat.printerIp || "N/A"}</TableCell>
-                                <TableCell>{events.find(e => e._id.toString() === cat.eventId.toString())?.name || "N/A"}</TableCell>
                                 <TableCell>
                                     <DeleteForm
                                         id={cat._id.toString()}
@@ -189,14 +185,7 @@ export default async function AdminCatalog() {
                                     <DialogTitle>Aggiungi Prodotto</DialogTitle>
                                 </DialogHeader>
                                 <div className="grid gap-4 py-4">
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="prod-eventId">Evento</Label>
-                                        <select name="eventId" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background" required>
-                                            {events.map((e: any) => (
-                                                <option key={e._id.toString()} value={e._id.toString()}>{e.name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
+                                    <input type="hidden" name="eventId" value={currentEventId} />
                                     <div className="grid gap-2">
                                         <Label htmlFor="categoryId">Categoria</Label>
                                         <select name="categoryId" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background" required>
