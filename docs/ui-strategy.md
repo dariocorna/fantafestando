@@ -33,7 +33,14 @@ Quest'area, anch'essa sotto login o PIN, è il core operativo:
 
 ### 3. Interfaccia WebApp Remota (PWA Clienti)
 - Ottimizzata per formato **Verticale** (Mobile-first).
-- Una singola pagina "Infinita" che mostra in sequenza le Categorie, scrollando fluidamente giù.
+- **Stile Visivo (Deliveroo-Like)**: Le app di food delivery sono lo standard aureo per l'ordinazione. Useremo lo stesso paradigma:
+  - *Product Cards orizzontali*: Immagine quadrata smussata a sinistra, titolo in grassetto e descrizione compatta a destra, con il bottone "+" in basso a destra.
+  - *Navigazione fluida*: Una singola pagina che scrolla attraverso le categorie (es. Griglia, Bar, Dolci) con un Header "Sticky" che evidenzia la categoria attiva.
+  - *Bottom Bar (Carrello)*: Una barra inferiore sempre visibile ("Sticky Footer") con un pulsante primario largo, di un colore sgargiante (es. verde smeraldo o teal vibrante) riportante il totale provvisorio e "Vai al Carrello".
+- Checkout in 3 step chiari e rassicuranti:
+  1. *Riepilogo Carrello* (modale a scorrimento dal basso).
+  2. *Dati Anagrafici (se richiesti)* - Nome, Tavolo.
+  3. *Schermata di Conferma*: Display luminoso a pieno schermo con il **Codice Breve** a lettere cubitali (es. **D45**) e istruzioni chiare per la Cassa.
 - Checkout in 3 step chiari e rassicuranti:
   1. *Riepilogo Carrello*.
   2. *Dati Anagrafici (se richiesti)* - Nome, Tavolo.
