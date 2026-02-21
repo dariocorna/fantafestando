@@ -58,7 +58,7 @@ test.describe('Admin Panel', () => {
         const catName = 'Test Cat';
         await page.fill('#cat-name', catName);
         await page.click('button[type="submit"]');
-        await expect(page.getByText(catName)).toBeVisible();
+        await expect(page.getByText(catName).first()).toBeVisible();
 
         // Wait for dialog to close completely
         await page.locator('div[role="dialog"]').waitFor({ state: 'hidden' });
