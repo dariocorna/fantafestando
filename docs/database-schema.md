@@ -22,6 +22,7 @@ interface IFesta {
     chiediNome: boolean;        // Abilita campo "Nome" in PWA
     chiediTavolo: boolean;      // Abilita campo "Tavolo" in PWA
   }
+  tavoliPredefiniti: string[];  // es. ["T1", "T2", "Panca 1"] per popolare il picker visivo al POS
 }
 ```
 
@@ -71,6 +72,7 @@ interface IOrdine {
   carrello: Array<{
     prodottoId: ObjectId;
     nomeSnapshot: string;       // Nome al momento dell'ordine (previene bug se il nome cambia)
+    noteCucinaCustom?: string;  // es. "Molto ben cotto per il nonno" - nome personalizzato
     quantita: number;
     opzioniScelte: Array<{
       nome: string;
