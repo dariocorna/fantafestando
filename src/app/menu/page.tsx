@@ -80,10 +80,10 @@ export default function CustomerMenu() {
                 <div className="flex justify-between items-center mb-6">
                     <div>
                         <h1 className="text-2xl font-black text-slate-800 tracking-tight">
-                            {activeEvent?.name || "Osgfest Menu"}
+                            {activeEvent?.name || "Menù Osgfest"}
                         </h1>
                         <p className="text-slate-400 text-sm font-bold flex items-center gap-1">
-                            <Info size={14} /> Tap on items to add them
+                            <Info size={14} /> Tocca i prodotti per aggiungerli
                         </p>
                     </div>
                 </div>
@@ -199,7 +199,7 @@ export default function CustomerMenu() {
                 )}
             </AnimatePresence>
 
-            {/* Cart Drawer Placeholder (Simplified for now) */}
+            {/* Cart Drawer Placeholder */}
             <AnimatePresence>
                 {isCartOpen && (
                     <motion.div
