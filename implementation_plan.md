@@ -8,8 +8,8 @@ Questo documento descrive l'architettura tecnica e le fasi di sviluppo proposte 
   - *Perché*: Permette di unire l'interfaccia ultra-veloce (POS) alle API di rete che parleranno con le stampanti (backend).
 - **Styling**: **Tailwind CSS**.
   - *Perché*: Ideale per creare interfacce POS con pulsanti touch-friendly e leggibilità ottimale in ambienti serali.
-- **Database**: **SQLite** + **Drizzle ORM** (Libreria Context7: `/drizzle-team/drizzle-orm`).
-  - *Perché*: L'ORM moderno in TypeScript perfetto per SQLite. Leggerissimo e type-safe. Il DB locale basta e avanza per una sagra senza server dedicati.
+- **Database**: **MongoDB** ospitato in container **Docker**, con **Mongoose** (o driver nativo) su Node.
+  - *Perché*: Approccio eccellente per un'architettura a microservizi pulita e scalabile. I dati non strutturati (es. comande libere, array dinamici di varianti) si sposano perfettamente con lo schema flessibile di un DB documentale. Isolarlo in Docker previene conflitti ambientali sul PC locale e velocizza il deploy sulla macchina target della sagra.
 - **Integrazione Stampanti Termiche**: **`node-thermal-printer`** (Libreria Context7: `/klemen1337/node-thermal-printer`).
   - *Perché*: Ottimo modulo Node.js identificato tramite ricerca, che supporta sintassi command-line diretta, protocollo ESC/POS e comunicazioni sia USB che di rete (per l'invio delle comande in cucina).
 - **Testing**:
@@ -22,7 +22,8 @@ Sviluppo strutturato in epiche iterabili con piccoli commit ("atomici" come rich
 
 ### Epica 1: Fondamenta e Setup
 - Inizializzazione applicazione Next.js con Tailwind.
-- Configurazione Drizzle ORM e schema base (Categorie, Prodotti, Varianti).
+- Startup file `docker-compose.yml` per MongoDB locale.
+- Configurazione Mongoose e schema base (Categorie, Prodotti, Varianti).
 - Setup librerie di Testing base.
 
 ### Epica 2: Catalogo e Menù
@@ -47,5 +48,5 @@ Sviluppo strutturato in epiche iterabili con piccoli commit ("atomici" come rich
 > [!CAUTION]
 > **Scelte da Approvare:**
 > - Next.js come applicazione unificata che funge sia da Backend (API x stampanti) che Frontend (Cassa POS).
-> - DB SQLite (file locale rimosso ad ogni fine festa) e Drizzle ORM (invece di Prisma).
+> - MongoDB su Docker isolato e gestito tramite Mongoose, per flessibilità sullo schema varianti.
 > - `node-thermal-printer` confermato per il supporto EPSON (ESC/POS) su rete e locale.
