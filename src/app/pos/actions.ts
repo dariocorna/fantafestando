@@ -3,6 +3,7 @@
 import dbConnect from "@/lib/mongoose"
 import Order from "@/models/Order"
 import { revalidatePath } from "next/cache"
+import { PrinterService } from "@/lib/printer"
 
 export async function createOrder(data: {
     eventId: string,
@@ -24,6 +25,10 @@ export async function createOrder(data: {
             totalAmount: data.totalAmount,
             cart: data.cart
         })
+
+        // Trigger network printing
+        await PrinterService.routeOrderToPrinters(order._id.toString());
+
         revalidatePath("/admin/orders")
         return { success: true, orderId: order._id.toString() }
     } catch (error) {

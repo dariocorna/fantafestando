@@ -37,13 +37,15 @@ export default async function EventsPage() {
         const eventId = formData.get("eventId") as string;
         const askName = formData.get("askName") === "on";
         const askTable = formData.get("askTable") === "on";
+        const defaultCashierPrinterIp = formData.get("defaultCashierPrinterIp") as string;
 
         if (!eventId) return;
 
         await dbConnect();
         await Event.findByIdAndUpdate(eventId, {
             "settings.askName": askName,
-            "settings.askTable": askTable
+            "settings.askTable": askTable,
+            "settings.defaultCashierPrinterIp": defaultCashierPrinterIp
         });
         revalidatePath("/admin/events");
     }
@@ -113,6 +115,10 @@ export default async function EventsPage() {
                                             <div className="flex items-center space-x-2">
                                                 <input type="checkbox" name="askTable" id={`askTable-${evt._id}`} defaultChecked={evt.settings.askTable} className="h-4 w-4 rounded border-gray-300" />
                                                 <Label htmlFor={`askTable-${evt._id}`}>Ask Table Number</Label>
+                                            </div>
+                                            <div className="grid gap-2">
+                                                <Label htmlFor={`cashierIp-${evt._id}`}>Default Cashier Printer IP</Label>
+                                                <Input id={`cashierIp-${evt._id}`} name="defaultCashierPrinterIp" defaultValue={evt.settings.defaultCashierPrinterIp} placeholder="192.168.1.100" />
                                             </div>
                                         </div>
                                         <DialogFooter>

@@ -6,6 +6,7 @@ export interface IEvent extends Document {
     settings: {
         askName: boolean;
         askTable: boolean;
+        defaultCashierPrinterIp?: string;
     };
     predefinedTables: string[];
 }
@@ -16,6 +17,7 @@ const EventSchema = new Schema<IEvent>({
     settings: {
         askName: { type: Boolean, default: false },
         askTable: { type: Boolean, default: false },
+        defaultCashierPrinterIp: { type: String }
     },
     predefinedTables: { type: [String], default: [] }
 }, {

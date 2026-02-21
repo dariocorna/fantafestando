@@ -4,6 +4,7 @@ import dbConnect from "@/lib/mongoose"
 import Order from "@/models/Order"
 import { revalidatePath } from "next/cache"
 import { nanoid } from "nanoid"
+import { PrinterService } from "@/lib/printer"
 
 export async function createPublicOrder(data: {
     eventId: string,
@@ -27,6 +28,9 @@ export async function createPublicOrder(data: {
             totalAmount: data.totalAmount,
             cart: data.cart
         })
+
+        // Trigger network printing
+        await PrinterService.routeOrderToPrinters(order._id.toString());
 
         // We could generate a simpler shortCode if needed, 
         // but for now we'll use the first 4 chars of the ID as a reference
