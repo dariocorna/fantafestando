@@ -28,7 +28,7 @@ Quest'area, anch'essa sotto login o PIN, è il core operativo:
 - **Adattamento Desktop/Tablet (>= 13 pollici)**: L'interfaccia non necessita di bottoni spropositatamente "enormi", poiché lo spazio disponibile su classici monitor o tablet da >= 13 pollici consente una densità visiva maggiore ma comunque altamente leggibile.
 - **Navigazione a Categorie Fisse (Tabs)**: Per gestire menù estesi (es. Primi, Griglia, Bevande, Piadineria), lo schermo avrà una colonna laterale o una barra fissa in alto a schede (Tabs) per filtrare istantaneamente la griglia centrale.
 - **Griglia Prodotti Statica**: I prodotti all'interno di una categoria manterranno **sempre la stessa posizione geometrica** a schermo. Le card saranno proporzionate per garantire un input sicuro ("touch-friendly") ma contenute per far stare più voci a colpo d'occhio.
-- **Collassamento degli "Extra"**: Salse (ketchup, maionese) e aggiunte onnipresenti (Pane) non intaseranno la griglia primaria. Appariranno come larghi interruttori (*Toggle*) in un modale automatico (es. tocchi "Spiedini" e appaiono i pulsanti centrali "Con Pane", "Con Patatine").
+- **Gestione degli "Extra" (Salse/Pane)**: Poiché voci come maionese, ketchup e pane possono essere acquistate singolarmente, non possono essere legate "a cascata" ai piatti principali. Avranno card dedicate, preferibilmente più compatte o raggruppate in un'area rapida visivamente distinta (es. una mini-barra orizzontale fissa sul fondo o un Tab dedicato "Accessori"), sempre a portata di mano per le aggiunte dell'ultimo secondo.
 - **Codici Colori Semantici Estremi**: 
   - *Sfondo Verde* (es. `bg-emerald-600`) per le Bevande.
   - *Sfondo Rosso/Arancio* (`bg-orange-500`) per la Griglieria e Cucina.
