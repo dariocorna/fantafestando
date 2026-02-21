@@ -24,10 +24,11 @@ Quest'area (*Dashboard Amministrativa*) sarà protetta da **NextAuth.js** ed è 
 
 ### 2. Interfaccia "Point of Sale" (Vista Cassiere)
 Quest'area, anch'essa sotto login o PIN, è il core operativo:
-- **Zero Tastiera (Keyboardless)**: L'input da tastiera rallenta il flusso ed è prono a errori su touchscreen. Tutta la spesa sarà gestita tramite enormi bottoni. Nessuna barra di ricerca. I cassieri memorizzeranno le posizioni fisiche e cromatiche dei pulsanti nel corso della prima serata (muscle memory).
-- **Navigazione a Categorie Fisse (Tabs)**: Per gestire menù estesi (es. Primi, Griglia, Bevande, Piadineria), lo schermo avrà una colonna laterale o una barra fissa in alto a grandi bottoni per filtrare istantaneamente la griglia centrale.
-- **Griglia Prodotti Statica**: I prodotti all'interno di una categoria manterranno **sempre la stessa posizione geometrica** a schermo. Le card saranno rettangolari e facili da colpire ("fat-finger friendly").
-- **Collassamento degli "Extra"**: Salse (ketchup, maionese) e aggiunte onnipresenti (Pane) non intaseranno la griglia primaria. Appariranno come enormi *Toggle* in un modale automatico (es. tocchi "Spiedini" e appaiono 3 mega-pulsanti centrali "Con Pane", "Con Patatine").
+- **Zero Tastiera (Keyboardless)**: L'input da tastiera rallenta il flusso ed è prono a errori su touchscreen. Tutta la spesa sarà gestita puramente al tocco. Nessuna barra di ricerca. I cassieri memorizzeranno le posizioni fisiche e cromatiche dei pulsanti nel corso della prima serata (muscle memory).
+- **Adattamento Desktop/Tablet (>= 13 pollici)**: L'interfaccia non necessita di bottoni spropositatamente "enormi", poiché lo spazio disponibile su classici monitor o tablet da >= 13 pollici consente una densità visiva maggiore ma comunque altamente leggibile.
+- **Navigazione a Categorie Fisse (Tabs)**: Per gestire menù estesi (es. Primi, Griglia, Bevande, Piadineria), lo schermo avrà una colonna laterale o una barra fissa in alto a schede (Tabs) per filtrare istantaneamente la griglia centrale.
+- **Griglia Prodotti Statica**: I prodotti all'interno di una categoria manterranno **sempre la stessa posizione geometrica** a schermo. Le card saranno proporzionate per garantire un input sicuro ("touch-friendly") ma contenute per far stare più voci a colpo d'occhio.
+- **Collassamento degli "Extra"**: Salse (ketchup, maionese) e aggiunte onnipresenti (Pane) non intaseranno la griglia primaria. Appariranno come larghi interruttori (*Toggle*) in un modale automatico (es. tocchi "Spiedini" e appaiono i pulsanti centrali "Con Pane", "Con Patatine").
 - **Codici Colori Semantici Estremi**: 
   - *Sfondo Verde* (es. `bg-emerald-600`) per le Bevande.
   - *Sfondo Rosso/Arancio* (`bg-orange-500`) per la Griglieria e Cucina.
