@@ -8,8 +8,10 @@ Questo documento descrive l'architettura tecnica e le fasi di sviluppo proposte 
   - *Perché*: Permette di unire l'interfaccia ultra-veloce (POS) alle API di rete che parleranno con le stampanti (backend).
 - **Styling**: **Tailwind CSS**.
   - *Perché*: Ideale per creare interfacce POS con pulsanti touch-friendly e leggibilità ottimale in ambienti serali.
-- **Database**: **MongoDB** ospitato in container **Docker**, con **Mongoose** (o driver nativo) su Node.
-  - *Perché*: Approccio eccellente per un'architettura a microservizi pulita e scalabile. I dati non strutturati (es. comande libere, array dinamici di varianti) si sposano perfettamente con lo schema flessibile di un DB documentale. Isolarlo in Docker previene conflitti ambientali sul PC locale e velocizza il deploy sulla macchina target della sagra.
+- **Autenticazione Backend**: **NextAuth.js (Auth.js)** (Libreria Context7: `/nextauthjs/next-auth`).
+  - *Perché*: Lo standard per gestire in modo sicuro e plug-and-play le sessioni di login degli amministratori su Next.js.
+- **Database Multitenant**: **MongoDB** ospitato in container **Docker**, con **Mongoose** (o driver nativo) su Node.
+  - *Perché*: Approccio eccellente per un'architettura a microservizi pulita e scalabile. I dati non strutturati si sposano bene con lo schema flessibile di un DB documentale. Inoltre le collection MongoDB filtrabili per `festaId` offrono una struttura multi-tenant perfetta.
 - **Integrazione Stampanti Termiche**: **`node-thermal-printer`** (Libreria Context7: `/klemen1337/node-thermal-printer`).
   - *Perché*: Ottimo modulo Node.js identificato tramite ricerca, che supporta sintassi command-line diretta, protocollo ESC/POS e comunicazioni sia USB che di rete (per l'invio delle comande in cucina).
 - **Testing**:
@@ -20,11 +22,12 @@ Questo documento descrive l'architettura tecnica e le fasi di sviluppo proposte 
 
 Sviluppo strutturato in epiche iterabili con piccoli commit ("atomici" come richiesto in `AGENTS.md`).
 
-### Epica 1: Fondamenta e Setup
+### Epica 1: Fondamenta, Autenticazione e Setup
 - Inizializzazione applicazione Next.js con Tailwind.
 - Startup file `docker-compose.yml` per MongoDB locale.
-- Configurazione Mongoose e schema base (Feste, Categorie, Prodotti, Varianti).
-- Schema "Impostazioni Festa" (es. per attivare obbligatoriamente i campi Nome e Tavolo).
+- Configurazione NextAuth per il login amministrativo protetto.
+- Configurazione Mongoose e schema base Multi-tenant (Feste, Categorie, Prodotti, Varianti).
+- Schema "Impostazioni Festa" (es. abilitazione campi opzionali Nome e Tavolo).
 - Setup libreria QRCode (`qrcode.react`) e strumenti Testing.
 
 ### Epica 2: Catalogo e Menù
@@ -54,8 +57,17 @@ Sviluppo strutturato in epiche iterabili con piccoli commit ("atomici" come rich
 ## User Review Required
 
 > [!CAUTION]
+## 4. Strategia di Deploy Multi-Festa
+
+Per gestire più feste ci sono due vie, a seconda della rete disponibile alle sagre:
+
+1. **Standalone (Isolato per ogni festa)**: Visto che dobbiamo stampare in rete locale via TCP sulle stampanti IP delle cucine, serve tendenzialmente che il server backend fisicamente "giri" sul PC in cassa (es: tramite un container Docker unico con MongoDB e l'app Next.js avviata via Docker Compose). Sulla WebApp, il QRCode viene letto dalla fotocamera per aggirare il fatto che i cellulari dei clienti non sono connessi al WiFi della cassa. *Ogni festa avrà il suo DB Docker indipendente configurabile tramite il backend*.
+
+2. **Cloud Backend + Local Print Node**: Se c'è sempre internet, l'app Next.js e MongoDB stanno in Cloud (es: Vercel + MongoDB Atlas), offrendo un **vero portale multi-tenant unico accessibile da ovunque** (es: `osgfest.it`). Per le stampe locali, alle singole casse gira un piccolo script Node.js / Python in background (Print Node) collegato in "ascolto" al cloud via Websocket, che si occupa solo di fare da ponte per le stampanti IP fisiche.
+
+> [!CAUTION]
 > **Scelte da Approvare:**
-> - Next.js come applicazione unificata che funge sia da Backend (API x stampanti) che Frontend (Cassa POS e **App Pubblica**).
-> - La comunicazione App Pubblica -> Cassa avviene esclusivamente **offline** tramite QRCode, o i dispositivi cliente dovranno essere collegati al WiFi della festa? Presumo offline via QR code come richiesto, dove la stringa del QR contiene l'intero ordine codificato (JSON zippato o base64).
-> - MongoDB su Docker isolato e gestito tramite Mongoose, per flessibilità sullo schema varianti e sulle impostazioni variabili della festa.
+> - Hai preferenze sulla strategia del deploy **Standalone Locale** o **Cloud Backend + Local Print Node**? 
+> - Next.js come applicazione unificata che funge sia da Backend (API x stampanti) che Frontend protetto da `NextAuth.js`.
+> - MongoDB Isolation vs Multi-tenant collection design nel DB.
 > - `node-thermal-printer` confermato per EPSON (ESC/POS) e `qrcode.react` per la generazione a schermo del cliente.
