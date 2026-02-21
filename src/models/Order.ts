@@ -19,6 +19,7 @@ export interface IOrder extends Document {
             priceVariation: number;
         }>;
     }>;
+    paymentMethod: "CASH" | "CARD" | "OTHER";
 }
 
 const OrderSchema = new Schema<IOrder>({
@@ -39,7 +40,8 @@ const OrderSchema = new Schema<IOrder>({
             name: { type: String, required: true },
             priceVariation: { type: Number, required: true }
         }]
-    }]
+    }],
+    paymentMethod: { type: String, enum: ["CASH", "CARD", "OTHER"], default: "CASH" }
 }, {
     timestamps: true
 });
