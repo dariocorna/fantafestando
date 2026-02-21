@@ -61,9 +61,12 @@ Sviluppo strutturato in epiche iterabili con piccoli commit ("atomici" come rich
 
 Per gestire più feste ci sono due vie, a seconda della rete disponibile alle sagre:
 
-1. **Standalone (Isolato per ogni festa)**: Visto che dobbiamo stampare in rete locale via TCP sulle stampanti IP delle cucine, serve tendenzialmente che il server backend fisicamente "giri" sul PC in cassa (es: tramite un container Docker unico con MongoDB e l'app Next.js avviata via Docker Compose). Sulla WebApp, il QRCode viene letto dalla fotocamera per aggirare il fatto che i cellulari dei clienti non sono connessi al WiFi della cassa. *Ogni festa avrà il suo DB Docker indipendente configurabile tramite il backend*.
+1. **Standalone Locale su RPi (Offline-First)**: Visto che dobbiamo stampare in rete locale via TCP sulle stampanti IP delle cucine, serve tendenzialmente che il server backend fisicamente "giri" sul PC in cassa (es: tramite un container Docker unico con MongoDB e l'app Next.js avviata via Docker Compose).  
+  **Il "Trucco" Offline per la WebApp Clienti**:
+  - *Come sincronizza il menu?* La WebApp sarà una **PWA (Progressive Web App) ospitata sul Cloud pubblico** (es. Vercel). Prima dell'inizio della festa, l'amministratore aggiorna il menù dal backend locale (RPi) ed esporta il "Menu del Giorno" verso la PWA in Cloud. I clienti che arrivano in fiera dal loro telefono 4G caricano la PWA pubblica aggiornata.
+  - *Come arriva l'ordine alla cassa offline?* La magia sta nel QR Code: non contiene un semplice link, ma **l'intero ordine codificato in un JSON compresso e convertito in Base64 (Data Payload)**. Il cliente compila l'ordine sulla PWA (che a questo punto funziona persino in modalità "aereo"), clicca "Genera", e lo schermo del telefono mostra il QR Data. Alla cassa locale, il cassiere spara col lettore ottico USB il QR: il backend Next.js offline decodifica il JSON al volo e riempie il carrello del POS istantaneamente senza bisogno che i dispositivi siano mai stati sulla stessa rete. *Geniale, sicuro, e a prova bomba in assenza di rete!*
 
-2. **Cloud Backend + Local Print Node**: Se c'è sempre internet, l'app Next.js e MongoDB stanno in Cloud (es: Vercel + MongoDB Atlas), offrendo un **vero portale multi-tenant unico accessibile da ovunque** (es: `osgfest.it`). Per le stampe locali, alle singole casse gira un piccolo script Node.js / Python in background (Print Node) collegato in "ascolto" al cloud via Websocket, che si occupa solo di fare da ponte per le stampanti IP fisiche.
+2. **Cloud Backend + Local Print Node**: Se c'è sempre internet, l'app Next.js e MongoDB stanno in Cloud (es: Vercel + MongoDB Atlas), offrendo un vero portale multi-tenant unico accessibile da ovunque. Per le stampe locali, alle singole casse gira un piccolo script Node.js in background collegato in "ascolto" al cloud via Websocket, che fa da ponte verso le stampanti IP.
 
 > [!CAUTION]
 > **Scelte da Approvare:**
