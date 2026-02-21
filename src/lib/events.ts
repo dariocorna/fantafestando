@@ -11,3 +11,19 @@ export async function getActiveEventId() {
     const event = await getActiveEvent();
     return event ? (event._id as any).toString() : null;
 }
+
+export async function getAllEvents() {
+    await dbConnect();
+    const events = await Event.find().sort({ createdAt: -1 }).lean();
+    return events;
+}
+
+export async function getAdminContextEventId() {
+    const { cookies } = await import("next/headers");
+    const cookieStore = await cookies();
+    const adminFestaId = cookieStore.get("admin_festa_id");
+    if (adminFestaId && adminFestaId.value) {
+        return adminFestaId.value;
+    }
+    return await getActiveEventId();
+}
