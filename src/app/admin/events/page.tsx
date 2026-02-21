@@ -1,6 +1,9 @@
 import dbConnect from "@/lib/mongoose";
 import Event from "@/models/Event";
+import Category from "@/models/Category";
+import Product from "@/models/Product";
 import { Button } from "@/components/ui/button";
+import { DeleteForm } from "@/components/delete-form";
 import { revalidatePath } from "next/cache";
 import {
     Dialog,
@@ -38,15 +41,37 @@ export default async function EventsPage() {
         const askName = formData.get("askName") === "on";
         const askTable = formData.get("askTable") === "on";
         const defaultCashierPrinterIp = formData.get("defaultCashierPrinterIp") as string;
+        const active = formData.get("active") === "on";
 
         if (!eventId) return;
 
         await dbConnect();
+
+        if (active) {
+            // Deactivate all others first
+            await Event.updateMany({ _id: { $ne: eventId } }, { active: false });
+        }
+
         await Event.findByIdAndUpdate(eventId, {
+            active,
             "settings.askName": askName,
             "settings.askTable": askTable,
             "settings.defaultCashierPrinterIp": defaultCashierPrinterIp
         });
+        revalidatePath("/admin/events");
+    }
+
+    async function deleteEvent(formData: FormData) {
+        "use server"
+        const eventId = formData.get("eventId") as string;
+        if (!eventId) return;
+
+        await dbConnect();
+        // Cascade delete: Event -> Categories -> Products
+        await Product.deleteMany({ eventId });
+        await Category.deleteMany({ eventId });
+        await Event.findByIdAndDelete(eventId);
+
         revalidatePath("/admin/events");
     }
 
@@ -89,44 +114,59 @@ export default async function EventsPage() {
                             <div>
                                 <h3 className="font-semibold text-lg">{evt.name}</h3>
                                 <div className="flex gap-4 mt-1">
-                                    <span className={`text-xs px-2 py-0.5 rounded-full ${evt.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
-                                        {evt.active ? "Attiva" : "Inattiva"}
+                                    <span className={`text-xs px-2 py-0.5 rounded-full ${evt.active ? 'bg-green-100 text-green-700 font-bold' : 'bg-gray-100 text-gray-700'}`}>
+                                        {evt.active ? "Attiva (Globale)" : "Inattiva"}
                                     </span>
                                     <span className="text-xs text-slate-500">
-                                        Fields: {evt.settings.askName ? 'Name' : ''} {evt.settings.askTable ? 'Table' : ''} {(!evt.settings.askName && !evt.settings.askTable) ? 'None' : ''}
+                                        Campi: {evt.settings?.askName ? 'Nome' : ''} {evt.settings?.askTable ? 'Tavolo' : ''} {(!evt.settings?.askName && !evt.settings?.askTable) ? 'Nessuno' : ''}
                                     </span>
                                 </div>
                             </div>
-                            <Dialog>
-                                <DialogTrigger asChild>
-                                    <Button variant="outline" size="sm">Settings</Button>
-                                </DialogTrigger>
-                                <DialogContent>
-                                    <form action={updateEventSettings}>
-                                        <input type="hidden" name="eventId" value={evt._id.toString()} />
-                                        <DialogHeader>
-                                            <DialogTitle>Settings for {evt.name}</DialogTitle>
-                                        </DialogHeader>
-                                        <div className="grid gap-4 py-4">
-                                            <div className="flex items-center space-x-2">
-                                                <input type="checkbox" name="askName" id={`askName-${evt._id}`} defaultChecked={evt.settings.askName} className="h-4 w-4 rounded border-gray-300" />
-                                                <Label htmlFor={`askName-${evt._id}`}>Ask Customer Name</Label>
+                            <div className="flex items-center gap-2">
+                                <Dialog>
+                                    <DialogTrigger asChild>
+                                        <Button variant="outline" size="sm">Impostazioni</Button>
+                                    </DialogTrigger>
+                                    <DialogContent>
+                                        <form action={updateEventSettings}>
+                                            <input type="hidden" name="eventId" value={evt._id.toString()} />
+                                            <DialogHeader>
+                                                <DialogTitle>Impostazioni per {evt.name}</DialogTitle>
+                                            </DialogHeader>
+                                            <div className="grid gap-4 py-4">
+                                                <div className="flex items-center space-x-2 border-b pb-4 mb-2">
+                                                    <input type="checkbox" name="active" id={`active-${evt._id}`} defaultChecked={evt.active} className="h-4 w-4 rounded border-gray-300" />
+                                                    <Label htmlFor={`active-${evt._id}`} className="font-bold text-green-600 cursor-pointer">Festa Attiva (Mostra nel POS e WebApp)</Label>
+                                                </div>
+                                                <div className="flex items-center space-x-2">
+                                                    <input type="checkbox" name="askName" id={`askName-${evt._id}`} defaultChecked={evt.settings?.askName} className="h-4 w-4 rounded border-gray-300" />
+                                                    <Label htmlFor={`askName-${evt._id}`}>Chiedi Nome Cliente</Label>
+                                                </div>
+                                                <div className="flex items-center space-x-2">
+                                                    <input type="checkbox" name="askTable" id={`askTable-${evt._id}`} defaultChecked={evt.settings?.askTable} className="h-4 w-4 rounded border-gray-300" />
+                                                    <Label htmlFor={`askTable-${evt._id}`}>Chiedi Numero Tavolo</Label>
+                                                </div>
+                                                <div className="grid gap-2 pt-2">
+                                                    <Label htmlFor={`cashierIp-${evt._id}`}>IP Stampante Cassa Predefinito</Label>
+                                                    <Input id={`cashierIp-${evt._id}`} name="defaultCashierPrinterIp" defaultValue={evt.settings?.defaultCashierPrinterIp} placeholder="192.168.1.100" />
+                                                </div>
                                             </div>
-                                            <div className="flex items-center space-x-2">
-                                                <input type="checkbox" name="askTable" id={`askTable-${evt._id}`} defaultChecked={evt.settings.askTable} className="h-4 w-4 rounded border-gray-300" />
-                                                <Label htmlFor={`askTable-${evt._id}`}>Ask Table Number</Label>
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label htmlFor={`cashierIp-${evt._id}`}>Default Cashier Printer IP</Label>
-                                                <Input id={`cashierIp-${evt._id}`} name="defaultCashierPrinterIp" defaultValue={evt.settings.defaultCashierPrinterIp} placeholder="192.168.1.100" />
-                                            </div>
-                                        </div>
-                                        <DialogFooter>
-                                            <Button type="submit">Save Settings</Button>
-                                        </DialogFooter>
-                                    </form>
-                                </DialogContent>
-                            </Dialog>
+                                            <DialogFooter>
+                                                <Button type="submit">Salva Impostazioni</Button>
+                                            </DialogFooter>
+                                        </form>
+                                    </DialogContent>
+                                </Dialog>
+
+                                <DeleteForm
+                                    id={evt._id.toString()}
+                                    idName="eventId"
+                                    message="Eliminare questa festa? Questo rimuoverà permanentemente TUTTI i prodotti e le categorie associate."
+                                    action={deleteEvent}
+                                    buttonSize="sm"
+                                    iconSize={18}
+                                />
+                            </div>
                         </div>
                     ))}
                 </div>
