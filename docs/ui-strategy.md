@@ -14,11 +14,13 @@ Non utilizzeremo template a pagamento monolitici chiusi, ma lo stack più flessi
 ## Linee Guida UX (User Experience)
 
 ### 1. Interfaccia "Backend/Manager"
-Quest'area (*Dashboard Amministrativa*) sarà protetta da **NextAuth.js**.
-- Layout classico a Sidebar sinistro + Contenuto centrale.
-- Si occuperà del setup per il giorno corrente: Inserimento Prodotti, definizione Prezzi, Varianti e creazione della singola entità "Festa" (attivando i toggle "Nome" e "Tavolo" per la WebApp Web).
-- La UI qui può usare i classici Data Table densi (Tabelle Radix UI), filtri e form tradizionali. La visibilità fine non è una priorità come per il POS.
-- Dashboard riassuntiva incassi a fine giornata.
+Quest'area (*Dashboard Amministrativa*) sarà protetta da **NextAuth.js** ed è pensata per l'uso "da scrivania" (Desktop-first).
+- **Layout di Riferimento**: Design pulito e denso tipico delle dashboard Vercel/shadcn. 
+  - *Sidebar laterale scura* per la navigazione principale (Menu, Feste, Impostazioni, Analytics).
+  - *Header bianco* in alto con Breadcrumb per sapere sempre dove ci si trova (es. `Dashboard > Menu > Prodotti`).
+- **Data Denseness**: Si occuperà del setup per il giorno corrente e dello storico. Utilizzeremo le classiche **Data Table di shadcn** interattive: righe dense, filtri, paginazione e un bottone globale primario `[+ Aggiungi Prodotto]` chiaramente visibile in alto a sinistra del contenuto.
+- **Form Modali**: L'inserimento dati per listini, varianti e configurazione Feste (toggle "Nome" e "Tavolo") avverrà tramite eleganti maschere *Sheet* (pannelli laterali a scorrimento) o *Form Dialogs* in overlay, per non perdere mail il contesto della tabella sottostante.
+- Dashboard riassuntiva incassi a fine giornata con grafici basilari (`recharts`).
 
 ### 2. Interfaccia "Point of Sale" (Vista Cassiere)
 Quest'area, anch'essa sotto login o PIN, è il core operativo:
