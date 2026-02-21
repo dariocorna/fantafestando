@@ -8,7 +8,9 @@ import {
     Trash2,
     CheckCircle2,
     Loader2,
-    X
+    X,
+    Banknote,
+    CreditCard
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -21,7 +23,7 @@ import {
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { NumPad } from "./components/NumPad"
-import { createOrder } from "./actions"
+import { createOrder, triggerSumUpPayment } from "./actions"
 
 interface CartItem {
     productId: string
@@ -39,15 +41,15 @@ export default function PosPage() {
     const [activeEvent, setActiveEvent] = useState<any>(null)
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
+    const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD">("CASH")
 
-    // Customer Info
+    // Info Cliente
     const [customerName, setCustomerName] = useState("")
     const [tableNumber, setTableNumber] = useState("")
 
-    // Initial load: active event and menu
+    // Caricamento iniziale: evento attivo e menu
     useEffect(() => {
         const loadInitialData = async () => {
-            // Simplified fetch for now, will connect to real API later
             const res = await fetch('/api/pos/init')
             const data = await res.json()
             if (data.event) {
@@ -84,6 +86,19 @@ export default function PosPage() {
 
     const handleCheckout = async () => {
         setIsProcessing(true)
+
+        if (paymentMethod === "CARD") {
+            // Avvia pagamento su terminale
+            const sumupResult = await triggerSumUpPayment(total);
+            if (!sumupResult.success) {
+                alert("Errore SumUp: " + sumupResult.error);
+                setIsProcessing(false);
+                return;
+            }
+            // In un caso reale qui potremmo fare polling o aspettare webhook.
+            // Per simularlo, assumiamo successo dopo il trigger.
+        }
+
         const orderData = {
             eventId: activeEvent._id,
             customer: {
@@ -95,8 +110,9 @@ export default function PosPage() {
                 productId: item.productId,
                 snapshotName: item.name,
                 quantity: item.quantity,
-                selectedOptions: [] // TODO: add variants selection
-            }))
+                selectedOptions: []
+            })),
+            paymentMethod
         }
 
         const result = await createOrder(orderData)
@@ -104,18 +120,19 @@ export default function PosPage() {
             setCart([])
             setCustomerName("")
             setTableNumber("")
+            setPaymentMethod("CASH")
             setIsCheckoutOpen(false)
         } else {
-            alert("Error creating order: " + result.error)
+            alert("Errore durante la creazione dell'ordine: " + result.error)
         }
         setIsProcessing(false)
     }
 
     return (
         <div className="flex h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950">
-            {/* Left: Product Selection (70%) */}
+            {/* Sinistra: Selezione Prodotti (70%) */}
             <div className="flex flex-col flex-1 h-full border-r bg-white dark:bg-slate-900">
-                {/* Category Tabs */}
+                {/* Tab Categorie */}
                 <div className="flex overflow-x-auto gap-2 p-4 bg-slate-50 dark:bg-slate-800 border-b scrollbar-hide shrink-0">
                     {categories.map(cat => (
                         <button
@@ -130,7 +147,7 @@ export default function PosPage() {
                     ))}
                 </div>
 
-                {/* Product Grid */}
+                {/* Griglia Prodotti */}
                 <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 content-start text-slate-800 dark:text-slate-100">
                     {products
                         .filter(p => p.categoryId === activeCategory)
@@ -148,40 +165,38 @@ export default function PosPage() {
                 </div>
             </div>
 
-            {/* Right: Summary & Cart (30%) */}
+            {/* Destra: Riepilogo & Carrello (30%) */}
             <div className="w-[400px] h-full flex flex-col bg-slate-50 dark:bg-slate-900 shrink-0 border-l border-slate-200 dark:border-slate-800">
-                {/* Header Info */}
+                {/* Info Intestazione */}
                 <div className="p-6 border-b bg-white dark:bg-slate-800">
-                    <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 uppercase tracking-tight">Current Order</h2>
+                    <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 uppercase tracking-tight">
+                        {activeEvent?.name || "Cassa Osgfest"}
+                    </h2>
                     <div className="grid grid-cols-2 gap-2 mt-4">
-                        {(activeEvent?.settings?.askName || true) && (
-                            <div className="bg-white dark:bg-slate-700 border p-2 rounded-xl flex items-center gap-2">
-                                <User size={18} className="text-slate-400" />
-                                <input
-                                    className="bg-transparent border-none focus:outline-none text-sm font-bold w-full"
-                                    placeholder="Name..."
-                                    value={customerName}
-                                    onChange={(e) => setCustomerName(e.target.value)}
-                                />
-                            </div>
-                        )}
-                        {(activeEvent?.settings?.askTable || true) && (
-                            <div className="bg-white dark:bg-slate-700 border p-2 rounded-xl flex items-center gap-2">
-                                <Hash size={18} className="text-slate-400" />
-                                <span className="text-sm font-bold truncate">
-                                    {tableNumber ? `Table ${tableNumber}` : "Table..."}
-                                </span>
-                            </div>
-                        )}
+                        <div className="bg-white dark:bg-slate-700 border p-2 rounded-xl flex items-center gap-2">
+                            <User size={18} className="text-slate-400" />
+                            <input
+                                className="bg-transparent border-none focus:outline-none text-sm font-bold w-full"
+                                placeholder="Nome..."
+                                value={customerName}
+                                onChange={(e) => setCustomerName(e.target.value)}
+                            />
+                        </div>
+                        <div className="bg-white dark:bg-slate-700 border p-2 rounded-xl flex items-center gap-2">
+                            <Hash size={18} className="text-slate-400" />
+                            <span className="text-sm font-bold truncate">
+                                {tableNumber ? `Tavolo ${tableNumber}` : "Tavolo..."}
+                            </span>
+                        </div>
                     </div>
                 </div>
 
-                {/* Cart Items */}
+                {/* Elementi Carrello */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                     {cart.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-50 space-y-4">
                             <ShoppingCart size={64} />
-                            <p className="font-bold">Cart is empty</p>
+                            <p className="font-bold">Il carrello è vuoto</p>
                         </div>
                     ) : (
                         cart.map((item) => (
@@ -201,10 +216,10 @@ export default function PosPage() {
                     )}
                 </div>
 
-                {/* Footer / Checkout Button */}
+                {/* Footer / Pulsante Pagamento */}
                 <div className="p-6 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 space-y-4">
                     <div className="flex justify-between items-center mb-2 px-2">
-                        <span className="text-sm text-slate-500 font-bold uppercase tracking-widest">Total to Pay</span>
+                        <span className="text-sm text-slate-500 font-bold uppercase tracking-widest">Totale da Pagare</span>
                         <span className="text-4xl font-black text-blue-600 dark:text-blue-400 leading-none">{total.toFixed(2)} €</span>
                     </div>
 
@@ -214,23 +229,23 @@ export default function PosPage() {
                         className="w-full py-8 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-3xl font-black text-2xl shadow-xl shadow-blue-200 dark:shadow-none active:scale-[0.98] transition-all flex items-center justify-center gap-3"
                     >
                         <CheckCircle2 size={32} />
-                        PAY NOW
+                        PAGA ORA
                     </button>
                 </div>
             </div>
 
-            {/* Checkout Modal */}
+            {/* Modal di Checkout */}
             <Dialog open={isCheckoutOpen} onOpenChange={setIsCheckoutOpen}>
                 <DialogContent className="max-w-[500px] rounded-3xl p-0 overflow-hidden border-none text-slate-800 dark:text-slate-100">
                     <div className="bg-blue-600 p-8 text-white text-center">
-                        <span className="text-blue-200 text-sm font-bold uppercase tracking-widest">Amount Due</span>
+                        <span className="text-blue-200 text-sm font-bold uppercase tracking-widest">Importo Dovuto</span>
                         <h2 className="text-6xl font-black mt-2">{total.toFixed(2)} €</h2>
                     </div>
 
                     <div className="p-8 space-y-6">
                         {(activeEvent?.settings?.askTable || true) && (
                             <div className="space-y-4">
-                                <Label className="text-lg font-bold">Which Table?</Label>
+                                <Label className="text-lg font-bold">Numero Tavolo?</Label>
                                 <div className="text-center py-4 bg-slate-100 dark:bg-slate-800 rounded-2xl">
                                     <span className="text-5xl font-black text-blue-600">{tableNumber || "---"}</span>
                                 </div>
@@ -238,20 +253,40 @@ export default function PosPage() {
                             </div>
                         )}
 
+                        <div className="space-y-3">
+                            <Label className="text-lg font-bold">Metodo di Pagamento</Label>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setPaymentMethod("CASH")}
+                                    className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === "CASH" ? "border-green-600 bg-green-50 text-green-700" : "border-slate-200"}`}
+                                >
+                                    <Banknote size={32} />
+                                    <span className="font-bold">CONTANTI</span>
+                                </button>
+                                <button
+                                    onClick={() => setPaymentMethod("CARD")}
+                                    className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === "CARD" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200"}`}
+                                >
+                                    <CreditCard size={32} />
+                                    <span className="font-bold">CARTA / POS</span>
+                                </button>
+                            </div>
+                        </div>
+
                         <div className="flex gap-4 pt-4">
                             <Button
                                 variant="outline"
                                 className="flex-1 py-8 text-xl font-bold rounded-2xl"
                                 onClick={() => setIsCheckoutOpen(false)}
                             >
-                                CANCEL
+                                ANNULLA
                             </Button>
                             <Button
                                 className="flex-1 py-8 text-xl font-bold rounded-2xl bg-green-600 hover:bg-green-700"
                                 onClick={handleCheckout}
                                 disabled={isProcessing || (activeEvent?.settings?.askTable && !tableNumber)}
                             >
-                                {isProcessing ? <Loader2 className="animate-spin" /> : "COMPLETE"}
+                                {isProcessing ? <Loader2 className="animate-spin" /> : "CONFERMA"}
                             </Button>
                         </div>
                     </div>

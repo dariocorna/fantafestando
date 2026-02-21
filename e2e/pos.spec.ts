@@ -1,37 +1,40 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('POS Interface', () => {
-    test('should load POS page and show categories', async ({ page }) => {
-        // Need to ensure an event and categories exist for this test to be robust
-        // But for now, check if the page loads and the basic layout is there
+test.describe('Interfaccia POS (Cassa)', () => {
+    test('caricamento pagina POS e visualizzazione categorie', async ({ page }) => {
+        // Naviga alla cassa
         await page.goto('/pos');
 
-        // Check current order header
-        await expect(page.getByText('Current Order')).toBeVisible();
-
-        // Total should be visible
-        await expect(page.getByText('Total to Pay')).toBeVisible();
+        // Verifica intestazione (deve esserci il nome dell'evento o il default)
+        // Usiamo un matcher flessibile per la traduzione
+        await expect(page.locator('h2')).toBeVisible();
+        await expect(page.getByText(/Totale da Pagare/i)).toBeVisible();
     });
 
-    test('should open payment dialog when "PAY NOW" is clicked', async ({ page }) => {
+    test('apertura dialog checkout e selezione pagamento', async ({ page }) => {
         await page.goto('/pos');
 
-        // Wait for potential data fetch
-        await page.waitForTimeout(1000);
+        // Attesa caricamento dati (API init)
+        await page.waitForTimeout(2000);
 
-        // If there are products, click one to add to cart
+        // Seleziona il primo prodotto disponibile (cerca per il prezzo €)
         const productButton = page.locator('button').filter({ hasText: /€/ }).first();
         if (await productButton.isVisible()) {
             await productButton.click();
 
-            // Check if cart is not empty
-            await expect(page.getByText('PAY NOW')).toBeEnabled();
+            // Verifica che il pulsante PAGA ORA sia attivo
+            const payBtn = page.getByRole('button', { name: /PAGA ORA/i });
+            await expect(payBtn).toBeEnabled();
 
-            // Click PAY NOW
-            await page.click('button:has-text("PAY NOW")');
+            // Clicca PAGA ORA
+            await payBtn.click();
 
-            // Should see the amount due in the dialog
-            await expect(page.getByText('Amount Due')).toBeVisible();
+            // Verifica modal checkout
+            await expect(page.getByText(/Importo Dovuto/i)).toBeVisible();
+
+            // Verifica selettore pagamento
+            await expect(page.getByText(/CONTANTI/i)).toBeVisible();
+            await expect(page.getByText(/CARTA \/ POS/i)).toBeVisible();
         }
     });
 });
