@@ -24,11 +24,6 @@ const items = [
         icon: UtensilsCrossed,
     },
     {
-        title: "Eventi",
-        url: "/admin/events",
-        icon: Calendar,
-    },
-    {
         title: "Storico Ordini",
         url: "/admin/orders",
         icon: FileText,
