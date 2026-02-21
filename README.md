@@ -6,8 +6,8 @@ Il progetto mira a realizzare un sistema completo per la gestione delle casse (n
 
 ## Funzionalità Principali
 
-- **Gestione Casse**: Interfaccia per la presa degli ordini.
-- **WebApp Ordini Remoti**: Portale per il pubblico che permette di compilare l'ordine dal proprio smartphone e generare un QRCode. Il codice viene mostrato al cassiere per caricare immediatamente l'ordine nel POS, dove potrà essere saldato, modificato o chiuso.
+- **Gestione Casse**: Interfaccia per la presa degli ordini (salvataggio locale degli incassi).
+- **WebApp Ordini Remoti (Cloud Sync)**: Portale Cloud (es. Vercel) dove i clienti possono compilare l'ordine dal proprio smartphone. L'ordine viene salvato nel server Cloud come "Provvisorio" e genera un numero/QR Code identificativo breve. Il cassiere può caricare l'ordine inserendo il codice o selezionandolo da una comoda lista "Ordini Pendenti" sincronizzata sulla Cassa Locale, salvaguardando però in locale (e non sul Cloud) tutti i dati sensibili di incasso.
 - **Architettura Multi-Festa (Multi-tenant)**: Capacità del sistema di gestire dati e configurazioni separate per festività diverse da un unico portale web centrale.
 - **Backend Autenticato**: Area riservata amministrativa protetta da login per l'accesso a configurazioni, catalogo, resoconti e gestione casse.
 - **Campi Opzionali Configurabili**: Possibilità per l'amministratore di configurare (a livello di singola festa) la richiesta obbligatoria o facoltativa di campi extra in fase di pre-ordine, come **Nome** e **Tavolo** (es. disabilitati per i servizi al volo, abilitati per servizio al tavolo).
