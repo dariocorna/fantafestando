@@ -23,8 +23,9 @@ Sviluppo strutturato in epiche iterabili con piccoli commit ("atomici" come rich
 ### Epica 1: Fondamenta e Setup
 - Inizializzazione applicazione Next.js con Tailwind.
 - Startup file `docker-compose.yml` per MongoDB locale.
-- Configurazione Mongoose e schema base (Categorie, Prodotti, Varianti).
-- Setup librerie di Testing base.
+- Configurazione Mongoose e schema base (Feste, Categorie, Prodotti, Varianti).
+- Schema "Impostazioni Festa" (es. per attivare obbligatoriamente i campi Nome e Tavolo).
+- Setup libreria QRCode (`qrcode.react`) e strumenti Testing.
 
 ### Epica 2: Catalogo e Menù
 - API + UI per la gestione del Menu e Varianti (es. "Senza Cipolla", "Doppio").
@@ -32,8 +33,15 @@ Sviluppo strutturato in epiche iterabili con piccoli commit ("atomici" come rich
 
 ### Epica 3: L'Interfaccia POS (Cassa)
 - UI principale "Point of Sale" ottimizzata per touchscreen.
+- Scanner QRCode per il caricamento di un pre-ordine generato dal cliente.
 - Carrello, gestione sconti volontari o manuali.
-- Chiusura dell'ordine.
+- Modifica o conferma dell'ordine (con campi "Autore" e "Tavolo" se configurati).
+
+### Epica 4: WebApp Ordini Pubblica
+- Creazione rotte frontend pubbliche accessibili via smartphone (es. tramite QR al tavolo).
+- Interfaccia per la selezione dei prodotti e personalizzazione (varianti).
+- Form di check-out cliente con richiesta Condizionale di "Nome" e "Tavolo" (secondo i settings della festa).
+- Generazione stringa codificata e render del componente QRCode finale per il cassiere.
 
 ### Epica 4: Smistamento Comande e Stampanti
 - Sviluppo integrato del modulo di stampa Node.js tramite `node-thermal-printer`.
@@ -47,6 +55,7 @@ Sviluppo strutturato in epiche iterabili con piccoli commit ("atomici" come rich
 
 > [!CAUTION]
 > **Scelte da Approvare:**
-> - Next.js come applicazione unificata che funge sia da Backend (API x stampanti) che Frontend (Cassa POS).
-> - MongoDB su Docker isolato e gestito tramite Mongoose, per flessibilità sullo schema varianti.
-> - `node-thermal-printer` confermato per il supporto EPSON (ESC/POS) su rete e locale.
+> - Next.js come applicazione unificata che funge sia da Backend (API x stampanti) che Frontend (Cassa POS e **App Pubblica**).
+> - La comunicazione App Pubblica -> Cassa avviene esclusivamente **offline** tramite QRCode, o i dispositivi cliente dovranno essere collegati al WiFi della festa? Presumo offline via QR code come richiesto, dove la stringa del QR contiene l'intero ordine codificato (JSON zippato o base64).
+> - MongoDB su Docker isolato e gestito tramite Mongoose, per flessibilità sullo schema varianti e sulle impostazioni variabili della festa.
+> - `node-thermal-printer` confermato per EPSON (ESC/POS) e `qrcode.react` per la generazione a schermo del cliente.
