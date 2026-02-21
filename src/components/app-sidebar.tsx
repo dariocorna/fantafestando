@@ -19,22 +19,22 @@ const items = [
         icon: Home,
     },
     {
-        title: "Catalog",
+        title: "Catalogo",
         url: "/admin/catalog",
         icon: UtensilsCrossed,
     },
     {
-        title: "Events",
+        title: "Eventi",
         url: "/admin/events",
         icon: Calendar,
     },
     {
-        title: "Orders History",
+        title: "Storico Ordini",
         url: "/admin/orders",
         icon: FileText,
     },
     {
-        title: "Settings",
+        title: "Impostazioni",
         url: "/admin/settings",
         icon: Settings,
     },
