@@ -14,43 +14,43 @@ Per via della strategia di Deploy *Standalone Ibrido*, il sistema utilizzerà du
 ### 1. Festa (Tenant)
 Definisce l'evento in corso. Tutte le altre collezioni appenderanno il campo `festaId`.
 ```typescript
-interface IFesta {
+interface IEvent {
   _id: ObjectId;
-  nome: string;                 // es. "Sagra Madasca 2024"
-  attiva: boolean;
-  impostazioni: {
-    chiediNome: boolean;        // Abilita campo "Nome" in PWA
-    chiediTavolo: boolean;      // Abilita campo "Tavolo" in PWA
+  name: string;                 // e.g. "Sagra Madasca 2024"
+  active: boolean;
+  settings: {
+    askName: boolean;           // Enables "Name" field in PWA
+    askTable: boolean;          // Enables "Table" field in PWA
   }
-  tavoliPredefiniti: string[];  // es. ["T1", "T2", "Panca 1"] per popolare il picker visivo al POS
+  predefinedTables: string[];   // e.g. ["T1", "T2", "Bench 1"] to populate visual picker at POS
 }
 ```
 
 ### 2. Categoria
 Raggruppa i prodotti.
 ```typescript
-interface ICategoria {
+interface ICategory {
   _id: ObjectId;
-  festaId: ObjectId;
-  nome: string;                 // es. "Prime Piatti", "Griglia", "Bar"
-  coloreUI: string;             // Colore semantico per la cassa (es. "bg-orange-500")
-  ordineStampa: number;         // ID Stampante o Coda di routing (es. 1=Cucina, 2=Pizzeria)
+  eventId: ObjectId;
+  name: string;                 // e.g. "First Courses", "Grill", "Bar"
+  uiColor: string;              // Semantic color for POS (e.g. "bg-orange-500")
+  printOrder: number;           // Printer ID or routing queue (e.g. 1=Kitchen, 2=Pizzeria)
 }
 ```
 
 ### 3. Prodotto
 L'entità centrale del catalogo vendibile.
 ```typescript
-interface IProdotto {
+interface IProduct {
   _id: ObjectId;
-  festaId: ObjectId;
-  categoriaId: ObjectId;
-  nome: string;                 // es. "Casoncelli alla Bergamasca"
-  prezzoBase: number;
-  esaurito: boolean;
-  varianti: Array<{
-    nomeOpzione: string;        // es. "Aggiunta Formaggio", "Senza Cipolla"
-    variazionePrezzo: number;   // es. +1.50, 0.00
+  eventId: ObjectId;
+  categoryId: ObjectId;
+  name: string;                 // e.g. "Casoncelli alla Bergamasca"
+  basePrice: number;
+  isSoldOut: boolean;
+  variants: Array<{
+    optionName: string;         // e.g. "Extra Cheese", "No Onions"
+    priceVariation: number;     // e.g. +1.50, 0.00
   }>;
 }
 ```
@@ -58,25 +58,25 @@ interface IProdotto {
 ### 4. Ordine / Pre-Ordine
 La struttura è identica sia per il Cloud (Provvisori) sia per Locale (Saldati).
 ```typescript
-interface IOrdine {
-  _id: ObjectId;                // Usato come "Codice Breve" (ultime 3-4 cifre) in Cassa es: "A72"
-  festaId: ObjectId;
-  stato: "PENDENTE" | "SALDATO" | "ANNULLATO";  // Pendente in Cloud -> Saldato passa in Locale
-  cliente: {
-    nome?: string;
-    tavolo?: string;
+interface IOrder {
+  _id: ObjectId;                // Used as "Short Code" (last 3-4 digits) in POS e.g. "A72"
+  eventId: ObjectId;
+  status: "PENDING" | "PAID" | "CANCELLED";  // Pending in Cloud -> Paid when confirmed locally
+  customer: {
+    name?: string;
+    table?: string;
   };
-  orarioCreazione: Date;
-  totale: number;
-  scontoApplicato: number;
-  carrello: Array<{
-    prodottoId: ObjectId;
-    nomeSnapshot: string;       // Nome al momento dell'ordine (previene bug se il nome cambia)
-    noteCucinaCustom?: string;  // es. "Molto ben cotto per il nonno" - nome personalizzato
-    quantita: number;
-    opzioniScelte: Array<{
-      nome: string;
-      sovrapprezzo: number;
+  createdAt: Date;
+  totalAmount: number;
+  discountApplied: number;
+  cart: Array<{
+    productId: ObjectId;
+    snapshotName: string;       // Name at order time (prevents bugs if product name changes)
+    customKitchenNotes?: string;  // e.g. "Well done for grandpa" - custom note
+    quantity: number;
+    selectedOptions: Array<{
+      name: string;
+      priceVariation: number;
     }>;
   }>;
 }
