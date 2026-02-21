@@ -10,8 +10,9 @@ Questo documento descrive l'architettura tecnica e le fasi di sviluppo proposte 
   - *Perché*: Ideale per creare interfacce POS con pulsanti touch-friendly e leggibilità ottimale in ambienti serali.
 - **Autenticazione Backend**: **NextAuth.js (Auth.js)** (Libreria Context7: `/nextauthjs/next-auth`).
   - *Perché*: Lo standard per gestire in modo sicuro e plug-and-play le sessioni di login degli amministratori su Next.js.
-- **Database Multitenant**: **MongoDB** ospitato in container **Docker**, con **Mongoose** (o driver nativo) su Node.
-  - *Perché*: Approccio eccellente per un'architettura a microservizi pulita e scalabile. I dati non strutturati si sposano bene con lo schema flessibile di un DB documentale. Inoltre le collection MongoDB filtrabili per `festaId` offrono una struttura multi-tenant perfetta.
+- **Database Standalone**: **MongoDB** ospitato in container **Docker**, con **Mongoose**.
+  - *Perché*: Approccio eccellente per un'architettura dati pulita. Il sistema adotta un approccio strettamente gerarchico: la **Festa è la vera root (padre)**. Record come Categorie, Prodotti, Stampanti IP, Casse e Sconti vivono solo se associati a una specifica Festa.
+  - Le Feste concluse diventano entità storiche sigillate e possono essere riutilizzate esclusivamente come *template* per le edizioni successive (clonazione di struttura, menu, layout).
 - **Integrazione Stampanti Termiche**: **`node-thermal-printer`** (Libreria Context7: `/klemen1337/node-thermal-printer`).
   - *Perché*: Ottimo modulo Node.js identificato tramite ricerca, in grado di comunicare in rete locale (TCP/IP via Ethernet o WiFi) con tutte le stampanti (cassa e reparti) usando il protocollo ESC/POS.
 - **Integrazione POS Bancario (SumUp)**: SDK Ufficiale Node.js (`@sumup/sdk`).
@@ -35,6 +36,7 @@ Sviluppo strutturato in epiche iterabili con piccoli commit ("atomici" come rich
 ### Epica 2: Catalogo e Menù
 - API + UI per la gestione del Menu e Varianti (es. "Senza Cipolla", "Doppio").
 - UI base gestione prodotti e prezzi.
+- **Gestione Ciclo di Vita**: Implementazione della cancellazione (Delete) per Eventi, Categorie e Prodotti per pulizia dati.
 
 ### Epica 3: L'Interfaccia POS (Cassa)
 - UI principale "Point of Sale" ottimizzata per touchscreen (Dati e incassi salvati Localmente).
@@ -66,8 +68,8 @@ Sviluppo strutturato in epiche iterabili con piccoli commit ("atomici" come rich
 
 Su indicazione del cliente, l'architettura scelta per il deploy alle feste è un ibrido che mira a **isolare i dati sensibili di incasso localmente, sfruttando il Cloud solo per raccogliere i clienti**:
 
-- **Il Backend Cassa Locale (RPi o PC cassa)** gestisce gli ordini "saldati", lo storico incassi e parla fisicamente TCP sulle reti WiFi/Ethernet con le stampanti di cucina e barra. 
-- **Il Portale Web PWA Cloud (es. Vercel + DB Mongo Atlas Bucket)** fornisce il menu pubblico ai cellulari dei clienti (anche sotto rete 4G esterna alla fiera) e genera "Ordini Provvisori Pendenti" sul db in cloud assegnando un *Codice Breve*.
-- **Sincronizzazione Unidirezionale in Cassa**: Il POS locale interroga periodicamente il DB in Cloud. Il cassiere aggancia l'ordine pendente e, una volta saldato, questo viene salvato *esclusivamente* sul DB Locale, mentre viene purgato dal Cloud. Partono infine le stampe IP locali in cucina.
+- **Il Backend Cassa Locale (RPi o PC cassa)** gestisce gli ordini "saldati", lo storico incassi e parla fisicamente TCP sulle reti WiFi/Ethernet con le stampanti di cucina e barra. Identifica l'evento corrente tramite un settaggio globale "Evento Attivo".
+- **Il Portale Web PWA Cloud (es. Vercel + DB Mongo Atlas Bucket)** fornisce il menu pubblico ai cellulari dei clienti caricando automaticamente l'unica festa attiva sincronizzata dalla Cassa.
+- **Sincronizzazione Unidirezionale in Cassa**: Il POS locale interroga periodicamente il DB in Cloud. Il cassiere aggancia l'ordine pendente associato all'evento attivo. Una volta saldato, questo viene salvato *esclusivamente* sul DB Locale, mentre viene purgato dal Cloud. Partono infine le stampe IP locali in cucina.
 
 *Documento Approvato - Architettura Definitiva*.

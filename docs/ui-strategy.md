@@ -16,8 +16,10 @@ Non utilizzeremo template a pagamento monolitici chiusi, ma lo stack più flessi
 ### 1. Interfaccia "Backend/Manager"
 Quest'area (*Dashboard Amministrativa*) sarà protetta da **NextAuth.js** ed è pensata per l'uso "da scrivania" (Desktop-first).
 - **Layout di Riferimento**: Design pulito e denso tipico delle dashboard Vercel/shadcn. 
-  - *Sidebar laterale scura* per la navigazione principale (Menu, Feste, Impostazioni, Analytics).
-  - *Header bianco* in alto con Breadcrumb per sapere sempre dove ci si trova (es. `Dashboard > Menu > Prodotti`).
+  - *Sidebar laterale scura* contestuale. La barra di navigazione rifletterà la gerarchia: si entra prima in una **Festa** specifica (o se ne crea una nuova da Impostazioni).
+  - *Header bianco* in alto con Breadcrumb per sapere sempre dove ci si trova (es. `Festa 2024 > Catalogo > Prodotti`).
+- **Il Paradigma "Festa-Centrico"**: La Festa è l'elemento **padre**. Dispositivi HW (casse, IP stampanti), Categorie, Prodotti, e Sconti Volontari non godono di vita a sé stante globale, ma sono strettamente associati/innestati a una specifica Festa.
+- **Archiviazione e Template**: La gestione delle Feste vive nelle *Impostazioni*. Una Festa, una volta conclusa, viene archiviata. Viene ripresa dal database storico unicamente per fungere da *Template* da cui ricalcare e importare le configurazioni (menu, device) in una Festa nuova (es. l'edizione dell'anno successivo), evitando la corruzione dei dati contabili pregressi.
 - **Data Denseness**: Si occuperà del setup per il giorno corrente e dello storico. Utilizzeremo le classiche **Data Table di shadcn** interattive: righe dense, filtri, paginazione e un bottone globale primario `[+ Aggiungi Prodotto]` chiaramente visibile in alto a sinistra del contenuto.
 - **Form Modali**: L'inserimento dati per listini, varianti e configurazione Feste (toggle "Nome" e "Tavolo") avverrà tramite eleganti maschere *Sheet* (pannelli laterali a scorrimento) o *Form Dialogs* in overlay, per non perdere mail il contesto della tabella sottostante.
 - Dashboard riassuntiva incassi a fine giornata con grafici basilari (`recharts`).

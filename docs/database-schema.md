@@ -6,8 +6,8 @@ Questa scelta è ideale per gestire entità flessibili come le *Varianti* (che p
 ## I due Database (Cloud vs Local)
 
 Per via della strategia di Deploy *Standalone Ibrido*, il sistema utilizzerà due cluster MongoDB distinti ma con schemi gemelli:
-1. **Cloud DB (Atlas/Vercel)**: Ospita i `PreOrdini` provvisori dei clienti e una copia in sola lettura del `Catalogo` e della singola `Festa` attiva sincronizzata dalla Cassa.
-2. **Local DB (Docker su Cassa)**: Il master. Ospita lo storico `Ordini` saldati, gli `Utenti` (cassieri), il `Catalogo` modificabile completo e le `Feste`.
+1. **Cloud DB (Atlas/Vercel)**: Ospita i `PreOrdini` provvisori dei clienti e una copia in sola lettura del `Catalogo` e dell'**unica Festa attiva** sincronizzata dalla Cassa.
+2. **Local DB (Docker su Cassa)**: Il master. Ospita lo storico `Ordini` saldati, gli `Utenti` (cassieri), il `Catalogo` completo e le `Feste` (storico ed eventi futuri).
 
 ## Modelli Principali (Schema Mongoose)
 
@@ -17,12 +17,13 @@ Definisce l'evento in corso. Tutte le altre collezioni appenderanno il campo `fe
 interface IEvent {
   _id: ObjectId;
   name: string;                 // e.g. "Sagra Madasca 2024"
-  active: boolean;
+  active: boolean;              // SEVER-SIDE Enforcement: only one event can be active.
   settings: {
     askName: boolean;           // Enables "Name" field in PWA
     askTable: boolean;          // Enables "Table" field in PWA
+    defaultCashierPrinterIp?: string;
   }
-  predefinedTables: string[];   // e.g. ["T1", "T2", "Bench 1"] to populate visual picker at POS
+  predefinedTables: string[];   // e.g. ["T1", "T2"]
 }
 ```
 
