@@ -34,11 +34,12 @@ export default async function AdminCatalog() {
         const name = formData.get("name") as string;
         const eventId = formData.get("eventId") as string;
         const uiColor = formData.get("uiColor") as string || "bg-blue-500";
+        const printerIp = formData.get("printerIp") as string;
 
         if (!name || !eventId) return;
 
         await dbConnect();
-        await Category.create({ name, eventId, uiColor });
+        await Category.create({ name, eventId, uiColor, printerIp });
         revalidatePath("/admin/catalog");
     }
 
@@ -109,6 +110,10 @@ export default async function AdminCatalog() {
                                         <Label htmlFor="uiColor">Color Class (Tailwind)</Label>
                                         <Input id="uiColor" name="uiColor" placeholder="bg-red-500" defaultValue="bg-blue-500" />
                                     </div>
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="printerIp">Printer IP (Optional)</Label>
+                                        <Input id="printerIp" name="printerIp" placeholder="192.168.1.100" />
+                                    </div>
                                 </div>
                                 <DialogFooter>
                                     <Button type="submit">Save Category</Button>
@@ -122,6 +127,7 @@ export default async function AdminCatalog() {
                         <TableRow>
                             <TableHead>Name</TableHead>
                             <TableHead>Color</TableHead>
+                            <TableHead>Printer IP</TableHead>
                             <TableHead>Event</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -130,6 +136,7 @@ export default async function AdminCatalog() {
                             <TableRow key={cat._id.toString()}>
                                 <TableCell className="font-medium">{cat.name}</TableCell>
                                 <TableCell><div className={`w-4 h-4 rounded-full ${cat.uiColor}`} /></TableCell>
+                                <TableCell>{cat.printerIp || "N/A"}</TableCell>
                                 <TableCell>{events.find(e => e._id.toString() === cat.eventId.toString())?.name || "N/A"}</TableCell>
                             </TableRow>
                         ))}

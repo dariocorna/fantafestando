@@ -10,6 +10,9 @@ import {
     TableRow
 } from "@/components/ui/table";
 import { format } from "date-fns";
+import { Button } from "@/components/ui/button";
+import { Printer } from "lucide-react";
+import { reprintOrder } from "./actions";
 
 export default async function AdminOrders() {
     await dbConnect();
@@ -40,6 +43,7 @@ export default async function AdminOrders() {
                             <TableHead>Tavolo</TableHead>
                             <TableHead>Prodotti</TableHead>
                             <TableHead className="text-right">Importo</TableHead>
+                            <TableHead className="text-right w-[100px]">Azioni</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -65,6 +69,14 @@ export default async function AdminOrders() {
                                     </TableCell>
                                     <TableCell className="text-right font-black text-blue-600">
                                         {order.totalAmount.toFixed(2)} €
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                        <form action={reprintOrder}>
+                                            <input type="hidden" name="orderId" value={order._id.toString()} />
+                                            <Button variant="ghost" size="sm" title="Ristampa comanda">
+                                                <Printer className="h-4 w-4" />
+                                            </Button>
+                                        </form>
                                     </TableCell>
                                 </TableRow>
                             ))
