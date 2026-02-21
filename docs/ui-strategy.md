@@ -24,14 +24,16 @@ Quest'area (*Dashboard Amministrativa*) sarà protetta da **NextAuth.js** ed è 
 
 ### 2. Interfaccia "Point of Sale" (Vista Cassiere)
 Quest'area, anch'essa sotto login o PIN, è il core operativo:
-- La cassa deve ricordare il layout dei moderni registratori di cassa touch o dei chioschi McDonald's:
-- **Griglia Prodotti**: I prodotti devono essere visualizzati come grosse Card "quadrate" (min. `min-h-32 min-w-32`) facili da colpire ("fat-finger friendly").
+- **Navigazione a Categorie (Tabs)**: Per gestire menù estesi (es. Primi, Griglia, Bevande, Piadineria), lo schermo avrà una barra di navigazione fissa in alto a grandi bottoni (Tabs). Questo evita di avere 50 card mescolate, permettendo al cassiere di "filtrare" istantaneamente la vista.
+- **Barra di Ricerca Rapida**: Un text-input in evidenza per trovare un prodotto digitando le prime due lettere (es. "ca" -> Casoncelli, Calamari).
+- **Griglia Prodotti**: I prodotti filtrati dalla categoria attiva mostreranno card quadrate (min. `min-h-32 min-w-32`) facili da colpire ("fat-finger friendly").
+- **Collassamento degli "Extra"**: Salse (ketchup, maionese) e aggiunte onnipresenti (Pane) non dovrebbero intasare la griglia principale come prodotti a sé stanti. Verranno accorpati in una Categoria/Tab speciale "Extra" oppure suggeriti automaticamente come *Varianti/Upsell* quando si seleziona un piatto principale.
 - **Codici Colori Semantici**: 
-  - *Verde* (es. `bg-emerald-600`) per le bevande.
-  - *Rosso/Arancio* (`bg-orange-500`) per la griglieria.
-  - *Giallo* per stuzzicheria (Patatine).
+  - *Verde* (es. `bg-emerald-600`) per le Bevande.
+  - *Rosso/Arancio* (`bg-orange-500`) per la Griglieria e Cucina.
+  - *Giallo* per Piadineria e Stuzzicheria.
 - **Carrello Fisso Laterale**: Un pannello congelato su un lato (su schermi larghi come Laptop) oppure uno "sticky footer" con un `Drawer` a scorrimento (su Tablet). Contiene la lista degli **"Ordini Pendenti"** presi dal Cloud.
-- **Varianti**: Quando l'operatore clicca un prodotto che ammette varianti, si apre istantaneamente un *Dialog modale* centrale, con bottoni a forma di grandi interruttori "Toggle".
+- **Varianti**: Quando l'operatore clicca un prodotto che ammette varianti o extra, si apre istantaneamente un *Dialog modale* centrale, con bottoni a forma di grandi interruttori "Toggle".
 
 ### 3. Interfaccia WebApp Remota (PWA Clienti)
 - Ottimizzata per formato **Verticale** (Mobile-first).
