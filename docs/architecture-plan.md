@@ -14,6 +14,8 @@ Questo documento descrive l'architettura tecnica e le fasi di sviluppo proposte 
   - *Perché*: Approccio eccellente per un'architettura a microservizi pulita e scalabile. I dati non strutturati si sposano bene con lo schema flessibile di un DB documentale. Inoltre le collection MongoDB filtrabili per `festaId` offrono una struttura multi-tenant perfetta.
 - **Integrazione Stampanti Termiche**: **`node-thermal-printer`** (Libreria Context7: `/klemen1337/node-thermal-printer`).
   - *Perché*: Ottimo modulo Node.js identificato tramite ricerca, in grado di comunicare in rete locale (TCP/IP via Ethernet o WiFi) con tutte le stampanti (cassa e reparti) usando il protocollo ESC/POS.
+- **Integrazione POS Bancario (SumUp)**: SDK Ufficiale Node.js (`@sumup/sdk`).
+  - *Perché*: La "Cloud API" (Terminal API) di SumUp consente a un backend web di avviare una transazione remota direttamente sul lettore carte compatibile (ad es. SumUp Solo connesso in WiFi) senza forzare il cassiere ad usare l'App smartphone proprietaria in parallelo.
 - **Testing**:
   - Unit Tests: **Vitest**
   - E2E Tests: **Playwright**
