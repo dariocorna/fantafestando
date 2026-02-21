@@ -13,18 +13,25 @@ Non utilizzeremo template a pagamento monolitici chiusi, ma lo stack più flessi
 
 ## Linee Guida UX (User Experience)
 
-### 1. Interfaccia Punto Cassa (Il POS)
-La cassa deve ricordare il layout dei moderni registratori di cassa touch o dei chioschi McDonald's:
+### 1. Interfaccia "Backend/Manager"
+Quest'area (*Dashboard Amministrativa*) sarà protetta da **NextAuth.js**.
+- Layout classico a Sidebar sinistro + Contenuto centrale.
+- Si occuperà del setup per il giorno corrente: Inserimento Prodotti, definizione Prezzi, Varianti e creazione della singola entità "Festa" (attivando i toggle "Nome" e "Tavolo" per la WebApp Web).
+- La UI qui può usare i classici Data Table densi (Tabelle Radix UI), filtri e form tradizionali. La visibilità fine non è una priorità come per il POS.
+- Dashboard riassuntiva incassi a fine giornata.
+
+### 2. Interfaccia "Point of Sale" (Vista Cassiere)
+Quest'area, anch'essa sotto login o PIN, è il core operativo:
+- La cassa deve ricordare il layout dei moderni registratori di cassa touch o dei chioschi McDonald's:
 - **Griglia Prodotti**: I prodotti devono essere visualizzati come grosse Card "quadrate" (min. `min-h-32 min-w-32`) facili da colpire ("fat-finger friendly").
 - **Codici Colori Semantici**: 
   - *Verde* (es. `bg-emerald-600`) per le bevande.
-  - *Rosso/Arancio* (`bg-orange-500`) per la griglieria (es. Casoncelli, Costine).
+  - *Rosso/Arancio* (`bg-orange-500`) per la griglieria.
   - *Giallo* per stuzzicheria (Patatine).
-  Questo accelera enormemente l'orientamento visivo rispetto alla sola lettura del testo.
-- **Carrello Fisso Laterale (o Inferiore)**: Il carrello deve essere un pannello congelato su un lato (su schermi larghi come Laptop) oppure uno "sticky footer" con un `Drawer` a scorrimento (su Tablet).
-- **Varianti**: Quando l'operatore clicca un prodotto che ammette varianti, deve aprirsi istantaneamente un *Dialog modale* centrale, in cui i bottoni delle varianti ("Ben Cotto", "Senza Patatine") siano a forma di grandi interruttori "Toggle".
+- **Carrello Fisso Laterale**: Un pannello congelato su un lato (su schermi larghi come Laptop) oppure uno "sticky footer" con un `Drawer` a scorrimento (su Tablet). Contiene la lista degli **"Ordini Pendenti"** presi dal Cloud.
+- **Varianti**: Quando l'operatore clicca un prodotto che ammette varianti, si apre istantaneamente un *Dialog modale* centrale, con bottoni a forma di grandi interruttori "Toggle".
 
-### 2. Interfaccia WebApp Remota (PWA Clienti)
+### 3. Interfaccia WebApp Remota (PWA Clienti)
 - Ottimizzata per formato **Verticale** (Mobile-first).
 - Una singola pagina "Infinita" che mostra in sequenza le Categorie, scrollando fluidamente giù.
 - Checkout in 3 step chiari e rassicuranti:
