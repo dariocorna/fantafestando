@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { motion, AnimatePresence } from "framer-motion"
 import { useRouter } from "next/navigation"
+import { getCategoryTheme } from "@/lib/category-colors"
 
 interface Product {
     _id: string
@@ -94,85 +95,114 @@ export default function CustomerMenu() {
 
                 {/* Horizontal Category Scroller */}
                 <div className="flex gap-4 overflow-x-auto scrollbar-hide -mx-6 px-6">
-                    {categories.map(cat => (
-                        <button
-                            key={cat._id}
-                            onClick={() => {
-                                setActiveTab(cat._id)
-                                document.getElementById(cat._id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                            }}
-                            className={`px-6 py-2 rounded-full font-bold text-sm whitespace-nowrap transition-all ${activeTab === cat._id
-                                ? 'bg-orange-500 text-white shadow-lg shadow-orange-100'
-                                : 'bg-slate-100 text-slate-500'
-                                }`}
-                        >
-                            {cat.name}
-                        </button>
-                    ))}
+                    {categories.map(cat => {
+                        const catTheme = getCategoryTheme(cat.uiColor)
+                        const isActive = activeTab === cat._id
+
+                        return (
+                            <button
+                                key={cat._id}
+                                onClick={() => {
+                                    setActiveTab(cat._id)
+                                    document.getElementById(cat._id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                                }}
+                                className="px-6 py-2 rounded-full font-bold text-sm whitespace-nowrap transition-all border"
+                                style={isActive
+                                    ? {
+                                        backgroundColor: catTheme.base,
+                                        color: catTheme.onBase,
+                                        borderColor: catTheme.base,
+                                        boxShadow: `0 10px 24px ${catTheme.shadow}`
+                                    }
+                                    : {
+                                        backgroundColor: catTheme.softBg,
+                                        color: catTheme.base,
+                                        borderColor: catTheme.border
+                                    }}
+                            >
+                                {cat.name}
+                            </button>
+                        )
+                    })}
                 </div>
             </div>
 
             {/* Menu Sections */}
             <div className="max-w-2xl mx-auto p-4 space-y-12 mt-6">
-                {categories.map(cat => (
-                    <section key={cat._id} id={cat._id} className="space-y-4">
-                        <h2 className="text-xl font-black text-slate-800 px-2 uppercase tracking-widest flex items-center gap-2">
-                            <span className="w-2 h-8 bg-orange-500 rounded-full"></span>
-                            {cat.name}
-                        </h2>
-                        <div className="grid gap-4">
-                            {products
-                                .filter(p => p.categoryId === cat._id)
-                                .map(product => {
-                                    const cartQuantity = cart.find(i => i._id === product._id)?.quantity || 0
-                                    return (
-                                        <div
-                                            key={product._id}
-                                            className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex justify-between items-center active:scale-[0.98] transition-transform"
-                                        >
-                                            <div className="flex-1">
-                                                <h3 className="font-bold text-lg text-slate-800">{product.name}</h3>
-                                                <p className="text-slate-500 text-sm line-clamp-2 mt-1 pr-4">
-                                                    {product.description || "Delizioso piatto tipico preparato con ingredienti freschi."}
-                                                </p>
-                                                <div className="mt-3 text-orange-600 font-black text-lg">
-                                                    {product.basePrice.toFixed(2)} €
+                {categories.map(cat => {
+                    const catTheme = getCategoryTheme(cat.uiColor)
+
+                    return (
+                        <section key={cat._id} id={cat._id} className="space-y-4">
+                            <h2 className="text-xl font-black text-slate-800 px-2 uppercase tracking-widest flex items-center gap-2">
+                                <span className="w-2 h-8 rounded-full" style={{ backgroundColor: catTheme.base }}></span>
+                                {cat.name}
+                            </h2>
+                            <div className="grid gap-4">
+                                {products
+                                    .filter(p => p.categoryId === cat._id)
+                                    .map(product => {
+                                        const cartQuantity = cart.find(i => i._id === product._id)?.quantity || 0
+                                        return (
+                                            <div
+                                                key={product._id}
+                                                className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex justify-between items-center active:scale-[0.98] transition-transform"
+                                            >
+                                                <div className="flex-1">
+                                                    <h3 className="font-bold text-lg text-slate-800">{product.name}</h3>
+                                                    <p className="text-slate-500 text-sm line-clamp-2 mt-1 pr-4">
+                                                        {product.description || "Delizioso piatto tipico preparato con ingredienti freschi."}
+                                                    </p>
+                                                    <div className="mt-3 font-black text-lg" style={{ color: catTheme.base }}>
+                                                        {product.basePrice.toFixed(2)} €
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex flex-col items-center gap-2">
+                                                    {cartQuantity > 0 ? (
+                                                        <div className="flex items-center bg-slate-100 rounded-full p-1 gap-2">
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); removeFromCart(product._id); }}
+                                                                className="w-8 h-8 rounded-full bg-white flex items-center justify-center shadow-sm"
+                                                                style={{ color: catTheme.base }}
+                                                            >
+                                                                <Minus size={18} />
+                                                            </button>
+                                                            <span className="font-black text-slate-800 w-4 text-center">{cartQuantity}</span>
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); addToCart(product); }}
+                                                                className="w-8 h-8 rounded-full flex items-center justify-center shadow-md"
+                                                                style={{
+                                                                    backgroundColor: catTheme.base,
+                                                                    color: catTheme.onBase,
+                                                                    boxShadow: `0 6px 14px ${catTheme.shadow}`
+                                                                }}
+                                                            >
+                                                                <Plus size={18} />
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => addToCart(product)}
+                                                            className="w-12 h-12 rounded-2xl border flex items-center justify-center transition-colors"
+                                                            style={{
+                                                                backgroundColor: catTheme.softBg,
+                                                                color: catTheme.base,
+                                                                borderColor: catTheme.border
+                                                            }}
+                                                        >
+                                                            <Plus size={24} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
-
-                                            <div className="flex flex-col items-center gap-2">
-                                                {cartQuantity > 0 ? (
-                                                    <div className="flex items-center bg-slate-100 rounded-full p-1 gap-2">
-                                                        <button
-                                                            onClick={(e) => { e.stopPropagation(); removeFromCart(product._id); }}
-                                                            className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-orange-500 shadow-sm"
-                                                        >
-                                                            <Minus size={18} />
-                                                        </button>
-                                                        <span className="font-black text-slate-800 w-4 text-center">{cartQuantity}</span>
-                                                        <button
-                                                            onClick={(e) => { e.stopPropagation(); addToCart(product); }}
-                                                            className="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center text-white shadow-md shadow-orange-100"
-                                                        >
-                                                            <Plus size={18} />
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <button
-                                                        onClick={() => addToCart(product)}
-                                                        className="w-12 h-12 rounded-2xl bg-slate-50 text-slate-300 border border-slate-200 flex items-center justify-center hover:bg-orange-50 hover:text-orange-500 hover:border-orange-200 transition-colors"
-                                                    >
-                                                        <Plus size={24} />
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    )
-                                })
-                            }
-                        </div>
-                    </section>
-                ))}
+                                        )
+                                    })
+                                }
+                            </div>
+                        </section>
+                    )
+                })}
             </div>
 
             {/* Sticky Basket Bar */}

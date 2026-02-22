@@ -28,6 +28,7 @@ import { EditCategoryDialog } from "@/components/edit-category-dialog";
 import { EditProductDialog } from "@/components/edit-product-dialog";
 import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { CreateProductDialog } from "@/components/create-product-dialog";
+import { normalizeCategoryColor } from "@/lib/category-colors";
 import { X } from "lucide-react";
 
 function getReferencedId(value: unknown): string | undefined {
@@ -55,7 +56,7 @@ export default async function AdminCatalog() {
         "use server"
         const submittedEventId = formData.get("eventId") as string | null;
         const name = formData.get("name") as string;
-        const uiColor = formData.get("uiColor") as string || "bg-blue-500";
+        const uiColor = normalizeCategoryColor(formData.get("uiColor") as string | null);
         const printerId = formData.get("printerId") as string;
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
@@ -122,7 +123,7 @@ export default async function AdminCatalog() {
         const submittedEventId = formData.get("eventId") as string | null;
         const id = formData.get("id") as string;
         const name = formData.get("name") as string;
-        const uiColor = formData.get("uiColor") as string;
+        const uiColor = normalizeCategoryColor(formData.get("uiColor") as string | null);
         const printerId = formData.get("printerId") as string;
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
@@ -236,14 +237,19 @@ export default async function AdminCatalog() {
                         {categories.map((cat: ICategory) => (
                             <TableRow key={String(cat._id)}>
                                 <TableCell className="font-medium">{cat.name}</TableCell>
-                                <TableCell><div className={`w-4 h-4 rounded-full ${cat.uiColor}`} /></TableCell>
+                                <TableCell>
+                                    <div
+                                        className="w-4 h-4 rounded-full border border-black/10"
+                                        style={{ backgroundColor: normalizeCategoryColor(cat.uiColor) }}
+                                    />
+                                </TableCell>
                                 <TableCell>{(cat.printerId as unknown as IPrinter)?.name || "Default Cassa"}</TableCell>
                                 <TableCell className="flex gap-2">
                                     <EditCategoryDialog
                                         category={{
                                             id: String(cat._id),
                                             name: cat.name,
-                                            uiColor: cat.uiColor,
+                                            uiColor: normalizeCategoryColor(cat.uiColor),
                                             printerId: getReferencedId(cat.printerId)
                                         }}
                                         eventId={currentEventId}
