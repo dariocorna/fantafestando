@@ -27,43 +27,46 @@ test.describe('Pannello Amministrazione', () => {
         }
     });
 
-    test('creazione nuova festa e attivazione globale', async ({ page, isMobile }) => {
+    test('creazione nuova festa e attivazione globale', async ({ page }) => {
         await page.goto('/admin/settings/events');
 
         // Apri dialog
         await page.click('#new-event-btn');
-        await expect(page.getByText(/Crea Nuova Festa/i)).toBeVisible();
+        const dialog = page.getByRole('dialog');
+        await expect(dialog.getByText(/Crea Nuova Festa/i)).toBeVisible();
 
         // Compila form
         const testEventName = `Festa Test ${Date.now()}`;
         await page.fill('#name', testEventName);
 
         // Invia
-        await page.getByRole('dialog').getByRole('button', { name: 'Salva', exact: true }).click();
+        await dialog.getByRole('button', { name: 'Salva', exact: true }).click();
 
-        // Attendi che il DOM si aggiorni (Server Action) e chiudi il dialog
-        await page.waitForTimeout(1000);
-        await page.keyboard.press('Escape');
-        await page.waitForTimeout(500);
+        // Verifica chiusura automatica del dialog
+        await expect(dialog).not.toBeVisible();
 
         // Verifica comparsa in lista
         await expect(page.getByText(testEventName)).toBeVisible();
 
-        // Clicca impostazioni per attivarla
-        // Nota: Assumiamo che ci sia un modo per identificare il pulsante impostazioni della riga appena creata
-        // Per semplicità cerchiamo il pulsante 'Settings' vicino al nome
-        // Clicca impostazioni per attivarla
-        const eventRow = page.locator('div.p-4').filter({ hasText: testEventName });
-        await eventRow.getByRole('button').filter({ hasText: /Impostazioni/i }).click();
+        // Seleziona la nuova festa nel selettore Header (AdminEventSelector)
+        await page.click('[data-testid="admin-event-selector"]');
+        await page.getByRole('option', { name: testEventName }).click();
 
-        // Nel modal impostazioni, attiva la festa
-        const activeCheckbox = page.getByLabel(/Festa Attiva/i);
-        await expect(activeCheckbox).toBeVisible();
+        // Attendi che il selettore mostri il nome corretto (indica che il refresh è avvenuto)
+        await expect(page.getByTestId('admin-event-selector')).toContainText(testEventName);
+
+        // Vai in Impostazioni principali
+        await page.goto('/admin/settings');
+        await expect(page.getByText(new RegExp(`Impostazioni Festa: ${testEventName}`, 'i'))).toBeVisible({ timeout: 10000 });
+
+        // Attiva la festa
+        const activeCheckbox = page.locator('input[name="active"]');
         await activeCheckbox.check();
 
         // Salva
-        await page.getByRole('dialog').getByRole('button', { name: 'Salva Impostazioni' }).click();
+        await page.getByRole('button', { name: /Salva Impostazioni/i }).click();
 
-        // Verifica che lo stato sia aggiornato (es. un badge 'Attiva' se implementato, o semplicemente non errore)
+        // Verifica feedback salvataggio
+        await expect(page.getByText(/Modifiche salvate/i)).toBeVisible();
     });
 });

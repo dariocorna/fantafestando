@@ -27,3 +27,10 @@ export async function getAdminContextEventId() {
     }
     return await getActiveEventId();
 }
+
+export async function getAdminContextEvent() {
+    await dbConnect();
+    const eventId = await getAdminContextEventId();
+    if (!eventId) return null;
+    return await Event.findById(eventId).lean();
+}

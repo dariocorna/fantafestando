@@ -33,7 +33,10 @@ export function AdminEventSelector({ events, currentEventId }: AdminEventSelecto
             onValueChange={handleChange}
             disabled={isPending}
         >
-            <SelectTrigger className="w-[180px] h-8 text-sm bg-slate-100 dark:bg-slate-800 border-none">
+            <SelectTrigger
+                className="w-[180px] h-8 text-sm bg-slate-100 dark:bg-slate-800 border-none"
+                data-testid="admin-event-selector"
+            >
                 <SelectValue placeholder="Seleziona Festa" />
             </SelectTrigger>
             <SelectContent>
