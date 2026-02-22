@@ -1,6 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 
-async function createAndActivateEvent(page: Page, eventName: string) {
+async function createAndActivateEvent(
+    page: Page,
+    eventName: string,
+    options?: { askTable?: boolean; askName?: boolean }
+) {
     await page.goto("/admin/settings/events");
 
     await page.click("#new-event-btn");
@@ -20,6 +24,21 @@ async function createAndActivateEvent(page: Page, eventName: string) {
     if (!(await activeCheckbox.isChecked())) {
         await activeCheckbox.check();
     }
+
+    const askTableCheckbox = page.locator('input[name="askTable"]');
+    if (options?.askTable) {
+        if (!(await askTableCheckbox.isChecked())) await askTableCheckbox.check();
+    } else {
+        if (await askTableCheckbox.isChecked()) await askTableCheckbox.uncheck();
+    }
+
+    const askNameCheckbox = page.locator('input[name="askName"]');
+    if (options?.askName) {
+        if (!(await askNameCheckbox.isChecked())) await askNameCheckbox.check();
+    } else {
+        if (await askNameCheckbox.isChecked()) await askNameCheckbox.uncheck();
+    }
+
     await page.getByRole("button", { name: /Salva Impostazioni/i }).click();
     await expect(page.getByText(/Modifiche salvate/i)).toBeVisible();
 }
@@ -79,7 +98,11 @@ async function createCatalogProduct(page: Page, categoryName: string, productNam
     await expect(page.getByText(productName)).toBeVisible();
 }
 
-async function createWebOrderAndGetCode(page: Page, productName: string) {
+async function createWebOrderAndGetCode(
+    page: Page,
+    productName: string,
+    options?: { tableCode?: string }
+) {
     await page.goto("/menu");
     await page.waitForResponse(
         response => response.url().includes("/api/pos/init") && response.ok(),
@@ -115,6 +138,17 @@ async function createWebOrderAndGetCode(page: Page, productName: string) {
 
     await page.goto("/menu/checkout");
     await expect(page.getByRole("button", { name: /INVIA ORDINE/i })).toBeVisible();
+    if (options?.tableCode) {
+        const tableCode = options.tableCode.toUpperCase();
+        const letter = tableCode.slice(0, 1);
+        const digits = tableCode.slice(1);
+
+        const tableSection = page.locator("div").filter({ hasText: /Tavolo \(A-F \+ 2 cifre\)/i }).first();
+        await expect(tableSection).toBeVisible();
+        await tableSection.getByRole("button", { name: letter, exact: true }).click();
+        await tableSection.getByPlaceholder("Es: 07").fill(digits);
+        await expect(tableSection.getByText(new RegExp(`Codice Tavolo:\\s*${tableCode}`, "i"))).toBeVisible();
+    }
     await page.getByRole("button", { name: /INVIA ORDINE/i }).click();
 
     await expect(page).toHaveURL(/\/menu\/success\?code=/);
@@ -157,12 +191,13 @@ test.describe("POS - Completamento ordine da codice", () => {
         const categoryName = `Cat ${uniqueSuffix}`;
         const productName = `Product ${uniqueSuffix}`;
         const productPrice = "8.00";
+        const tableCode = "B07";
 
-        await createAndActivateEvent(page, eventName);
+        await createAndActivateEvent(page, eventName, { askTable: true });
         await configureHardwareForCashPos(page, cashierPrinterName, `192.168.1.${Math.floor(Math.random() * 150) + 50}`, cashBoxName, posName);
         await createCatalogProduct(page, categoryName, productName, productPrice);
 
-        const orderCode = await createWebOrderAndGetCode(page, productName);
+        const orderCode = await createWebOrderAndGetCode(page, productName, { tableCode });
 
         await openPosAndSelectDevice(page, posName);
 
@@ -178,14 +213,26 @@ test.describe("POS - Completamento ordine da codice", () => {
         await loadDialog.getByRole("button", { name: /Carica Ordine/i }).click();
 
         await expect(page.getByText(new RegExp(`Codice ${orderCode}`, "i"))).toBeVisible();
+        await expect(page.getByText(new RegExp(`Tavolo ${tableCode}`, "i"))).toBeVisible();
 
         await page.getByRole("button", { name: "PAGA ORA", exact: true }).click();
         const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i });
         await expect(checkoutDialog).toBeVisible();
+        await expect(checkoutDialog.getByText(/Tavolo \(A-F \+ 2 cifre\)/i)).toBeVisible();
+
+        const tableSelector = checkoutDialog.locator("div").filter({ hasText: /Tavolo \(A-F \+ 2 cifre\)/i }).first();
+        await tableSelector.getByRole("button", { name: "C", exact: true }).click();
+        await tableSelector.getByRole("button", { name: "CLR", exact: true }).click();
+        await tableSelector.getByRole("button", { name: "1", exact: true }).click();
+        await tableSelector.getByRole("button", { name: "2", exact: true }).click();
+        await expect(checkoutDialog.getByText(/C12/)).toBeVisible();
+
         await expect(checkoutDialog.getByText(/CONTANTI/i)).toBeVisible();
         await expect(checkoutDialog.getByText(/CARTA \/ POS/i)).toHaveCount(0);
 
-        await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click();
+        const confirmButton = checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true });
+        await confirmButton.scrollIntoViewIfNeeded();
+        await confirmButton.click();
         await expect(checkoutDialog.getByText(/Stampa in corso/i)).toBeVisible();
         await expect(checkoutDialog.getByText(/Simulazione stampa attiva/i)).toBeVisible();
         await expect.poll(() => dialogMessages.join(" | ")).toContain("Ordine completato correttamente");

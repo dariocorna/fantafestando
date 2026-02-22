@@ -582,7 +582,7 @@ export default function PosPage() {
 
                     <button
                         onClick={() => setIsCheckoutOpen(true)}
-                        disabled={cart.length === 0 || !selectedPosDeviceId}
+                        disabled={cart.length === 0 || !selectedPosDeviceId || isProcessing || isPrintMockActive}
                         className="w-full py-8 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-3xl font-black text-2xl shadow-xl shadow-blue-200 dark:shadow-none active:scale-[0.98] transition-all flex items-center justify-center gap-3"
                     >
                         <CheckCircle2 size={32} />
@@ -593,7 +593,7 @@ export default function PosPage() {
 
             {/* Modal di Checkout */}
             <Dialog open={isCheckoutOpen} onOpenChange={handleCheckoutDialogOpenChange}>
-                <DialogContent className="max-w-[500px] rounded-3xl p-0 overflow-hidden border-none text-slate-800 dark:text-slate-100">
+                <DialogContent className="max-h-[90vh] max-w-[500px] overflow-y-auto rounded-3xl border-none p-0 text-slate-800 dark:text-slate-100">
                     <DialogHeader className="sr-only">
                         <DialogTitle>Checkout ordine POS</DialogTitle>
                     </DialogHeader>
@@ -706,7 +706,8 @@ export default function PosPage() {
                                     <Button
                                         variant="outline"
                                         className="flex-1 py-8 text-xl font-bold rounded-2xl"
-                                        onClick={() => setIsCheckoutOpen(false)}
+                                        onClick={() => handleCheckoutDialogOpenChange(false)}
+                                        disabled={isProcessing || isPrintMockActive}
                                     >
                                         ANNULLA
                                     </Button>
