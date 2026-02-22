@@ -1,7 +1,7 @@
 import dbConnect from "@/lib/mongoose";
-import Category from "@/models/Category";
-import Product from "@/models/Product";
-import Printer from "@/models/Printer";
+import Category, { ICategory } from "@/models/Category";
+import Product, { IProduct } from "@/models/Product";
+import Printer, { IPrinter } from "@/models/Printer";
 import { getAdminContextEventId } from "@/lib/events";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -133,10 +133,10 @@ export default async function AdminCatalog() {
                                     </div>
                                     <div className="grid gap-2">
                                         <Label htmlFor="printerId">Stampante Reparto (Opzionale)</Label>
-                                        <select name="printerId" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background">
+                                        <select id="printerId" name="printerId" aria-label="Stampante Reparto" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background">
                                             <option value="">Nessuna (Copia singola in cassa)</option>
-                                            {printers.filter((p: any) => p.type === 'KITCHEN').map((p: any) => (
-                                                <option key={p._id.toString()} value={p._id.toString()}>{p.name} ({p.ip})</option>
+                                            {printers.filter((p: IPrinter) => p.type === 'KITCHEN').map((p: IPrinter) => (
+                                                <option key={String(p._id)} value={String(p._id)}>{p.name} ({p.ip})</option>
                                             ))}
                                         </select>
                                     </div>
@@ -158,14 +158,14 @@ export default async function AdminCatalog() {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {categories.map((cat: any) => (
-                            <TableRow key={cat._id.toString()}>
+                        {categories.map((cat: ICategory) => (
+                            <TableRow key={String(cat._id)}>
                                 <TableCell className="font-medium">{cat.name}</TableCell>
                                 <TableCell><div className={`w-4 h-4 rounded-full ${cat.uiColor}`} /></TableCell>
-                                <TableCell>{(cat.printerId as any)?.name || "Default Cassa"}</TableCell>
+                                <TableCell>{(cat.printerId as unknown as IPrinter)?.name || "Default Cassa"}</TableCell>
                                 <TableCell>
                                     <DeleteForm
-                                        id={cat._id.toString()}
+                                        id={String(cat._id)}
                                         idName="id"
                                         message="Eliminare la categoria e TUTTI i suoi prodotti?"
                                         action={deleteCategory}
@@ -196,8 +196,8 @@ export default async function AdminCatalog() {
                                     <div className="grid gap-2">
                                         <Label htmlFor="categoryId">Categoria</Label>
                                         <select name="categoryId" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background" required>
-                                            {categories.map((c: any) => (
-                                                <option key={c._id.toString()} value={c._id.toString()}>{c.name}</option>
+                                            {categories.map((c: ICategory) => (
+                                                <option key={String(c._id)} value={String(c._id)}>{c.name}</option>
                                             ))}
                                         </select>
                                     </div>
@@ -228,14 +228,14 @@ export default async function AdminCatalog() {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {products.map((p: any) => (
-                            <TableRow key={p._id.toString()}>
+                        {products.map((p: IProduct) => (
+                            <TableRow key={String(p._id)}>
                                 <TableCell className="font-medium">{p.name}</TableCell>
-                                <TableCell>{(p.categoryId as any)?.name || "N/A"}</TableCell>
+                                <TableCell>{(p.categoryId as unknown as ICategory)?.name || "N/A"}</TableCell>
                                 <TableCell>{p.basePrice.toFixed(2)} €</TableCell>
                                 <TableCell>
                                     <div className="flex flex-wrap gap-1">
-                                        {p.variants?.map((v: any, idx: number) => (
+                                        {p.variants?.map((v, idx) => (
                                             <span key={idx} className="text-[10px] bg-slate-100 dark:bg-slate-800 px-1 rounded">
                                                 {v.optionName} ({v.priceVariation >= 0 ? '+' : ''}{v.priceVariation}€)
                                             </span>
@@ -249,7 +249,7 @@ export default async function AdminCatalog() {
                                         </DialogTrigger>
                                         <DialogContent>
                                             <form action={addVariant}>
-                                                <input type="hidden" name="productId" value={p._id.toString()} />
+                                                <input type="hidden" name="productId" value={String(p._id)} />
                                                 <DialogHeader>
                                                     <DialogTitle>Gestisci Varianti per {p.name}</DialogTitle>
                                                 </DialogHeader>
@@ -271,7 +271,7 @@ export default async function AdminCatalog() {
                                     </Dialog>
 
                                     <DeleteForm
-                                        id={p._id.toString()}
+                                        id={String(p._id)}
                                         idName="id"
                                         message="Eliminare questo prodotto?"
                                         action={deleteProduct}

@@ -1,6 +1,6 @@
 import dbConnect from "@/lib/mongoose";
-import Order from "@/models/Order";
-import Event from "@/models/Event";
+import Order, { IOrder } from "@/models/Order";
+import { IEvent } from "@/models/Event";
 import {
     Table,
     TableBody,
@@ -18,7 +18,7 @@ export default async function AdminOrders() {
     await dbConnect();
     const orders = await Order.find({}).sort({ createdAt: -1 }).populate('eventId').lean();
 
-    const getTotalRevenue = () => orders.reduce((acc: number, o: any) => acc + o.totalAmount, 0);
+    const getTotalRevenue = () => orders.reduce((acc: number, o: IOrder) => acc + o.totalAmount, 0);
 
     return (
         <div className="space-y-6">
@@ -54,17 +54,17 @@ export default async function AdminOrders() {
                                 </TableCell>
                             </TableRow>
                         ) : (
-                            orders.map((order: any) => (
-                                <TableRow key={order._id.toString()}>
+                            orders.map((order: IOrder) => (
+                                <TableRow key={String(order._id)}>
                                     <TableCell className="font-medium whitespace-nowrap">
-                                        {format(new Date(order.createdAt), "dd/MM/yyyy HH:mm")}
+                                        {format(new Date(order.createdAt as unknown as string), "dd/MM/yyyy HH:mm")}
                                     </TableCell>
-                                    <TableCell>{(order.eventId as any)?.name || "N/A"}</TableCell>
+                                    <TableCell>{(order.eventId as unknown as IEvent)?.name || "N/A"}</TableCell>
                                     <TableCell>{order.customer?.name || "-"}</TableCell>
                                     <TableCell className="font-bold">{order.customer?.table || "-"}</TableCell>
                                     <TableCell>
-                                        <div className="max-w-[200px] truncate" title={order.cart.map((i: any) => `${i.quantity}x ${i.snapshotName}`).join(", ")}>
-                                            {order.cart.map((i: any) => `${i.quantity}x ${i.snapshotName}`).join(", ")}
+                                        <div className="max-w-[200px] truncate" title={order.cart.map((i) => `${i.quantity}x ${i.snapshotName}`).join(", ")}>
+                                            {order.cart.map((i) => `${i.quantity}x ${i.snapshotName}`).join(", ")}
                                         </div>
                                     </TableCell>
                                     <TableCell className="text-right font-black text-blue-600">
@@ -72,7 +72,7 @@ export default async function AdminOrders() {
                                     </TableCell>
                                     <TableCell className="text-right">
                                         <form action={reprintOrder}>
-                                            <input type="hidden" name="orderId" value={order._id.toString()} />
+                                            <input type="hidden" name="orderId" value={String(order._id)} />
                                             <Button variant="ghost" size="sm" title="Ristampa comanda">
                                                 <Printer className="h-4 w-4" />
                                             </Button>

@@ -9,7 +9,7 @@ export async function getActiveEvent() {
 
 export async function getActiveEventId() {
     const event = await getActiveEvent();
-    return event ? (event._id as any).toString() : null;
+    return event ? String(event._id) : null;
 }
 
 export async function getAllEvents() {

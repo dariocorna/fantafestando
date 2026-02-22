@@ -1,30 +1,49 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import {
-    ShoppingCart,
-    User,
-    Hash,
-    Trash2,
-    CheckCircle2,
-    Loader2,
-    X,
-    Banknote,
-    CreditCard,
-    Monitor
-} from "lucide-react"
+import { ArrowLeft, ShoppingCart, Info, User, Table, CreditCard, Banknote, Search, Plus, Minus, Trash2, CheckCircle2, Loader2, Hash, Monitor } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
     DialogContent,
     DialogHeader,
     DialogTitle,
-    DialogTrigger,
-    DialogFooter
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { NumPad } from "./components/NumPad"
 import { createOrder, triggerSumUpPayment } from "./actions"
+
+// Define interfaces for external types
+interface ICategory {
+    _id: string;
+    name: string;
+    // Add other properties if known
+}
+
+interface IProduct {
+    _id: string;
+    name: string;
+    basePrice: number;
+    categoryId: string;
+    // Add other properties if known
+}
+
+interface IEvent {
+    _id: string;
+    name: string;
+    settings?: {
+        sumupMerchantCode?: string;
+        sumupApiKey?: string;
+        askTable?: boolean;
+        askName?: boolean;
+    };
+}
+
+interface IPosDevice {
+    _id: string;
+    name: string;
+    printerId?: string | { _id: string; name: string; ip: string };
+}
 
 interface CartItem {
     productId: string
@@ -37,13 +56,13 @@ interface CartItem {
 export default function PosPage() {
     const [activeCategory, setActiveCategory] = useState<string | null>(null)
     const [cart, setCart] = useState<CartItem[]>([])
-    const [categories, setCategories] = useState<any[]>([])
-    const [products, setProducts] = useState<any[]>([])
-    const [activeEvent, setActiveEvent] = useState<any>(null)
+    const [categories, setCategories] = useState<ICategory[]>([])
+    const [products, setProducts] = useState<IProduct[]>([])
+    const [activeEvent, setActiveEvent] = useState<IEvent | null>(null)
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
     const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD">("CASH")
-    const [posDevices, setPosDevices] = useState<any[]>([])
+    const [posDevices, setPosDevices] = useState<IPosDevice[]>([])
     const [selectedPosDeviceId, setSelectedPosDeviceId] = useState<string | null>(null)
     const [isPosSelectorOpen, setIsPosSelectorOpen] = useState(false)
 
@@ -81,15 +100,15 @@ export default function PosPage() {
         setIsPosSelectorOpen(false)
     }
 
-    const selectedPosDevice = posDevices.find(d => d._id === selectedPosDeviceId)
+    const selectedPosDevice = posDevices.find((d: IPosDevice) => d._id === selectedPosDeviceId)
 
-    const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0)
+    const total = cart.reduce((acc: number, item: CartItem) => acc + (item.price * item.quantity), 0)
 
-    const addToCart = (product: any) => {
-        setCart(prev => {
-            const existing = prev.find(i => i.productId === product._id)
+    const addToCart = (product: IProduct) => {
+        setCart((prev: CartItem[]) => {
+            const existing = prev.find((i: CartItem) => i.productId === product._id)
             if (existing) {
-                return prev.map(i => i.productId === product._id ? { ...i, quantity: i.quantity + 1 } : i)
+                return prev.map((i: CartItem) => i.productId === product._id ? { ...i, quantity: i.quantity + 1 } : i)
             }
             return [...prev, {
                 productId: product._id,
@@ -102,7 +121,7 @@ export default function PosPage() {
     }
 
     const removeFromCart = (productId: string) => {
-        setCart(prev => prev.filter(i => i.productId !== productId))
+        setCart((prev: CartItem[]) => prev.filter((i: CartItem) => i.productId !== productId))
     }
 
     const handleCheckout = async () => {
@@ -112,7 +131,7 @@ export default function PosPage() {
 
         if (paymentMethod === "CARD") {
             // Avvia pagamento su terminale
-            const sumupResult = await triggerSumUpPayment(total, activeEvent._id);
+            const sumupResult = await triggerSumUpPayment(total, activeEvent?._id || "");
             if (!sumupResult.success) {
                 alert("Errore SumUp: " + sumupResult.error);
                 setIsProcessing(false);
@@ -123,7 +142,7 @@ export default function PosPage() {
         }
 
         const orderData = {
-            eventId: activeEvent._id,
+            eventId: activeEvent?._id || "",
             customer: {
                 name: customerName || undefined,
                 table: tableNumber || undefined
@@ -345,7 +364,7 @@ export default function PosPage() {
                                     >
                                         <div>
                                             <p className="font-black text-lg">{device.name}</p>
-                                            <p className="text-sm text-slate-500">Stampante: {device.printerId?.name || 'Nessuna'}</p>
+                                            <p className="text-sm text-slate-500">Stampante: {typeof device.printerId === 'object' && device.printerId ? device.printerId.name : 'Nessuna'}</p>
                                         </div>
                                         <Monitor className={`transition-colors ${isSelected ? 'text-blue-600' : 'text-slate-300 group-hover:text-blue-400'}`} />
                                     </button>

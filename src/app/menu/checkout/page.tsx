@@ -7,8 +7,6 @@ import {
     User,
     Hash,
     Loader2,
-    CheckCircle2,
-    Calendar,
     ShoppingBag,
     ArrowRight
 } from "lucide-react"
@@ -16,29 +14,45 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createPublicOrder } from "../actions"
-import { motion } from "framer-motion"
+
+interface Product {
+    _id: string
+    name: string
+    basePrice: number
+}
+
+interface CartItem extends Product {
+    quantity: number
+}
 
 export default function CheckoutPage() {
     const router = useRouter()
-    const [cart, setCart] = useState<any[]>([])
-    const [eventId, setEventId] = useState("")
+    const [cart, setCart] = useState<CartItem[]>(() => {
+        if (typeof window !== "undefined") {
+            const saved = localStorage.getItem("osg_cart")
+            return saved ? JSON.parse(saved) : []
+        }
+        return []
+    })
+    const [eventId] = useState(() => {
+        if (typeof window !== "undefined") {
+            return localStorage.getItem("osg_eventId") || ""
+        }
+        return ""
+    })
     const [customerName, setCustomerName] = useState("")
     const [tableNumber, setTableNumber] = useState("")
     const [isSubmitting, setIsSubmitting] = useState(false)
-    const [eventSettings, setEventSettings] = useState<any>(null)
+    const [eventSettings, setEventSettings] = useState<{ askName?: boolean; askTable?: boolean } | null>(null)
 
     useEffect(() => {
-        const savedCart = localStorage.getItem('osg_cart')
-        const savedEventId = localStorage.getItem('osg_eventId')
-        if (savedCart) setCart(JSON.parse(savedCart))
-        if (savedEventId) {
-            setEventId(savedEventId)
+        if (eventId) {
             // Fetch event settings to know if we need name/table
-            fetch('/api/pos/init').then(res => res.json()).then(data => {
+            fetch("/api/pos/init").then(res => res.json()).then(data => {
                 if (data.event) setEventSettings(data.event.settings)
             })
         }
-    }, [])
+    }, [eventId])
 
     const totalPrice = cart.reduce((acc, item) => acc + (item.basePrice * item.quantity), 0)
 
@@ -63,7 +77,7 @@ export default function CheckoutPage() {
         })
 
         if (result.success) {
-            localStorage.removeItem('osg_cart')
+            localStorage.removeItem("osg_cart")
             router.push(`/menu/success?code=${result.shortCode}`)
         } else {
             alert(result.error)

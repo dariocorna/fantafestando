@@ -6,6 +6,15 @@ import Printer from "@/models/Printer";
 import PosDevice from "@/models/PosDevice";
 import dbConnect from "./mongoose";
 
+// Define a bridge type for global to avoid 'any' error
+interface GlobalMongoose {
+    mongoose?: MongooseCache;
+}
+
+export interface MongooseCache {
+    conn: typeof import("mongoose") | null;
+    promise: Promise<typeof import("mongoose")> | null;
+}
 export interface PrintJob {
     ip: string;
     title: string;
@@ -20,6 +29,15 @@ export interface PrintJob {
     shortCode?: string;
 }
 
+// Define an interface for cart items based on usage
+interface CartItem {
+    productId: string;
+    snapshotName: string;
+    quantity: number;
+    customKitchenNotes?: string;
+    // Add other properties if they exist in the actual Order.cart items
+}
+
 export class PrinterService {
     static async printComanda(job: PrintJob, copies: number = 1) {
         if (!job.ip) {
@@ -30,7 +48,7 @@ export class PrinterService {
         const printer = new ThermalPrinter({
             type: PrinterTypes.EPSON, // Default for most thermal printers
             interface: `tcp://${job.ip}`,
-            characterSet: "PC1252_ITALIAN" as any,
+            characterSet: "PC1252_ITALIAN" as CharacterSet,
             removeSpecialCharacters: false,
             lineCharacter: "=",
         });
@@ -95,12 +113,12 @@ export class PrinterService {
         // Fetch POS Device and its printer
         let cashierPrinterIp: string | undefined = undefined;
         if (posDeviceId) {
-            const device = await PosDevice.findById(posDeviceId).populate('printerId').lean() as any;
+            const device = await PosDevice.findById(posDeviceId).populate('printerId').lean() as (import("@/models/PosDevice").IPosDevice & { printerId: import("@/models/Printer").IPrinter });
             cashierPrinterIp = device?.printerId?.ip;
         }
 
         // Fetch products and their categories
-        const productIds = order.cart.map((item: any) => item.productId);
+        const productIds = order.cart.map((item: CartItem) => item.productId);
         const products = await Product.find({ _id: { $in: productIds } }).lean();
 
         const categoryIdsFromProducts = Array.from(new Set(products.map(p => p.categoryId.toString())));
@@ -119,11 +137,11 @@ export class PrinterService {
             shortCode: order._id.toString().slice(-4).toUpperCase()
         };
 
-        order.cart.forEach((item: any) => {
+        order.cart.forEach((item: CartItem) => {
             const product = products.find(p => p._id.toString() === item.productId.toString());
             if (!product) return;
             const category = categories.find(c => c._id.toString() === product.categoryId.toString());
-            const kitchenPrinter = category?.printerId as any;
+            const kitchenPrinter = category?.printerId as (import("@/models/Printer").IPrinter | undefined);
 
             if (kitchenPrinter?.ip) {
                 // Add to kitchen job (IP specific)
