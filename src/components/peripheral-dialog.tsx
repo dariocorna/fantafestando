@@ -31,7 +31,6 @@ export function PeripheralDialog({
         type: string;
         config?: {
             merchantId?: string;
-            affiliateKey?: string;
             [key: string]: unknown;
         };
     },
@@ -84,6 +83,7 @@ export function PeripheralDialog({
                         ) : (
                             <input type="hidden" name="eventId" value={eventId} />
                         )}
+                        {isEdit && eventId && <input type="hidden" name="eventId" value={eventId} />}
 
                         <div className="space-y-2">
                             <Label htmlFor="periph-name">Nome Descrittivo</Label>
@@ -109,11 +109,23 @@ export function PeripheralDialog({
                                 <p className="text-sm font-medium text-muted-foreground">Configurazione SumUp</p>
                                 <div className="space-y-2">
                                     <Label htmlFor="merchantId">Merchant Id</Label>
-                                    <Input id="merchantId" name="merchantId" defaultValue={peripheral?.config?.merchantId} placeholder="Codice Commerciante" required={type === "SUMUP"} />
+                                    <Input
+                                        id="merchantId"
+                                        name="merchantId"
+                                        defaultValue={peripheral?.config?.merchantId}
+                                        placeholder="Codice Commerciante"
+                                        required={type === "SUMUP" && !isEdit}
+                                    />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="affiliateKey">Affiliate Key / API Key</Label>
-                                    <Input id="affiliateKey" name="affiliateKey" defaultValue={peripheral?.config?.affiliateKey} placeholder="Chiave API SumUp" required={type === "SUMUP"} />
+                                    <Input
+                                        id="affiliateKey"
+                                        name="affiliateKey"
+                                        type="password"
+                                        placeholder={isEdit ? "Nuova chiave (lascia vuoto per mantenere quella attuale)" : "Chiave API SumUp"}
+                                        required={type === "SUMUP" && !isEdit}
+                                    />
                                 </div>
                             </div>
                         )}

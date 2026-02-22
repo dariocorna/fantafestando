@@ -21,11 +21,13 @@ function SubmitButton() {
 
 export function EditPosDeviceDialog({
     posDevice,
+    eventId,
     printers,
     peripherals,
     updateAction
 }: {
     posDevice: { id: string, name: string, printerId: string, paymentTerminalId?: string, cashBoxId?: string },
+    eventId?: string,
     printers: { id: string, name: string }[],
     peripherals: { id: string, name: string, type: string }[],
     updateAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | undefined>
@@ -61,6 +63,7 @@ export function EditPosDeviceDialog({
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <input type="hidden" name="id" value={posDevice.id} />
+                        {eventId && <input type="hidden" name="eventId" value={eventId} />}
                         <div className="space-y-2">
                             <Label htmlFor="pos-edit-name">Nome Postazione</Label>
                             <Input id="pos-edit-name" name="name" defaultValue={posDevice.name} required />

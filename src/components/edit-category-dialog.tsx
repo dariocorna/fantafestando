@@ -19,10 +19,12 @@ function SubmitButton() {
 
 export function EditCategoryDialog({
     category,
+    eventId,
     printers,
     updateAction
 }: {
     category: { id: string, name: string, uiColor: string, printerId?: string },
+    eventId?: string,
     printers: { id: string, name: string, ip: string }[],
     updateAction: (formData: FormData) => Promise<void>
 }) {
@@ -47,6 +49,7 @@ export function EditCategoryDialog({
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <input type="hidden" name="id" value={category.id} />
+                        {eventId && <input type="hidden" name="eventId" value={eventId} />}
                         <div className="grid gap-2">
                             <Label htmlFor="cat-edit-name">Nome</Label>
                             <Input id="cat-edit-name" name="name" defaultValue={category.name} required />

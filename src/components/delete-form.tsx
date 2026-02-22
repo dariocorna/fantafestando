@@ -18,6 +18,7 @@ import {
 export function DeleteForm({
     id,
     idName = "id",
+    hiddenFields = [],
     message,
     action,
     buttonSize = "sm",
@@ -25,6 +26,7 @@ export function DeleteForm({
 }: {
     id: string,
     idName?: string,
+    hiddenFields?: Array<{ name: string; value: string }>,
     message: string,
     action: (formData: FormData) => void,
     buttonSize?: "default" | "sm" | "lg" | "icon" | "xs",
@@ -48,6 +50,9 @@ export function DeleteForm({
                     <AlertDialogCancel>Annulla</AlertDialogCancel>
                     <form action={action}>
                         <input type="hidden" name={idName} value={id} />
+                        {hiddenFields.map(field => (
+                            <input key={field.name} type="hidden" name={field.name} value={field.value} />
+                        ))}
                         <AlertDialogAction type="submit" className="bg-red-600 hover:bg-red-700 text-white">
                             Continua
                         </AlertDialogAction>
