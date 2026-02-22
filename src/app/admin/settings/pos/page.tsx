@@ -7,7 +7,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Button } from "@/components/ui/button";
 import { Plus, Monitor, Trash2, ArrowLeft } from "lucide-react";
 import { DeleteForm } from "@/components/delete-form";
-import { deletePosDeviceAction, createPosDeviceAction } from "../actions";
+import { deletePosDeviceAction, createPosDeviceAction, updatePosDeviceAction } from "../actions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { HardwareDialog } from "@/components/hardware-dialog";
 import { HardwareFormWrapper } from "@/components/hardware-form-wrapper";
+import { EditPosDeviceDialog } from "@/components/edit-pos-device-dialog";
 
 export default async function PosDevicesPage() {
     const eventId = await getAdminContextEventId();
@@ -90,7 +91,12 @@ export default async function PosDevicesPage() {
                                 <p>Stampante associata: <span className="font-medium text-foreground">{(device.printerId as unknown as IPrinter)?.name || "Non collegata"}</span></p>
                                 <p>IP Stampante: <span className="font-mono text-foreground">{(device.printerId as unknown as IPrinter)?.ip || "N/A"}</span></p>
                             </div>
-                            <div className="flex justify-end">
+                            <div className="flex justify-end gap-2 mt-4">
+                                <EditPosDeviceDialog
+                                    posDevice={{ id: String(device._id), name: device.name, printerId: String((device.printerId as any)?._id || device.printerId || "") }}
+                                    printers={cashierPrinters.map(p => ({ id: String(p._id), name: p.name }))}
+                                    updateAction={updatePosDeviceAction}
+                                />
                                 <DeleteForm
                                     id={String(device._id)}
                                     action={deletePosDeviceAction}

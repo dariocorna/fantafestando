@@ -6,7 +6,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Button } from "@/components/ui/button";
 import { Plus, Printer as PrinterIcon, Trash2, ArrowLeft } from "lucide-react";
 import { DeleteForm } from "@/components/delete-form";
-import { deletePrinterAction, createPrinterAction } from "../actions";
+import { deletePrinterAction, createPrinterAction, updatePrinterAction } from "../actions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { HardwareDialog } from "@/components/hardware-dialog";
 import { HardwareFormWrapper } from "@/components/hardware-form-wrapper";
+import { EditPrinterDialog } from "@/components/edit-printer-dialog";
 
 export default async function PrintersPage() {
     const eventId = await getAdminContextEventId();
@@ -84,7 +85,11 @@ export default async function PrintersPage() {
                                 <p>IP: <span className="font-mono font-medium text-foreground">{printer.ip}</span></p>
                                 <p>Tipo: <span className="font-medium text-foreground">{printer.type === 'CASHIER' ? 'Cassa' : 'Reparto'}</span></p>
                             </div>
-                            <div className="flex justify-end">
+                            <div className="flex justify-end gap-2 mt-4">
+                                <EditPrinterDialog
+                                    printer={{ id: String(printer._id), name: printer.name, ip: printer.ip, type: printer.type }}
+                                    updateAction={updatePrinterAction}
+                                />
                                 <DeleteForm
                                     id={String(printer._id)}
                                     action={deletePrinterAction}
