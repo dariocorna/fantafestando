@@ -163,6 +163,21 @@ export async function deletePrinterAction(formData: FormData) {
     revalidatePath("/admin/settings/printers");
 }
 
+export async function updatePrinterAction(formData: FormData) {
+    const id = formData.get("id") as string;
+    const name = formData.get("name") as string;
+    const ip = formData.get("ip") as string;
+    const type = formData.get("type") as "CASHIER" | "KITCHEN";
+
+    if (!id || !name || !ip) return { error: "Dati mancanti" };
+
+    await dbConnect();
+    await Printer.findByIdAndUpdate(id, { name, ip, type });
+
+    revalidatePath("/admin/settings/printers");
+    return { success: true };
+}
+
 // POS DEVICE ACTIONS
 export async function createPosDeviceAction(formData: FormData) {
     const eventId = formData.get("eventId") as string;
@@ -185,4 +200,18 @@ export async function deletePosDeviceAction(formData: FormData) {
     await PosDevice.findByIdAndDelete(id);
 
     revalidatePath("/admin/settings/pos");
+}
+
+export async function updatePosDeviceAction(formData: FormData) {
+    const id = formData.get("id") as string;
+    const name = formData.get("name") as string;
+    const printerId = formData.get("printerId") as string;
+
+    if (!id || !name || !printerId) return { error: "Dati mancanti" };
+
+    await dbConnect();
+    await PosDevice.findByIdAndUpdate(id, { name, printerId });
+
+    revalidatePath("/admin/settings/pos");
+    return { success: true };
 }

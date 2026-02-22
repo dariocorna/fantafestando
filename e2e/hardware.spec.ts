@@ -95,4 +95,48 @@ test.describe('Gestione Hardware ed Elettronica', () => {
         const count = await rows.count();
         // Se non ci sono righe o il conteggio non è aumentato, ok.
     });
+
+    test('modifica hardware esistente (Full CRUD)', async ({ page }) => {
+        // Crea una stampante
+        await page.goto('/admin/settings/printers');
+        await page.click('button:has-text("Nuova Stampante")');
+        const printerName = `PrinterToEdit ${Date.now()}`;
+        const printerIp = `192.168.1.99`;
+        await page.fill('input[id="name"]', printerName);
+        await page.fill('input[id="ip"]', printerIp);
+        await page.click('button:has-text("Salva")');
+        await expect(page.getByText(printerName)).toBeVisible();
+
+        // Clicca modifica
+        // Visto che cerchiamo all'interno della Card associata
+        const card = page.locator('.rounded-xl.border', { hasText: printerName });
+        await card.getByRole('button', { name: "Modifica" }).click();
+
+        const editPrinterIp = `192.168.1.100`;
+        await page.fill('input[id="printer-edit-ip"]', editPrinterIp);
+        await page.click('button:has-text("Salva Modifiche")');
+
+        await expect(page.getByText(editPrinterIp)).toBeVisible();
+
+        // Crea un POS
+        await page.goto('/admin/settings/pos');
+        await page.click('button:has-text("Nuovo Dispositivo")');
+        const posName = `PosToEdit ${Date.now()}`;
+        await page.fill('input[id="name"]', posName);
+
+        // Cerca stampante cassa
+        await page.getByRole('combobox', { name: 'Stampante Associata' }).click();
+        await page.getByRole('option').last().click();
+        await page.click('button:has-text("Salva")');
+        await expect(page.getByText(posName)).toBeVisible();
+
+        const posCard = page.locator('.rounded-xl.border', { hasText: posName });
+        await posCard.getByRole('button', { name: "Modifica" }).click();
+
+        const editPosName = `${posName} EDITED`;
+        await page.fill('input[id="pos-edit-name"]', editPosName);
+        await page.click('button:has-text("Salva Modifiche")');
+
+        await expect(page.getByText(editPosName)).toBeVisible();
+    });
 });
