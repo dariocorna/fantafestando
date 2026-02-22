@@ -44,7 +44,11 @@ async function createAndActivateEvent(
     }
 
     const predefinedTables = options?.predefinedTables ?? [];
-    await page.locator('textarea[name="predefinedTables"]').fill(predefinedTables.join("\n"));
+    if (predefinedTables.length > 0) {
+        await page.getByRole("button", { name: /Importa Elenco/i }).click();
+        await page.locator("#bulk-predefined-tables").fill(predefinedTables.join("\n"));
+        await page.getByRole("button", { name: /Importa in Lista/i }).click();
+    }
 
     await page.getByRole("button", { name: /Salva Impostazioni/i }).click();
     await expect(page.getByText(/Modifiche salvate/i)).toBeVisible();
