@@ -8,6 +8,8 @@ export interface IEvent extends Document {
         askName: boolean;
         askTable: boolean;
         defaultCashierPrinterIp?: string;
+        sumupMerchantCode?: string;
+        sumupApiKey?: string;
     };
     predefinedTables: string[];
 }
@@ -19,7 +21,9 @@ const EventSchema = new Schema<IEvent>({
     settings: {
         askName: { type: Boolean, default: false },
         askTable: { type: Boolean, default: false },
-        defaultCashierPrinterIp: { type: String }
+        defaultCashierPrinterIp: { type: String },
+        sumupMerchantCode: { type: String },
+        sumupApiKey: { type: String }
     },
     predefinedTables: { type: [String], default: [] }
 }, {
