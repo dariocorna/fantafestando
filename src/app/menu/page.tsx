@@ -7,8 +7,7 @@ import {
     Info,
     X,
     Plus,
-    Minus,
-    Check
+    Minus
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { motion, AnimatePresence } from "framer-motion"
@@ -20,7 +19,13 @@ interface Product {
     description?: string
     basePrice: number
     categoryId: string
-    variants?: any[]
+    variants?: { optionName: string; priceVariation: number }[]
+}
+
+interface Category {
+    _id: string
+    name: string
+    uiColor?: string
 }
 
 interface CartItem extends Product {
@@ -28,9 +33,9 @@ interface CartItem extends Product {
 }
 
 export default function CustomerMenu() {
-    const [categories, setCategories] = useState<any[]>([])
+    const [categories, setCategories] = useState<Category[]>([])
     const [products, setProducts] = useState<Product[]>([])
-    const [activeEvent, setActiveEvent] = useState<any>(null)
+    const [activeEvent, setActiveEvent] = useState<{ _id: string; name: string } | null>(null)
     const [activeTab, setActiveTab] = useState("")
     const [cart, setCart] = useState<CartItem[]>([])
     const [isCartOpen, setIsCartOpen] = useState(false)
@@ -244,9 +249,9 @@ export default function CustomerMenu() {
                                 <Button
                                     className="w-full h-20 rounded-3xl bg-slate-900 text-white font-black text-xl hover:bg-slate-800 flex items-center justify-between px-8"
                                     onClick={() => {
-                                        localStorage.setItem('osg_cart', JSON.stringify(cart));
-                                        localStorage.setItem('osg_eventId', activeEvent?._id);
-                                        router.push('/menu/checkout');
+                                        localStorage.setItem("osg_cart", JSON.stringify(cart));
+                                        localStorage.setItem("osg_eventId", activeEvent?._id || "");
+                                        router.push("/menu/checkout");
                                     }}
                                 >
                                     PROSEGUI

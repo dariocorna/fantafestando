@@ -1,5 +1,5 @@
 import dbConnect from "@/lib/mongoose";
-import Event from "@/models/Event";
+import Event, { IEvent } from "@/models/Event";
 import Category from "@/models/Category";
 import Product from "@/models/Product";
 import { Button } from "@/components/ui/button";
@@ -53,8 +53,8 @@ export default async function EventsPage() {
                 </div>
             ) : (
                 <div className="grid gap-4 mt-6">
-                    {events.map((evt: any) => (
-                        <div key={evt._id.toString()} className="p-4 border rounded-md shadow-sm bg-white dark:bg-slate-900 flex justify-between items-center">
+                    {events.map((evt: IEvent) => (
+                        <div key={String(evt._id)} className="p-4 border rounded-md shadow-sm bg-white dark:bg-slate-900 flex justify-between items-center">
                             <div>
                                 <h3 className="font-semibold text-lg">{evt.name} {evt.archived && <span className="text-xs ml-2 bg-amber-100 text-amber-800 px-2 py-1 rounded">Archiviata</span>}</h3>
                                 <div className="flex gap-4 mt-1">
@@ -69,11 +69,11 @@ export default async function EventsPage() {
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
-                                <CloneEventDialog sourceEventId={evt._id.toString()} sourceEventName={evt.name} />
+                                <CloneEventDialog sourceEventId={String(evt._id)} sourceEventName={evt.name} />
 
                                 {!evt.archived && (
                                     <ArchiveForm
-                                        id={evt._id.toString()}
+                                        id={String(evt._id)}
                                         idName="eventId"
                                         message="Questa festa non sarà più modificabile e scompariranno le impostazioni. Confermi l'archiviazione?"
                                         action={archiveEvent}
@@ -83,7 +83,7 @@ export default async function EventsPage() {
                                 )}
 
                                 <DeleteForm
-                                    id={evt._id.toString()}
+                                    id={String(evt._id)}
                                     idName="eventId"
                                     message="Eliminare questa festa? Questo rimuoverà permanentemente TUTTI i prodotti e le categorie associate."
                                     action={deleteEvent}
