@@ -11,10 +11,9 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { NumPad } from "./components/NumPad"
 import { createOrder, triggerSumUpPayment, loadPendingOrderByCode, completePendingOrderPayment, listRecentPendingOrders } from "./actions"
 import { getCategoryTheme } from "@/lib/category-colors"
-import { TABLE_CODE_LETTERS, buildTableCode, isValidTableCode, normalizeTableCode, parseTableCode } from "@/lib/table-code"
+import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
 
 interface ICategory {
     _id: string
@@ -36,6 +35,7 @@ interface IEvent {
         askTable?: boolean
         askName?: boolean
     }
+    predefinedTables?: string[]
 }
 
 interface IPeripheralRef {
@@ -177,9 +177,9 @@ export default function PosPage() {
 
     const total = cart.reduce((acc: number, item: CartItem) => acc + (item.price * item.quantity), 0)
     const effectiveTotal = total
-    const parsedTableCode = parseTableCode(tableNumber)
-    const normalizedTableCode = normalizeTableCode(tableNumber)
-    const isTableCodeValid = isValidTableCode(normalizedTableCode)
+    const normalizedTableValue = normalizeTableValue(tableNumber)
+    const tableValueValid = isTableValueValid(tableNumber)
+    const predefinedTables = activeEvent?.predefinedTables || []
 
     const addToCart = (product: IProduct) => {
         setCart((prev: CartItem[]) => {
@@ -263,16 +263,7 @@ export default function PosPage() {
         setPrintStatusLabel("Preparazione comanda...")
     }, [])
 
-    const handleTableLetterSelection = (letter: string) => {
-        const nextLetter = parsedTableCode.letter === letter ? "" : letter
-        setTableNumber(buildTableCode(nextLetter, parsedTableCode.digits))
-    }
-
-    const handleTableDigitsChange = (digits: string) => {
-        setTableNumber(buildTableCode(parsedTableCode.letter, digits))
-    }
-
-    const clearTableCode = () => {
+    const clearTableSelection = () => {
         setTableNumber("")
     }
 
@@ -303,7 +294,7 @@ export default function PosPage() {
 
         setLoadedPendingOrder(result.order)
         setCustomerName(result.order.customer?.name || "")
-        setTableNumber(normalizeTableCode(result.order.customer?.table || ""))
+        setTableNumber(normalizeTableValue(result.order.customer?.table || ""))
         setCart(result.order.items.map((item) => ({
             productId: item.productId,
             name: item.snapshotName,
@@ -341,8 +332,8 @@ export default function PosPage() {
             return
         }
 
-        if (activeEvent?.settings?.askTable && !isTableCodeValid) {
-            alert("Inserisci il tavolo nel formato: lettera A-F + 2 numeri (es. B07)")
+        if (activeEvent?.settings?.askTable && !tableValueValid) {
+            alert("Inserisci il tavolo oppure selezionalo dalla lista")
             return
         }
 
@@ -357,7 +348,7 @@ export default function PosPage() {
                 posDeviceId: selectedPosDeviceId,
                 customer: {
                     name: customerName || undefined,
-                    table: normalizedTableCode || undefined
+                    table: normalizedTableValue || undefined
                 },
                 totalAmount: total,
                 cart: cart.map((item) => ({
@@ -401,7 +392,7 @@ export default function PosPage() {
             eventId: activeEvent._id,
             customer: {
                 name: customerName || undefined,
-                table: normalizedTableCode || undefined
+                table: normalizedTableValue || undefined
             },
             totalAmount: total,
             cart: cart.map(item => ({
@@ -430,7 +421,7 @@ export default function PosPage() {
         || !selectedPosDeviceId
         || cart.length === 0
         || (!cashAvailable && !cardAvailable)
-        || (Boolean(activeEvent?.settings?.askTable) && !isTableCodeValid)
+        || (Boolean(activeEvent?.settings?.askTable) && !tableValueValid)
 
     return (
         <div className="flex h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950">
@@ -521,7 +512,7 @@ export default function PosPage() {
                         <div className="bg-white dark:bg-slate-700 border p-2 rounded-xl flex items-center gap-2">
                             <Hash size={18} className="text-slate-400" />
                             <span className="text-sm font-bold truncate">
-                                {normalizedTableCode ? `Tavolo ${normalizedTableCode}` : "Tavolo..."}
+                                {normalizedTableValue ? `Tavolo ${normalizedTableValue}` : "Tavolo..."}
                             </span>
                         </div>
                     </div>
@@ -641,32 +632,44 @@ export default function PosPage() {
 
                                 {activeEvent?.settings?.askTable && (
                                     <div className="space-y-4">
-                                        <Label className="text-lg font-bold">Tavolo (A-F + 2 cifre)</Label>
+                                        <Label className="text-lg font-bold">Tavolo</Label>
                                         <div className="text-center py-4 bg-slate-100 dark:bg-slate-800 rounded-2xl">
-                                            <span className="text-5xl font-black text-blue-600">{normalizedTableCode || "---"}</span>
+                                            <span className="text-5xl font-black text-blue-600">{normalizedTableValue || "---"}</span>
                                         </div>
-                                        <div className="grid grid-cols-6 gap-2">
-                                            {TABLE_CODE_LETTERS.map((letter) => {
-                                                const isActive = parsedTableCode.letter === letter
-                                                return (
-                                                    <button
-                                                        key={letter}
-                                                        type="button"
-                                                        onClick={() => handleTableLetterSelection(letter)}
-                                                        className={`h-12 rounded-xl border-2 text-lg font-black transition-colors ${isActive ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
-                                                    >
-                                                        {letter}
-                                                    </button>
-                                                )
-                                            })}
+                                        {predefinedTables.length > 0 ? (
+                                            <div className="flex flex-wrap gap-2">
+                                                {predefinedTables.map((table) => {
+                                                    const isActive = normalizeTableValue(table) === normalizedTableValue
+                                                    return (
+                                                        <button
+                                                            key={table}
+                                                            type="button"
+                                                            onClick={() => setTableNumber(table)}
+                                                            className={`rounded-xl border-2 px-3 py-2 text-sm font-black transition-colors ${isActive ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
+                                                        >
+                                                            {table}
+                                                        </button>
+                                                    )
+                                                })}
+                                            </div>
+                                        ) : null}
+                                        <Input
+                                            value={tableNumber}
+                                            onChange={(e) => setTableNumber(e.target.value)}
+                                            placeholder="Es: B02 oppure VIP TERRAZZA"
+                                            className="h-12 rounded-xl border-2 font-semibold"
+                                        />
+                                        <div className="flex items-center justify-between">
+                                            <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
+                                                Tavolo selezionato: <span className="text-slate-800">{normalizedTableValue || "---"}</span>
+                                            </p>
+                                            <Button type="button" variant="outline" className="rounded-xl font-bold" onClick={clearTableSelection}>
+                                                RESET
+                                            </Button>
                                         </div>
-                                        <NumPad value={parsedTableCode.digits} onChange={handleTableDigitsChange} maxLength={2} />
-                                        <Button type="button" variant="outline" className="w-full rounded-xl font-bold" onClick={clearTableCode}>
-                                            RESET TAVOLO
-                                        </Button>
-                                        {!isTableCodeValid && normalizedTableCode.length > 0 ? (
+                                        {!tableValueValid && tableNumber.trim().length > 0 ? (
                                             <p className="text-xs font-semibold text-amber-700">
-                                                Formato richiesto: una lettera da A a F e due numeri (es. C12).
+                                                Inserisci un valore tavolo valido.
                                             </p>
                                         ) : null}
                                     </div>
