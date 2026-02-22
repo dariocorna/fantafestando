@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle2 } from "lucide-react";
 import { updateEventSettingsAction } from "./actions";
 import { useState } from "react";
+import { formatPredefinedTablesForTextarea } from "@/lib/table-presets";
 
 interface ActiveEventSettingsFormProps {
     event: {
@@ -16,6 +17,7 @@ interface ActiveEventSettingsFormProps {
             askName?: boolean;
             askTable?: boolean;
         };
+        predefinedTables?: string[];
     };
 }
 
@@ -85,6 +87,23 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                         </div>
                     </div>
 
+                </div>
+
+                <div className="space-y-3 rounded-md border p-4 shadow-sm">
+                    <Label htmlFor="predefinedTables" className="text-sm font-medium">
+                        Tavoli Predefiniti
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                        Inserisci un tavolo per riga (oppure separati da virgola). Verranno mostrati come selezione rapida su POS e WebApp, con inserimento custom sempre disponibile.
+                    </p>
+                    <textarea
+                        id="predefinedTables"
+                        name="predefinedTables"
+                        defaultValue={formatPredefinedTablesForTextarea(event.predefinedTables)}
+                        placeholder={"A01\nB02\nVIP TERRAZZA"}
+                        rows={6}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    />
                 </div>
             </CardContent>
             <CardFooter className="bg-slate-50/50 border-t px-6 py-4 flex justify-between items-center">

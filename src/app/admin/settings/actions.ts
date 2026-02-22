@@ -10,6 +10,7 @@ import Printer from "@/models/Printer";
 import PosDevice from "@/models/PosDevice";
 import Peripheral from "@/models/Peripheral";
 import { revalidatePath } from "next/cache";
+import { parsePredefinedTablesInput } from "@/lib/table-presets";
 
 function revalidateHardwareViews() {
     revalidatePath("/admin/settings/hardware");
@@ -64,6 +65,8 @@ export async function updateEventSettingsAction(formData: FormData) {
     const askTable = formData.get("askTable") === "on";
     const defaultCashierPrinterIp = formData.get("defaultCashierPrinterIp") as string;
     const active = formData.get("active") === "on";
+    const predefinedTablesInput = formData.get("predefinedTables") as string | null;
+    const predefinedTables = parsePredefinedTablesInput(predefinedTablesInput);
 
     if (!eventId) return { error: "Event ID obbligatorio" };
 
@@ -92,7 +95,8 @@ export async function updateEventSettingsAction(formData: FormData) {
                 active,
                 "settings.askName": askName,
                 "settings.askTable": askTable,
-                "settings.defaultCashierPrinterIp": defaultCashierPrinterIp
+                "settings.defaultCashierPrinterIp": defaultCashierPrinterIp,
+                predefinedTables
             },
             // Cleanup legacy global SumUp configuration: now managed via Peripherals.
             $unset: {
@@ -117,6 +121,10 @@ export async function cloneEventAction(formData: FormData) {
     const sourceEvent = await Event.findById(sourceEventId).lean();
     if (!sourceEvent) return { error: "Evento sorgente non trovato" };
 
+    const clonedPredefinedTables = parsePredefinedTablesInput(
+        Array.isArray(sourceEvent.predefinedTables) ? sourceEvent.predefinedTables.join("\n") : ""
+    );
+
     // 1. Crea la nuova festa
     const newEvent = await Event.create({
         name: newName,
@@ -126,7 +134,8 @@ export async function cloneEventAction(formData: FormData) {
             askName: sourceEvent.settings?.askName ?? false,
             askTable: sourceEvent.settings?.askTable ?? false,
             defaultCashierPrinterIp: sourceEvent.settings?.defaultCashierPrinterIp
-        }
+        },
+        predefinedTables: clonedPredefinedTables
     });
 
     // 2. Clona i Printers
