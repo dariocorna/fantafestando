@@ -1,5 +1,5 @@
 "use client"
-import { Calendar, Home, Settings, UtensilsCrossed, FileText } from "lucide-react"
+import { Home, Settings, UtensilsCrossed, FileText } from "lucide-react"
 
 import {
     Sidebar,

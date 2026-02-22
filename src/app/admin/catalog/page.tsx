@@ -30,6 +30,15 @@ import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { CreateProductDialog } from "@/components/create-product-dialog";
 import { X } from "lucide-react";
 
+function getReferencedId(value: unknown): string | undefined {
+    if (!value) return undefined;
+    if (typeof value === "object" && "_id" in value) {
+        const populated = value as { _id?: unknown };
+        return populated._id ? String(populated._id) : undefined;
+    }
+    return String(value);
+}
+
 export default async function AdminCatalog() {
     await dbConnect();
     const currentEventId = await getAdminContextEventId();
@@ -184,7 +193,7 @@ export default async function AdminCatalog() {
                                             id: String(cat._id),
                                             name: cat.name,
                                             uiColor: cat.uiColor,
-                                            printerId: cat.printerId ? String((cat.printerId as any)._id || cat.printerId) : undefined
+                                            printerId: getReferencedId(cat.printerId)
                                         }}
                                         printers={printers.filter((p: IPrinter) => p.type === 'KITCHEN').map((p: IPrinter) => ({ id: String(p._id), name: p.name, ip: p.ip }))}
                                         updateAction={updateCategory}
@@ -250,7 +259,7 @@ export default async function AdminCatalog() {
                                         product={{
                                             id: String(p._id),
                                             name: p.name,
-                                            categoryId: String((p.categoryId as any)._id || p.categoryId),
+                                            categoryId: getReferencedId(p.categoryId) || "",
                                             basePrice: p.basePrice
                                         }}
                                         categories={categories.map((c: ICategory) => ({ id: String(c._id), name: c.name }))}

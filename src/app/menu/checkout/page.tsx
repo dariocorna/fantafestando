@@ -27,7 +27,7 @@ interface CartItem extends Product {
 
 export default function CheckoutPage() {
     const router = useRouter()
-    const [cart, setCart] = useState<CartItem[]>(() => {
+    const [cart] = useState<CartItem[]>(() => {
         if (typeof window !== "undefined") {
             const saved = localStorage.getItem("osg_cart")
             return saved ? JSON.parse(saved) : []

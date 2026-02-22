@@ -2,19 +2,9 @@ import { ThermalPrinter, PrinterTypes, CharacterSet } from "node-thermal-printer
 import Order from "@/models/Order";
 import Product from "@/models/Product";
 import Category from "@/models/Category";
-import Printer from "@/models/Printer";
 import PosDevice from "@/models/PosDevice";
 import dbConnect from "./mongoose";
 
-// Define a bridge type for global to avoid 'any' error
-interface GlobalMongoose {
-    mongoose?: MongooseCache;
-}
-
-export interface MongooseCache {
-    conn: typeof import("mongoose") | null;
-    promise: Promise<typeof import("mongoose")> | null;
-}
 export interface PrintJob {
     ip: string;
     title: string;

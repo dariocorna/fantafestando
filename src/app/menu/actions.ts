@@ -3,7 +3,6 @@
 import dbConnect from "@/lib/mongoose"
 import Order from "@/models/Order"
 import { revalidatePath } from "next/cache"
-import { nanoid } from "nanoid"
 import { PrinterService } from "@/lib/printer"
 
 export async function createPublicOrder(data: {
