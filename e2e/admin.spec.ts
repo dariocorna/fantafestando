@@ -69,4 +69,50 @@ test.describe('Pannello Amministrazione', () => {
         // Verifica feedback salvataggio
         await expect(page.getByText(/Modifiche salvate/i)).toBeVisible();
     });
+
+    test('modifica categoria e prodotto (Full CRUD)', async ({ page }) => {
+        await page.goto('/admin/catalog');
+
+        // Crea una categoria temporanea
+        const catName = `CatToEdit ${Date.now()}`;
+        await page.click('#new-category-btn');
+        await page.fill('#cat-name', catName);
+        await page.click('button:has-text("Salva Categoria")');
+        await expect(page.getByRole('dialog')).not.toBeVisible();
+        await expect(page.getByText(catName)).toBeVisible();
+
+        // Trova la riga e clicca Modifica (tramite aria-label)
+        const catRow = page.locator('tr').filter({ hasText: catName });
+        await catRow.getByLabel("Modifica").click();
+
+        // Dialog modifica categoria
+        const editCatName = `${catName} EDITED`;
+        await page.fill('#cat-edit-name', editCatName);
+        await page.click('button:has-text("Salva Modifiche")');
+
+        await expect(page.getByText(editCatName)).toBeVisible();
+
+        // Crea un prodotto temporaneo
+        const prodName = `ProdToEdit ${Date.now()}`;
+        await page.click('#new-product-btn');
+        await page.fill('#prod-name', prodName);
+        await page.fill('input[name="basePrice"]', '5.00');
+        // Native select per categoria
+        await page.locator('select[name="categoryId"]').selectOption({ label: editCatName });
+        await page.click('button:has-text("Salva Prodotto")');
+        await expect(page.getByRole('dialog')).not.toBeVisible();
+        await expect(page.getByText(prodName)).toBeVisible();
+
+        // Modifica prodotto
+        const prodRow = page.locator('tr').filter({ hasText: prodName });
+        await prodRow.getByLabel("Modifica").click();
+
+        const editProdName = `${prodName} EDITED`;
+        await page.fill('#prod-edit-name', editProdName);
+        await page.fill('input[name="basePrice"]', '7.50');
+        await page.click('button:has-text("Salva Modifiche")');
+
+        await expect(page.getByText(editProdName)).toBeVisible();
+        await expect(page.getByText('7.50 €')).toBeVisible();
+    });
 });
