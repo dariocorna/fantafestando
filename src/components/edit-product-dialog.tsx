@@ -19,10 +19,12 @@ function SubmitButton() {
 
 export function EditProductDialog({
     product,
+    eventId,
     categories,
     updateAction
 }: {
     product: { id: string, name: string, categoryId: string, basePrice: number },
+    eventId?: string,
     categories: { id: string, name: string }[],
     updateAction: (formData: FormData) => Promise<void>
 }) {
@@ -47,6 +49,7 @@ export function EditProductDialog({
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <input type="hidden" name="id" value={product.id} />
+                        {eventId && <input type="hidden" name="eventId" value={eventId} />}
                         <div className="grid gap-2">
                             <Label htmlFor="productCategory">Categoria</Label>
                             <select

@@ -92,11 +92,13 @@ export default async function HardwarePage() {
                                     <div className="flex justify-end gap-2 mt-4">
                                         <EditPrinterDialog
                                             printer={{ id: String(printer._id), name: printer.name, ip: printer.ip, type: printer.type }}
+                                            eventId={eventId}
                                             updateAction={updatePrinterAction}
                                         />
                                         <DeleteForm
                                             id={String(printer._id)}
                                             action={deletePrinterAction}
+                                            hiddenFields={[{ name: "eventId", value: eventId }]}
                                             message={`Sei sicuro di voler eliminare la stampante ${printer.name}?`}
                                         />
                                     </div>
@@ -128,12 +130,19 @@ export default async function HardwarePage() {
                                     </div>
                                     <div className="flex justify-end gap-2 mt-4">
                                         <PeripheralDialog
-                                            peripheral={{ id: String(p._id), name: p.name, type: p.type, config: p.config }}
+                                            peripheral={{
+                                                id: String(p._id),
+                                                name: p.name,
+                                                type: p.type,
+                                                config: { merchantId: p.config?.merchantId as string | undefined }
+                                            }}
+                                            eventId={eventId}
                                             updateAction={updatePeripheralAction}
                                         />
                                         <DeleteForm
                                             id={String(p._id)}
                                             action={deletePeripheralAction}
+                                            hiddenFields={[{ name: "eventId", value: eventId }]}
                                             message={`Sei sicuro di voler eliminare la periferica ${p.name}? Verrà scollegata da tutti i punti cassa.`}
                                         />
                                     </div>

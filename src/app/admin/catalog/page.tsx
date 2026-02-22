@@ -53,33 +53,48 @@ export default async function AdminCatalog() {
 
     async function createCategory(formData: FormData) {
         "use server"
+        const submittedEventId = formData.get("eventId") as string | null;
         const name = formData.get("name") as string;
-        const eventId = formData.get("eventId") as string;
         const uiColor = formData.get("uiColor") as string || "bg-blue-500";
         const printerId = formData.get("printerId") as string;
+        const normalizedSubmittedEventId = submittedEventId?.trim();
+        const scopedEventId = currentEventId;
 
-        if (!name || !eventId) return;
+        if (!name || !scopedEventId) return;
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
 
         await dbConnect();
-        await Category.create({ name, eventId, uiColor, printerId: printerId || undefined });
+
+        if (printerId) {
+            const printer = await Printer.findOne({ _id: printerId, eventId: scopedEventId, type: "KITCHEN" }).select("_id").lean();
+            if (!printer) return;
+        }
+
+        await Category.create({ name, eventId: scopedEventId, uiColor, printerId: printerId || undefined });
         revalidatePath("/admin/catalog");
     }
 
     async function createProduct(formData: FormData) {
         "use server"
+        const submittedEventId = formData.get("eventId") as string | null;
         const name = formData.get("name") as string;
         const categoryId = formData.get("categoryId") as string;
         const basePrice = parseFloat(formData.get("basePrice") as string);
-        const eventId = formData.get("eventId") as string;
+        const normalizedSubmittedEventId = submittedEventId?.trim();
+        const scopedEventId = currentEventId;
 
-        if (!name || !categoryId || isNaN(basePrice) || !eventId) return;
+        if (!name || !categoryId || isNaN(basePrice) || !scopedEventId) return;
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
 
         await dbConnect();
+        const category = await Category.findOne({ _id: categoryId, eventId: scopedEventId }).select("_id").lean();
+        if (!category) return;
+
         await Product.create({
             name,
             categoryId,
             basePrice,
-            eventId,
+            eventId: scopedEventId,
             isSoldOut: false,
             variants: []
         });
@@ -88,60 +103,92 @@ export default async function AdminCatalog() {
 
     async function deleteCategory(formData: FormData) {
         "use server"
+        const submittedEventId = formData.get("eventId") as string | null;
         const id = formData.get("id") as string;
-        if (!id) return;
+        const normalizedSubmittedEventId = submittedEventId?.trim();
+        const scopedEventId = currentEventId;
+        if (!id || !scopedEventId) return;
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
         await dbConnect();
-        await Category.findByIdAndDelete(id);
+        const deletedCategory = await Category.findOneAndDelete({ _id: id, eventId: scopedEventId }).select("_id").lean();
+        if (!deletedCategory) return;
         // Also delete products in this category to keep consistency
-        await Product.deleteMany({ categoryId: id });
+        await Product.deleteMany({ eventId: scopedEventId, categoryId: id });
         revalidatePath("/admin/catalog");
     }
 
     async function updateCategory(formData: FormData) {
         "use server"
+        const submittedEventId = formData.get("eventId") as string | null;
         const id = formData.get("id") as string;
         const name = formData.get("name") as string;
         const uiColor = formData.get("uiColor") as string;
         const printerId = formData.get("printerId") as string;
-        if (!id || !name) return;
+        const normalizedSubmittedEventId = submittedEventId?.trim();
+        const scopedEventId = currentEventId;
+        if (!id || !name || !scopedEventId) return;
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
 
         await dbConnect();
-        await Category.findByIdAndUpdate(id, { name, uiColor, printerId: printerId || null });
+        if (printerId) {
+            const printer = await Printer.findOne({ _id: printerId, eventId: scopedEventId, type: "KITCHEN" }).select("_id").lean();
+            if (!printer) return;
+        }
+
+        await Category.findOneAndUpdate(
+            { _id: id, eventId: scopedEventId },
+            { name, uiColor, printerId: printerId || null }
+        );
         revalidatePath("/admin/catalog");
     }
 
     async function deleteProduct(formData: FormData) {
         "use server"
+        const submittedEventId = formData.get("eventId") as string | null;
         const id = formData.get("id") as string;
-        if (!id) return;
+        const normalizedSubmittedEventId = submittedEventId?.trim();
+        const scopedEventId = currentEventId;
+        if (!id || !scopedEventId) return;
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
         await dbConnect();
-        await Product.findByIdAndDelete(id);
+        await Product.findOneAndDelete({ _id: id, eventId: scopedEventId });
         revalidatePath("/admin/catalog");
     }
 
     async function updateProduct(formData: FormData) {
         "use server"
+        const submittedEventId = formData.get("eventId") as string | null;
         const id = formData.get("id") as string;
         const name = formData.get("name") as string;
         const categoryId = formData.get("categoryId") as string;
         const basePrice = parseFloat(formData.get("basePrice") as string);
-        if (!id || !name || !categoryId || isNaN(basePrice)) return;
+        const normalizedSubmittedEventId = submittedEventId?.trim();
+        const scopedEventId = currentEventId;
+        if (!id || !name || !categoryId || isNaN(basePrice) || !scopedEventId) return;
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
 
         await dbConnect();
-        await Product.findByIdAndUpdate(id, { name, categoryId, basePrice });
+        const category = await Category.findOne({ _id: categoryId, eventId: scopedEventId }).select("_id").lean();
+        if (!category) return;
+
+        await Product.findOneAndUpdate({ _id: id, eventId: scopedEventId }, { name, categoryId, basePrice });
         revalidatePath("/admin/catalog");
     }
 
     async function addVariant(formData: FormData) {
         "use server"
+        const submittedEventId = formData.get("eventId") as string | null;
         const productId = formData.get("productId") as string;
         const optionName = formData.get("optionName") as string;
         const priceVariation = parseFloat(formData.get("priceVariation") as string);
+        const normalizedSubmittedEventId = submittedEventId?.trim();
+        const scopedEventId = currentEventId;
 
-        if (!productId || !optionName || isNaN(priceVariation)) return;
+        if (!productId || !optionName || isNaN(priceVariation) || !scopedEventId) return;
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
 
         await dbConnect();
-        await Product.findByIdAndUpdate(productId, {
+        await Product.findOneAndUpdate({ _id: productId, eventId: scopedEventId }, {
             $push: { variants: { optionName, priceVariation } }
         });
         revalidatePath("/admin/catalog");
@@ -149,13 +196,17 @@ export default async function AdminCatalog() {
 
     async function removeVariant(formData: FormData) {
         "use server"
+        const submittedEventId = formData.get("eventId") as string | null;
         const productId = formData.get("productId") as string;
         const optionName = formData.get("optionName") as string;
+        const normalizedSubmittedEventId = submittedEventId?.trim();
+        const scopedEventId = currentEventId;
 
-        if (!productId || !optionName) return;
+        if (!productId || !optionName || !scopedEventId) return;
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
 
         await dbConnect();
-        await Product.findByIdAndUpdate(productId, {
+        await Product.findOneAndUpdate({ _id: productId, eventId: scopedEventId }, {
             $pull: { variants: { optionName } }
         });
         revalidatePath("/admin/catalog");
@@ -195,12 +246,14 @@ export default async function AdminCatalog() {
                                             uiColor: cat.uiColor,
                                             printerId: getReferencedId(cat.printerId)
                                         }}
+                                        eventId={currentEventId}
                                         printers={printers.filter((p: IPrinter) => p.type === 'KITCHEN').map((p: IPrinter) => ({ id: String(p._id), name: p.name, ip: p.ip }))}
                                         updateAction={updateCategory}
                                     />
                                     <DeleteForm
                                         id={String(cat._id)}
                                         idName="id"
+                                        hiddenFields={[{ name: "eventId", value: currentEventId }]}
                                         message="Eliminare la categoria e TUTTI i suoi prodotti?"
                                         action={deleteCategory}
                                         buttonSize="xs"
@@ -245,6 +298,7 @@ export default async function AdminCatalog() {
                                                 <span>{v.optionName} ({v.priceVariation >= 0 ? '+' : ''}{v.priceVariation}€)</span>
                                                 <form action={removeVariant} className="flex items-center">
                                                     <input type="hidden" name="productId" value={String(p._id)} />
+                                                    <input type="hidden" name="eventId" value={currentEventId} />
                                                     <input type="hidden" name="optionName" value={v.optionName} />
                                                     <button type="submit" className="text-red-500 hover:bg-red-200 rounded-full cursor-pointer ml-1 p-0.5 opacity-50 group-hover:opacity-100 transition-opacity">
                                                         <X className="h-3 w-3" />
@@ -262,6 +316,7 @@ export default async function AdminCatalog() {
                                             categoryId: getReferencedId(p.categoryId) || "",
                                             basePrice: p.basePrice
                                         }}
+                                        eventId={currentEventId}
                                         categories={categories.map((c: ICategory) => ({ id: String(c._id), name: c.name }))}
                                         updateAction={updateProduct}
                                     />
@@ -274,6 +329,7 @@ export default async function AdminCatalog() {
                                         <DialogContent>
                                             <form action={addVariant}>
                                                 <input type="hidden" name="productId" value={String(p._id)} />
+                                                <input type="hidden" name="eventId" value={currentEventId} />
                                                 <DialogHeader>
                                                     <DialogTitle>Gestisci Varianti per {p.name}</DialogTitle>
                                                 </DialogHeader>
@@ -297,6 +353,7 @@ export default async function AdminCatalog() {
                                     <DeleteForm
                                         id={String(p._id)}
                                         idName="id"
+                                        hiddenFields={[{ name: "eventId", value: currentEventId }]}
                                         message="Eliminare questo prodotto?"
                                         action={deleteProduct}
                                         buttonSize="xs"

@@ -1,9 +1,11 @@
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://root:password@localhost:27017/osgfest?authSource=admin';
-
-if (!MONGODB_URI) {
-    throw new Error('Please define the MONGODB_URI environment variable');
+function getMongoUri(): string {
+    const mongoUri = process.env.MONGODB_URI;
+    if (!mongoUri) {
+        throw new Error('Please define the MONGODB_URI environment variable');
+    }
+    return mongoUri;
 }
 
 interface MongooseCache {
@@ -29,7 +31,7 @@ async function dbConnect() {
             bufferCommands: false,
         };
 
-        cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
+        cached.promise = mongoose.connect(getMongoUri(), opts).then((mongoose) => {
             return mongoose;
         });
     }

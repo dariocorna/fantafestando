@@ -21,9 +21,11 @@ function SubmitButton() {
 
 export function EditPrinterDialog({
     printer,
+    eventId,
     updateAction
 }: {
     printer: { id: string, name: string, ip: string, type: "CASHIER" | "KITCHEN" },
+    eventId?: string,
     updateAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | undefined>
 }) {
     const [open, setOpen] = useState(false);
@@ -53,6 +55,7 @@ export function EditPrinterDialog({
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <input type="hidden" name="id" value={printer.id} />
+                        {eventId && <input type="hidden" name="eventId" value={eventId} />}
                         <div className="space-y-2">
                             <Label htmlFor="printer-edit-name">Nome Stampante</Label>
                             <Input id="printer-edit-name" name="name" defaultValue={printer.name} required />

@@ -1,17 +1,20 @@
 import { SumUp, Currency } from "@sumup/sdk";
 
-// In a real scenario, these would come from environment variables
-// and potentially from an OAuth flow if the app is multi-merchant.
-// For OSGFest, we assume a single merchant configuration for now.
-const SUMUP_API_KEY = process.env.SUMUP_API_KEY || "YOUR_SUMUP_API_KEY";
-
-export const sumupClient = new SumUp({
-    apiKey: SUMUP_API_KEY
-});
+function resolveApiKey(overrideApiKey?: string): string | undefined {
+    const explicitApiKey = overrideApiKey?.trim();
+    if (explicitApiKey) return explicitApiKey;
+    const envApiKey = process.env.SUMUP_API_KEY?.trim();
+    return envApiKey || undefined;
+}
 
 export async function createSumUpCheckout(amount: number, currency: Currency = "EUR", merchantCode = "M_CODE", apiKey?: string) {
     try {
-        const client = apiKey ? new SumUp({ apiKey }) : sumupClient;
+        const resolvedApiKey = resolveApiKey(apiKey);
+        if (!resolvedApiKey) {
+            return { success: false, error: "Missing SumUp API key configuration" };
+        }
+
+        const client = new SumUp({ apiKey: resolvedApiKey });
         const checkout = await client.checkouts.create({
             merchant_code: merchantCode,
             amount,
