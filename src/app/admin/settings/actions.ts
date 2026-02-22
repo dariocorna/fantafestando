@@ -14,6 +14,7 @@ import {
     MAX_PREDEFINED_TABLES,
     parsePredefinedTablesInput
 } from "@/lib/table-presets";
+import { normalizeAvailableDays } from "@/lib/product-availability";
 
 function revalidateHardwareViews() {
     revalidatePath("/admin/settings/hardware");
@@ -219,6 +220,7 @@ export async function cloneEventAction(formData: FormData) {
             name: prod.name,
             basePrice: prod.basePrice,
             isSoldOut: false,
+            availableDays: normalizeAvailableDays((prod as { availableDays?: string[] }).availableDays || []),
             variants: prod.variants
         });
     }

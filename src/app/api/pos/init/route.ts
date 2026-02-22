@@ -7,6 +7,7 @@ import PosDevice from "@/models/PosDevice";
 import "@/models/Printer"; // Import to register schema for .populate()
 import "@/models/Peripheral"; // Import to register schema for .populate()
 import { parsePredefinedTablesInput } from "@/lib/table-presets";
+import { getCurrentDayCode, isProductAvailableToday } from "@/lib/product-availability";
 
 export async function GET() {
     try {
@@ -27,6 +28,14 @@ export async function GET() {
 
         // 3. Fetch products for this event
         const products = await Product.find({ eventId: event._id }).lean();
+        const currentDayCode = getCurrentDayCode("Europe/Rome");
+        const availableProducts = products.filter((product) =>
+            isProductAvailableToday((product as { availableDays?: string[] }).availableDays || [], currentDayCode)
+        );
+        const availableCategoryIds = new Set(
+            availableProducts.map((product) => String((product as { categoryId: unknown }).categoryId))
+        );
+        const availableCategories = categories.filter((category) => availableCategoryIds.has(String(category._id)));
 
         // 4. Fetch POS Devices for this event
         const posDevices = await PosDevice.find({ eventId: event._id })
@@ -75,8 +84,8 @@ export async function GET() {
 
         return NextResponse.json({
             event: sanitizedEvent,
-            categories,
-            products,
+            categories: availableCategories,
+            products: availableProducts,
             posDevices: serializedPosDevices
         });
     } catch (error) {
