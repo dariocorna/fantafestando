@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react"
 import {
-    ShoppingBag,
     ArrowRight,
     Info,
     X,
