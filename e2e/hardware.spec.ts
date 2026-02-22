@@ -1,142 +1,137 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from "@playwright/test";
 
-test.describe('Gestione Hardware ed Elettronica', () => {
+async function ensureAdminEventContext(page: Page) {
+    await page.goto("/admin");
+    await page.click('[data-testid="admin-event-selector"]');
+
+    const firstOption = page.getByRole("option").first();
+    if (await firstOption.isVisible()) {
+        await firstOption.click();
+        return;
+    }
+
+    await page.goto("/admin/settings/events");
+    await page.click("#new-event-btn");
+    await page.fill("#name", `Event Hardware Test ${Date.now()}`);
+    await page.getByRole("button", { name: "Salva", exact: true }).click();
+    await page.click('[data-testid="admin-event-selector"]');
+    await page.getByRole("option").first().click();
+}
+
+test.describe("Gestione Hardware ed Elettronica", () => {
     test.beforeEach(async ({ page }) => {
-        await page.goto('/admin');
-        // Assicurati che ci sia un evento attivo e selezionato
-        // Se non c'è, il test 'navigazione' in admin.spec.ts dovrebbe averlo creato, 
-        // ma per isolamento usiamo uno esistente o il primo disponibile.
-        await page.click('[data-testid="admin-event-selector"]');
-        const firstOption = page.getByRole('option').first();
-        if (await firstOption.isVisible()) {
-            await firstOption.click();
-        } else {
-            // Se non ci sono eventi, ne creiamo uno al volo (mantenendo i test isolati)
-            await page.goto('/admin/settings/events');
-            await page.click('#new-event-btn');
-            await page.fill('#name', 'Event Hardware Test');
-            await page.click('button:has-text("Salva")');
-            await page.click('[data-testid="admin-event-selector"]');
-            await page.getByRole('option', { name: 'Event Hardware Test' }).click();
-        }
+        await ensureAdminEventContext(page);
     });
 
-    test('configurazione completa: stampante -> pos -> categoria', async ({ page }) => {
-        // 1. Aggiungi Stampante
-        await page.goto('/admin/settings/printers');
-        await page.click('button:has-text("Nuova Stampante")');
-        const printerName = `Kitchen ${Date.now()}`;
-        const printerIp = `192.168.1.${Math.floor(Math.random() * 254) + 1}`;
+    test("configurazione completa: stampante -> pos -> categoria", async ({ page }) => {
+        await page.goto("/admin/settings/hardware");
 
-        await page.fill('input[id="name"]', printerName);
-        await page.fill('input[id="ip"]', printerIp);
-        // Precise Shadcn Select interaction
-        await page.getByRole('combobox', { name: 'Tipo Stampante' }).click();
-        await page.getByRole('option', { name: 'Reparto (Comanda Piatto)' }).click();
-        await page.click('button:has-text("Salva")');
+        // 1. Aggiungi stampante reparto
+        await page.getByRole("button", { name: /Nuova Stampante/i }).click();
+        const printerDialog = page.getByRole("dialog");
+        const printerName = `Kitchen ${Date.now()}`;
+        const printerIp = `192.168.1.${Math.floor(Math.random() * 200) + 20}`;
+        await printerDialog.getByLabel("Nome Stampante").fill(printerName);
+        await printerDialog.getByLabel("Indirizzo IP").fill(printerIp);
+        await printerDialog.getByRole("combobox", { name: "Tipo Stampante" }).click();
+        await page.getByRole("option", { name: "Reparto (Comanda Piatto)" }).click();
+        await printerDialog.getByRole("button", { name: "Salva", exact: true }).click();
 
         await expect(page.getByText(printerName)).toBeVisible();
         await expect(page.getByText(printerIp)).toBeVisible();
 
-        // Aggiungi anche una stampante cassa per il POS
+        // 2. Aggiungi stampante cassa
         const cashierName = `Cassa Centrale ${Date.now()}`;
-        const cashierIp = `192.168.1.50`;
-        await page.click('button:has-text("Nuova Stampante")');
-        await page.fill('input[id="name"]', cashierName);
-        await page.fill('input[id="ip"]', cashierIp);
-        // Precise Shadcn Select interaction
-        await page.getByRole('combobox', { name: 'Tipo Stampante' }).click();
-        await page.getByRole('option', { name: 'Cassa (Scontrino Cliente)' }).click();
-        await page.click('button:has-text("Salva")');
+        const cashierIp = "192.168.1.50";
+        await page.getByRole("button", { name: /Nuova Stampante/i }).click();
+        const cashierDialog = page.getByRole("dialog");
+        await cashierDialog.getByLabel("Nome Stampante").fill(cashierName);
+        await cashierDialog.getByLabel("Indirizzo IP").fill(cashierIp);
+        await cashierDialog.getByRole("combobox", { name: "Tipo Stampante" }).click();
+        await page.getByRole("option", { name: "Cassa (Scontrino Cliente)" }).click();
+        await cashierDialog.getByRole("button", { name: "Salva", exact: true }).click();
         await expect(page.getByText(cashierName)).toBeVisible();
 
-        // 2. Aggiungi Punto Cassa (PosDevice)
-        await page.goto('/admin/settings/pos');
-        await page.click('button:has-text("Nuovo Dispositivo")');
+        // 3. Aggiungi Punto Cassa
+        await page.goto("/admin/settings/pos");
+        await page.getByRole("button", { name: /Nuovo Dispositivo/i }).click();
+        const posDialog = page.getByRole("dialog");
         const posName = `Cassa 1 ${Date.now()}`;
-        await page.fill('input[id="name"]', posName);
-        // Seleziona la stampante cassa appena creata
-        await page.getByRole('combobox', { name: 'Stampante Associata' }).click();
-        await page.getByRole('option', { name: new RegExp(cashierName) }).click();
-        await page.click('button:has-text("Salva")');
+        await posDialog.getByLabel("Nome Postazione").fill(posName);
+        await posDialog.getByRole("combobox", { name: "Stampante Associata" }).click();
+        await page.getByRole("option", { name: new RegExp(cashierName) }).click();
+        await posDialog.getByRole("button", { name: "Salva", exact: true }).click();
 
         await expect(page.getByText(posName)).toBeVisible();
 
-        // 3. Collega Categoria alla stampante cucina
-        await page.goto('/admin/catalog');
-        await page.click('#new-category-btn');
+        // 4. Collega categoria alla stampante reparto
+        await page.goto("/admin/catalog");
+        await page.click("#new-category-btn");
         const catName = `Pizza ${Date.now()}`;
-        await page.fill('#cat-name', catName);
-        // Native select interaction for Category printer
+        await page.fill("#cat-name", catName);
         await page.selectOption('select[id="printerId"]', { label: `${printerName} (${printerIp})` });
-        await page.click('button:has-text("Salva Categoria")');
+        await page.getByRole("button", { name: "Salva Categoria", exact: true }).click();
 
-        // Verifica nella tabella del catalogo
-        const row = page.locator('tr').filter({ hasText: catName });
+        const row = page.locator("tr").filter({ hasText: catName });
         await expect(row.getByText(printerName)).toBeVisible();
     });
 
-    test('validazione campi obbligatori hardware', async ({ page }) => {
-        await page.goto('/admin/settings/printers');
-        await page.click('button:has-text("Nuova Stampante")');
-        // Test Negativo: manca IP stampante
-        await page.fill('input[name="name"]', 'Stampante Rotta');
-        // Non compiliamo IP (HTML5 required dovrebbe bloccare, ma verifichiamo il comportamento)
-        await page.click('button:has-text("Salva")');
+    test("validazione campi obbligatori hardware", async ({ page }) => {
+        await page.goto("/admin/settings/hardware");
+        await page.getByRole("button", { name: /Nuova Stampante/i }).click();
 
-        // Verifichiamo che non sia stata aggiunta
-        await expect(page.getByText('Stampante Rotta')).not.toBeVisible();
+        const invalidName = `Stampante Rotta ${Date.now()}`;
+        const dialog = page.getByRole("dialog");
+        await dialog.getByLabel("Nome Stampante").fill(invalidName);
+        await dialog.getByRole("button", { name: "Salva", exact: true }).click();
 
-        // Test Negativo: manca nome POS
-        await page.goto('/admin/settings/pos');
-        await page.click('button:has-text("Nuovo Dispositivo")');
-        // Dovrebbe restare sulla stessa pagina con errori o non fare nulla
-        const rows = page.locator('table tbody tr');
-        const count = await rows.count();
-        // Se non ci sono righe o il conteggio non è aumentato, ok.
+        // L'input IP è required: il dialog resta aperto e la card non viene creata.
+        await expect(dialog).toBeVisible();
+        await expect(page.locator('[data-slot="card-title"]', { hasText: invalidName })).toHaveCount(0);
     });
 
-    test('modifica hardware esistente (Full CRUD)', async ({ page }) => {
-        // Crea una stampante
-        await page.goto('/admin/settings/printers');
-        await page.click('button:has-text("Nuova Stampante")');
+    test("modifica hardware esistente (Full CRUD)", async ({ page }) => {
+        await page.goto("/admin/settings/hardware");
+
+        // Crea stampante cassa
+        await page.getByRole("button", { name: /Nuova Stampante/i }).click();
+        const createDialog = page.getByRole("dialog");
         const printerName = `PrinterToEdit ${Date.now()}`;
-        const printerIp = `192.168.1.99`;
-        await page.fill('input[id="name"]', printerName);
-        await page.fill('input[id="ip"]', printerIp);
-        await page.click('button:has-text("Salva")');
+        const printerIp = "192.168.1.99";
+        await createDialog.getByLabel("Nome Stampante").fill(printerName);
+        await createDialog.getByLabel("Indirizzo IP").fill(printerIp);
+        await createDialog.getByRole("combobox", { name: "Tipo Stampante" }).click();
+        await page.getByRole("option", { name: "Cassa (Scontrino Cliente)" }).click();
+        await createDialog.getByRole("button", { name: "Salva", exact: true }).click();
         await expect(page.getByText(printerName)).toBeVisible();
 
-        // Clicca modifica
-        // Visto che cerchiamo all'interno della Card associata
-        const card = page.locator('.rounded-xl.border', { hasText: printerName });
-        await card.getByRole('button', { name: "Modifica" }).click();
+        // Modifica stampante
+        const printerCard = page.locator('[data-slot="card"]', { hasText: printerName }).first();
+        await printerCard.getByRole("button", { name: "Modifica" }).click();
+        const editPrinterDialog = page.getByRole("dialog");
+        const editedPrinterIp = "192.168.1.100";
+        await editPrinterDialog.getByLabel("Indirizzo IP").fill(editedPrinterIp);
+        await editPrinterDialog.getByRole("button", { name: "Salva Modifiche", exact: true }).click();
+        await expect(page.getByText(editedPrinterIp)).toBeVisible();
 
-        const editPrinterIp = `192.168.1.100`;
-        await page.fill('input[id="printer-edit-ip"]', editPrinterIp);
-        await page.click('button:has-text("Salva Modifiche")');
-
-        await expect(page.getByText(editPrinterIp)).toBeVisible();
-
-        // Crea un POS
-        await page.goto('/admin/settings/pos');
-        await page.click('button:has-text("Nuovo Dispositivo")');
+        // Crea POS
+        await page.goto("/admin/settings/pos");
+        await page.getByRole("button", { name: /Nuovo Dispositivo/i }).click();
+        const createPosDialog = page.getByRole("dialog");
         const posName = `PosToEdit ${Date.now()}`;
-        await page.fill('input[id="name"]', posName);
-
-        // Cerca stampante cassa
-        await page.getByRole('combobox', { name: 'Stampante Associata' }).click();
-        await page.getByRole('option').last().click();
-        await page.click('button:has-text("Salva")');
+        await createPosDialog.getByLabel("Nome Postazione").fill(posName);
+        await createPosDialog.getByRole("combobox", { name: "Stampante Associata" }).click();
+        await page.getByRole("option", { name: new RegExp(printerName) }).click();
+        await createPosDialog.getByRole("button", { name: "Salva", exact: true }).click();
         await expect(page.getByText(posName)).toBeVisible();
 
-        const posCard = page.locator('.rounded-xl.border', { hasText: posName });
-        await posCard.getByRole('button', { name: "Modifica" }).click();
-
-        const editPosName = `${posName} EDITED`;
-        await page.fill('input[id="pos-edit-name"]', editPosName);
-        await page.click('button:has-text("Salva Modifiche")');
-
-        await expect(page.getByText(editPosName)).toBeVisible();
+        // Modifica POS
+        const posCard = page.locator('[data-slot="card"]', { hasText: posName }).first();
+        await posCard.getByRole("button", { name: "Modifica" }).click();
+        const editPosDialog = page.getByRole("dialog");
+        const editedPosName = `${posName} EDITED`;
+        await editPosDialog.getByLabel("Nome Postazione").fill(editedPosName);
+        await editPosDialog.getByRole("button", { name: "Salva Modifiche", exact: true }).click();
+        await expect(page.getByText(editedPosName)).toBeVisible();
     });
 });

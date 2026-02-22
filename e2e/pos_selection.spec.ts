@@ -1,50 +1,69 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from "@playwright/test";
 
-test.describe('Selezione Punto Cassa POS', () => {
+async function openPosWithCleanSelection(page: Page) {
+    await page.goto("/pos");
+    await page.evaluate(() => localStorage.removeItem("osgfest_pos_id"));
+    await page.reload();
+}
 
-    test('obbligo di selezione al primo avvio', async ({ page }) => {
-        // Pulizia localStorage per simulare primo avvio
-        await page.goto('/pos');
-        await page.evaluate(() => localStorage.removeItem('osgfest_pos_id'));
-        await page.reload();
+async function getFirstPosButton(page: Page) {
+    return page.getByRole("dialog").locator("button").filter({ hasText: /Stampante:/i }).first();
+}
 
-        // Verifica che il dialog sia aperto
+test.describe("Selezione Punto Cassa POS", () => {
+    test("obbligo di selezione al primo avvio", async ({ page }) => {
+        await openPosWithCleanSelection(page);
+
         await expect(page.getByText(/In quale cassa sei\?/i)).toBeVisible();
 
-        // Se non ci sono casse configurate (dipende dallo stato del DB di test)
-        // Se ci sono, ne selezioniamo una.
-        const posButton = page.locator('button').filter({ hasText: /Postazione:/i }).first();
-        // In un ambiente di test pulito, probabilmente dobbiamo crearne una prima o mockare l'API init.
-        // Ma qui usiamo l'approccio integrato: se non c'è, verifichiamo il messaggio di errore.
         if (await page.getByText(/Loggati come admin e configura/i).isVisible()) {
             await expect(page.getByText(/Loggati come admin e configura/i)).toBeVisible();
+            return;
         }
+
+        const firstDevice = await getFirstPosButton(page);
+        await expect(firstDevice).toBeVisible();
     });
 
-    test('persistenza della selezione tramite localStorage', async ({ page }) => {
-        await page.goto('/pos');
+    test("persistenza della selezione tramite localStorage", async ({ page }) => {
+        await openPosWithCleanSelection(page);
 
-        // Mocking manuale della selezione via localStorage per testare il caricamento
-        const testPosId = '65d000000000000000000001';
-        await page.evaluate((id) => localStorage.setItem('osgfest_pos_id', id), testPosId);
+        if (await page.getByText(/Loggati come admin e configura/i).isVisible()) {
+            await expect(page.getByText(/Loggati come admin e configura/i)).toBeVisible();
+            return;
+        }
+
+        const firstDevice = await getFirstPosButton(page);
+        await firstDevice.click();
+        await expect(page.getByText(/In quale cassa sei\?/i)).toBeHidden();
+        await expect(page.getByRole("button", { name: /Postazione:/i })).toBeVisible();
+
         await page.reload();
-
-        // Il dialog non dovrebbe apparire se è già salvata
-        await expect(page.getByText(/In quale cassa sei\?/i)).not.toBeVisible();
-
-        // Verifichiamo che nell'header compaia il link per cambiare postazione (anche se l'ID è fake, il frontend lo legge)
-        await expect(page.getByRole('button', { name: /Postazione:/i })).toBeVisible();
+        await expect(page.getByText(/In quale cassa sei\?/i)).toBeHidden();
+        await expect(page.getByRole("button", { name: /Postazione:/i })).toBeVisible();
     });
 
-    test('cambio postazione tramite interfaccia', async ({ page }) => {
-        await page.goto('/pos');
+    test("cambio postazione tramite interfaccia", async ({ page }) => {
+        await page.goto("/pos");
+        await page.waitForResponse(
+            response => response.url().includes("/api/pos/init") && response.ok(),
+            { timeout: 10000 }
+        ).catch(() => null);
 
-        // Assicuriamoci che il dialog sia chiuso (o apriamolo cliccando sul link)
-        const headerBtn = page.getByRole('button', { name: /Postazione:/i });
-        if (await headerBtn.isVisible()) {
-            await headerBtn.click();
+        if (await page.getByText(/Loggati come admin e configura/i).isVisible()) {
+            await expect(page.getByText(/Loggati come admin e configura/i)).toBeVisible();
+            return;
         }
 
+        const selectorTitle = page.getByText(/In quale cassa sei\?/i);
+        await page.waitForTimeout(300);
+        if (await selectorTitle.isVisible()) {
+            const firstDevice = await getFirstPosButton(page);
+            await firstDevice.click();
+            await expect(selectorTitle).toBeHidden();
+        }
+
+        await page.getByRole("button", { name: /Postazione:/i }).click();
         await expect(page.getByText(/In quale cassa sei\?/i)).toBeVisible();
     });
 });
