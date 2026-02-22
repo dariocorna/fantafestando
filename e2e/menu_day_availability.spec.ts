@@ -97,7 +97,22 @@ async function createProduct(page: Page, options: {
     await expect(page.getByText(options.name)).toBeVisible();
 }
 
+async function setProductAvailableDay(page: Page, productName: string, dayLabel: string) {
+    await page.goto("/admin/catalog");
+    const productRow = page.locator("tr").filter({ hasText: productName }).first();
+    await productRow.getByRole("button", { name: "Modifica", exact: true }).click();
+
+    const dialog = page.getByRole("dialog").filter({ hasText: /Modifica Prodotto/i });
+    await dialog.getByRole("button", { name: dayLabel, exact: true }).click();
+    await dialog.getByRole("button", { name: "Salva Modifiche", exact: true }).click();
+
+    await expect(dialog).toBeHidden();
+    await expect(productRow.getByText(dayLabel, { exact: false })).toBeVisible();
+}
+
 test.describe("Disponibilità prodotti per giorno", () => {
+    test.describe.configure({ mode: "serial" });
+
     test("mostra nel menu solo i prodotti disponibili oggi", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso validato su desktop.");
 
@@ -139,5 +154,61 @@ test.describe("Disponibilità prodotti per giorno", () => {
 
         await expect(page.getByText(alwaysProductName)).toBeVisible();
         await expect(page.getByText(limitedProductName)).toHaveCount(0);
+    });
+
+    test("blocca checkout se il carrello contiene prodotti non più disponibili oggi", async ({ page, isMobile }) => {
+        test.skip(isMobile, "Flusso validato su desktop.");
+
+        const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const eventName = `Day Availability Guard ${suffix}`;
+        const categoryName = `Piatti ${suffix}`;
+        const productName = `ProdottoStale ${suffix}`;
+
+        const todayCode = getCurrentRomeDayCode();
+        const todayIndex = DAY_CODES.indexOf(todayCode);
+        const hiddenDayCode = DAY_CODES[(todayIndex + 1) % DAY_CODES.length];
+        const hiddenDayLabel = DAY_LABELS[hiddenDayCode];
+
+        await createAndActivateEvent(page, eventName);
+        await createCategory(page, categoryName);
+        await createProduct(page, {
+            name: productName,
+            categoryName,
+            price: "7.00"
+        });
+
+        await page.goto("/menu");
+        await page.waitForResponse(
+            (response) => response.url().includes("/api/pos/init") && response.ok(),
+            { timeout: 10000 }
+        );
+        await expect(page.getByText(productName)).toBeVisible();
+
+        const productCard = page
+            .locator("div.bg-white")
+            .filter({ has: page.getByRole("heading", { name: productName, level: 3 }) })
+            .first();
+        await productCard.locator("button").first().click();
+        await page.getByRole("button", { name: /Vedi Carrello/i }).click();
+        await page.getByRole("button", { name: /PROSEGUI/i }).click();
+
+        await expect(page).toHaveURL(/\/menu\/checkout/);
+        await expect(page.getByText(productName)).toBeVisible();
+
+        await setProductAvailableDay(page, productName, hiddenDayLabel);
+
+        await page.goto("/menu/checkout");
+        await expect(page.getByText(productName)).toBeVisible();
+
+        let dialogMessage = "";
+        page.once("dialog", async (dialog) => {
+            dialogMessage = dialog.message();
+            await dialog.accept();
+        });
+
+        await page.getByRole("button", { name: /INVIA ORDINE/i }).click();
+
+        await expect.poll(() => dialogMessage).toContain("non sono più disponibili oggi");
+        await expect(page).toHaveURL(/\/menu\/checkout/);
     });
 });
