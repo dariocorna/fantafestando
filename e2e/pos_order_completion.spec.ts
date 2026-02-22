@@ -179,14 +179,21 @@ test.describe("POS - Completamento ordine da codice", () => {
 
         await expect(page.getByText(new RegExp(`Codice ${orderCode}`, "i"))).toBeVisible();
 
-        await page.getByRole("button", { name: "CHIUDI ORDINE", exact: true }).first().click();
+        await page.getByRole("button", { name: "PAGA ORA", exact: true }).click();
         const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i });
         await expect(checkoutDialog).toBeVisible();
         await expect(checkoutDialog.getByText(/CONTANTI/i)).toBeVisible();
         await expect(checkoutDialog.getByText(/CARTA \/ POS/i)).toHaveCount(0);
 
-        await checkoutDialog.getByRole("button", { name: "CHIUDI ORDINE", exact: true }).click();
+        await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click();
+        await expect(checkoutDialog.getByText(/Stampa in corso/i)).toBeVisible();
+        await expect(checkoutDialog.getByText(/Simulazione stampa attiva/i)).toBeVisible();
         await expect.poll(() => dialogMessages.join(" | ")).toContain("Ordine completato correttamente");
+        await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible();
+
+        await page.getByRole("button", { name: /Carica ordine da codice/i }).click();
+        const pendingDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i });
+        await expect(pendingDialog.getByText(/Nessun ordine pendente disponibile/i)).toBeVisible();
 
         await page.goto("/admin/orders");
         await expect(page.getByText(productName)).toBeVisible();

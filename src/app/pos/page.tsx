@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label"
 import { NumPad } from "./components/NumPad"
 import { createOrder, triggerSumUpPayment, loadPendingOrderByCode, completePendingOrderPayment, listRecentPendingOrders } from "./actions"
 import { getCategoryTheme } from "@/lib/category-colors"
+import { TABLE_CODE_LETTERS, buildTableCode, isValidTableCode, normalizeTableCode, parseTableCode } from "@/lib/table-code"
 
 interface ICategory {
     _id: string
@@ -91,6 +92,15 @@ function getPeripheralRef(value: IPosDevice["paymentTerminalId"] | IPosDevice["c
     return value
 }
 
+const MOCK_PRINT_STEPS: Array<{ progress: number, label: string, delayMs: number }> = [
+    { progress: 18, label: "Preparazione comanda...", delayMs: 220 },
+    { progress: 44, label: "Invio alla stampante...", delayMs: 320 },
+    { progress: 72, label: "Stampa in corso...", delayMs: 360 },
+    { progress: 100, label: "Stampa completata", delayMs: 260 }
+]
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
 export default function PosPage() {
     const [activeCategory, setActiveCategory] = useState<string | null>(null)
     const [cart, setCart] = useState<CartItem[]>([])
@@ -99,6 +109,9 @@ export default function PosPage() {
     const [activeEvent, setActiveEvent] = useState<IEvent | null>(null)
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
+    const [isPrintMockActive, setIsPrintMockActive] = useState(false)
+    const [printProgress, setPrintProgress] = useState(0)
+    const [printStatusLabel, setPrintStatusLabel] = useState("Preparazione comanda...")
     const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD">("CASH")
     const [posDevices, setPosDevices] = useState<IPosDevice[]>([])
     const [selectedPosDeviceId, setSelectedPosDeviceId] = useState<string | null>(null)
@@ -164,6 +177,9 @@ export default function PosPage() {
 
     const total = cart.reduce((acc: number, item: CartItem) => acc + (item.price * item.quantity), 0)
     const effectiveTotal = total
+    const parsedTableCode = parseTableCode(tableNumber)
+    const normalizedTableCode = normalizeTableCode(tableNumber)
+    const isTableCodeValid = isValidTableCode(normalizedTableCode)
 
     const addToCart = (product: IProduct) => {
         setCart((prev: CartItem[]) => {
@@ -188,6 +204,13 @@ export default function PosPage() {
     const resetPendingOrder = () => {
         setLoadedPendingOrder(null)
         setOrderCode("")
+    }
+
+    const resetCheckoutForm = () => {
+        setCart([])
+        setCustomerName("")
+        setTableNumber("")
+        setPaymentMethod(cashAvailable ? "CASH" : "CARD")
     }
 
     const loadRecentPendingOrdersForDialog = useCallback(async () => {
@@ -218,6 +241,41 @@ export default function PosPage() {
         }
     }
 
+    const handleCheckoutDialogOpenChange = (open: boolean) => {
+        if (isProcessing || isPrintMockActive) return
+        setIsCheckoutOpen(open)
+    }
+
+    const runMockPrintFlow = useCallback(async () => {
+        setIsPrintMockActive(true)
+        setPrintProgress(0)
+        setPrintStatusLabel("Preparazione comanda...")
+
+        for (const step of MOCK_PRINT_STEPS) {
+            await wait(step.delayMs)
+            setPrintProgress(step.progress)
+            setPrintStatusLabel(step.label)
+        }
+
+        await wait(220)
+        setIsPrintMockActive(false)
+        setPrintProgress(0)
+        setPrintStatusLabel("Preparazione comanda...")
+    }, [])
+
+    const handleTableLetterSelection = (letter: string) => {
+        const nextLetter = parsedTableCode.letter === letter ? "" : letter
+        setTableNumber(buildTableCode(nextLetter, parsedTableCode.digits))
+    }
+
+    const handleTableDigitsChange = (digits: string) => {
+        setTableNumber(buildTableCode(parsedTableCode.letter, digits))
+    }
+
+    const clearTableCode = () => {
+        setTableNumber("")
+    }
+
     const handleLoadOrderByCode = async (rawCode?: string) => {
         if (!activeEvent?._id) {
             alert("Evento non disponibile")
@@ -245,7 +303,7 @@ export default function PosPage() {
 
         setLoadedPendingOrder(result.order)
         setCustomerName(result.order.customer?.name || "")
-        setTableNumber(result.order.customer?.table || "")
+        setTableNumber(normalizeTableCode(result.order.customer?.table || ""))
         setCart(result.order.items.map((item) => ({
             productId: item.productId,
             name: item.snapshotName,
@@ -283,9 +341,15 @@ export default function PosPage() {
             return
         }
 
+        if (activeEvent?.settings?.askTable && !isTableCodeValid) {
+            alert("Inserisci il tavolo nel formato: lettera A-F + 2 numeri (es. B07)")
+            return
+        }
+
         setIsProcessing(true)
 
         if (loadedPendingOrder) {
+            const completedPendingOrderId = loadedPendingOrder.id
             const completionResult = await completePendingOrderPayment({
                 eventId: activeEvent._id,
                 orderId: loadedPendingOrder.id,
@@ -293,7 +357,7 @@ export default function PosPage() {
                 posDeviceId: selectedPosDeviceId,
                 customer: {
                     name: customerName || undefined,
-                    table: tableNumber || undefined
+                    table: normalizedTableCode || undefined
                 },
                 totalAmount: total,
                 cart: cart.map((item) => ({
@@ -305,6 +369,9 @@ export default function PosPage() {
             })
 
             if (completionResult.success) {
+                await runMockPrintFlow()
+                setRecentPendingOrders((prev) => prev.filter((order) => order.id !== completedPendingOrderId))
+                resetCheckoutForm()
                 resetPendingOrder()
                 setIsCheckoutOpen(false)
                 alert("Ordine completato correttamente")
@@ -334,7 +401,7 @@ export default function PosPage() {
             eventId: activeEvent._id,
             customer: {
                 name: customerName || undefined,
-                table: tableNumber || undefined
+                table: normalizedTableCode || undefined
             },
             totalAmount: total,
             cart: cart.map(item => ({
@@ -350,10 +417,8 @@ export default function PosPage() {
 
         const result = await createOrder(orderData)
         if (result.success) {
-            setCart([])
-            setCustomerName("")
-            setTableNumber("")
-            setPaymentMethod(cashAvailable ? "CASH" : "CARD")
+            await runMockPrintFlow()
+            resetCheckoutForm()
             setIsCheckoutOpen(false)
         } else {
             alert("Errore durante la creazione dell'ordine: " + result.error)
@@ -365,7 +430,7 @@ export default function PosPage() {
         || !selectedPosDeviceId
         || cart.length === 0
         || (!cashAvailable && !cardAvailable)
-        || (Boolean(activeEvent?.settings?.askTable) && !loadedPendingOrder && !tableNumber)
+        || (Boolean(activeEvent?.settings?.askTable) && !isTableCodeValid)
 
     return (
         <div className="flex h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950">
@@ -456,7 +521,7 @@ export default function PosPage() {
                         <div className="bg-white dark:bg-slate-700 border p-2 rounded-xl flex items-center gap-2">
                             <Hash size={18} className="text-slate-400" />
                             <span className="text-sm font-bold truncate">
-                                {tableNumber ? `Tavolo ${tableNumber}` : "Tavolo..."}
+                                {normalizedTableCode ? `Tavolo ${normalizedTableCode}` : "Tavolo..."}
                             </span>
                         </div>
                     </div>
@@ -521,13 +586,13 @@ export default function PosPage() {
                         className="w-full py-8 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-3xl font-black text-2xl shadow-xl shadow-blue-200 dark:shadow-none active:scale-[0.98] transition-all flex items-center justify-center gap-3"
                     >
                         <CheckCircle2 size={32} />
-                        {loadedPendingOrder ? "CHIUDI ORDINE" : "PAGA ORA"}
+                        PAGA ORA
                     </button>
                 </div>
             </div>
 
             {/* Modal di Checkout */}
-            <Dialog open={isCheckoutOpen} onOpenChange={setIsCheckoutOpen}>
+            <Dialog open={isCheckoutOpen} onOpenChange={handleCheckoutDialogOpenChange}>
                 <DialogContent className="max-w-[500px] rounded-3xl p-0 overflow-hidden border-none text-slate-800 dark:text-slate-100">
                     <DialogHeader className="sr-only">
                         <DialogTitle>Checkout ordine POS</DialogTitle>
@@ -541,62 +606,120 @@ export default function PosPage() {
                     </div>
 
                     <div className="p-8 space-y-6">
-                        {activeEvent?.settings?.askTable && !loadedPendingOrder && (
-                            <div className="space-y-4">
-                                <Label className="text-lg font-bold">Numero Tavolo?</Label>
-                                <div className="text-center py-4 bg-slate-100 dark:bg-slate-800 rounded-2xl">
-                                    <span className="text-5xl font-black text-blue-600">{tableNumber || "---"}</span>
+                        {isPrintMockActive ? (
+                            <div className="space-y-5">
+                                <div className="rounded-2xl border border-blue-200 bg-blue-50 p-6">
+                                    <p className="text-xs font-black uppercase tracking-widest text-blue-600">Fase Stampa (Mock)</p>
+                                    <p className="mt-1 text-2xl font-black text-blue-700">Stampa in corso...</p>
+                                    <p className="mt-2 text-sm font-semibold text-blue-600">{printStatusLabel}</p>
+                                    <div className="mt-5 h-3 w-full overflow-hidden rounded-full bg-blue-100">
+                                        <div
+                                            className="h-full rounded-full bg-blue-600 transition-all duration-300 ease-out"
+                                            style={{ width: `${printProgress}%` }}
+                                        />
+                                    </div>
+                                    <p className="mt-2 text-right text-sm font-black text-blue-700">{printProgress}%</p>
                                 </div>
-                                <NumPad value={tableNumber} onChange={setTableNumber} />
-                            </div>
-                        )}
-
-                        <div className="space-y-3">
-                            <Label className="text-lg font-bold">Metodo di Pagamento</Label>
-                            {(cashAvailable || cardAvailable) ? (
-                                <div className="flex gap-3">
-                                    {cashAvailable && (
-                                        <button
-                                            onClick={() => setPaymentMethod("CASH")}
-                                            className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${effectivePaymentMethod === "CASH" ? "border-green-600 bg-green-50 text-green-700" : "border-slate-200"}`}
-                                        >
-                                            <Banknote size={32} />
-                                            <span className="font-bold">CONTANTI</span>
-                                        </button>
-                                    )}
-                                    {cardAvailable && (
-                                        <button
-                                            onClick={() => setPaymentMethod("CARD")}
-                                            className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${effectivePaymentMethod === "CARD" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200"}`}
-                                        >
-                                            <CreditCard size={32} />
-                                            <span className="font-bold">CARTA / POS</span>
-                                        </button>
-                                    )}
-                                </div>
-                            ) : (
-                                <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
-                                    La postazione selezionata non ha metodi di pagamento configurati. Associa terminale e/o cassetta in impostazioni hardware.
+                                <p className="text-center text-sm font-semibold text-slate-500">
+                                    Simulazione stampa attiva: integrazione stampante reale in arrivo.
                                 </p>
-                            )}
-                        </div>
+                            </div>
+                        ) : (
+                            <>
+                                {activeEvent?.settings?.askName && (
+                                    <div className="space-y-3">
+                                        <Label htmlFor="checkout-customer-name" className="text-lg font-bold">Nome Cliente</Label>
+                                        <Input
+                                            id="checkout-customer-name"
+                                            value={customerName}
+                                            onChange={(e) => setCustomerName(e.target.value)}
+                                            placeholder="Inserisci nome cliente"
+                                            className="h-14 rounded-2xl text-lg font-semibold"
+                                        />
+                                    </div>
+                                )}
 
-                        <div className="flex gap-4 pt-4">
-                            <Button
-                                variant="outline"
-                                className="flex-1 py-8 text-xl font-bold rounded-2xl"
-                                onClick={() => setIsCheckoutOpen(false)}
-                            >
-                                ANNULLA
-                            </Button>
-                            <Button
-                                className="flex-1 py-8 text-xl font-bold rounded-2xl bg-green-600 hover:bg-green-700"
-                                onClick={handleCheckout}
-                                disabled={checkoutDisabled}
-                            >
-                                {isProcessing ? <Loader2 className="animate-spin" /> : (loadedPendingOrder ? "CHIUDI ORDINE" : "CONFERMA")}
-                            </Button>
-                        </div>
+                                {activeEvent?.settings?.askTable && (
+                                    <div className="space-y-4">
+                                        <Label className="text-lg font-bold">Tavolo (A-F + 2 cifre)</Label>
+                                        <div className="text-center py-4 bg-slate-100 dark:bg-slate-800 rounded-2xl">
+                                            <span className="text-5xl font-black text-blue-600">{normalizedTableCode || "---"}</span>
+                                        </div>
+                                        <div className="grid grid-cols-6 gap-2">
+                                            {TABLE_CODE_LETTERS.map((letter) => {
+                                                const isActive = parsedTableCode.letter === letter
+                                                return (
+                                                    <button
+                                                        key={letter}
+                                                        type="button"
+                                                        onClick={() => handleTableLetterSelection(letter)}
+                                                        className={`h-12 rounded-xl border-2 text-lg font-black transition-colors ${isActive ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
+                                                    >
+                                                        {letter}
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                        <NumPad value={parsedTableCode.digits} onChange={handleTableDigitsChange} maxLength={2} />
+                                        <Button type="button" variant="outline" className="w-full rounded-xl font-bold" onClick={clearTableCode}>
+                                            RESET TAVOLO
+                                        </Button>
+                                        {!isTableCodeValid && normalizedTableCode.length > 0 ? (
+                                            <p className="text-xs font-semibold text-amber-700">
+                                                Formato richiesto: una lettera da A a F e due numeri (es. C12).
+                                            </p>
+                                        ) : null}
+                                    </div>
+                                )}
+
+                                <div className="space-y-3">
+                                    <Label className="text-lg font-bold">Metodo di Pagamento</Label>
+                                    {(cashAvailable || cardAvailable) ? (
+                                        <div className="flex gap-3">
+                                            {cashAvailable && (
+                                                <button
+                                                    onClick={() => setPaymentMethod("CASH")}
+                                                    className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${effectivePaymentMethod === "CASH" ? "border-green-600 bg-green-50 text-green-700" : "border-slate-200"}`}
+                                                >
+                                                    <Banknote size={32} />
+                                                    <span className="font-bold">CONTANTI</span>
+                                                </button>
+                                            )}
+                                            {cardAvailable && (
+                                                <button
+                                                    onClick={() => setPaymentMethod("CARD")}
+                                                    className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${effectivePaymentMethod === "CARD" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200"}`}
+                                                >
+                                                    <CreditCard size={32} />
+                                                    <span className="font-bold">CARTA / POS</span>
+                                                </button>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+                                            La postazione selezionata non ha metodi di pagamento configurati. Associa terminale e/o cassetta in impostazioni hardware.
+                                        </p>
+                                    )}
+                                </div>
+
+                                <div className="flex gap-4 pt-4">
+                                    <Button
+                                        variant="outline"
+                                        className="flex-1 py-8 text-xl font-bold rounded-2xl"
+                                        onClick={() => setIsCheckoutOpen(false)}
+                                    >
+                                        ANNULLA
+                                    </Button>
+                                    <Button
+                                        className="flex-1 py-8 text-xl font-bold rounded-2xl bg-green-600 hover:bg-green-700"
+                                        onClick={handleCheckout}
+                                        disabled={checkoutDisabled}
+                                    >
+                                        {isProcessing ? <Loader2 className="animate-spin" /> : "CONFERMA"}
+                                    </Button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </DialogContent>
             </Dialog>
