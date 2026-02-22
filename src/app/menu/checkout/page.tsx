@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createPublicOrder } from "../actions"
-import { TABLE_CODE_LETTERS, buildTableCode, isValidTableCode, normalizeTableCode, parseTableCode } from "@/lib/table-code"
+import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
 
 interface Product {
     _id: string
@@ -24,6 +24,12 @@ interface Product {
 
 interface CartItem extends Product {
     quantity: number
+}
+
+interface EventCheckoutConfig {
+    askName?: boolean
+    askTable?: boolean
+    predefinedTables?: string[]
 }
 
 export default function CheckoutPage() {
@@ -44,16 +50,22 @@ export default function CheckoutPage() {
     const [customerName, setCustomerName] = useState("")
     const [tableNumber, setTableNumber] = useState("")
     const [isSubmitting, setIsSubmitting] = useState(false)
-    const [eventSettings, setEventSettings] = useState<{ askName?: boolean; askTable?: boolean } | null>(null)
-    const parsedTableCode = parseTableCode(tableNumber)
-    const normalizedTableCode = normalizeTableCode(tableNumber)
-    const isTableCodeValid = isValidTableCode(normalizedTableCode)
+    const [eventSettings, setEventSettings] = useState<EventCheckoutConfig | null>(null)
+    const normalizedTableValue = normalizeTableValue(tableNumber)
+    const tableValueValid = isTableValueValid(tableNumber)
+    const predefinedTables = eventSettings?.predefinedTables || []
 
     useEffect(() => {
         if (eventId) {
             // Fetch event settings to know if we need name/table
             fetch("/api/pos/init").then(res => res.json()).then(data => {
-                if (data.event) setEventSettings(data.event.settings)
+                if (data.event) {
+                    setEventSettings({
+                        askName: data.event.settings?.askName ?? false,
+                        askTable: data.event.settings?.askTable ?? false,
+                        predefinedTables: Array.isArray(data.event.predefinedTables) ? data.event.predefinedTables : []
+                    })
+                }
             })
         }
     }, [eventId])
@@ -62,8 +74,8 @@ export default function CheckoutPage() {
 
     const handleSubmit = async () => {
         if (eventSettings?.askName && !customerName) return alert("Inserisci il tuo nome")
-        if (eventSettings?.askTable && !isTableCodeValid) {
-            return alert("Inserisci il tavolo nel formato: lettera A-F + 2 numeri (es. B07)")
+        if (eventSettings?.askTable && !tableValueValid) {
+            return alert("Inserisci il tavolo oppure selezionalo dalla lista")
         }
 
         setIsSubmitting(true)
@@ -71,7 +83,7 @@ export default function CheckoutPage() {
             eventId,
             customer: {
                 name: customerName || undefined,
-                table: normalizedTableCode || undefined
+                table: normalizedTableValue || undefined
             },
             totalAmount: totalPrice,
             cart: cart.map(item => ({
@@ -152,37 +164,37 @@ export default function CheckoutPage() {
 
                     {eventSettings?.askTable && (
                         <div className="space-y-3">
-                            <Label className="text-slate-500 font-bold ml-1">Tavolo (A-F + 2 cifre)</Label>
+                            <Label className="text-slate-500 font-bold ml-1">Tavolo</Label>
                             <div className="rounded-2xl bg-slate-50 p-4 space-y-4">
-                                <div className="grid grid-cols-6 gap-2">
-                                    {TABLE_CODE_LETTERS.map((letter) => {
-                                        const isActive = parsedTableCode.letter === letter
-                                        return (
-                                            <button
-                                                key={letter}
-                                                type="button"
-                                                onClick={() => setTableNumber(buildTableCode(isActive ? "" : letter, parsedTableCode.digits))}
-                                                className={`h-11 rounded-xl border-2 text-sm font-black transition-colors ${isActive ? "border-orange-600 bg-orange-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-orange-300"}`}
-                                            >
-                                                {letter}
-                                            </button>
-                                        )
-                                    })}
-                                </div>
+                                {predefinedTables.length > 0 ? (
+                                    <div className="flex flex-wrap gap-2">
+                                        {predefinedTables.map((table) => {
+                                            const isActive = normalizeTableValue(table) === normalizedTableValue
+                                            return (
+                                                <button
+                                                    key={table}
+                                                    type="button"
+                                                    onClick={() => setTableNumber(table)}
+                                                    className={`rounded-xl border-2 px-3 py-2 text-sm font-black transition-colors ${isActive ? "border-orange-600 bg-orange-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-orange-300"}`}
+                                                >
+                                                    {table}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                ) : null}
                                 <div className="relative">
                                     <Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
                                     <Input
-                                        inputMode="numeric"
-                                        maxLength={2}
                                         className="h-14 pl-12 rounded-2xl bg-white border border-slate-200 font-bold text-lg"
-                                        placeholder="Es: 07"
-                                        value={parsedTableCode.digits}
-                                        onChange={(e) => setTableNumber(buildTableCode(parsedTableCode.letter, e.target.value))}
+                                        placeholder="Es: B02 oppure VIP TERRAZZA"
+                                        value={tableNumber}
+                                        onChange={(e) => setTableNumber(e.target.value)}
                                     />
                                 </div>
                                 <div className="flex items-center justify-between">
                                     <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
-                                        Codice Tavolo: <span className="text-slate-800">{normalizedTableCode || "---"}</span>
+                                        Tavolo selezionato: <span className="text-slate-800">{normalizedTableValue || "---"}</span>
                                     </p>
                                     <button
                                         type="button"
@@ -192,11 +204,6 @@ export default function CheckoutPage() {
                                         RESET
                                     </button>
                                 </div>
-                                {!isTableCodeValid && normalizedTableCode.length > 0 ? (
-                                    <p className="text-xs font-semibold text-amber-700">
-                                        Formato richiesto: una lettera da A a F e due numeri (es. C12).
-                                    </p>
-                                ) : null}
                             </div>
                         </div>
                     )}
