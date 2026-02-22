@@ -5,8 +5,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Pencil } from "lucide-react";
+import { Check, Pencil } from "lucide-react";
 import { useFormStatus } from "react-dom";
+import { CATEGORY_COLOR_OPTIONS, getCategoryTextColor, normalizeCategoryColor } from "@/lib/category-colors";
 
 function SubmitButton() {
     const { pending } = useFormStatus();
@@ -29,6 +30,7 @@ export function EditCategoryDialog({
     updateAction: (formData: FormData) => Promise<void>
 }) {
     const [open, setOpen] = useState(false);
+    const [selectedColor, setSelectedColor] = useState(() => normalizeCategoryColor(category.uiColor));
 
     async function handleSubmit(formData: FormData) {
         await updateAction(formData);
@@ -49,14 +51,38 @@ export function EditCategoryDialog({
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <input type="hidden" name="id" value={category.id} />
+                        <input type="hidden" name="uiColor" value={selectedColor} />
                         {eventId && <input type="hidden" name="eventId" value={eventId} />}
                         <div className="grid gap-2">
                             <Label htmlFor="cat-edit-name">Nome</Label>
                             <Input id="cat-edit-name" name="name" defaultValue={category.name} required />
                         </div>
                         <div className="grid gap-2">
-                            <Label htmlFor="uiColor">Classe Colore (Tailwind)</Label>
-                            <Input id="uiColor" name="uiColor" defaultValue={category.uiColor} placeholder="bg-blue-500" required />
+                            <Label>Colore Categoria</Label>
+                            <div className="grid grid-cols-5 gap-2">
+                                {CATEGORY_COLOR_OPTIONS.map((option) => {
+                                    const isSelected = selectedColor === option.value;
+                                    return (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            title={option.label}
+                                            aria-label={`Colore ${option.label}`}
+                                            onClick={() => setSelectedColor(option.value)}
+                                            className={`h-9 rounded-md border-2 transition ${isSelected
+                                                ? "border-slate-900 dark:border-slate-100 scale-105"
+                                                : "border-transparent hover:border-slate-300"
+                                                }`}
+                                            style={{
+                                                backgroundColor: option.value,
+                                                color: getCategoryTextColor(option.value)
+                                            }}
+                                        >
+                                            {isSelected ? <Check size={16} className="mx-auto" /> : null}
+                                        </button>
+                                    );
+                                })}
+                            </div>
                         </div>
                         <div className="grid gap-2">
                             <Label htmlFor="printerId">Stampante Reparto</Label>
