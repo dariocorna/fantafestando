@@ -9,8 +9,10 @@ import { Printer, Loader2, CheckCircle2 } from "lucide-react";
 import { updateEventSettingsAction } from "./actions";
 import { useState } from "react";
 
+import { IEvent } from "@/models/Event";
+
 interface ActiveEventSettingsFormProps {
-    event: any;
+    event: IEvent;
 }
 
 export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps) {
@@ -28,7 +30,7 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
 
     return (
         <form action={handleSubmit}>
-            <input type="hidden" name="eventId" value={event._id.toString()} />
+            <input type="hidden" name="eventId" value={String(event._id)} />
             <CardContent className="grid gap-6 py-6">
                 <div className="grid gap-4 sm:grid-cols-2">
                     <div className="flex flex-row items-center space-x-3 space-y-0 rounded-md border p-4 shadow-sm hover:bg-slate-50 transition-colors">

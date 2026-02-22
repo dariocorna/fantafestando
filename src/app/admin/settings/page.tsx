@@ -2,11 +2,20 @@ import Link from "next/link";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "../../../components/ui/card";
 import { Calendar, Settings, Printer, User, Home } from "lucide-react";
 import { getAdminContextEvent } from "@/lib/events";
+import { IEvent } from "@/models/Event";
 import { Button } from "@/components/ui/button";
 import { ActiveEventSettingsForm } from "./settings-form";
 
 export default async function AdminSettings() {
-    const contextEvent = await getAdminContextEvent() as any;
+    const contextEvent = await getAdminContextEvent() as IEvent | null;
+
+    // Serialize the event object to pass to Client Component
+    const serializedEvent = contextEvent
+        ? {
+            ...contextEvent,
+            _id: String(contextEvent._id)
+        }
+        : null;
 
     return (
         <div className="space-y-6">
@@ -26,16 +35,16 @@ export default async function AdminSettings() {
                                 <Settings className="h-5 w-5" />
                             </div>
                             <div>
-                                <CardTitle className="text-xl">Impostazioni Festa: {contextEvent?.name || "Nessuna selezionata"}</CardTitle>
+                                <CardTitle className="text-xl">Impostazioni Festa: {serializedEvent?.name || "Nessuna selezionata"}</CardTitle>
                                 <CardDescription>Personalizza il comportamento del POS e della WebApp per questa edizione.</CardDescription>
                             </div>
                         </div>
                     </CardHeader>
-                    {contextEvent ? (
-                        <ActiveEventSettingsForm event={contextEvent} />
+                    {serializedEvent ? (
+                        <ActiveEventSettingsForm event={serializedEvent as any} />
                     ) : (
                         <CardContent className="py-12 text-center">
-                            <p className="text-muted-foreground mb-4">Seleziona una festa dall'header per configurarne i parametri.</p>
+                            <p className="text-muted-foreground mb-4">Seleziona una festa dall&apos;header per configurarne i parametri.</p>
                             <Link href="/admin/settings/events">
                                 <Button variant="outline">Gestione Tutte le Feste</Button>
                             </Link>

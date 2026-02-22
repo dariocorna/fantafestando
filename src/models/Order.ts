@@ -23,6 +23,8 @@ export interface IOrder extends Document {
     sumupCheckoutId?: string;
     sumupPaymentId?: string;
     posDeviceId?: Types.ObjectId;
+    createdAt?: Date;
+    updatedAt?: Date;
 }
 
 const OrderSchema = new Schema<IOrder>({

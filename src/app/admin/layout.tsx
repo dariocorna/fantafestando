@@ -17,7 +17,7 @@ export default async function AdminLayout({
     const events = await getAllEvents();
     // Convertiamo l'id a stringa per inviarlo al Client Component
     const serializedEvents = events.map(e => ({
-        _id: (e._id as any).toString(),
+        _id: String(e._id),
         name: e.name,
         active: e.active
     }));
