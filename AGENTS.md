@@ -10,3 +10,4 @@ OSGFest è un sistema gestionale per le feste di Bonate Sotto.
   - **Requisito Atomicità e PR**: In previsione delle Pull Request, un commit successivo NON deve eseguire un rework o correggere errori macroscopici di un commit immediatamente precedente appena scritto su quel branch. Qualora si presentasse questa eventualità (es. fix typo, fix build test fallito post-codifica), i commit vanno obbligatoriamente uniti (`git rebase -i` / squash) per mantenere la cronologia pulita e 100% atomica prima della PR.
 - **Testing**: Sono obbligatori test unitari per coprire ogni nuova funzione introdotta.
 - **Test E2E**: Utilizzare Playwright per implementare test end-to-end (E2E) sulle funzionalità dell'interfaccia utente.
+- **Chiusura Epic**: Prima di considerare chiusa e completata qualsiasi Epica di sviluppo, è **obbligatorio** creare dei test E2E esaustivi per coprire le funzionalità dell'epica e assicurarsi che vengano eseguiti con successo.
