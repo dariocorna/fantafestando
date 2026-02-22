@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { ShoppingCart, User, CreditCard, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X } from "lucide-react"
+import { useState, useEffect, useCallback } from "react"
+import { ShoppingCart, User, CreditCard, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X, RefreshCw, Clock3 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -12,7 +12,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NumPad } from "./components/NumPad"
-import { createOrder, triggerSumUpPayment, loadPendingOrderByCode, completePendingOrderPayment } from "./actions"
+import { createOrder, triggerSumUpPayment, loadPendingOrderByCode, completePendingOrderPayment, listRecentPendingOrders } from "./actions"
 import { getCategoryTheme } from "@/lib/category-colors"
 
 interface ICategory {
@@ -68,9 +68,22 @@ interface LoadedPendingOrder {
         table?: string
     }
     items: Array<{
+        productId: string
         snapshotName: string
         quantity: number
+        unitPrice: number
     }>
+}
+
+interface RecentPendingOrder {
+    id: string
+    code: string
+    totalAmount: number
+    customer?: {
+        name?: string
+        table?: string
+    }
+    createdAt?: string
 }
 
 function getPeripheralRef(value: IPosDevice["paymentTerminalId"] | IPosDevice["cashBoxId"]) {
@@ -95,6 +108,8 @@ export default function PosPage() {
     const [orderCode, setOrderCode] = useState("")
     const [isCodeLoading, setIsCodeLoading] = useState(false)
     const [loadedPendingOrder, setLoadedPendingOrder] = useState<LoadedPendingOrder | null>(null)
+    const [recentPendingOrders, setRecentPendingOrders] = useState<RecentPendingOrder[]>([])
+    const [isRecentOrdersLoading, setIsRecentOrdersLoading] = useState(false)
 
     // Info Cliente
     const [customerName, setCustomerName] = useState("")
@@ -135,6 +150,7 @@ export default function PosPage() {
     const selectedPaymentTerminal = getPeripheralRef(selectedPosDevice?.paymentTerminalId)
     const selectedCashBox = getPeripheralRef(selectedPosDevice?.cashBoxId)
     const activeCategoryTheme = getCategoryTheme(categories.find((c) => c._id === activeCategory)?.uiColor)
+    const activeEventId = activeEvent?._id
 
     const cashAvailable = Boolean(selectedCashBox)
     const cardAvailable = Boolean(selectedPaymentTerminal)
@@ -147,14 +163,9 @@ export default function PosPage() {
                 : paymentMethod
 
     const total = cart.reduce((acc: number, item: CartItem) => acc + (item.price * item.quantity), 0)
-    const effectiveTotal = loadedPendingOrder ? loadedPendingOrder.totalAmount : total
+    const effectiveTotal = total
 
     const addToCart = (product: IProduct) => {
-        if (loadedPendingOrder) {
-            alert("Hai già caricato un ordine da codice. Completa o annulla quell'ordine prima di aggiungerne uno nuovo.")
-            return
-        }
-
         setCart((prev: CartItem[]) => {
             const existing = prev.find((i: CartItem) => i.productId === product._id)
             if (existing) {
@@ -179,16 +190,51 @@ export default function PosPage() {
         setOrderCode("")
     }
 
-    const handleLoadOrderByCode = async () => {
+    const loadRecentPendingOrdersForDialog = useCallback(async () => {
+        if (!activeEventId) return
+
+        setIsRecentOrdersLoading(true)
+        const result = await listRecentPendingOrders({ eventId: activeEventId, limit: 10 })
+        if (result.success) {
+            setRecentPendingOrders(result.orders)
+        } else {
+            setRecentPendingOrders([])
+        }
+        setIsRecentOrdersLoading(false)
+    }, [activeEventId])
+
+    const formatRecentOrderTime = (createdAt?: string) => {
+        if (!createdAt) return ""
+        return new Intl.DateTimeFormat("it-IT", {
+            hour: "2-digit",
+            minute: "2-digit"
+        }).format(new Date(createdAt))
+    }
+
+    const handleCodeDialogOpenChange = (open: boolean) => {
+        setIsCodeDialogOpen(open)
+        if (open) {
+            void loadRecentPendingOrdersForDialog()
+        }
+    }
+
+    const handleLoadOrderByCode = async (rawCode?: string) => {
         if (!activeEvent?._id) {
             alert("Evento non disponibile")
             return
         }
 
+        const codeToLoad = (rawCode ?? orderCode).trim().toUpperCase()
+        if (!codeToLoad) {
+            alert("Inserisci un numero ordine valido")
+            return
+        }
+
+        setOrderCode(codeToLoad)
         setIsCodeLoading(true)
         const result = await loadPendingOrderByCode({
             eventId: activeEvent._id,
-            code: orderCode
+            code: codeToLoad
         })
         setIsCodeLoading(false)
 
@@ -200,7 +246,14 @@ export default function PosPage() {
         setLoadedPendingOrder(result.order)
         setCustomerName(result.order.customer?.name || "")
         setTableNumber(result.order.customer?.table || "")
-        setCart([])
+        setCart(result.order.items.map((item) => ({
+            productId: item.productId,
+            name: item.snapshotName,
+            price: item.unitPrice,
+            quantity: item.quantity,
+            variants: []
+        })))
+        setRecentPendingOrders((prev) => prev.filter((order) => order.id !== result.order?.id))
         setIsCodeDialogOpen(false)
     }
 
@@ -237,7 +290,18 @@ export default function PosPage() {
                 eventId: activeEvent._id,
                 orderId: loadedPendingOrder.id,
                 paymentMethod: effectivePaymentMethod,
-                posDeviceId: selectedPosDeviceId
+                posDeviceId: selectedPosDeviceId,
+                customer: {
+                    name: customerName || undefined,
+                    table: tableNumber || undefined
+                },
+                totalAmount: total,
+                cart: cart.map((item) => ({
+                    productId: item.productId,
+                    snapshotName: item.name,
+                    quantity: item.quantity,
+                    selectedOptions: []
+                }))
             })
 
             if (completionResult.success) {
@@ -299,7 +363,7 @@ export default function PosPage() {
 
     const checkoutDisabled = isProcessing
         || !selectedPosDeviceId
-        || (!loadedPendingOrder && cart.length === 0)
+        || cart.length === 0
         || (!cashAvailable && !cardAvailable)
         || (Boolean(activeEvent?.settings?.askTable) && !loadedPendingOrder && !tableNumber)
 
@@ -373,10 +437,10 @@ export default function PosPage() {
                         {selectedPosDevice ? `Postazione: ${selectedPosDevice.name}` : "Seleziona Cassa"}
                     </button>
                     <button
-                        onClick={() => setIsCodeDialogOpen(true)}
-                        className="text-xs font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1 mt-1 hover:underline"
+                        onClick={() => handleCodeDialogOpenChange(true)}
+                        className="mt-2 inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
                     >
-                        <Search size={12} />
+                        <Search size={14} />
                         Carica ordine da codice
                     </button>
                     <div className="grid grid-cols-2 gap-2 mt-4">
@@ -406,6 +470,9 @@ export default function PosPage() {
                                 <div>
                                     <p className="text-xs uppercase font-bold tracking-widest text-indigo-500">Ordine WebApp Caricato</p>
                                     <p className="text-lg font-black text-indigo-700">Codice {loadedPendingOrder.code}</p>
+                                    <p className="text-xs font-semibold text-indigo-600 mt-1">
+                                        Carrello precompilato: puoi aggiungere/rimuovere prodotti prima della chiusura.
+                                    </p>
                                 </div>
                                 <button
                                     className="text-indigo-500 hover:text-indigo-700"
@@ -415,18 +482,10 @@ export default function PosPage() {
                                     <X size={18} />
                                 </button>
                             </div>
-                            <div className="space-y-2">
-                                {loadedPendingOrder.items.map((item, index) => (
-                                    <div key={`${item.snapshotName}-${index}`} className="flex justify-between text-sm font-semibold text-slate-700">
-                                        <span>{item.quantity}x {item.snapshotName}</span>
-                                    </div>
-                                ))}
-                            </div>
-                            <div className="text-right text-lg font-black text-indigo-700">
-                                {loadedPendingOrder.totalAmount.toFixed(2)} €
-                            </div>
                         </div>
-                    ) : cart.length === 0 ? (
+                    ) : null}
+
+                    {cart.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-50 space-y-4">
                             <ShoppingCart size={64} />
                             <p className="font-bold">Il carrello è vuoto</p>
@@ -458,7 +517,7 @@ export default function PosPage() {
 
                     <button
                         onClick={() => setIsCheckoutOpen(true)}
-                        disabled={(!loadedPendingOrder && cart.length === 0) || !selectedPosDeviceId}
+                        disabled={cart.length === 0 || !selectedPosDeviceId}
                         className="w-full py-8 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-3xl font-black text-2xl shadow-xl shadow-blue-200 dark:shadow-none active:scale-[0.98] transition-all flex items-center justify-center gap-3"
                     >
                         <CheckCircle2 size={32} />
@@ -543,27 +602,103 @@ export default function PosPage() {
             </Dialog>
 
             {/* Modal Carica Ordine da Codice */}
-            <Dialog open={isCodeDialogOpen} onOpenChange={setIsCodeDialogOpen}>
-                <DialogContent className="max-w-[400px] rounded-3xl p-8">
-                    <DialogHeader>
-                        <DialogTitle className="text-2xl font-black text-center">Carica ordine da codice</DialogTitle>
+            <Dialog open={isCodeDialogOpen} onOpenChange={handleCodeDialogOpenChange}>
+                <DialogContent className="max-w-[760px] rounded-3xl p-0 overflow-hidden">
+                    <DialogHeader className="border-b bg-slate-50 px-8 py-6 dark:bg-slate-900">
+                        <DialogTitle className="flex items-center gap-3 text-2xl font-black">
+                            <Search className="h-6 w-6 text-indigo-600" />
+                            Carica ordine da codice
+                        </DialogTitle>
+                        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                            Inserisci il numero ordine oppure seleziona rapidamente uno degli ultimi ordini pendenti.
+                        </p>
                     </DialogHeader>
-                    <div className="space-y-4 py-2">
-                        <Label htmlFor="order-code" className="text-sm font-bold">Codice ordine (4 caratteri)</Label>
-                        <Input
-                            id="order-code"
-                            value={orderCode}
-                            onChange={(e) => setOrderCode(e.target.value.toUpperCase())}
-                            placeholder="Es: A1B2"
-                            maxLength={8}
-                        />
-                        <Button
-                            className="w-full"
-                            onClick={handleLoadOrderByCode}
-                            disabled={isCodeLoading || !orderCode.trim()}
-                        >
-                            {isCodeLoading ? <Loader2 className="animate-spin" /> : "Carica Ordine"}
-                        </Button>
+                    <div className="grid gap-6 p-8 md:grid-cols-[1.1fr_1fr]">
+                        <div className="space-y-5">
+                            <div className="space-y-3">
+                                <Label htmlFor="order-code" className="text-sm font-bold uppercase tracking-widest text-slate-500">
+                                    Codice ordine (numero progressivo)
+                                </Label>
+                                <Input
+                                    id="order-code"
+                                    value={orderCode}
+                                    inputMode="numeric"
+                                    onChange={(e) => setOrderCode(e.target.value.toUpperCase())}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            e.preventDefault()
+                                            void handleLoadOrderByCode()
+                                        }
+                                    }}
+                                    placeholder="Es: 12"
+                                    maxLength={8}
+                                    className="h-20 rounded-2xl border-2 text-center text-4xl font-black tracking-wide"
+                                />
+                            </div>
+
+                            <div className="flex gap-3">
+                                <Button
+                                    className="h-14 flex-1 rounded-2xl text-lg font-black bg-indigo-600 hover:bg-indigo-700"
+                                    onClick={() => void handleLoadOrderByCode()}
+                                    disabled={isCodeLoading || !orderCode.trim()}
+                                >
+                                    {isCodeLoading ? <Loader2 className="animate-spin" /> : "Carica Ordine"}
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    className="h-14 rounded-2xl px-5 font-bold"
+                                    onClick={() => void loadRecentPendingOrdersForDialog()}
+                                    disabled={isRecentOrdersLoading || isCodeLoading}
+                                >
+                                    {isRecentOrdersLoading ? <Loader2 className="animate-spin" /> : <RefreshCw size={16} />}
+                                    Aggiorna
+                                </Button>
+                            </div>
+
+                            <p className="text-xs font-semibold text-slate-500">
+                                Se preferisci, tocca direttamente un ordine nella lista a destra.
+                            </p>
+                        </div>
+
+                        <div className="rounded-2xl border bg-slate-50/80 p-4 dark:bg-slate-900/70">
+                            <h3 className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-500">
+                                <Clock3 size={14} />
+                                Ultimi 10 ordini pendenti
+                            </h3>
+                            <div className="max-h-[340px] space-y-2 overflow-y-auto pr-1">
+                                {isRecentOrdersLoading ? (
+                                    <div className="flex h-24 items-center justify-center rounded-xl border border-dashed text-slate-400">
+                                        <Loader2 className="animate-spin" />
+                                    </div>
+                                ) : recentPendingOrders.length === 0 ? (
+                                    <div className="rounded-xl border border-dashed p-4 text-sm font-semibold text-slate-500">
+                                        Nessun ordine pendente disponibile.
+                                    </div>
+                                ) : (
+                                    recentPendingOrders.map((order) => (
+                                        <button
+                                            key={order.id}
+                                            className="w-full rounded-xl border bg-white p-3 text-left transition-colors hover:bg-indigo-50 hover:border-indigo-200 dark:bg-slate-800 dark:hover:bg-indigo-950/40"
+                                            onClick={() => void handleLoadOrderByCode(order.code)}
+                                        >
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div>
+                                                    <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Numero ordine</p>
+                                                    <p className="text-2xl font-black text-indigo-700 dark:text-indigo-300">{order.code}</p>
+                                                </div>
+                                                <p className="text-lg font-black text-slate-700 dark:text-slate-200">
+                                                    {order.totalAmount.toFixed(2)} €
+                                                </p>
+                                            </div>
+                                            <div className="mt-1 flex items-center justify-between text-xs font-semibold text-slate-500">
+                                                <span>{order.customer?.name || "Cliente non indicato"}{order.customer?.table ? ` · Tavolo ${order.customer.table}` : ""}</span>
+                                                <span>{formatRecentOrderTime(order.createdAt)}</span>
+                                            </div>
+                                        </button>
+                                    ))
+                                )}
+                            </div>
+                        </div>
                     </div>
                 </DialogContent>
             </Dialog>
