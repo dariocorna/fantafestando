@@ -29,7 +29,12 @@ export async function createPublicOrder(data: {
         })
 
         // Per il flusso WebApp la comanda viene inoltrata subito ai reparti.
-        await PrinterService.routeOrderToPrinters(order._id.toString());
+        // Se la stampa fallisce, l'ordine resta comunque valido e viene creato.
+        try {
+            await PrinterService.routeOrderToPrinters(order._id.toString());
+        } catch (printError) {
+            console.error("Public order created but printer routing failed:", printError);
+        }
 
         // We could generate a simpler shortCode if needed, 
         // but for now we'll use the first 4 chars of the ID as a reference
