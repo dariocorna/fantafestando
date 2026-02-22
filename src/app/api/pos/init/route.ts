@@ -3,6 +3,8 @@ import dbConnect from "@/lib/mongoose";
 import Event from "@/models/Event";
 import Category from "@/models/Category";
 import Product from "@/models/Product";
+import PosDevice from "@/models/PosDevice";
+import Printer from "@/models/Printer";
 
 export async function GET() {
     try {
@@ -24,10 +26,14 @@ export async function GET() {
         // 3. Fetch products for this event
         const products = await Product.find({ eventId: event._id }).lean();
 
+        // 4. Fetch POS Devices for this event
+        const posDevices = await PosDevice.find({ eventId: event._id }).populate('printerId').lean();
+
         return NextResponse.json({
             event,
             categories,
-            products
+            products,
+            posDevices
         });
     } catch (error) {
         console.error("POS Init Error:", error);
