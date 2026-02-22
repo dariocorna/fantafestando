@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ArrowLeft, ShoppingCart, Info, User, Table, CreditCard, Banknote, Search, Plus, Minus, Trash2, CheckCircle2, Loader2, Hash, Monitor } from "lucide-react"
+import { ShoppingCart, User, CreditCard, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -294,7 +294,7 @@ export default function PosPage() {
                     </div>
 
                     <div className="p-8 space-y-6">
-                        {(activeEvent?.settings?.askTable || true) && (
+                        {activeEvent?.settings?.askTable && (
                             <div className="space-y-4">
                                 <Label className="text-lg font-bold">Numero Tavolo?</Label>
                                 <div className="text-center py-4 bg-slate-100 dark:bg-slate-800 rounded-2xl">

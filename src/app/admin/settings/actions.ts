@@ -9,6 +9,11 @@ import PosDevice from "@/models/PosDevice";
 import Peripheral from "@/models/Peripheral";
 import { revalidatePath } from "next/cache";
 
+function revalidateHardwareViews() {
+    revalidatePath("/admin/settings/hardware");
+    revalidatePath("/admin/settings/pos");
+}
+
 export async function createEventAction(formData: FormData) {
     const name = formData.get("name") as string;
     if (!name) return { error: "Nome obbligatorio" };
@@ -37,6 +42,9 @@ export async function updateEventSettingsAction(formData: FormData) {
     if (!eventId) return { error: "Event ID obbligatorio" };
 
     await dbConnect();
+    const targetEvent = await Event.findById(eventId).select("archived").lean();
+    if (!targetEvent) return { error: "Festa non trovata" };
+    if (targetEvent.archived) return { error: "Le feste archiviate non sono modificabili" };
 
     if (active) {
         // Deactivate all others first
@@ -89,17 +97,32 @@ export async function cloneEventAction(formData: FormData) {
         printerMap.set(String(printer._id), newPrinter._id);
     }
 
-    // 3. Clona i PosDevices
+    // 3. Clona le Periferiche
+    const peripherals = await Peripheral.find({ eventId: sourceEventId }).lean();
+    const peripheralMap = new Map();
+    for (const peripheral of peripherals) {
+        const newPeripheral = await Peripheral.create({
+            eventId: newEvent._id,
+            name: peripheral.name,
+            type: peripheral.type,
+            config: peripheral.config || {}
+        });
+        peripheralMap.set(String(peripheral._id), newPeripheral._id);
+    }
+
+    // 4. Clona i PosDevices
     const posDevices = await PosDevice.find({ eventId: sourceEventId }).lean();
     for (const posDevice of posDevices) {
         await PosDevice.create({
             eventId: newEvent._id,
             name: posDevice.name,
-            printerId: posDevice.printerId ? printerMap.get(String(posDevice.printerId)) : null
+            printerId: posDevice.printerId ? printerMap.get(String(posDevice.printerId)) : null,
+            paymentTerminalId: posDevice.paymentTerminalId ? peripheralMap.get(String(posDevice.paymentTerminalId)) : null,
+            cashBoxId: posDevice.cashBoxId ? peripheralMap.get(String(posDevice.cashBoxId)) : null
         });
     }
 
-    // 4. Clona le Categorie
+    // 5. Clona le Categorie
     const categories = await Category.find({ eventId: sourceEventId }).lean();
     const categoryMap = new Map(); // mappa vecchi id -> nuovi id
 
@@ -113,7 +136,7 @@ export async function cloneEventAction(formData: FormData) {
         categoryMap.set(String(cat._id), newCat._id);
     }
 
-    // 5. Clona i Prodotti associandoli alle nuove Categorie
+    // 6. Clona i Prodotti associandoli alle nuove Categorie
     const products = await Product.find({ eventId: sourceEventId }).lean();
     for (const prod of products) {
         await Product.create({
@@ -142,7 +165,7 @@ export async function createPrinterAction(formData: FormData) {
     await dbConnect();
     await Printer.create({ eventId, name, ip, type });
 
-    revalidatePath("/admin/settings/printers");
+    revalidateHardwareViews();
     return { success: true };
 }
 
@@ -161,7 +184,7 @@ export async function deletePrinterAction(formData: FormData) {
     const PosDevice = (await import("@/models/PosDevice")).default;
     await PosDevice.deleteMany({ printerId: id });
 
-    revalidatePath("/admin/settings/printers");
+    revalidateHardwareViews();
 }
 
 export async function updatePrinterAction(formData: FormData) {
@@ -175,7 +198,7 @@ export async function updatePrinterAction(formData: FormData) {
     await dbConnect();
     await Printer.findByIdAndUpdate(id, { name, ip, type });
 
-    revalidatePath("/admin/settings/printers");
+    revalidateHardwareViews();
     return { success: true };
 }
 
@@ -188,15 +211,18 @@ export async function createPosDeviceAction(formData: FormData) {
 
     if (!eventId || !name || !printerId) return { error: "Dati mancanti" };
 
+    const normalizedPaymentTerminalId = paymentTerminalId === "none" ? "" : paymentTerminalId;
+    const normalizedCashBoxId = cashBoxId === "none" ? "" : cashBoxId;
+
     await dbConnect();
     await PosDevice.create({
         eventId,
         name,
         printerId,
-        paymentTerminalId: paymentTerminalId || undefined,
-        cashBoxId: cashBoxId || undefined
+        paymentTerminalId: normalizedPaymentTerminalId || undefined,
+        cashBoxId: normalizedCashBoxId || undefined
     });
-    revalidatePath("/admin/settings/pos");
+    revalidateHardwareViews();
     return { success: true };
 }
 
@@ -207,7 +233,7 @@ export async function deletePosDeviceAction(formData: FormData) {
     await dbConnect();
     await PosDevice.findByIdAndDelete(id);
 
-    revalidatePath("/admin/settings/pos");
+    revalidateHardwareViews();
 }
 
 export async function updatePosDeviceAction(formData: FormData) {
@@ -219,15 +245,18 @@ export async function updatePosDeviceAction(formData: FormData) {
 
     if (!id || !name || !printerId) return { error: "Dati mancanti" };
 
+    const normalizedPaymentTerminalId = paymentTerminalId === "none" ? "" : paymentTerminalId;
+    const normalizedCashBoxId = cashBoxId === "none" ? "" : cashBoxId;
+
     await dbConnect();
     await PosDevice.findByIdAndUpdate(id, {
         name,
         printerId,
-        paymentTerminalId: paymentTerminalId || null,
-        cashBoxId: cashBoxId || null
+        paymentTerminalId: normalizedPaymentTerminalId || null,
+        cashBoxId: normalizedCashBoxId || null
     });
 
-    revalidatePath("/admin/settings/pos");
+    revalidateHardwareViews();
     return { success: true };
 }
 
@@ -242,6 +271,9 @@ export async function createPeripheralAction(formData: FormData) {
     const affiliateKey = formData.get("affiliateKey") as string;
 
     if (!eventId || !name || !type) return { error: "Dati mancanti" };
+    if (type === "SUMUP" && (!merchantId || !affiliateKey)) {
+        return { error: "Merchant ID e API Key sono obbligatori per terminali SumUp" };
+    }
 
     await dbConnect();
     await Peripheral.create({
@@ -251,8 +283,7 @@ export async function createPeripheralAction(formData: FormData) {
         config: type === "SUMUP" ? { merchantId, affiliateKey } : {}
     });
 
-    revalidatePath("/admin/settings/hardware");
-    revalidatePath("/admin/settings/printers");
+    revalidateHardwareViews();
     return { success: true };
 }
 
@@ -268,8 +299,7 @@ export async function deletePeripheralAction(formData: FormData) {
     await PosDevice.updateMany({ paymentTerminalId: id }, { $unset: { paymentTerminalId: 1 } });
     await PosDevice.updateMany({ cashBoxId: id }, { $unset: { cashBoxId: 1 } });
 
-    revalidatePath("/admin/settings/hardware");
-    revalidatePath("/admin/settings/printers");
+    revalidateHardwareViews();
 }
 
 export async function updatePeripheralAction(formData: FormData) {
@@ -281,6 +311,9 @@ export async function updatePeripheralAction(formData: FormData) {
     const affiliateKey = formData.get("affiliateKey") as string;
 
     if (!id || !name || !type) return { error: "Dati mancanti" };
+    if (type === "SUMUP" && (!merchantId || !affiliateKey)) {
+        return { error: "Merchant ID e API Key sono obbligatori per terminali SumUp" };
+    }
 
     await dbConnect();
     await Peripheral.findByIdAndUpdate(id, {
@@ -289,7 +322,6 @@ export async function updatePeripheralAction(formData: FormData) {
         config: type === "SUMUP" ? { merchantId, affiliateKey } : {}
     });
 
-    revalidatePath("/admin/settings/hardware");
-    revalidatePath("/admin/settings/printers");
+    revalidateHardwareViews();
     return { success: true };
 }

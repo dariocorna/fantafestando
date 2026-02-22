@@ -16,7 +16,7 @@ import { reprintOrder } from "./actions";
 
 export default async function AdminOrders() {
     await dbConnect();
-    const orders = await Order.find({}).sort({ createdAt: -1 }).populate('eventId').lean();
+    const orders = await Order.find({ status: "PAID" }).sort({ createdAt: -1 }).populate('eventId').lean();
 
     const getTotalRevenue = () => orders.reduce((acc: number, o: IOrder) => acc + o.totalAmount, 0);
 
@@ -87,4 +87,3 @@ export default async function AdminOrders() {
         </div>
     );
 }
-

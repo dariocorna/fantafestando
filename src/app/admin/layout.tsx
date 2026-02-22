@@ -15,8 +15,9 @@ export default async function AdminLayout({
     children: React.ReactNode;
 }>) {
     const events = await getAllEvents();
+    const selectableEvents = events.filter(event => !event.archived);
     // Convertiamo l'id a stringa per inviarlo al Client Component
-    const serializedEvents = events.map(e => ({
+    const serializedEvents = selectableEvents.map(e => ({
         _id: String(e._id),
         name: e.name,
         active: e.active
