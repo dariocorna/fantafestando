@@ -4,6 +4,7 @@ import Product from "@/models/Product";
 import Category from "@/models/Category";
 import PosDevice from "@/models/PosDevice";
 import dbConnect from "./mongoose";
+import { getOrderCodeFromOrder } from "./order-code";
 
 export interface PrintJob {
     ip: string;
@@ -116,6 +117,10 @@ export class PrinterService {
 
         // Jobs for Kitchen/Departments (Double Copy)
         const kitchenJobsByIp: Record<string, PrintJob> = {};
+        const orderCode = getOrderCodeFromOrder({
+            pickupNumber: (order as { pickupNumber?: number }).pickupNumber,
+            _id: order._id.toString()
+        });
         // Job for Cashier (Single Copy for items without kitchen printer)
         const cashierJob: PrintJob = {
             ip: cashierPrinterIp || "",
@@ -124,7 +129,7 @@ export class PrinterService {
             customerName: order.customer?.name,
             tableNumber: order.customer?.table,
             orderId: order._id.toString(),
-            shortCode: order._id.toString().slice(-4).toUpperCase()
+            shortCode: orderCode || undefined
         };
 
         order.cart.forEach((item: CartItem) => {

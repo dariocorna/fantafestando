@@ -2,6 +2,7 @@ import mongoose, { Schema, Document, Types } from 'mongoose';
 
 export interface IOrder extends Document {
     eventId: Types.ObjectId;
+    pickupNumber?: number;
     status: "PENDING" | "PAID" | "CANCELLED";
     customer: {
         name?: string;
@@ -29,6 +30,7 @@ export interface IOrder extends Document {
 
 const OrderSchema = new Schema<IOrder>({
     eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
+    pickupNumber: { type: Number, min: 1 },
     status: { type: String, enum: ["PENDING", "PAID", "CANCELLED"], default: "PENDING" },
     customer: {
         name: { type: String },
@@ -53,6 +55,8 @@ const OrderSchema = new Schema<IOrder>({
 }, {
     timestamps: true
 });
+
+OrderSchema.index({ eventId: 1, pickupNumber: 1 }, { unique: true, sparse: true });
 
 if (process.env.NODE_ENV === "development") {
     delete mongoose.models.Order;
