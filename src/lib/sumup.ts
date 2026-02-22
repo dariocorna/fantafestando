@@ -9,9 +9,10 @@ export const sumupClient = new SumUp({
     apiKey: SUMUP_API_KEY
 });
 
-export async function createSumUpCheckout(amount: number, currency: Currency = "EUR", merchantCode = "M_CODE") {
+export async function createSumUpCheckout(amount: number, currency: Currency = "EUR", merchantCode = "M_CODE", apiKey?: string) {
     try {
-        const checkout = await sumupClient.checkouts.create({
+        const client = apiKey ? new SumUp({ apiKey }) : sumupClient;
+        const checkout = await client.checkouts.create({
             merchant_code: merchantCode,
             amount,
             currency,
