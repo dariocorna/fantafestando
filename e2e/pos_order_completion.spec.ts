@@ -1,9 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
 
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function createAndActivateEvent(
     page: Page,
     eventName: string,
-    options?: { askTable?: boolean; askName?: boolean }
+    options?: { askTable?: boolean; askName?: boolean; predefinedTables?: string[] }
 ) {
     await page.goto("/admin/settings/events");
 
@@ -38,6 +42,9 @@ async function createAndActivateEvent(
     } else {
         if (await askNameCheckbox.isChecked()) await askNameCheckbox.uncheck();
     }
+
+    const predefinedTables = options?.predefinedTables ?? [];
+    await page.locator('textarea[name="predefinedTables"]').fill(predefinedTables.join("\n"));
 
     await page.getByRole("button", { name: /Salva Impostazioni/i }).click();
     await expect(page.getByText(/Modifiche salvate/i)).toBeVisible();
@@ -101,7 +108,7 @@ async function createCatalogProduct(page: Page, categoryName: string, productNam
 async function createWebOrderAndGetCode(
     page: Page,
     productName: string,
-    options?: { tableCode?: string }
+    options?: { tableCode?: string; usePresetTable?: boolean }
 ) {
     await page.goto("/menu");
     await page.waitForResponse(
@@ -140,14 +147,18 @@ async function createWebOrderAndGetCode(
     await expect(page.getByRole("button", { name: /INVIA ORDINE/i })).toBeVisible();
     if (options?.tableCode) {
         const tableCode = options.tableCode.toUpperCase();
-        const letter = tableCode.slice(0, 1);
-        const digits = tableCode.slice(1);
+        const tableInput = page.getByPlaceholder("Es: B02 oppure VIP TERRAZZA");
+        await expect(tableInput).toBeVisible();
 
-        const tableSection = page.locator("div").filter({ hasText: /Tavolo \(A-F \+ 2 cifre\)/i }).first();
-        await expect(tableSection).toBeVisible();
-        await tableSection.getByRole("button", { name: letter, exact: true }).click();
-        await tableSection.getByPlaceholder("Es: 07").fill(digits);
-        await expect(tableSection.getByText(new RegExp(`Codice Tavolo:\\s*${tableCode}`, "i"))).toBeVisible();
+        if (options.usePresetTable) {
+            await page.getByRole("button", { name: tableCode, exact: true }).click();
+        } else {
+            await tableInput.fill(tableCode);
+        }
+
+        await expect(
+            page.getByText(new RegExp(`Tavolo selezionato:\\s*${escapeRegExp(tableCode)}`, "i"))
+        ).toBeVisible();
     }
     await page.getByRole("button", { name: /INVIA ORDINE/i }).click();
 
@@ -192,12 +203,17 @@ test.describe("POS - Completamento ordine da codice", () => {
         const productName = `Product ${uniqueSuffix}`;
         const productPrice = "8.00";
         const tableCode = "B07";
+        const overrideTableCode = "C12";
+        const customTableName = "VIP TERRAZZA 1";
 
-        await createAndActivateEvent(page, eventName, { askTable: true });
+        await createAndActivateEvent(page, eventName, {
+            askTable: true,
+            predefinedTables: [tableCode, overrideTableCode, "A01"]
+        });
         await configureHardwareForCashPos(page, cashierPrinterName, `192.168.1.${Math.floor(Math.random() * 150) + 50}`, cashBoxName, posName);
         await createCatalogProduct(page, categoryName, productName, productPrice);
 
-        const orderCode = await createWebOrderAndGetCode(page, productName, { tableCode });
+        const orderCode = await createWebOrderAndGetCode(page, productName, { tableCode, usePresetTable: true });
 
         await openPosAndSelectDevice(page, posName);
 
@@ -218,19 +234,29 @@ test.describe("POS - Completamento ordine da codice", () => {
         await page.getByRole("button", { name: "PAGA ORA", exact: true }).click();
         const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i });
         await expect(checkoutDialog).toBeVisible();
-        await expect(checkoutDialog.getByText(/Tavolo \(A-F \+ 2 cifre\)/i)).toBeVisible();
+        await expect(checkoutDialog.getByText(/^Tavolo$/i)).toBeVisible();
 
-        const tableSelector = checkoutDialog.locator("div").filter({ hasText: /Tavolo \(A-F \+ 2 cifre\)/i }).first();
-        await tableSelector.getByRole("button", { name: "C", exact: true }).click();
-        await tableSelector.getByRole("button", { name: "CLR", exact: true }).click();
-        await tableSelector.getByRole("button", { name: "1", exact: true }).click();
-        await tableSelector.getByRole("button", { name: "2", exact: true }).click();
-        await expect(checkoutDialog.getByText(/C12/)).toBeVisible();
+        const tableInput = checkoutDialog.getByPlaceholder("Es: B02 oppure VIP TERRAZZA");
+        await expect(tableInput).toHaveValue(tableCode);
+
+        await checkoutDialog.getByRole("button", { name: overrideTableCode, exact: true }).click();
+        await expect(
+            checkoutDialog.getByText(new RegExp(`Tavolo selezionato:\\s*${overrideTableCode}`, "i"))
+        ).toBeVisible();
+
+        const confirmButton = checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true });
+        await checkoutDialog.getByRole("button", { name: "RESET", exact: true }).click();
+        await expect(checkoutDialog.getByText(/Tavolo selezionato:\s*---/i)).toBeVisible();
+        await expect(confirmButton).toBeDisabled();
+
+        await tableInput.fill(customTableName);
+        await expect(
+            checkoutDialog.getByText(new RegExp(`Tavolo selezionato:\\s*${escapeRegExp(customTableName)}`, "i"))
+        ).toBeVisible();
 
         await expect(checkoutDialog.getByText(/CONTANTI/i)).toBeVisible();
         await expect(checkoutDialog.getByText(/CARTA \/ POS/i)).toHaveCount(0);
 
-        const confirmButton = checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true });
         await confirmButton.scrollIntoViewIfNeeded();
         await confirmButton.click();
         await expect(checkoutDialog.getByText(/Stampa in corso/i)).toBeVisible();
