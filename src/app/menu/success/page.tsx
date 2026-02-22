@@ -39,7 +39,7 @@ function SuccessContent() {
 
                 <div className="space-y-4">
                     <p className="text-xs text-slate-400 font-bold leading-relaxed px-4">
-                        Il tuo ordine verrà preparato non appena avrai confermato il pagamento in cassa.
+                        La tua comanda è già stata inoltrata ai reparti: completa il pagamento in cassa mostrando questo codice.
                     </p>
                 </div>
             </motion.div>
