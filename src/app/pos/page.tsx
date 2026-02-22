@@ -13,10 +13,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NumPad } from "./components/NumPad"
 import { createOrder, triggerSumUpPayment, loadPendingOrderByCode, completePendingOrderPayment } from "./actions"
+import { getCategoryTheme } from "@/lib/category-colors"
 
 interface ICategory {
     _id: string
     name: string
+    uiColor?: string
 }
 
 interface IProduct {
@@ -132,6 +134,7 @@ export default function PosPage() {
     const selectedPosDevice = posDevices.find((d: IPosDevice) => d._id === selectedPosDeviceId)
     const selectedPaymentTerminal = getPeripheralRef(selectedPosDevice?.paymentTerminalId)
     const selectedCashBox = getPeripheralRef(selectedPosDevice?.cashBoxId)
+    const activeCategoryTheme = getCategoryTheme(categories.find((c) => c._id === activeCategory)?.uiColor)
 
     const cashAvailable = Boolean(selectedCashBox)
     const cardAvailable = Boolean(selectedPaymentTerminal)
@@ -306,17 +309,32 @@ export default function PosPage() {
             <div className="flex flex-col flex-1 h-full border-r bg-white dark:bg-slate-900">
                 {/* Tab Categorie */}
                 <div className="flex overflow-x-auto gap-2 p-4 bg-slate-50 dark:bg-slate-800 border-b scrollbar-hide shrink-0">
-                    {categories.map(cat => (
-                        <button
-                            key={cat._id}
-                            onClick={() => setActiveCategory(cat._id)}
-                            className={`px-8 py-6 rounded-xl font-bold text-lg whitespace-nowrap transition-all shadow-sm ${activeCategory === cat._id
-                                ? 'bg-blue-600 text-white scale-105 ring-4 ring-blue-200'
-                                : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200'}`}
-                        >
-                            {cat.name}
-                        </button>
-                    ))}
+                    {categories.map(cat => {
+                        const catTheme = getCategoryTheme(cat.uiColor)
+                        const isActive = activeCategory === cat._id
+
+                        return (
+                            <button
+                                key={cat._id}
+                                onClick={() => setActiveCategory(cat._id)}
+                                className={`px-8 py-6 rounded-xl font-bold text-lg whitespace-nowrap transition-all shadow-sm border ${isActive ? "scale-105" : ""}`}
+                                style={isActive
+                                    ? {
+                                        backgroundColor: catTheme.base,
+                                        color: catTheme.onBase,
+                                        borderColor: catTheme.base,
+                                        boxShadow: `0 0 0 4px ${catTheme.softBg}`
+                                    }
+                                    : {
+                                        backgroundColor: catTheme.softBg,
+                                        color: catTheme.base,
+                                        borderColor: catTheme.border
+                                    }}
+                            >
+                                {cat.name}
+                            </button>
+                        )
+                    })}
                 </div>
 
                 {/* Griglia Prodotti */}
@@ -328,9 +346,12 @@ export default function PosPage() {
                                 key={p._id}
                                 onClick={() => addToCart(p)}
                                 className="flex flex-col h-40 p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md active:scale-95 transition-all text-left"
+                                style={{ borderColor: activeCategoryTheme.border }}
                             >
                                 <span className="font-bold text-lg leading-tight mb-2 line-clamp-2">{p.name}</span>
-                                <span className="mt-auto text-blue-600 dark:text-blue-400 font-black text-xl">{p.basePrice.toFixed(2)} €</span>
+                                <span className="mt-auto font-black text-xl" style={{ color: activeCategoryTheme.base }}>
+                                    {p.basePrice.toFixed(2)} €
+                                </span>
                             </button>
                         ))
                     }
