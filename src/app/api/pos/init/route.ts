@@ -68,7 +68,8 @@ export async function GET() {
                 askTable: event.settings?.askTable ?? false
             },
             predefinedTables: parsePredefinedTablesInput(
-                Array.isArray(event.predefinedTables) ? event.predefinedTables.join("\n") : ""
+                Array.isArray(event.predefinedTables) ? event.predefinedTables.join("\n") : "",
+                Number.MAX_SAFE_INTEGER
             )
         };
 

@@ -10,7 +10,11 @@ import Printer from "@/models/Printer";
 import PosDevice from "@/models/PosDevice";
 import Peripheral from "@/models/Peripheral";
 import { revalidatePath } from "next/cache";
-import { parsePredefinedTablesInput } from "@/lib/table-presets";
+import {
+    countDistinctPredefinedTables,
+    MAX_PREDEFINED_TABLES,
+    parsePredefinedTablesInput
+} from "@/lib/table-presets";
 
 function revalidateHardwareViews() {
     revalidatePath("/admin/settings/hardware");
@@ -66,7 +70,11 @@ export async function updateEventSettingsAction(formData: FormData) {
     const defaultCashierPrinterIp = formData.get("defaultCashierPrinterIp") as string;
     const active = formData.get("active") === "on";
     const predefinedTablesInput = formData.get("predefinedTables") as string | null;
-    const predefinedTables = parsePredefinedTablesInput(predefinedTablesInput);
+    const distinctPredefinedTablesCount = countDistinctPredefinedTables(predefinedTablesInput);
+    if (distinctPredefinedTablesCount > MAX_PREDEFINED_TABLES) {
+        return { error: `Puoi inserire al massimo ${MAX_PREDEFINED_TABLES} tavoli predefiniti` };
+    }
+    const predefinedTables = parsePredefinedTablesInput(predefinedTablesInput, MAX_PREDEFINED_TABLES);
 
     if (!eventId) return { error: "Event ID obbligatorio" };
 
@@ -122,7 +130,8 @@ export async function cloneEventAction(formData: FormData) {
     if (!sourceEvent) return { error: "Evento sorgente non trovato" };
 
     const clonedPredefinedTables = parsePredefinedTablesInput(
-        Array.isArray(sourceEvent.predefinedTables) ? sourceEvent.predefinedTables.join("\n") : ""
+        Array.isArray(sourceEvent.predefinedTables) ? sourceEvent.predefinedTables.join("\n") : "",
+        Number.MAX_SAFE_INTEGER
     );
 
     // 1. Crea la nuova festa
