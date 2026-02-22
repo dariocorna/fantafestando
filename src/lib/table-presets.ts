@@ -29,7 +29,20 @@ export function parsePredefinedTablesInput(raw?: string | null, maxItems = MAX_P
     return unique
 }
 
+export function countDistinctPredefinedTables(raw?: string | null): number {
+    const chunks = (raw || "").split(/[\n,]+/)
+    const seen = new Set<string>()
+
+    for (const chunk of chunks) {
+        const normalized = normalizeTableValue(chunk)
+        if (!normalized) continue
+        seen.add(normalized.toLowerCase())
+    }
+
+    return seen.size
+}
+
 export function formatPredefinedTablesForTextarea(values?: string[] | null): string {
     if (!Array.isArray(values)) return ""
-    return parsePredefinedTablesInput(values.join("\n")).join("\n")
+    return parsePredefinedTablesInput(values.join("\n"), Number.MAX_SAFE_INTEGER).join("\n")
 }
