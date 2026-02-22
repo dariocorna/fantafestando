@@ -18,7 +18,8 @@ export default async function AdminSettings() {
             settings: {
                 askName: contextEvent.settings?.askName ?? false,
                 askTable: contextEvent.settings?.askTable ?? false
-            }
+            },
+            predefinedTables: Array.isArray(contextEvent.predefinedTables) ? contextEvent.predefinedTables : []
         }
         : null;
 

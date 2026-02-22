@@ -6,6 +6,7 @@ import Product from "@/models/Product";
 import PosDevice from "@/models/PosDevice";
 import "@/models/Printer"; // Import to register schema for .populate()
 import "@/models/Peripheral"; // Import to register schema for .populate()
+import { parsePredefinedTablesInput } from "@/lib/table-presets";
 
 export async function GET() {
     try {
@@ -65,7 +66,10 @@ export async function GET() {
             settings: {
                 askName: event.settings?.askName ?? false,
                 askTable: event.settings?.askTable ?? false
-            }
+            },
+            predefinedTables: parsePredefinedTablesInput(
+                Array.isArray(event.predefinedTables) ? event.predefinedTables.join("\n") : ""
+            )
         };
 
         return NextResponse.json({
