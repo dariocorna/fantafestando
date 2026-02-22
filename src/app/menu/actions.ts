@@ -28,7 +28,7 @@ export async function createPublicOrder(data: {
             cart: data.cart
         })
 
-        // Trigger network printing
+        // Per il flusso WebApp la comanda viene inoltrata subito ai reparti.
         await PrinterService.routeOrderToPrinters(order._id.toString());
 
         // We could generate a simpler shortCode if needed, 

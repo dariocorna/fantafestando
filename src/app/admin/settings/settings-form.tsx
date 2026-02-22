@@ -3,7 +3,6 @@
 import { useTransition } from "react";
 import { CardContent, CardFooter } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle2 } from "lucide-react";
 import { updateEventSettingsAction } from "./actions";
@@ -16,8 +15,6 @@ interface ActiveEventSettingsFormProps {
         settings?: {
             askName?: boolean;
             askTable?: boolean;
-            sumupMerchantCode?: string;
-            sumupApiKey?: string;
         };
     };
 }
@@ -88,29 +85,6 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                         </div>
                     </div>
 
-
-                    <div className="flex flex-col space-y-2 rounded-md border p-4 shadow-sm bg-blue-50/30 dark:bg-blue-900/10">
-                        <Label htmlFor="sumupMerchantCode" className="text-sm font-medium">Merchant Code SumUp</Label>
-                        <Input
-                            id="sumupMerchantCode"
-                            name="sumupMerchantCode"
-                            defaultValue={event.settings?.sumupMerchantCode}
-                            placeholder="M1234567"
-                            className="h-9"
-                        />
-                    </div>
-
-                    <div className="flex flex-col space-y-2 rounded-md border p-4 shadow-sm bg-blue-50/30 dark:bg-blue-900/10">
-                        <Label htmlFor="sumupApiKey" className="text-sm font-medium">API Key SumUp</Label>
-                        <Input
-                            id="sumupApiKey"
-                            name="sumupApiKey"
-                            type="password"
-                            defaultValue={event.settings?.sumupApiKey}
-                            placeholder="sup_sk_..."
-                            className="h-9"
-                        />
-                    </div>
                 </div>
             </CardContent>
             <CardFooter className="bg-slate-50/50 border-t px-6 py-4 flex justify-between items-center">
