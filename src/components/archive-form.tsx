@@ -27,7 +27,7 @@ export function ArchiveForm({
     idName?: string,
     message: string,
     action: (formData: FormData) => void,
-    buttonSize?: "default" | "sm" | "lg" | "icon" | "xs" | any,
+    buttonSize?: "default" | "sm" | "lg" | "icon" | "xs",
     iconSize?: number
 }) {
     return (

@@ -50,7 +50,7 @@ export async function createOrder(data: {
 export async function triggerSumUpPayment(amount: number, eventId: string) {
     try {
         await dbConnect();
-        const event = await Event.findById(eventId).lean() as any;
+        const event = await Event.findById(eventId).lean() as (import("@/models/Event").IEvent);
         if (!event || !event.settings?.sumupMerchantCode || !event.settings?.sumupApiKey) {
             return { success: false, error: "Configurazione SumUp mancante per questa festa" };
         }

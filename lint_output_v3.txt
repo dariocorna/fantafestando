@@ -1,0 +1,71 @@
+
+> temp-app@0.1.0 lint
+> eslint
+
+
+/home/dariocorna/devel/dario/osgfest/e2e/hardware.spec.ts
+  89:15  warning  'count' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/e2e/pos_selection.spec.ts
+  16:15  warning  'posButton' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/admin/settings/events/page.tsx
+  5:10  warning  'Button' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/admin/settings/page.tsx
+  2:69  warning  'CardFooter' is defined but never used  @typescript-eslint/no-unused-vars
+  3:39  warning  'User' is defined but never used        @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/admin/settings/pos/page.tsx
+  6:39  warning  'CardDescription' is defined but never used  @typescript-eslint/no-unused-vars
+  8:10  warning  'Plus' is defined but never used             @typescript-eslint/no-unused-vars
+  8:25  warning  'Trash2' is defined but never used           @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/admin/settings/printers/page.tsx
+  5:39  warning  'CardDescription' is defined but never used  @typescript-eslint/no-unused-vars
+  7:10  warning  'Plus' is defined but never used             @typescript-eslint/no-unused-vars
+  7:40  warning  'Trash2' is defined but never used           @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/admin/settings/settings-form.tsx
+  8:10  warning  'Printer' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/api/pos/init/route.ts
+  7:8  warning  'Printer' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/menu/actions.ts
+  6:10  warning  'nanoid' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/menu/checkout/page.tsx
+  30:18  warning  'setCart' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  37:21  warning  'setEventId' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/menu/page.tsx
+  5:5  warning  'ShoppingBag' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/menu/success/page.tsx
+   3:10  warning  'useState' is defined but never used    @typescript-eslint/no-unused-vars
+   3:20  warning  'useEffect' is defined but never used   @typescript-eslint/no-unused-vars
+   8:5   warning  'ArrowRight' is defined but never used  @typescript-eslint/no-unused-vars
+  10:5   warning  'Printer' is defined but never used     @typescript-eslint/no-unused-vars
+  11:5   warning  'Home' is defined but never used        @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/pos/page.tsx
+  4:10  warning  'ArrowLeft' is defined but never used  @typescript-eslint/no-unused-vars
+  4:35  warning  'Info' is defined but never used       @typescript-eslint/no-unused-vars
+  4:47  warning  'Table' is defined but never used      @typescript-eslint/no-unused-vars
+  4:76  warning  'Search' is defined but never used     @typescript-eslint/no-unused-vars
+  4:84  warning  'Plus' is defined but never used       @typescript-eslint/no-unused-vars
+  4:90  warning  'Minus' is defined but never used      @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/components/app-sidebar.tsx
+  2:10  warning  'Calendar' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/lib/printer.ts
+   5:8   warning  'Printer' is defined but never used         @typescript-eslint/no-unused-vars
+  10:11  warning  'GlobalMongoose' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/models/Event.ts
+  1:38  warning  'Types' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 32 problems (0 errors, 32 warnings)
+

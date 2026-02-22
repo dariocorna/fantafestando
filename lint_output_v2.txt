@@ -1,0 +1,95 @@
+
+> temp-app@0.1.0 lint
+> eslint
+
+
+/home/dariocorna/devel/dario/osgfest/e2e/hardware.spec.ts
+  89:15  warning  'count' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/e2e/pos_selection.spec.ts
+  16:15  warning  'posButton' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/admin/orders/page.tsx
+  3:8  warning  'Event' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/admin/settings/events/page.tsx
+  5:10  warning  'Button' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/admin/settings/page.tsx
+  2:69  warning  'CardFooter' is defined but never used  @typescript-eslint/no-unused-vars
+  3:39  warning  'User' is defined but never used        @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/admin/settings/pos/page.tsx
+  6:39  warning  'CardDescription' is defined but never used  @typescript-eslint/no-unused-vars
+  8:10  warning  'Plus' is defined but never used             @typescript-eslint/no-unused-vars
+  8:25  warning  'Trash2' is defined but never used           @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/admin/settings/printers/page.tsx
+  5:39  warning  'CardDescription' is defined but never used  @typescript-eslint/no-unused-vars
+  7:10  warning  'Plus' is defined but never used             @typescript-eslint/no-unused-vars
+  7:40  warning  'Trash2' is defined but never used           @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/admin/settings/settings-form.tsx
+  8:10  warning  'Printer' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/api/pos/init/route.ts
+  7:8  warning  'Printer' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/menu/actions.ts
+  6:10  warning  'nanoid' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/menu/checkout/page.tsx
+  10:5   warning  'CheckCircle2' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              @typescript-eslint/no-unused-vars
+  11:5   warning  'Calendar' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  @typescript-eslint/no-unused-vars
+  19:10  warning  'motion' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    @typescript-eslint/no-unused-vars
+  23:38  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              @typescript-eslint/no-explicit-any
+  28:56  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              @typescript-eslint/no-explicit-any
+  33:24  error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/home/dariocorna/devel/dario/osgfest/src/app/menu/checkout/page.tsx:33:24
+  31 |         const savedCart = localStorage.getItem("osg_cart")
+  32 |         const savedEventId = localStorage.getItem("osg_eventId")
+> 33 |         if (savedCart) setCart(JSON.parse(savedCart))
+     |                        ^^^^^^^ Avoid calling setState() directly within an effect
+  34 |         if (savedEventId) {
+  35 |             setEventId(savedEventId)
+  36 |             // Fetch event settings to know if we need name/table  react-hooks/set-state-in-effect
+
+/home/dariocorna/devel/dario/osgfest/src/app/menu/page.tsx
+   5:5   warning  'ShoppingBag' is defined but never used   @typescript-eslint/no-unused-vars
+  11:5   warning  'Check' is defined but never used         @typescript-eslint/no-unused-vars
+  39:52  error    Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/dariocorna/devel/dario/osgfest/src/app/menu/success/page.tsx
+   3:10  warning  'useState' is defined but never used    @typescript-eslint/no-unused-vars
+   3:20  warning  'useEffect' is defined but never used   @typescript-eslint/no-unused-vars
+   8:5   warning  'ArrowRight' is defined but never used  @typescript-eslint/no-unused-vars
+  10:5   warning  'Printer' is defined but never used     @typescript-eslint/no-unused-vars
+  11:5   warning  'Home' is defined but never used        @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/app/pos/page.tsx
+  4:10  warning  'ArrowLeft' is defined but never used  @typescript-eslint/no-unused-vars
+  4:35  warning  'Info' is defined but never used       @typescript-eslint/no-unused-vars
+  4:47  warning  'Table' is defined but never used      @typescript-eslint/no-unused-vars
+  4:76  warning  'Search' is defined but never used     @typescript-eslint/no-unused-vars
+  4:84  warning  'Plus' is defined but never used       @typescript-eslint/no-unused-vars
+  4:90  warning  'Minus' is defined but never used      @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/components/app-sidebar.tsx
+  2:10  warning  'Calendar' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/lib/printer.ts
+   5:8   warning  'Printer' is defined but never used         @typescript-eslint/no-unused-vars
+  10:11  warning  'GlobalMongoose' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/dariocorna/devel/dario/osgfest/src/models/Event.ts
+  1:38  warning  'Types' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 39 problems (4 errors, 35 warnings)
+
