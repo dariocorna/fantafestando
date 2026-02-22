@@ -1,0 +1,162 @@
+"use server";
+
+import dbConnect from "@/lib/mongoose";
+import Event from "@/models/Event";
+import Category from "@/models/Category";
+import Product from "@/models/Product";
+import Printer from "@/models/Printer";
+import PosDevice from "@/models/PosDevice";
+import { revalidatePath } from "next/cache";
+
+export async function createEventAction(formData: FormData) {
+    const name = formData.get("name") as string;
+    if (!name) return { error: "Nome obbligatorio" };
+
+    await dbConnect();
+    await Event.create({
+        name,
+        active: false,
+        archived: false,
+        settings: { askName: false, askTable: false }
+    });
+
+    revalidatePath("/admin/settings/events");
+}
+
+export async function updateEventSettingsAction(formData: FormData) {
+    const eventId = formData.get("eventId") as string;
+    const askName = formData.get("askName") === "on";
+    const askTable = formData.get("askTable") === "on";
+    const defaultCashierPrinterIp = formData.get("defaultCashierPrinterIp") as string;
+    const active = formData.get("active") === "on";
+    const sumupMerchantCode = formData.get("sumupMerchantCode") as string;
+    const sumupApiKey = formData.get("sumupApiKey") as string;
+
+    if (!eventId) return { error: "Event ID obbligatorio" };
+
+    await dbConnect();
+
+    if (active) {
+        // Deactivate all others first
+        await Event.updateMany({ _id: { $ne: eventId } }, { active: false });
+    }
+
+    await Event.findByIdAndUpdate(eventId, {
+        active,
+        "settings.askName": askName,
+        "settings.askTable": askTable,
+        "settings.defaultCashierPrinterIp": defaultCashierPrinterIp,
+        "settings.sumupMerchantCode": sumupMerchantCode,
+        "settings.sumupApiKey": sumupApiKey
+    });
+
+    revalidatePath("/admin/settings");
+    revalidatePath("/admin/settings/events");
+    return { success: true };
+}
+
+export async function cloneEventAction(formData: FormData) {
+    const sourceEventId = formData.get("sourceEventId") as string;
+    const newName = formData.get("newName") as string;
+    if (!sourceEventId || !newName) return { error: "Dati mancanti" };
+
+    await dbConnect();
+
+    const sourceEvent = await Event.findById(sourceEventId).lean();
+    if (!sourceEvent) return { error: "Evento sorgente non trovato" };
+
+    // 1. Crea la nuova festa
+    const newEvent = await Event.create({
+        name: newName,
+        active: false,
+        archived: false,
+        settings: sourceEvent.settings
+    });
+
+    // 2. Clona le Categorie
+    const categories = await Category.find({ eventId: sourceEventId }).lean();
+    const categoryMap = new Map(); // mappa vecchi id -> nuovi id
+
+    for (const cat of categories) {
+        const newCat = await Category.create({
+            eventId: newEvent._id,
+            name: cat.name,
+            uiColor: cat.uiColor,
+            printerIp: cat.printerIp
+        });
+        categoryMap.set((cat._id as any).toString(), newCat._id);
+    }
+
+    // 3. Clona i Prodotti associandoli alle nuove Categorie
+    const products = await Product.find({ eventId: sourceEventId }).lean();
+    for (const prod of products) {
+        await Product.create({
+            eventId: newEvent._id,
+            categoryId: categoryMap.get((prod.categoryId as any).toString()),
+            name: prod.name,
+            basePrice: prod.basePrice,
+            isSoldOut: false,
+            variants: prod.variants
+        });
+    }
+
+    revalidatePath("/admin/settings/events");
+    return { success: true };
+}
+
+// PRINTER ACTIONS
+export async function createPrinterAction(formData: FormData) {
+    const eventId = formData.get("eventId") as string;
+    const name = formData.get("name") as string;
+    const ip = formData.get("ip") as string;
+    const type = formData.get("type") as "CASHIER" | "KITCHEN";
+
+    if (!eventId || !name || !ip) return { error: "Dati mancanti" };
+
+    await dbConnect();
+    await Printer.create({ eventId, name, ip, type });
+
+    revalidatePath("/admin/settings/printers");
+}
+
+export async function deletePrinterAction(formData: FormData) {
+    const id = formData.get("id") as string;
+    if (!id) return;
+
+    await dbConnect();
+    await Printer.findByIdAndDelete(id);
+
+    // Unlink from categories
+    const Category = (await import("@/models/Category")).default;
+    await Category.updateMany({ printerId: id }, { $unset: { printerId: 1 } });
+
+    // Delete PosDevices linked to this printer
+    const PosDevice = (await import("@/models/PosDevice")).default;
+    await PosDevice.deleteMany({ printerId: id });
+
+    revalidatePath("/admin/settings/printers");
+}
+
+// POS DEVICE ACTIONS
+export async function createPosDeviceAction(formData: FormData) {
+    const eventId = formData.get("eventId") as string;
+    const name = formData.get("name") as string;
+    const printerId = formData.get("printerId") as string;
+
+    if (!eventId || !name || !printerId) return { error: "Dati mancanti" };
+
+    await dbConnect();
+    await PosDevice.create({ eventId, name, printerId });
+
+    revalidatePath("/admin/settings/pos");
+}
+
+export async function deletePosDeviceAction(formData: FormData) {
+    const id = formData.get("id") as string;
+    if (!id) return;
+
+    await dbConnect();
+    await PosDevice.findByIdAndDelete(id);
+
+    revalidatePath("/admin/settings/pos");
+}
