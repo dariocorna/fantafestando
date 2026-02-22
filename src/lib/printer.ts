@@ -2,6 +2,8 @@ import { ThermalPrinter, PrinterTypes, CharacterSet } from "node-thermal-printer
 import Order from "@/models/Order";
 import Product from "@/models/Product";
 import Category from "@/models/Category";
+import Printer from "@/models/Printer";
+import PosDevice from "@/models/PosDevice";
 import dbConnect from "./mongoose";
 
 export interface PrintJob {
@@ -19,7 +21,7 @@ export interface PrintJob {
 }
 
 export class PrinterService {
-    static async printComanda(job: PrintJob) {
+    static async printComanda(job: PrintJob, copies: number = 1) {
         if (!job.ip) {
             console.warn(`No printer IP defined for job ${job.orderId}`);
             return false;
@@ -74,8 +76,10 @@ export class PrinterService {
         printer.cut();
 
         try {
-            await printer.execute();
-            console.log(`Print job sent to ${job.ip} successfully`);
+            for (let i = 0; i < copies; i++) {
+                await printer.execute();
+            }
+            console.log(`Print job sent to ${job.ip} (${copies} copies) successfully`);
             return true;
         } catch (error) {
             console.error(`Printer execution error at ${job.ip}:`, error);
@@ -83,43 +87,65 @@ export class PrinterService {
         }
     }
 
-    static async routeOrderToPrinters(orderId: string) {
+    static async routeOrderToPrinters(orderId: string, posDeviceId?: string) {
         await dbConnect();
         const order = await Order.findById(orderId).lean();
         if (!order) return;
 
-        // Fetch categories to get printer IPs
-        const categoryIds = order.cart.map((item: any) => item.productId); // This is actually productId in the cart
-        // We need to fetch the products to get their categories
+        // Fetch POS Device and its printer
+        let cashierPrinterIp: string | undefined = undefined;
+        if (posDeviceId) {
+            const device = await PosDevice.findById(posDeviceId).populate('printerId').lean() as any;
+            cashierPrinterIp = device?.printerId?.ip;
+        }
+
+        // Fetch products and their categories
         const productIds = order.cart.map((item: any) => item.productId);
         const products = await Product.find({ _id: { $in: productIds } }).lean();
 
         const categoryIdsFromProducts = Array.from(new Set(products.map(p => p.categoryId.toString())));
-        const categories = await Category.find({ _id: { $in: categoryIdsFromProducts } }).lean();
+        const categories = await Category.find({ _id: { $in: categoryIdsFromProducts } }).populate('printerId').lean();
 
-        // Group cart items by printer IP
-        const jobsByIp: Record<string, PrintJob> = {};
+        // Jobs for Kitchen/Departments (Double Copy)
+        const kitchenJobsByIp: Record<string, PrintJob> = {};
+        // Job for Cashier (Single Copy for items without kitchen printer)
+        const cashierJob: PrintJob = {
+            ip: cashierPrinterIp || "",
+            title: "COMANDA CLIENTE",
+            items: [],
+            customerName: order.customer?.name,
+            tableNumber: order.customer?.table,
+            orderId: order._id.toString(),
+            shortCode: order._id.toString().slice(-4).toUpperCase()
+        };
 
         order.cart.forEach((item: any) => {
             const product = products.find(p => p._id.toString() === item.productId.toString());
             if (!product) return;
             const category = categories.find(c => c._id.toString() === product.categoryId.toString());
-            const ip = category?.printerIp;
+            const kitchenPrinter = category?.printerId as any;
 
-            if (ip) {
-                if (!jobsByIp[ip]) {
-                    const shortCode = order._id.toString().slice(-4).toUpperCase();
-                    jobsByIp[ip] = {
-                        ip,
-                        title: "COMANDA",
+            if (kitchenPrinter?.ip) {
+                // Add to kitchen job (IP specific)
+                if (!kitchenJobsByIp[kitchenPrinter.ip]) {
+                    kitchenJobsByIp[kitchenPrinter.ip] = {
+                        ip: kitchenPrinter.ip,
+                        title: "COMANDA REPARTO",
                         items: [],
                         customerName: order.customer?.name,
                         tableNumber: order.customer?.table,
                         orderId: order._id.toString(),
-                        shortCode
+                        shortCode: cashierJob.shortCode
                     };
                 }
-                jobsByIp[ip].items.push({
+                kitchenJobsByIp[kitchenPrinter.ip].items.push({
+                    name: item.snapshotName,
+                    quantity: item.quantity,
+                    notes: item.customKitchenNotes
+                });
+            } else if (cashierPrinterIp) {
+                // No kitchen printer -> fallback to cashier printer (1 copy for customer)
+                cashierJob.items.push({
                     name: item.snapshotName,
                     quantity: item.quantity,
                     notes: item.customKitchenNotes
@@ -127,11 +153,21 @@ export class PrinterService {
             }
         });
 
-        // Execute all jobs
-        const results = await Promise.all(
-            Object.values(jobsByIp).map(job => this.printComanda(job))
-        );
+        const printPromises: Promise<boolean>[] = [];
 
-        return results;
+        // 1. Print Kitchen Jobs: 2 copies each (one for kitchen, one for customer)
+        Object.values(kitchenJobsByIp).forEach(job => {
+            printPromises.push(this.printComanda(job, 2));
+        });
+
+        // 2. Print Cashier fallback for customer: 1 copy
+        if (cashierJob.items.length > 0 && cashierJob.ip) {
+            printPromises.push(this.printComanda(cashierJob, 1));
+        }
+
+        // 3. Always print a full fiscal/summary receipt at the cashier printer? 
+        // For now, let's stick to the "comande" requirements.
+
+        return await Promise.all(printPromises);
     }
 }
