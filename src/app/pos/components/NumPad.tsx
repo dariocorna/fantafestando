@@ -6,13 +6,14 @@ import { Delete } from "lucide-react"
 interface NumPadProps {
     value: string
     onChange: (val: string) => void
+    maxLength?: number
 }
 
-export function NumPad({ value, onChange }: NumPadProps) {
+export function NumPad({ value, onChange, maxLength = 4 }: NumPadProps) {
     const numbers = ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
 
     const handlePress = (num: string) => {
-        if (value.length < 4) onChange(value + num)
+        if (value.length < maxLength) onChange(value + num)
     }
 
     const handleClear = () => onChange("")
