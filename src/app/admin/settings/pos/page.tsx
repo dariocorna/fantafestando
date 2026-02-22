@@ -144,6 +144,7 @@ export default async function PosDevicesPage() {
                                         paymentTerminalId: String(device.paymentTerminalId || ""),
                                         cashBoxId: String(device.cashBoxId || "")
                                     }}
+                                    eventId={eventId}
                                     printers={cashierPrinters.map(p => ({ id: String(p._id), name: p.name }))}
                                     peripherals={peripherals.map((p: IPeripheral) => ({ id: String(p._id), name: p.name, type: p.type }))}
                                     updateAction={updatePosDeviceAction}
@@ -151,6 +152,7 @@ export default async function PosDevicesPage() {
                                 <DeleteForm
                                     id={String(device._id)}
                                     action={deletePosDeviceAction}
+                                    hiddenFields={[{ name: "eventId", value: eventId }]}
                                     message={`Sei sicuro di voler eliminare il Punto Cassa ${device.name}?`}
                                 />
                             </div>
