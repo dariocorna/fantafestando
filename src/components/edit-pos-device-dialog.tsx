@@ -22,16 +22,22 @@ function SubmitButton() {
 export function EditPosDeviceDialog({
     posDevice,
     printers,
+    peripherals,
     updateAction
 }: {
-    posDevice: { id: string, name: string, printerId: string },
+    posDevice: { id: string, name: string, printerId: string, paymentTerminalId?: string, cashBoxId?: string },
     printers: { id: string, name: string }[],
+    peripherals: { id: string, name: string, type: string }[],
     updateAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | undefined>
 }) {
     const [open, setOpen] = useState(false);
     const router = useRouter();
 
     async function handleSubmit(formData: FormData) {
+        // Normalize "none" selections
+        if (formData.get("paymentTerminalId") === "none") formData.set("paymentTerminalId", "");
+        if (formData.get("cashBoxId") === "none") formData.set("cashBoxId", "");
+
         const result = await updateAction(formData);
         if (result?.error) {
             alert(result.error);
@@ -67,6 +73,34 @@ export function EditPosDeviceDialog({
                                 </SelectTrigger>
                                 <SelectContent>
                                     {printers.map(p => (
+                                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="pos-edit-paymentTerminalId">Terminale Pagamento (Elettronico)</Label>
+                            <Select name="paymentTerminalId" defaultValue={posDevice.paymentTerminalId || "none"}>
+                                <SelectTrigger id="pos-edit-paymentTerminalId">
+                                    <SelectValue placeholder="Nessuno" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">Nessuno</SelectItem>
+                                    {peripherals.filter(p => p.type === "SUMUP").map(p => (
+                                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="pos-edit-cashBoxId">Cassetta Contanti (Manuale)</Label>
+                            <Select name="cashBoxId" defaultValue={posDevice.cashBoxId || "none"}>
+                                <SelectTrigger id="pos-edit-cashBoxId">
+                                    <SelectValue placeholder="Nessuna" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">Nessuna</SelectItem>
+                                    {peripherals.filter(p => p.type === "CASH_BOX").map(p => (
                                         <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                                     ))}
                                 </SelectContent>
