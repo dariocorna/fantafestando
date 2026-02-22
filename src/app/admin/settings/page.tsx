@@ -17,9 +17,7 @@ export default async function AdminSettings() {
             active: contextEvent.active,
             settings: {
                 askName: contextEvent.settings?.askName ?? false,
-                askTable: contextEvent.settings?.askTable ?? false,
-                sumupMerchantCode: contextEvent.settings?.sumupMerchantCode ?? "",
-                sumupApiKey: contextEvent.settings?.sumupApiKey ?? ""
+                askTable: contextEvent.settings?.askTable ?? false
             }
         }
         : null;

@@ -5,6 +5,7 @@ import Category from "@/models/Category";
 import Product from "@/models/Product";
 import PosDevice from "@/models/PosDevice";
 import "@/models/Printer"; // Import to register schema for .populate()
+import "@/models/Peripheral"; // Import to register schema for .populate()
 
 export async function GET() {
     try {
@@ -27,13 +28,51 @@ export async function GET() {
         const products = await Product.find({ eventId: event._id }).lean();
 
         // 4. Fetch POS Devices for this event
-        const posDevices = await PosDevice.find({ eventId: event._id }).populate('printerId').lean();
+        const posDevices = await PosDevice.find({ eventId: event._id })
+            .populate({ path: "printerId", select: "name ip" })
+            .populate({ path: "paymentTerminalId", select: "name type" })
+            .populate({ path: "cashBoxId", select: "name type" })
+            .lean();
+
+        const serializedPosDevices = posDevices.map((device) => ({
+            _id: String(device._id),
+            name: device.name,
+            printerId: device.printerId && typeof device.printerId === "object"
+                ? {
+                    _id: String((device.printerId as { _id: unknown })._id),
+                    name: (device.printerId as { name?: string }).name || "",
+                    ip: (device.printerId as { ip?: string }).ip || ""
+                }
+                : (device.printerId ? String(device.printerId) : undefined),
+            paymentTerminalId: device.paymentTerminalId && typeof device.paymentTerminalId === "object"
+                ? {
+                    _id: String((device.paymentTerminalId as { _id: unknown })._id),
+                    name: (device.paymentTerminalId as { name?: string }).name || "",
+                    type: (device.paymentTerminalId as { type?: string }).type || "OTHER"
+                }
+                : (device.paymentTerminalId ? String(device.paymentTerminalId) : undefined),
+            cashBoxId: device.cashBoxId && typeof device.cashBoxId === "object"
+                ? {
+                    _id: String((device.cashBoxId as { _id: unknown })._id),
+                    name: (device.cashBoxId as { name?: string }).name || "",
+                    type: (device.cashBoxId as { type?: string }).type || "OTHER"
+                }
+                : (device.cashBoxId ? String(device.cashBoxId) : undefined)
+        }));
+
+        const sanitizedEvent = {
+            ...event,
+            settings: {
+                askName: event.settings?.askName ?? false,
+                askTable: event.settings?.askTable ?? false
+            }
+        };
 
         return NextResponse.json({
-            event,
+            event: sanitizedEvent,
             categories,
             products,
-            posDevices
+            posDevices: serializedPosDevices
         });
     } catch (error) {
         console.error("POS Init Error:", error);
