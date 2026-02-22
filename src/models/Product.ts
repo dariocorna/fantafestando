@@ -6,6 +6,7 @@ export interface IProduct extends Document {
     name: string;
     basePrice: number;
     isSoldOut: boolean;
+    availableDays: string[];
     variants: Array<{
         optionName: string;
         priceVariation: number;
@@ -18,6 +19,7 @@ const ProductSchema = new Schema<IProduct>({
     name: { type: String, required: true },
     basePrice: { type: Number, required: true },
     isSoldOut: { type: Boolean, default: false },
+    availableDays: { type: [String], default: [] },
     variants: [{
         optionName: { type: String, required: true },
         priceVariation: { type: Number, required: true }
