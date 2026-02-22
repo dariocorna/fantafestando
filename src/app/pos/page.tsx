@@ -667,11 +667,6 @@ export default function PosPage() {
                                                 RESET
                                             </Button>
                                         </div>
-                                        {!tableValueValid && tableNumber.trim().length > 0 ? (
-                                            <p className="text-xs font-semibold text-amber-700">
-                                                Inserisci un valore tavolo valido.
-                                            </p>
-                                        ) : null}
                                     </div>
                                 )}
 
