@@ -10,7 +10,8 @@ import {
     Loader2,
     X,
     Banknote,
-    CreditCard
+    CreditCard,
+    Monitor
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -42,6 +43,9 @@ export default function PosPage() {
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
     const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD">("CASH")
+    const [posDevices, setPosDevices] = useState<any[]>([])
+    const [selectedPosDeviceId, setSelectedPosDeviceId] = useState<string | null>(null)
+    const [isPosSelectorOpen, setIsPosSelectorOpen] = useState(false)
 
     // Info Cliente
     const [customerName, setCustomerName] = useState("")
@@ -56,11 +60,28 @@ export default function PosPage() {
                 setActiveEvent(data.event)
                 setCategories(data.categories)
                 setProducts(data.products)
+                setPosDevices(data.posDevices)
                 if (data.categories.length > 0) setActiveCategory(data.categories[0]._id)
+
+                // Check localStorage for POS Device
+                const savedPosId = localStorage.getItem('osgfest_pos_id')
+                if (savedPosId) {
+                    setSelectedPosDeviceId(savedPosId)
+                } else {
+                    setIsPosSelectorOpen(true)
+                }
             }
         }
         loadInitialData()
     }, [])
+
+    const selectPosDevice = (id: string) => {
+        setSelectedPosDeviceId(id)
+        localStorage.setItem('osgfest_pos_id', id)
+        setIsPosSelectorOpen(false)
+    }
+
+    const selectedPosDevice = posDevices.find(d => d._id === selectedPosDeviceId)
 
     const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0)
 
@@ -87,16 +108,18 @@ export default function PosPage() {
     const handleCheckout = async () => {
         setIsProcessing(true)
 
+        let sumupCheckoutId: string | undefined = undefined;
+
         if (paymentMethod === "CARD") {
             // Avvia pagamento su terminale
-            const sumupResult = await triggerSumUpPayment(total);
+            const sumupResult = await triggerSumUpPayment(total, activeEvent._id);
             if (!sumupResult.success) {
                 alert("Errore SumUp: " + sumupResult.error);
                 setIsProcessing(false);
                 return;
             }
-            // In un caso reale qui potremmo fare polling o aspettare webhook.
-            // Per simularlo, assumiamo successo dopo il trigger.
+            sumupCheckoutId = sumupResult.checkoutId;
+            // L'ordine verrà creato in stato PENDING e confermato via webhook.
         }
 
         const orderData = {
@@ -112,7 +135,9 @@ export default function PosPage() {
                 quantity: item.quantity,
                 selectedOptions: []
             })),
-            paymentMethod
+            paymentMethod,
+            sumupCheckoutId,
+            posDeviceId: selectedPosDeviceId || undefined
         }
 
         const result = await createOrder(orderData)
@@ -172,6 +197,13 @@ export default function PosPage() {
                     <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 uppercase tracking-tight">
                         {activeEvent?.name || "Cassa Osgfest"}
                     </h2>
+                    <button
+                        onClick={() => setIsPosSelectorOpen(true)}
+                        className="text-xs font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1 mt-1 hover:underline"
+                    >
+                        <Monitor size={12} />
+                        {selectedPosDevice ? `Postazione: ${selectedPosDevice.name}` : "Seleziona Cassa"}
+                    </button>
                     <div className="grid grid-cols-2 gap-2 mt-4">
                         <div className="bg-white dark:bg-slate-700 border p-2 rounded-xl flex items-center gap-2">
                             <User size={18} className="text-slate-400" />
@@ -289,6 +321,37 @@ export default function PosPage() {
                                 {isProcessing ? <Loader2 className="animate-spin" /> : "CONFERMA"}
                             </Button>
                         </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+            {/* Modal Selezione Punto Cassa */}
+            <Dialog open={isPosSelectorOpen} onOpenChange={setIsPosSelectorOpen}>
+                <DialogContent className="max-w-[400px] rounded-3xl p-8">
+                    <DialogHeader>
+                        <DialogTitle className="text-2xl font-black text-center">In quale cassa sei?</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        {posDevices.length === 0 ? (
+                            <p className="text-center text-muted-foreground">Loggati come admin e configura almeno un Punto Cassa nelle impostazioni hardware.</p>
+                        ) : (
+                            posDevices.map((device) => {
+                                const isSelected = device._id === selectedPosDeviceId;
+                                return (
+                                    <button
+                                        key={device._id}
+                                        onClick={() => selectPosDevice(device._id)}
+                                        className={`w-full p-6 rounded-2xl border-2 text-left transition-all flex items-center justify-between group ${isSelected ? 'border-blue-600 bg-blue-50' : 'border-slate-100 hover:border-blue-200'
+                                            }`}
+                                    >
+                                        <div>
+                                            <p className="font-black text-lg">{device.name}</p>
+                                            <p className="text-sm text-slate-500">Stampante: {device.printerId?.name || 'Nessuna'}</p>
+                                        </div>
+                                        <Monitor className={`transition-colors ${isSelected ? 'text-blue-600' : 'text-slate-300 group-hover:text-blue-400'}`} />
+                                    </button>
+                                );
+                            })
+                        )}
                     </div>
                 </DialogContent>
             </Dialog>

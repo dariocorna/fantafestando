@@ -4,6 +4,8 @@ import dbConnect from "@/lib/mongoose"
 import Order from "@/models/Order"
 import { revalidatePath } from "next/cache"
 import { PrinterService } from "@/lib/printer"
+import Event from "@/models/Event"
+import { createSumUpCheckout } from "@/lib/sumup"
 
 export async function createOrder(data: {
     eventId: string,
@@ -15,21 +17,27 @@ export async function createOrder(data: {
         quantity: number,
         selectedOptions: Array<{ name: string, priceVariation: number }>
     }>,
-    paymentMethod: "CASH" | "CARD" | "OTHER"
+    paymentMethod: "CASH" | "CARD" | "OTHER",
+    sumupCheckoutId?: string,
+    posDeviceId?: string
 }) {
     try {
         await dbConnect()
         const order = await Order.create({
             eventId: data.eventId,
-            status: "PAID",
+            status: data.paymentMethod === "CARD" ? "PENDING" : "PAID",
             customer: data.customer,
             totalAmount: data.totalAmount,
             cart: data.cart,
-            paymentMethod: data.paymentMethod
+            paymentMethod: data.paymentMethod,
+            sumupCheckoutId: data.sumupCheckoutId,
+            posDeviceId: data.posDeviceId
         })
 
-        // Trigger network printing
-        await PrinterService.routeOrderToPrinters(order._id.toString());
+        // Trigger network printing ONLY if PAID immediately
+        if (order.status === "PAID") {
+            await PrinterService.routeOrderToPrinters(order._id.toString(), data.posDeviceId);
+        }
 
         revalidatePath("/admin/orders")
         return { success: true, orderId: order._id.toString() }
@@ -39,22 +47,30 @@ export async function createOrder(data: {
     }
 }
 
-export async function triggerSumUpPayment(amount: number) {
-    // In a real scenario, we would use the Terminal API or create a checkout
-    // that the terminal is polling. For now, we simulate the Cloud API call.
+export async function triggerSumUpPayment(amount: number, eventId: string) {
     try {
-        // Example: await sumupClient.checkouts.create(...)
-        // But for Terminals, it's often a different endpoint /readers/checkout
+        await dbConnect();
+        const event = await Event.findById(eventId).lean() as any;
+        if (!event || !event.settings?.sumupMerchantCode || !event.settings?.sumupApiKey) {
+            return { success: false, error: "Configurazione SumUp mancante per questa festa" };
+        }
 
-        console.log(`[SumUp] Inizializzazione pagamento di ${amount}€ sul terminale...`);
+        console.log(`[SumUp] Inizializzazione pagamento di ${amount}€ per ${event.name}...`);
 
-        // Simulating network latency
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        const result = await createSumUpCheckout(
+            amount,
+            "EUR",
+            event.settings.sumupMerchantCode,
+            event.settings.sumupApiKey
+        );
 
-        // Implementation note: we would return a checkoutId or status
-        return { success: true, status: "PENDING_ON_TERMINAL" };
+        if (!result.success) {
+            return { success: false, error: result.error };
+        }
+
+        return { success: true, checkoutId: result.id };
     } catch (error) {
-        console.error("SumUp Terminal Error:", error);
-        return { success: false, error: "Errore comunicazione terminale" };
+        console.error("SumUp Context Error:", error);
+        return { success: false, error: "Errore durante l'inizializzazione del pagamento" };
     }
 }
