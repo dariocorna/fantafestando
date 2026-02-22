@@ -1,6 +1,7 @@
 import dbConnect from "@/lib/mongoose";
 import Category from "@/models/Category";
 import Product from "@/models/Product";
+import Printer from "@/models/Printer";
 import { getAdminContextEventId } from "@/lib/events";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,20 +33,21 @@ export default async function AdminCatalog() {
         return <div className="text-center p-10 text-muted-foreground">Nessuna festa attiva o selezionata. Seleziona una festa dalla barra in alto.</div>;
     }
 
-    const categories = await Category.find({ eventId: currentEventId }).lean();
+    const categories = await Category.find({ eventId: currentEventId }).populate('printerId').lean();
     const products = await Product.find({ eventId: currentEventId }).populate('categoryId').lean();
+    const printers = await Printer.find({ eventId: currentEventId }).lean();
 
     async function createCategory(formData: FormData) {
         "use server"
         const name = formData.get("name") as string;
         const eventId = formData.get("eventId") as string;
         const uiColor = formData.get("uiColor") as string || "bg-blue-500";
-        const printerIp = formData.get("printerIp") as string;
+        const printerId = formData.get("printerId") as string;
 
         if (!name || !eventId) return;
 
         await dbConnect();
-        await Category.create({ name, eventId, uiColor, printerIp });
+        await Category.create({ name, eventId, uiColor, printerId: printerId || undefined });
         revalidatePath("/admin/catalog");
     }
 
@@ -130,8 +132,13 @@ export default async function AdminCatalog() {
                                         <Input id="uiColor" name="uiColor" placeholder="bg-red-500" defaultValue="bg-blue-500" />
                                     </div>
                                     <div className="grid gap-2">
-                                        <Label htmlFor="printerIp">IP Stampante (Opzionale)</Label>
-                                        <Input id="printerIp" name="printerIp" placeholder="192.168.1.100" />
+                                        <Label htmlFor="printerId">Stampante Reparto (Opzionale)</Label>
+                                        <select name="printerId" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background">
+                                            <option value="">Nessuna (Copia singola in cassa)</option>
+                                            {printers.filter((p: any) => p.type === 'KITCHEN').map((p: any) => (
+                                                <option key={p._id.toString()} value={p._id.toString()}>{p.name} ({p.ip})</option>
+                                            ))}
+                                        </select>
                                     </div>
                                 </div>
                                 <DialogFooter>
@@ -146,7 +153,7 @@ export default async function AdminCatalog() {
                         <TableRow>
                             <TableHead>Nome</TableHead>
                             <TableHead>Colore</TableHead>
-                            <TableHead>IP Stampante</TableHead>
+                            <TableHead>Stampante Comanda</TableHead>
                             <TableHead className="w-[80px]">Azioni</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -155,7 +162,7 @@ export default async function AdminCatalog() {
                             <TableRow key={cat._id.toString()}>
                                 <TableCell className="font-medium">{cat.name}</TableCell>
                                 <TableCell><div className={`w-4 h-4 rounded-full ${cat.uiColor}`} /></TableCell>
-                                <TableCell>{cat.printerIp || "N/A"}</TableCell>
+                                <TableCell>{(cat.printerId as any)?.name || "Default Cassa"}</TableCell>
                                 <TableCell>
                                     <DeleteForm
                                         id={cat._id.toString()}
