@@ -4,6 +4,7 @@ import dbConnect from "@/lib/mongoose"
 import Order from "@/models/Order"
 import { revalidatePath } from "next/cache"
 import { PrinterService } from "@/lib/printer"
+import { getNextPublicOrderNumber, getOrderCodeFromOrder } from "@/lib/order-code"
 
 export async function createPublicOrder(data: {
     eventId: string,
@@ -18,10 +19,12 @@ export async function createPublicOrder(data: {
 }) {
     try {
         await dbConnect()
+        const pickupNumber = await getNextPublicOrderNumber(data.eventId)
 
         // Create the order with PENDING status
         const order = await Order.create({
             eventId: data.eventId,
+            pickupNumber,
             status: "PENDING",
             customer: data.customer,
             totalAmount: data.totalAmount,
@@ -36,9 +39,7 @@ export async function createPublicOrder(data: {
             console.error("Public order created but printer routing failed:", printError);
         }
 
-        // We could generate a simpler shortCode if needed, 
-        // but for now we'll use the first 4 chars of the ID as a reference
-        const shortCode = order._id.toString().slice(-4).toUpperCase()
+        const shortCode = getOrderCodeFromOrder({ pickupNumber: order.pickupNumber, _id: order._id })
 
         revalidatePath("/admin/orders")
         return {
