@@ -18,10 +18,8 @@ interface IEvent {
   _id: ObjectId;
   name: string;                 // e.g. "Sagra Madasca 2024"
   active: boolean;              // SEVER-SIDE Enforcement: only one event can be active.
-  settings: {
     askName: boolean;           // Enables "Name" field in PWA
     askTable: boolean;          // Enables "Table" field in PWA
-    defaultCashierPrinterIp?: string;
   }
   predefinedTables: string[];   // e.g. ["T1", "T2"]
 }
@@ -35,7 +33,31 @@ interface ICategory {
   eventId: ObjectId;
   name: string;                 // e.g. "First Courses", "Grill", "Bar"
   uiColor: string;              // Semantic color for POS (e.g. "bg-orange-500")
-  printOrder: number;           // Printer ID or routing queue (e.g. 1=Kitchen, 2=Pizzeria)
+  printOrder: number;           // Sorting order in POS
+  printerId?: ObjectId;         // OPTIONAL: Link to IPrinter for comanda routing
+}
+```
+
+### 3. Stampante (Printer)
+Definisce una stampante fisica in rete.
+```typescript
+interface IPrinter {
+  _id: ObjectId;
+  eventId: ObjectId;
+  name: string;                 // e.g. "Stampante Cucina", "Stampante Bar"
+  ip: string;                   // Indirizzo IP statico
+  type: "CASHIER" | "KITCHEN";  // Scopo: Ricevute Cassa o Comande Reparto
+}
+```
+
+### 4. Punto Cassa (PosDevice)
+Definisce una postazione fisica di vendita.
+```typescript
+interface IPosDevice {
+  _id: ObjectId;
+  eventId: ObjectId;
+  name: string;                 // e.g. "Cassa Centrale", "Cassa Bar"
+  printerId: ObjectId;          // Link obbligatorio a una stampante di tipo CASHIER
 }
 ```
 

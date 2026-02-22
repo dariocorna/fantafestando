@@ -20,6 +20,9 @@ export interface IOrder extends Document {
         }>;
     }>;
     paymentMethod: "CASH" | "CARD" | "OTHER";
+    sumupCheckoutId?: string;
+    sumupPaymentId?: string;
+    posDeviceId?: Types.ObjectId;
 }
 
 const OrderSchema = new Schema<IOrder>({
@@ -41,9 +44,15 @@ const OrderSchema = new Schema<IOrder>({
             priceVariation: { type: Number, required: true }
         }]
     }],
-    paymentMethod: { type: String, enum: ["CASH", "CARD", "OTHER"], default: "CASH" }
+    paymentMethod: { type: String, enum: ["CASH", "CARD", "OTHER"], default: "CASH" },
+    sumupCheckoutId: { type: String },
+    sumupPaymentId: { type: String },
+    posDeviceId: { type: Schema.Types.ObjectId, ref: 'PosDevice' }
 }, {
     timestamps: true
 });
 
+if (process.env.NODE_ENV === "development") {
+    delete mongoose.models.Order;
+}
 export default mongoose.models.Order || mongoose.model<IOrder>('Order', OrderSchema);
