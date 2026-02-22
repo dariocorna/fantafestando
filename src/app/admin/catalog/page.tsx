@@ -30,6 +30,11 @@ import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { CreateProductDialog } from "@/components/create-product-dialog";
 import { normalizeCategoryColor } from "@/lib/category-colors";
 import { X } from "lucide-react";
+import {
+    formatAvailableDaysLabel,
+    normalizeAvailableDays,
+    parseAvailableDaysInput
+} from "@/lib/product-availability";
 
 function getReferencedId(value: unknown): string | undefined {
     if (!value) return undefined;
@@ -81,6 +86,7 @@ export default async function AdminCatalog() {
         const name = formData.get("name") as string;
         const categoryId = formData.get("categoryId") as string;
         const basePrice = parseFloat(formData.get("basePrice") as string);
+        const availableDays = parseAvailableDaysInput(formData.get("availableDays") as string | null);
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
 
@@ -97,6 +103,7 @@ export default async function AdminCatalog() {
             basePrice,
             eventId: scopedEventId,
             isSoldOut: false,
+            availableDays,
             variants: []
         });
         revalidatePath("/admin/catalog");
@@ -163,6 +170,7 @@ export default async function AdminCatalog() {
         const name = formData.get("name") as string;
         const categoryId = formData.get("categoryId") as string;
         const basePrice = parseFloat(formData.get("basePrice") as string);
+        const availableDays = parseAvailableDaysInput(formData.get("availableDays") as string | null);
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
         if (!id || !name || !categoryId || isNaN(basePrice) || !scopedEventId) return;
@@ -172,7 +180,7 @@ export default async function AdminCatalog() {
         const category = await Category.findOne({ _id: categoryId, eventId: scopedEventId }).select("_id").lean();
         if (!category) return;
 
-        await Product.findOneAndUpdate({ _id: id, eventId: scopedEventId }, { name, categoryId, basePrice });
+        await Product.findOneAndUpdate({ _id: id, eventId: scopedEventId }, { name, categoryId, basePrice, availableDays });
         revalidatePath("/admin/catalog");
     }
 
@@ -287,6 +295,7 @@ export default async function AdminCatalog() {
                             <TableHead>Nome</TableHead>
                             <TableHead>Categoria</TableHead>
                             <TableHead>Prezzo</TableHead>
+                            <TableHead>Disponibilità</TableHead>
                             <TableHead>Varianti</TableHead>
                             <TableHead className="w-[120px]">Azioni</TableHead>
                         </TableRow>
@@ -297,6 +306,11 @@ export default async function AdminCatalog() {
                                 <TableCell className="font-medium">{p.name}</TableCell>
                                 <TableCell>{(p.categoryId as unknown as ICategory)?.name || "N/A"}</TableCell>
                                 <TableCell>{p.basePrice.toFixed(2)} €</TableCell>
+                                <TableCell>
+                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
+                                        {formatAvailableDaysLabel(p.availableDays)}
+                                    </span>
+                                </TableCell>
                                 <TableCell>
                                     <div className="flex flex-wrap gap-1">
                                         {p.variants?.map((v, idx) => (
@@ -320,7 +334,8 @@ export default async function AdminCatalog() {
                                             id: String(p._id),
                                             name: p.name,
                                             categoryId: getReferencedId(p.categoryId) || "",
-                                            basePrice: p.basePrice
+                                            basePrice: p.basePrice,
+                                            availableDays: normalizeAvailableDays(p.availableDays)
                                         }}
                                         eventId={currentEventId}
                                         categories={categories.map((c: ICategory) => ({ id: String(c._id), name: c.name }))}
