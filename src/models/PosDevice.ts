@@ -4,12 +4,16 @@ export interface IPosDevice extends Document {
     eventId: Types.ObjectId;
     name: string;
     printerId: Types.ObjectId;
+    paymentTerminalId?: Types.ObjectId;
+    cashBoxId?: Types.ObjectId;
 }
 
 const PosDeviceSchema = new Schema<IPosDevice>({
     eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
     name: { type: String, required: true },
-    printerId: { type: Schema.Types.ObjectId, ref: 'Printer', required: true }
+    printerId: { type: Schema.Types.ObjectId, ref: 'Printer', required: true },
+    paymentTerminalId: { type: Schema.Types.ObjectId, ref: 'Peripheral' },
+    cashBoxId: { type: Schema.Types.ObjectId, ref: 'Peripheral' }
 }, {
     timestamps: true
 });
