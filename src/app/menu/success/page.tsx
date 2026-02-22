@@ -29,11 +29,11 @@ function SuccessContent() {
 
                 <h1 className="text-3xl font-black text-slate-800 mb-2">Ordine Inviato!</h1>
                 <p className="text-slate-500 font-medium mb-8">
-                    Mostra questo codice alla cassa per pagare e ricevere il tuo ordine.
+                    Mostra questo numero progressivo alla cassa per pagare e ricevere il tuo ordine.
                 </p>
 
                 <div className="bg-slate-50 py-8 rounded-3xl border-2 border-dashed border-slate-200 mb-8">
-                    <span className="text-slate-400 font-black uppercase tracking-widest text-xs block mb-2">Il Tuo Codice</span>
+                    <span className="text-slate-400 font-black uppercase tracking-widest text-xs block mb-2">Il Tuo Numero Ordine</span>
                     <span className="text-6xl font-black text-blue-600 tracking-tighter">{code || "---"}</span>
                 </div>
 
