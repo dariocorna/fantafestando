@@ -5,14 +5,21 @@ import { CardContent, CardFooter } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Printer, Loader2, CheckCircle2 } from "lucide-react";
+import { Loader2, CheckCircle2 } from "lucide-react";
 import { updateEventSettingsAction } from "./actions";
 import { useState } from "react";
 
-import { IEvent } from "@/models/Event";
-
 interface ActiveEventSettingsFormProps {
-    event: IEvent;
+    event: {
+        _id: string;
+        active: boolean;
+        settings?: {
+            askName?: boolean;
+            askTable?: boolean;
+            sumupMerchantCode?: string;
+            sumupApiKey?: string;
+        };
+    };
 }
 
 export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps) {

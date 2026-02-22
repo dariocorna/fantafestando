@@ -7,7 +7,7 @@ export interface IPeripheral extends Document {
     config: {
         merchantId?: string;
         affiliateKey?: string;
-        [key: string]: any;
+        [key: string]: unknown;
     };
     createdAt?: Date;
     updatedAt?: Date;

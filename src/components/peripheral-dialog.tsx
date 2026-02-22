@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Pencil, Smartphone, Wallet } from "lucide-react";
+import { Pencil, Smartphone } from "lucide-react";
 import { useFormStatus } from "react-dom";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useRouter } from "next/navigation";
@@ -25,7 +25,16 @@ export function PeripheralDialog({
     createAction,
     updateAction
 }: {
-    peripheral?: { id: string, name: string, type: string, config?: any },
+    peripheral?: {
+        id: string;
+        name: string;
+        type: string;
+        config?: {
+            merchantId?: string;
+            affiliateKey?: string;
+            [key: string]: unknown;
+        };
+    },
     eventId?: string,
     createAction?: (formData: FormData) => Promise<{ success?: boolean; error?: string } | undefined>,
     updateAction?: (formData: FormData) => Promise<{ success?: boolean; error?: string } | undefined>

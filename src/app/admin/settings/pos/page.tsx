@@ -4,9 +4,9 @@ import dbConnect from "@/lib/mongoose";
 import PosDevice, { IPosDevice } from "@/models/PosDevice";
 import Printer, { IPrinter } from "@/models/Printer";
 import Peripheral, { IPeripheral } from "@/models/Peripheral";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Monitor, Trash2, ArrowLeft, Smartphone, Wallet } from "lucide-react";
+import { Monitor, ArrowLeft } from "lucide-react";
 import { DeleteForm } from "@/components/delete-form";
 import { deletePosDeviceAction, createPosDeviceAction, updatePosDeviceAction } from "../actions";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,15 @@ import {
 import { HardwareDialog } from "@/components/hardware-dialog";
 import { HardwareFormWrapper } from "@/components/hardware-form-wrapper";
 import { EditPosDeviceDialog } from "@/components/edit-pos-device-dialog";
+
+function getReferencedId(value: unknown): string | undefined {
+    if (!value) return undefined;
+    if (typeof value === "object" && "_id" in value) {
+        const populated = value as { _id?: unknown };
+        return populated._id ? String(populated._id) : undefined;
+    }
+    return String(value);
+}
 
 export default async function PosDevicesPage() {
     const eventId = await getAdminContextEventId();
@@ -131,7 +140,7 @@ export default async function PosDevicesPage() {
                                     posDevice={{
                                         id: String(device._id),
                                         name: device.name,
-                                        printerId: String((device.printerId as any)?._id || device.printerId || ""),
+                                        printerId: getReferencedId(device.printerId) || "",
                                         paymentTerminalId: String(device.paymentTerminalId || ""),
                                         cashBoxId: String(device.cashBoxId || "")
                                     }}

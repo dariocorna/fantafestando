@@ -1,14 +1,11 @@
 "use client"
 
-import { useState, useEffect, Suspense } from "react"
+import { Suspense } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import {
     CheckCircle2,
     ShoppingBag,
-    ArrowRight,
     Loader2,
-    Printer,
-    Home
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { motion } from "framer-motion"

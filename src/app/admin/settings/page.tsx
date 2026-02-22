@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "../../../components/ui/card";
-import { Calendar, Settings, Printer, User, Home } from "lucide-react";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../../../components/ui/card";
+import { Calendar, Settings, Printer, Home } from "lucide-react";
 import { getAdminContextEvent } from "@/lib/events";
 import { IEvent } from "@/models/Event";
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,15 @@ export default async function AdminSettings() {
     // Serialize the event object to pass to Client Component
     const serializedEvent = contextEvent
         ? {
-            ...contextEvent,
-            _id: String(contextEvent._id)
+            _id: String(contextEvent._id),
+            name: contextEvent.name,
+            active: contextEvent.active,
+            settings: {
+                askName: contextEvent.settings?.askName ?? false,
+                askTable: contextEvent.settings?.askTable ?? false,
+                sumupMerchantCode: contextEvent.settings?.sumupMerchantCode ?? "",
+                sumupApiKey: contextEvent.settings?.sumupApiKey ?? ""
+            }
         }
         : null;
 
@@ -41,7 +48,7 @@ export default async function AdminSettings() {
                         </div>
                     </CardHeader>
                     {serializedEvent ? (
-                        <ActiveEventSettingsForm event={serializedEvent as any} />
+                        <ActiveEventSettingsForm event={serializedEvent} />
                     ) : (
                         <CardContent className="py-12 text-center">
                             <p className="text-muted-foreground mb-4">Seleziona una festa dall&apos;header per configurarne i parametri.</p>
