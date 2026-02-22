@@ -5,7 +5,7 @@ export interface ICategory extends Document {
     name: string;
     uiColor: string;
     printOrder: number;
-    printerIp?: string;
+    printerId?: Types.ObjectId;
 }
 
 const CategorySchema = new Schema<ICategory>({
@@ -13,9 +13,12 @@ const CategorySchema = new Schema<ICategory>({
     name: { type: String, required: true },
     uiColor: { type: String, required: true },
     printOrder: { type: Number, default: 0 },
-    printerIp: { type: String }
+    printerId: { type: Schema.Types.ObjectId, ref: 'Printer' }
 }, {
     timestamps: true
 });
 
+if (process.env.NODE_ENV === "development") {
+    delete mongoose.models.Category;
+}
 export default mongoose.models.Category || mongoose.model<ICategory>('Category', CategorySchema);
