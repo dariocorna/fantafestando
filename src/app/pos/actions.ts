@@ -95,9 +95,14 @@ export async function createOrder(data: {
             posDeviceId: data.posDeviceId
         })
 
-        // Trigger network printing ONLY if PAID immediately
+        // Trigger network printing ONLY if PAID immediately.
+        // Printing must never block order creation.
         if (order.status === "PAID") {
-            await PrinterService.routeOrderToPrinters(order._id.toString(), data.posDeviceId)
+            try {
+                await PrinterService.routeOrderToPrinters(order._id.toString(), data.posDeviceId)
+            } catch (printError) {
+                console.error("Order created but printer routing failed:", printError)
+            }
         }
 
         revalidatePath("/admin/orders")
