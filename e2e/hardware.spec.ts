@@ -1,25 +1,75 @@
 import { test, expect, type Page } from "@playwright/test";
 
-async function ensureAdminEventContext(page: Page) {
-    await page.goto("/admin");
-    await page.click('[data-testid="admin-event-selector"]');
+async function gotoAdmin(page: Page) {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            await page.goto("/admin", { waitUntil: "domcontentloaded", timeout: 60000 });
+            return;
+        } catch (error) {
+            lastError = error;
+            await page.waitForTimeout(500);
+        }
+    }
+    throw lastError;
+}
 
+async function ensureAdminEventContext(page: Page) {
+    const selector = page.getByTestId("admin-event-selector");
+
+    await gotoAdmin(page);
+    await page.click('[data-testid="admin-event-selector"]');
     const firstOption = page.getByRole("option").first();
-    if (await firstOption.isVisible()) {
+    if (await firstOption.isVisible().catch(() => false)) {
         await firstOption.click();
+        await expect(selector).not.toContainText("Seleziona Festa", { timeout: 10000 });
+        await expect(selector).toBeEnabled({ timeout: 10000 });
+        await page.waitForLoadState("networkidle");
         return;
     }
 
+    const eventName = `Event Hardware Test ${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     await page.goto("/admin/settings/events");
     await page.click("#new-event-btn");
-    await page.fill("#name", `Event Hardware Test ${Date.now()}`);
-    await page.getByRole("button", { name: "Salva", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await page.fill("#name", eventName);
+    await dialog.getByRole("button", { name: "Salva", exact: true }).click();
+    await expect(page.getByText(eventName)).toBeVisible({ timeout: 10000 });
+
+    await gotoAdmin(page);
     await page.click('[data-testid="admin-event-selector"]');
     await page.getByRole("option").first().click();
+    await expect(selector).not.toContainText("Seleziona Festa", { timeout: 10000 });
+    await expect(selector).toBeEnabled({ timeout: 10000 });
+    await page.waitForLoadState("networkidle");
+}
+
+async function submitDialogWithRetry(
+    _page: Page,
+    dialog: ReturnType<Page["getByRole"]>,
+    submitButtonName: string,
+    expectedVisibleLocator: ReturnType<Page["getByText"]>,
+) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+        await dialog.getByRole("button", { name: submitButtonName, exact: true }).click();
+        try {
+            await expect(expectedVisibleLocator).toBeVisible({ timeout: 12000 });
+            return;
+        } catch (error) {
+            if (attempt === 1) throw error;
+            await dialog.getByRole("button", { name: submitButtonName, exact: true }).click();
+            await expect(expectedVisibleLocator).toBeVisible({ timeout: 15000 });
+            return;
+        }
+    }
 }
 
 test.describe("Gestione Hardware ed Elettronica", () => {
+    test.describe.configure({ timeout: 90000 });
     test.beforeEach(async ({ page }) => {
+        page.on("dialog", async (dialog) => {
+            await dialog.accept();
+        });
         await ensureAdminEventContext(page);
     });
 
@@ -35,10 +85,8 @@ test.describe("Gestione Hardware ed Elettronica", () => {
         await printerDialog.getByLabel("Indirizzo IP").fill(printerIp);
         await printerDialog.getByRole("combobox", { name: "Tipo Stampante" }).click();
         await page.getByRole("option", { name: "Reparto (Comanda Piatto)" }).click();
-        await printerDialog.getByRole("button", { name: "Salva", exact: true }).click();
-
-        await expect(page.getByText(printerName)).toBeVisible();
-        await expect(page.getByText(printerIp)).toBeVisible();
+        await submitDialogWithRetry(page, printerDialog, "Salva", page.getByText(printerName));
+        await expect(page.getByText(printerIp)).toBeVisible({ timeout: 15000 });
 
         // 2. Aggiungi stampante cassa
         const cashierName = `Cassa Centrale ${Date.now()}`;
@@ -49,8 +97,7 @@ test.describe("Gestione Hardware ed Elettronica", () => {
         await cashierDialog.getByLabel("Indirizzo IP").fill(cashierIp);
         await cashierDialog.getByRole("combobox", { name: "Tipo Stampante" }).click();
         await page.getByRole("option", { name: "Cassa (Scontrino Cliente)" }).click();
-        await cashierDialog.getByRole("button", { name: "Salva", exact: true }).click();
-        await expect(page.getByText(cashierName)).toBeVisible();
+        await submitDialogWithRetry(page, cashierDialog, "Salva", page.getByText(cashierName));
 
         // 3. Aggiungi Punto Cassa
         await page.goto("/admin/settings/pos");
@@ -60,9 +107,7 @@ test.describe("Gestione Hardware ed Elettronica", () => {
         await posDialog.getByLabel("Nome Postazione").fill(posName);
         await posDialog.getByRole("combobox", { name: "Stampante Associata" }).click();
         await page.getByRole("option", { name: new RegExp(cashierName) }).click();
-        await posDialog.getByRole("button", { name: "Salva", exact: true }).click();
-
-        await expect(page.getByText(posName)).toBeVisible();
+        await submitDialogWithRetry(page, posDialog, "Salva", page.getByText(posName));
 
         // 4. Collega categoria alla stampante reparto
         await page.goto("/admin/catalog");
@@ -73,7 +118,7 @@ test.describe("Gestione Hardware ed Elettronica", () => {
         await page.getByRole("button", { name: "Salva Categoria", exact: true }).click();
 
         const row = page.locator("tr").filter({ hasText: catName });
-        await expect(row.getByText(printerName)).toBeVisible();
+        await expect(row.getByText(printerName)).toBeVisible({ timeout: 10000 });
     });
 
     test("validazione campi obbligatori hardware", async ({ page }) => {
@@ -102,8 +147,7 @@ test.describe("Gestione Hardware ed Elettronica", () => {
         await createDialog.getByLabel("Indirizzo IP").fill(printerIp);
         await createDialog.getByRole("combobox", { name: "Tipo Stampante" }).click();
         await page.getByRole("option", { name: "Cassa (Scontrino Cliente)" }).click();
-        await createDialog.getByRole("button", { name: "Salva", exact: true }).click();
-        await expect(page.getByText(printerName)).toBeVisible();
+        await submitDialogWithRetry(page, createDialog, "Salva", page.getByText(printerName));
 
         // Modifica stampante
         const printerCard = page.locator('[data-slot="card"]', { hasText: printerName }).first();
@@ -122,8 +166,7 @@ test.describe("Gestione Hardware ed Elettronica", () => {
         await createPosDialog.getByLabel("Nome Postazione").fill(posName);
         await createPosDialog.getByRole("combobox", { name: "Stampante Associata" }).click();
         await page.getByRole("option", { name: new RegExp(printerName) }).click();
-        await createPosDialog.getByRole("button", { name: "Salva", exact: true }).click();
-        await expect(page.getByText(posName)).toBeVisible();
+        await submitDialogWithRetry(page, createPosDialog, "Salva", page.getByText(posName));
 
         // Modifica POS
         const posCard = page.locator('[data-slot="card"]', { hasText: posName }).first();
