@@ -21,6 +21,7 @@ export async function createEventAction(formData: FormData) {
     });
 
     revalidatePath("/admin/settings/events");
+    return { success: true };
 }
 
 export async function updateEventSettingsAction(formData: FormData) {
@@ -73,7 +74,31 @@ export async function cloneEventAction(formData: FormData) {
         settings: sourceEvent.settings
     });
 
-    // 2. Clona le Categorie
+    // 2. Clona i Printers
+    const printers = await Printer.find({ eventId: sourceEventId }).lean();
+    const printerMap = new Map(); // mappa vecchi id -> nuovi id
+
+    for (const printer of printers) {
+        const newPrinter = await Printer.create({
+            eventId: newEvent._id,
+            name: printer.name,
+            ip: printer.ip,
+            type: printer.type
+        });
+        printerMap.set(String(printer._id), newPrinter._id);
+    }
+
+    // 3. Clona i PosDevices
+    const posDevices = await PosDevice.find({ eventId: sourceEventId }).lean();
+    for (const posDevice of posDevices) {
+        await PosDevice.create({
+            eventId: newEvent._id,
+            name: posDevice.name,
+            printerId: posDevice.printerId ? printerMap.get(String(posDevice.printerId)) : null
+        });
+    }
+
+    // 4. Clona le Categorie
     const categories = await Category.find({ eventId: sourceEventId }).lean();
     const categoryMap = new Map(); // mappa vecchi id -> nuovi id
 
@@ -82,17 +107,17 @@ export async function cloneEventAction(formData: FormData) {
             eventId: newEvent._id,
             name: cat.name,
             uiColor: cat.uiColor,
-            printerIp: cat.printerIp
+            printerId: cat.printerId ? printerMap.get(String(cat.printerId)) : null
         });
-        categoryMap.set((cat._id as any).toString(), newCat._id);
+        categoryMap.set(String(cat._id), newCat._id);
     }
 
-    // 3. Clona i Prodotti associandoli alle nuove Categorie
+    // 5. Clona i Prodotti associandoli alle nuove Categorie
     const products = await Product.find({ eventId: sourceEventId }).lean();
     for (const prod of products) {
         await Product.create({
             eventId: newEvent._id,
-            categoryId: categoryMap.get((prod.categoryId as any).toString()),
+            categoryId: categoryMap.get(String(prod.categoryId)),
             name: prod.name,
             basePrice: prod.basePrice,
             isSoldOut: false,
@@ -117,6 +142,7 @@ export async function createPrinterAction(formData: FormData) {
     await Printer.create({ eventId, name, ip, type });
 
     revalidatePath("/admin/settings/printers");
+    return { success: true };
 }
 
 export async function deletePrinterAction(formData: FormData) {
@@ -147,8 +173,8 @@ export async function createPosDeviceAction(formData: FormData) {
 
     await dbConnect();
     await PosDevice.create({ eventId, name, printerId });
-
     revalidatePath("/admin/settings/pos");
+    return { success: true };
 }
 
 export async function deletePosDeviceAction(formData: FormData) {
