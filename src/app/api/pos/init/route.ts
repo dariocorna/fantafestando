@@ -5,16 +5,15 @@ import Category from "@/models/Category";
 import Product from "@/models/Product";
 import PosDevice from "@/models/PosDevice";
 import "@/models/Printer"; // Import to register schema for .populate()
-import Printer from "@/models/Printer";
 
 export async function GET() {
     try {
         await dbConnect();
 
         // 1. Find active event (or the latest one as fallback)
-        let event = await Event.findOne({ active: true }).lean();
+        let event = await Event.findOne({ active: true, archived: { $ne: true } }).lean();
         if (!event) {
-            event = await Event.findOne({}).sort({ createdAt: -1 }).lean();
+            event = await Event.findOne({ archived: { $ne: true } }).sort({ createdAt: -1 }).lean();
         }
 
         if (!event) {

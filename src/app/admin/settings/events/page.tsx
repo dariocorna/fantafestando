@@ -2,7 +2,10 @@ import dbConnect from "@/lib/mongoose";
 import Event, { IEvent } from "@/models/Event";
 import Category from "@/models/Category";
 import Product from "@/models/Product";
-import { Button } from "@/components/ui/button";
+import Printer from "@/models/Printer";
+import PosDevice from "@/models/PosDevice";
+import Peripheral from "@/models/Peripheral";
+import Order from "@/models/Order";
 import { DeleteForm } from "@/components/delete-form";
 import { ArchiveForm } from "@/components/archive-form";
 import { revalidatePath } from "next/cache";
@@ -19,7 +22,11 @@ export default async function EventsPage() {
         if (!eventId) return;
 
         await dbConnect();
-        // Cascade delete: Event -> Categories -> Products
+        // Full cascade delete for all festa-bound data
+        await Order.deleteMany({ eventId });
+        await PosDevice.deleteMany({ eventId });
+        await Peripheral.deleteMany({ eventId });
+        await Printer.deleteMany({ eventId });
         await Product.deleteMany({ eventId });
         await Category.deleteMany({ eventId });
         await Event.findByIdAndDelete(eventId);
