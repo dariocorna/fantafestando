@@ -5,6 +5,12 @@ test.describe('Interfaccia POS (Cassa)', () => {
         // Naviga alla cassa
         await page.goto('/pos');
 
+        // Gestione selezione postazione se presente
+        const dialog = page.getByText(/In quale cassa sei\?/i);
+        if (await dialog.isVisible()) {
+            await page.locator('button').filter({ hasText: /Postazione:/i }).first().click();
+        }
+
         // Verifica intestazione (deve esserci il nome dell'evento o il default)
         // Usiamo un matcher flessibile per la traduzione
         await expect(page.locator('h2')).toBeVisible();
@@ -13,6 +19,22 @@ test.describe('Interfaccia POS (Cassa)', () => {
 
     test('apertura dialog checkout e selezione pagamento', async ({ page }) => {
         await page.goto('/pos');
+
+        // Aspetta l'animazione del potenziale dialog
+        await page.waitForTimeout(500);
+        const dialog = page.getByText(/In quale cassa sei\?/i);
+        if (await dialog.isVisible()) {
+            const selectTrigger = page.getByRole('combobox');
+            if (await selectTrigger.isVisible()) {
+                await selectTrigger.click();
+                await page.getByRole('option').first().click();
+                await page.getByRole('button', { name: /Conferma/i }).click();
+                await expect(dialog).toBeHidden();
+                await page.waitForTimeout(500); // Wait for fade out
+            } else {
+                // Può darsi che dica "Nessun punto cassa" e offra bottone "Aggiungilo ora"
+            }
+        }
 
         // Attesa caricamento dati (API init)
         await page.waitForTimeout(2000);
