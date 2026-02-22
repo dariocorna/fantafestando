@@ -68,15 +68,15 @@ export default async function AdminSettings() {
                         </Card>
                     </Link>
 
-                    <Link href="/admin/settings/printers">
+                    <Link href="/admin/settings/hardware">
                         <Card className="hover:bg-slate-50 dark:hover:bg-slate-900 transition-all border-2 border-transparent hover:border-primary/20 shadow-md h-full">
                             <CardHeader className="flex flex-row items-center gap-4">
                                 <div className="p-3 bg-green-100 rounded-full text-green-600">
                                     <Printer className="h-6 w-6" />
                                 </div>
                                 <div>
-                                    <CardTitle className="text-lg">Hardware Stampanti</CardTitle>
-                                    <CardDescription>Configura IP stampanti cucina, bar e cassa.</CardDescription>
+                                    <CardTitle className="text-lg">Gestione Hardware</CardTitle>
+                                    <CardDescription>Configura stampanti, terminali SumUp e cassette contanti.</CardDescription>
                                 </div>
                             </CardHeader>
                         </Card>

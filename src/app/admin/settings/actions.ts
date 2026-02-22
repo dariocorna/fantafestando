@@ -6,6 +6,7 @@ import Category from "@/models/Category";
 import Product from "@/models/Product";
 import Printer from "@/models/Printer";
 import PosDevice from "@/models/PosDevice";
+import Peripheral from "@/models/Peripheral";
 import { revalidatePath } from "next/cache";
 
 export async function createEventAction(formData: FormData) {
@@ -178,16 +179,23 @@ export async function updatePrinterAction(formData: FormData) {
     return { success: true };
 }
 
-// POS DEVICE ACTIONS
 export async function createPosDeviceAction(formData: FormData) {
     const eventId = formData.get("eventId") as string;
     const name = formData.get("name") as string;
     const printerId = formData.get("printerId") as string;
+    const paymentTerminalId = formData.get("paymentTerminalId") as string;
+    const cashBoxId = formData.get("cashBoxId") as string;
 
     if (!eventId || !name || !printerId) return { error: "Dati mancanti" };
 
     await dbConnect();
-    await PosDevice.create({ eventId, name, printerId });
+    await PosDevice.create({
+        eventId,
+        name,
+        printerId,
+        paymentTerminalId: paymentTerminalId || undefined,
+        cashBoxId: cashBoxId || undefined
+    });
     revalidatePath("/admin/settings/pos");
     return { success: true };
 }
@@ -206,12 +214,82 @@ export async function updatePosDeviceAction(formData: FormData) {
     const id = formData.get("id") as string;
     const name = formData.get("name") as string;
     const printerId = formData.get("printerId") as string;
+    const paymentTerminalId = formData.get("paymentTerminalId") as string;
+    const cashBoxId = formData.get("cashBoxId") as string;
 
     if (!id || !name || !printerId) return { error: "Dati mancanti" };
 
     await dbConnect();
-    await PosDevice.findByIdAndUpdate(id, { name, printerId });
+    await PosDevice.findByIdAndUpdate(id, {
+        name,
+        printerId,
+        paymentTerminalId: paymentTerminalId || null,
+        cashBoxId: cashBoxId || null
+    });
 
     revalidatePath("/admin/settings/pos");
+    return { success: true };
+}
+
+// PERIPHERAL ACTIONS
+export async function createPeripheralAction(formData: FormData) {
+    const eventId = formData.get("eventId") as string;
+    const name = formData.get("name") as string;
+    const type = formData.get("type") as "SUMUP" | "CASH_BOX" | "OTHER";
+
+    // SumUp specific config
+    const merchantId = formData.get("merchantId") as string;
+    const affiliateKey = formData.get("affiliateKey") as string;
+
+    if (!eventId || !name || !type) return { error: "Dati mancanti" };
+
+    await dbConnect();
+    await Peripheral.create({
+        eventId,
+        name,
+        type,
+        config: type === "SUMUP" ? { merchantId, affiliateKey } : {}
+    });
+
+    revalidatePath("/admin/settings/hardware");
+    revalidatePath("/admin/settings/printers");
+    return { success: true };
+}
+
+export async function deletePeripheralAction(formData: FormData) {
+    const id = formData.get("id") as string;
+    if (!id) return;
+
+    await dbConnect();
+    await Peripheral.findByIdAndDelete(id);
+
+    // Unlink from PosDevices
+    const PosDevice = (await import("@/models/PosDevice")).default;
+    await PosDevice.updateMany({ paymentTerminalId: id }, { $unset: { paymentTerminalId: 1 } });
+    await PosDevice.updateMany({ cashBoxId: id }, { $unset: { cashBoxId: 1 } });
+
+    revalidatePath("/admin/settings/hardware");
+    revalidatePath("/admin/settings/printers");
+}
+
+export async function updatePeripheralAction(formData: FormData) {
+    const id = formData.get("id") as string;
+    const name = formData.get("name") as string;
+    const type = formData.get("type") as "SUMUP" | "CASH_BOX" | "OTHER";
+
+    const merchantId = formData.get("merchantId") as string;
+    const affiliateKey = formData.get("affiliateKey") as string;
+
+    if (!id || !name || !type) return { error: "Dati mancanti" };
+
+    await dbConnect();
+    await Peripheral.findByIdAndUpdate(id, {
+        name,
+        type,
+        config: type === "SUMUP" ? { merchantId, affiliateKey } : {}
+    });
+
+    revalidatePath("/admin/settings/hardware");
+    revalidatePath("/admin/settings/printers");
     return { success: true };
 }

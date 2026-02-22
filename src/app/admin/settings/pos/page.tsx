@@ -3,9 +3,10 @@ import { getAdminContextEventId } from "@/lib/events";
 import dbConnect from "@/lib/mongoose";
 import PosDevice, { IPosDevice } from "@/models/PosDevice";
 import Printer, { IPrinter } from "@/models/Printer";
+import Peripheral, { IPeripheral } from "@/models/Peripheral";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Monitor, Trash2, ArrowLeft } from "lucide-react";
+import { Plus, Monitor, Trash2, ArrowLeft, Smartphone, Wallet } from "lucide-react";
 import { DeleteForm } from "@/components/delete-form";
 import { deletePosDeviceAction, createPosDeviceAction, updatePosDeviceAction } from "../actions";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,7 @@ export default async function PosDevicesPage() {
     await dbConnect();
     const posDevices = await PosDevice.find({ eventId }).populate('printerId').lean();
     const cashierPrinters = await Printer.find({ eventId, type: 'CASHIER' }).lean();
+    const peripherals = await Peripheral.find({ eventId }).sort({ name: 1 }).lean();
 
     return (
         <div className="space-y-6">
@@ -69,6 +71,38 @@ export default async function PosDevicesPage() {
                                     </Select>
                                     <p className="text-xs text-muted-foreground">Verranno mostrate solo le stampanti di tipo &quot;Cassa&quot;.</p>
                                 </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="terminal-select">Terminale Pagamento (Elettronico)</Label>
+                                    <Select name="paymentTerminalId">
+                                        <SelectTrigger id="terminal-select">
+                                            <SelectValue placeholder="Nessuno" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="none">Nessuno</SelectItem>
+                                            {peripherals.filter((p: IPeripheral) => p.type === 'SUMUP').map((p: IPeripheral) => (
+                                                <SelectItem key={String(p._id)} value={String(p._id)}>
+                                                    {p.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="cashbox-select">Cassetta Contanti (Manuale)</Label>
+                                    <Select name="cashBoxId">
+                                        <SelectTrigger id="cashbox-select">
+                                            <SelectValue placeholder="Nessuna" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="none">Nessuna</SelectItem>
+                                            {peripherals.filter((p: IPeripheral) => p.type === 'CASH_BOX').map((p: IPeripheral) => (
+                                                <SelectItem key={String(p._id)} value={String(p._id)}>
+                                                    {p.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                             </HardwareFormWrapper>
                         ) : (
                             <p className="text-sm text-destructive font-medium p-4">Configura almeno una stampante &quot;Cassa&quot; per aggiungere dispositivi.</p>
@@ -89,12 +123,20 @@ export default async function PosDevicesPage() {
                         <CardContent>
                             <div className="text-sm text-muted-foreground mb-4">
                                 <p>Stampante associata: <span className="font-medium text-foreground">{(device.printerId as unknown as IPrinter)?.name || "Non collegata"}</span></p>
-                                <p>IP Stampante: <span className="font-mono text-foreground">{(device.printerId as unknown as IPrinter)?.ip || "N/A"}</span></p>
+                                <p>Terminale: <span className="font-medium text-foreground">{peripherals.find(p => String(p._id) === String(device.paymentTerminalId))?.name || "Nessuno"}</span></p>
+                                <p>Cassetta: <span className="font-medium text-foreground">{peripherals.find(p => String(p._id) === String(device.cashBoxId))?.name || "Nessuna"}</span></p>
                             </div>
                             <div className="flex justify-end gap-2 mt-4">
                                 <EditPosDeviceDialog
-                                    posDevice={{ id: String(device._id), name: device.name, printerId: String((device.printerId as any)?._id || device.printerId || "") }}
+                                    posDevice={{
+                                        id: String(device._id),
+                                        name: device.name,
+                                        printerId: String((device.printerId as any)?._id || device.printerId || ""),
+                                        paymentTerminalId: String(device.paymentTerminalId || ""),
+                                        cashBoxId: String(device.cashBoxId || "")
+                                    }}
                                     printers={cashierPrinters.map(p => ({ id: String(p._id), name: p.name }))}
+                                    peripherals={peripherals.map((p: IPeripheral) => ({ id: String(p._id), name: p.name, type: p.type }))}
                                     updateAction={updatePosDeviceAction}
                                 />
                                 <DeleteForm
