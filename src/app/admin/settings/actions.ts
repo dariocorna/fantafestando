@@ -11,7 +11,6 @@ import PosDevice from "@/models/PosDevice";
 import Peripheral from "@/models/Peripheral";
 import { revalidatePath } from "next/cache";
 import {
-    countDistinctPredefinedTables,
     MAX_PREDEFINED_TABLES,
     parsePredefinedTablesInput
 } from "@/lib/table-presets";
@@ -70,11 +69,8 @@ export async function updateEventSettingsAction(formData: FormData) {
     const defaultCashierPrinterIp = formData.get("defaultCashierPrinterIp") as string;
     const active = formData.get("active") === "on";
     const predefinedTablesInput = formData.get("predefinedTables") as string | null;
-    const distinctPredefinedTablesCount = countDistinctPredefinedTables(predefinedTablesInput);
-    if (distinctPredefinedTablesCount > MAX_PREDEFINED_TABLES) {
-        return { error: `Puoi inserire al massimo ${MAX_PREDEFINED_TABLES} tavoli predefiniti` };
-    }
-    const predefinedTables = parsePredefinedTablesInput(predefinedTablesInput, MAX_PREDEFINED_TABLES);
+    const normalizedInputTables = parsePredefinedTablesInput(predefinedTablesInput, Number.MAX_SAFE_INTEGER);
+    const distinctPredefinedTablesCount = normalizedInputTables.length;
 
     if (!eventId) return { error: "Event ID obbligatorio" };
 
@@ -85,11 +81,25 @@ export async function updateEventSettingsAction(formData: FormData) {
 
     await dbConnect();
     const targetEvent = await Event.findOne({ _id: scopedEventId, archived: { $ne: true } })
-        .select("archived")
-        .lean() as ({ archived?: boolean } | null);
+        .select("archived predefinedTables")
+        .lean() as ({ archived?: boolean; predefinedTables?: string[] } | null);
 
     if (!targetEvent) return { error: "Festa non trovata" };
     if (targetEvent.archived) return { error: "Le feste archiviate non sono modificabili" };
+
+    const normalizedExistingTables = parsePredefinedTablesInput(
+        Array.isArray(targetEvent.predefinedTables) ? targetEvent.predefinedTables.join("\n") : "",
+        Number.MAX_SAFE_INTEGER
+    );
+    const predefinedTablesChanged = normalizedInputTables.join("\n") !== normalizedExistingTables.join("\n");
+
+    if (distinctPredefinedTablesCount > MAX_PREDEFINED_TABLES && predefinedTablesChanged) {
+        return { error: `Puoi inserire al massimo ${MAX_PREDEFINED_TABLES} tavoli predefiniti` };
+    }
+
+    const predefinedTables = distinctPredefinedTablesCount > MAX_PREDEFINED_TABLES
+        ? normalizedInputTables
+        : parsePredefinedTablesInput(predefinedTablesInput, MAX_PREDEFINED_TABLES);
 
     if (active) {
         // Deactivate all others first
