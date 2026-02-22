@@ -103,7 +103,10 @@ test.describe('Pannello Amministrazione', () => {
         // Verifica comparsa in lista
         await expect(page.getByText(testEventName)).toBeVisible();
 
-        await ensureAdminEventContext(page);
+        // Seleziona esplicitamente la festa appena creata come contesto admin
+        await page.click('[data-testid="admin-event-selector"]');
+        await page.getByRole('option', { name: new RegExp(testEventName) }).click();
+        await expect(page.getByTestId('admin-event-selector')).toContainText(testEventName);
 
         // Vai in Impostazioni principali
         await page.goto('/admin/settings');
@@ -116,8 +119,18 @@ test.describe('Pannello Amministrazione', () => {
         // Salva
         await page.getByRole('button', { name: /Salva Impostazioni/i }).click();
 
-        // Verifica feedback salvataggio
-        await expect(page.getByText(/Modifiche salvate/i)).toBeVisible();
+        // Verifica effetto persistente (piu stabile del toast temporaneo)
+        await expect
+            .poll(
+                async () => {
+                    await page.goto('/admin/settings/events');
+                    const eventCard = page.locator('div.p-4.border').filter({ hasText: testEventName }).first();
+                    if (!(await eventCard.isVisible().catch(() => false))) return false;
+                    return await eventCard.getByText(/Attiva \(Globale\)/i).isVisible().catch(() => false);
+                },
+                { timeout: 15000 }
+            )
+            .toBeTruthy();
     });
 
     test('modifica categoria e prodotto (Full CRUD)', async ({ page }) => {
