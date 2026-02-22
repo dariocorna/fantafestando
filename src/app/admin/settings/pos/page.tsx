@@ -1,21 +1,13 @@
 import Link from "next/link";
 import { getAdminContextEventId } from "@/lib/events";
 import dbConnect from "@/lib/mongoose";
-import PosDevice from "@/models/PosDevice";
-import Printer from "@/models/Printer";
+import PosDevice, { IPosDevice } from "@/models/PosDevice";
+import Printer, { IPrinter } from "@/models/Printer";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Monitor, Trash2, ArrowLeft } from "lucide-react";
 import { DeleteForm } from "@/components/delete-form";
 import { deletePosDeviceAction, createPosDeviceAction } from "../actions";
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-    DialogFooter
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -25,6 +17,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { HardwareDialog } from "@/components/hardware-dialog";
+import { HardwareFormWrapper } from "@/components/hardware-form-wrapper";
 
 export default async function PosDevicesPage() {
     const eventId = await getAdminContextEventId();
@@ -47,54 +41,44 @@ export default async function PosDevicesPage() {
                     <p className="text-muted-foreground">Gestisci le postazioni fisiche di vendita.</p>
                 </div>
                 <div className="ml-auto">
-                    {cashierPrinters.length > 0 ? (
-                        <Dialog>
-                            <DialogTrigger asChild>
-                                <Button className="gap-2">
-                                    <Plus className="h-4 w-4" /> Nuovo Punto Cassa
-                                </Button>
-                            </DialogTrigger>
-                            <DialogContent>
-                                <DialogHeader>
-                                    <DialogTitle>Aggiungi Punto Cassa</DialogTitle>
-                                </DialogHeader>
-                                <form action={createPosDeviceAction} className="space-y-4 pt-4">
-                                    <input type="hidden" name="eventId" value={eventId} />
-                                    <div className="space-y-2">
-                                        <Label htmlFor="name">Nome Cassa</Label>
-                                        <Input id="name" name="name" placeholder="es. Cassa 1, Cassa Bar" required />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="printerId">Stampante Ricevute</Label>
-                                        <Select name="printerId" required>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Seleziona stampante" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {cashierPrinters.map((p: any) => (
-                                                    <SelectItem key={p._id.toString()} value={p._id.toString()}>
-                                                        {p.name} ({p.ip})
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        <p className="text-xs text-muted-foreground">Verranno mostrate solo le stampanti di tipo "Cassa".</p>
-                                    </div>
-                                    <DialogFooter>
-                                        <Button type="submit">Salva</Button>
-                                    </DialogFooter>
-                                </form>
-                            </DialogContent>
-                        </Dialog>
-                    ) : (
-                        <p className="text-sm text-destructive font-medium">Configura almeno una stampante "Cassa" per aggiungere dispositivi.</p>
-                    )}
+                    <HardwareDialog
+                        title="Aggiungi Punto Cassa"
+                        buttonText="Nuovo Dispositivo"
+                    >
+                        {cashierPrinters.length > 0 ? (
+                            <HardwareFormWrapper action={createPosDeviceAction}>
+                                <input type="hidden" name="eventId" value={eventId} />
+                                <div className="space-y-2">
+                                    <Label htmlFor="name">Nome Postazione</Label>
+                                    <Input id="name" name="name" placeholder="Es: Cassa Centrale, Bar..." required />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="printer-select">Stampante Associata</Label>
+                                    <Select name="printerId" required>
+                                        <SelectTrigger id="printer-select" aria-label="Stampante Associata">
+                                            <SelectValue placeholder="Seleziona stampante" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {cashierPrinters.map((p: IPrinter) => (
+                                                <SelectItem key={String(p._id)} value={String(p._id)}>
+                                                    {p.name} ({p.ip})
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground">Verranno mostrate solo le stampanti di tipo &quot;Cassa&quot;.</p>
+                                </div>
+                            </HardwareFormWrapper>
+                        ) : (
+                            <p className="text-sm text-destructive font-medium p-4">Configura almeno una stampante &quot;Cassa&quot; per aggiungere dispositivi.</p>
+                        )}
+                    </HardwareDialog>
                 </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {posDevices.map((device: any) => (
-                    <Card key={device._id.toString()}>
+                {posDevices.map((device: IPosDevice) => (
+                    <Card key={String(device._id)}>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                             <CardTitle className="text-lg font-bold">{device.name}</CardTitle>
                             <div className="p-2 rounded-full bg-blue-100 text-blue-600">
@@ -103,12 +87,12 @@ export default async function PosDevicesPage() {
                         </CardHeader>
                         <CardContent>
                             <div className="text-sm text-muted-foreground mb-4">
-                                <p>Stampante associata: <span className="font-medium text-foreground">{device.printerId?.name || "Non collegata"}</span></p>
-                                <p>IP Stampante: <span className="font-mono text-foreground">{device.printerId?.ip || "N/A"}</span></p>
+                                <p>Stampante associata: <span className="font-medium text-foreground">{(device.printerId as unknown as IPrinter)?.name || "Non collegata"}</span></p>
+                                <p>IP Stampante: <span className="font-mono text-foreground">{(device.printerId as unknown as IPrinter)?.ip || "N/A"}</span></p>
                             </div>
                             <div className="flex justify-end">
                                 <DeleteForm
-                                    id={device._id.toString()}
+                                    id={String(device._id)}
                                     action={deletePosDeviceAction}
                                     message={`Sei sicuro di voler eliminare il Punto Cassa ${device.name}?`}
                                 />
