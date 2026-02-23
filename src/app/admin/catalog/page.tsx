@@ -35,6 +35,11 @@ import {
     normalizeAvailableDays,
     parseAvailableDaysInput
 } from "@/lib/product-availability";
+import {
+    getStockLabel,
+    getStockStatus,
+    parseStockQuantityInput
+} from "@/lib/inventory";
 
 function getReferencedId(value: unknown): string | undefined {
     if (!value) return undefined;
@@ -86,6 +91,7 @@ export default async function AdminCatalog() {
         const name = formData.get("name") as string;
         const categoryId = formData.get("categoryId") as string;
         const basePrice = parseFloat(formData.get("basePrice") as string);
+        const stockQuantity = parseStockQuantityInput(formData.get("stockQuantity") as string | null);
         const availableDays = parseAvailableDaysInput(formData.get("availableDays") as string | null);
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
@@ -102,7 +108,8 @@ export default async function AdminCatalog() {
             categoryId,
             basePrice,
             eventId: scopedEventId,
-            isSoldOut: false,
+            isSoldOut: stockQuantity !== null ? stockQuantity <= 0 : false,
+            stockQuantity,
             availableDays,
             variants: []
         });
@@ -170,6 +177,7 @@ export default async function AdminCatalog() {
         const name = formData.get("name") as string;
         const categoryId = formData.get("categoryId") as string;
         const basePrice = parseFloat(formData.get("basePrice") as string);
+        const stockQuantity = parseStockQuantityInput(formData.get("stockQuantity") as string | null);
         const availableDays = parseAvailableDaysInput(formData.get("availableDays") as string | null);
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
@@ -180,7 +188,17 @@ export default async function AdminCatalog() {
         const category = await Category.findOne({ _id: categoryId, eventId: scopedEventId }).select("_id").lean();
         if (!category) return;
 
-        await Product.findOneAndUpdate({ _id: id, eventId: scopedEventId }, { name, categoryId, basePrice, availableDays });
+        await Product.findOneAndUpdate(
+            { _id: id, eventId: scopedEventId },
+            {
+                name,
+                categoryId,
+                basePrice,
+                stockQuantity,
+                isSoldOut: stockQuantity !== null ? stockQuantity <= 0 : false,
+                availableDays
+            }
+        );
         revalidatePath("/admin/catalog");
     }
 
@@ -190,6 +208,7 @@ export default async function AdminCatalog() {
         const productId = formData.get("productId") as string;
         const optionName = formData.get("optionName") as string;
         const priceVariation = parseFloat(formData.get("priceVariation") as string);
+        const stockQuantity = parseStockQuantityInput(formData.get("stockQuantity") as string | null);
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
 
@@ -198,7 +217,7 @@ export default async function AdminCatalog() {
 
         await dbConnect();
         await Product.findOneAndUpdate({ _id: productId, eventId: scopedEventId }, {
-            $push: { variants: { optionName, priceVariation } }
+            $push: { variants: { optionName, priceVariation, stockQuantity } }
         });
         revalidatePath("/admin/catalog");
     }
@@ -295,6 +314,7 @@ export default async function AdminCatalog() {
                             <TableHead>Nome</TableHead>
                             <TableHead>Categoria</TableHead>
                             <TableHead>Prezzo</TableHead>
+                            <TableHead>Scorte</TableHead>
                             <TableHead>Disponibilità</TableHead>
                             <TableHead>Varianti</TableHead>
                             <TableHead className="w-[120px]">Azioni</TableHead>
@@ -307,6 +327,18 @@ export default async function AdminCatalog() {
                                 <TableCell>{(p.categoryId as unknown as ICategory)?.name || "N/A"}</TableCell>
                                 <TableCell>{p.basePrice.toFixed(2)} €</TableCell>
                                 <TableCell>
+                                    <span
+                                        className={`rounded-full px-2 py-1 text-xs font-bold ${getStockStatus((p as { stockQuantity?: number | null }).stockQuantity, p.isSoldOut) === "OUT"
+                                            ? "bg-red-100 text-red-700"
+                                            : getStockStatus((p as { stockQuantity?: number | null }).stockQuantity, p.isSoldOut) === "LOW"
+                                                ? "bg-amber-100 text-amber-700"
+                                                : "bg-slate-100 text-slate-700"
+                                            }`}
+                                    >
+                                        {getStockLabel((p as { stockQuantity?: number | null }).stockQuantity, p.isSoldOut)}
+                                    </span>
+                                </TableCell>
+                                <TableCell>
                                     <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
                                         {formatAvailableDaysLabel(p.availableDays)}
                                     </span>
@@ -315,7 +347,11 @@ export default async function AdminCatalog() {
                                     <div className="flex flex-wrap gap-1">
                                         {p.variants?.map((v, idx) => (
                                             <span key={idx} className="text-[10px] bg-slate-100 dark:bg-slate-800 px-1 rounded flex items-center gap-1 group">
-                                                <span>{v.optionName} ({v.priceVariation >= 0 ? '+' : ''}{v.priceVariation}€)</span>
+                                                <span>
+                                                    {v.optionName} ({v.priceVariation >= 0 ? '+' : ''}{v.priceVariation}€)
+                                                    {" · "}
+                                                    {getStockLabel((v as { stockQuantity?: number | null }).stockQuantity, false)}
+                                                </span>
                                                 <form action={removeVariant} className="flex items-center">
                                                     <input type="hidden" name="productId" value={String(p._id)} />
                                                     <input type="hidden" name="eventId" value={currentEventId} />
@@ -335,6 +371,7 @@ export default async function AdminCatalog() {
                                             name: p.name,
                                             categoryId: getReferencedId(p.categoryId) || "",
                                             basePrice: p.basePrice,
+                                            stockQuantity: (p as { stockQuantity?: number | null }).stockQuantity ?? null,
                                             availableDays: normalizeAvailableDays(p.availableDays)
                                         }}
                                         eventId={currentEventId}
@@ -362,6 +399,17 @@ export default async function AdminCatalog() {
                                                     <div className="grid gap-2">
                                                         <Label htmlFor="priceVariation">Varianza Prezzo (€)</Label>
                                                         <Input name="priceVariation" type="number" step="0.01" placeholder="1.00" required />
+                                                    </div>
+                                                    <div className="grid gap-2">
+                                                        <Label htmlFor="stockQuantity">Scorte Variante</Label>
+                                                        <Input
+                                                            name="stockQuantity"
+                                                            type="number"
+                                                            min="0"
+                                                            step="1"
+                                                            inputMode="numeric"
+                                                            placeholder="Illimitato"
+                                                        />
                                                     </div>
                                                 </div>
                                                 <DialogFooter>
