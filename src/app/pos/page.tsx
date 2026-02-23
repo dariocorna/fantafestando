@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { createOrder, triggerSumUpPayment, loadPendingOrderByCode, completePendingOrderPayment, listRecentPendingOrders } from "./actions"
+import { createOrder, loadPendingOrderByCode, completePendingOrderPayment, listRecentPendingOrders } from "./actions"
 import { getCategoryTheme } from "@/lib/category-colors"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
 import { getStockLabel, getStockStatus, type StockShortage } from "@/lib/inventory"
@@ -388,20 +388,6 @@ export default function PosPage() {
             return
         }
 
-        let sumupCheckoutId: string | undefined = undefined
-
-        if (effectivePaymentMethod === "CARD") {
-            // Avvia pagamento su terminale
-            const sumupResult = await triggerSumUpPayment(total, activeEvent._id, selectedPosDeviceId)
-            if (!sumupResult.success) {
-                alert("Errore SumUp: " + sumupResult.error)
-                setIsProcessing(false)
-                return
-            }
-            sumupCheckoutId = sumupResult.checkoutId
-            // L'ordine verrà creato in stato PENDING e confermato via webhook.
-        }
-
         const orderData = {
             eventId: activeEvent._id,
             customer: {
@@ -416,7 +402,6 @@ export default function PosPage() {
                 selectedOptions: []
             })),
             paymentMethod: effectivePaymentMethod,
-            sumupCheckoutId,
             posDeviceId: selectedPosDeviceId,
             allowStockOverride
         }
