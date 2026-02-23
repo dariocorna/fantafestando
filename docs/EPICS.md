@@ -139,10 +139,15 @@ Rifattorizzazione dell'architettura hardware per supportare periferiche modulari
 
 ## ⬜ Epica 9: Magazzino e Scorte Base
 
-- Campo giacenza (scorta) sul modello `Product`/`Variant`.
-- Decremento automatico scorta ad ogni checkout POS confermato.
-- Auto Sold-Out quando le scorte arrivano a 0.
-- Indicatori visivi "Low stock warning" nella UI.
+- Campo giacenza (scorta) sul modello `Product` e su ogni `Variant`.
+- Decremento automatico scorta al passaggio ordine in stato `PAID` (checkout POS cash / chiusura pendente / webhook carta).
+- Auto Sold-Out quando le scorte arrivano a `0` (con clamp per evitare valori negativi).
+- Indicatori visivi "Low stock warning" in Admin Catalogo e POS.
+- **Regola operativa POS**: a scorta `0` il prodotto resta vendibile solo con warning bloccante e conferma esplicita del cassiere.
+- **Regola operativa Menu pubblico**: prodotti esauriti non ordinabili.
+- Nessuna prenotazione scorte sugli ordini web pendenti: la verifica avviene in chiusura.
+
+Riferimento funzionale dettagliato: `docs/inventory-stock.md`.
 
 ---
 
