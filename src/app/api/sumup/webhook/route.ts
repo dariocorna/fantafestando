@@ -2,7 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import dbConnect from "@/lib/mongoose";
 import Order from "@/models/Order";
+import Product from "@/models/Product";
 import { PrinterService } from "@/lib/printer";
+import {
+    aggregateCartQuantities,
+    applyStockDecrement,
+    collectStockShortages,
+    isStockTracked,
+    normalizeStockQuantity,
+    type ProductStockInfo,
+    type StockMode
+} from "@/lib/inventory";
 
 function safeEquals(a: string, b: string) {
     const aBuf = Buffer.from(a);
@@ -22,6 +32,82 @@ function verifyWebhookSignature(rawBody: string, signatureHeader: string, secret
         `sha256=${expectedBase64}`
     ];
     return expectedCandidates.some(candidate => safeEquals(candidate, normalizedSignature));
+}
+
+async function applyStockOnWebhook(
+    eventId: string,
+    cart: Array<{ productId: string | { toString(): string }, quantity: number, snapshotName: string }>,
+    mode: StockMode
+) {
+    const demands = aggregateCartQuantities(
+        cart.map((item) => ({
+            productId: item.productId.toString(),
+            quantity: item.quantity,
+            snapshotName: item.snapshotName
+        }))
+    )
+    if (demands.size === 0) {
+        return { success: true as const }
+    }
+
+    const productIds = [...demands.keys()]
+    const docs = await Product.find({
+        eventId,
+        _id: { $in: productIds }
+    }).select("_id name stockQuantity isSoldOut").lean() as Array<{
+        _id: string | { toString(): string }
+        name: string
+        stockQuantity?: number | null
+        isSoldOut?: boolean
+    }>
+
+    const productMap = new Map<string, ProductStockInfo>(
+        docs.map((doc) => [
+            doc._id.toString(),
+            {
+                id: doc._id.toString(),
+                name: doc.name,
+                stockQuantity: normalizeStockQuantity(doc.stockQuantity ?? null),
+                isSoldOut: Boolean(doc.isSoldOut)
+            }
+        ])
+    )
+
+    const shortages = collectStockShortages(demands, productMap)
+    if (mode === "strict" && shortages.length > 0) {
+        return {
+            success: false as const,
+            shortages
+        }
+    }
+
+    for (const [productId, requestedQuantity] of demands.entries()) {
+        const stockInfo = productMap.get(productId)
+        if (!stockInfo || !isStockTracked(stockInfo.stockQuantity)) continue
+
+        const latestDoc = await Product.findOne({
+            eventId,
+            _id: productId
+        }).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
+
+        if (!latestDoc) continue
+
+        const currentStock = normalizeStockQuantity(latestDoc.stockQuantity ?? null)
+        if (!isStockTracked(currentStock)) continue
+
+        const result = applyStockDecrement(currentStock, requestedQuantity, mode)
+        await Product.updateOne(
+            { eventId, _id: productId },
+            {
+                $set: {
+                    stockQuantity: result.nextStockQuantity,
+                    isSoldOut: (result.nextStockQuantity ?? 0) <= 0
+                }
+            }
+        )
+    }
+
+    return { success: true as const }
 }
 
 export async function POST(req: NextRequest) {
@@ -67,6 +153,17 @@ export async function POST(req: NextRequest) {
 
             if (order.status === "PAID") {
                 return NextResponse.json({ success: true, message: "Already paid" });
+            }
+
+            const strictStockResult = await applyStockOnWebhook(
+                order.eventId.toString(),
+                order.cart,
+                (order as { stockOverrideApproved?: boolean }).stockOverrideApproved ? "override" : "strict"
+            )
+            if (!strictStockResult.success) {
+                console.warn("[SumUp Webhook] Stock shortage on strict mode, applying override fallback.", strictStockResult.shortages);
+                await applyStockOnWebhook(order.eventId.toString(), order.cart, "override")
+                order.set("stockOverrideApproved", true)
             }
 
             // Aggiorna lo stato dell'ordine
