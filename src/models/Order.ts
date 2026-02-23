@@ -24,6 +24,7 @@ export interface IOrder extends Document {
     sumupCheckoutId?: string;
     sumupPaymentId?: string;
     posDeviceId?: Types.ObjectId;
+    stockOverrideApproved?: boolean;
     createdAt?: Date;
     updatedAt?: Date;
 }
@@ -51,7 +52,8 @@ const OrderSchema = new Schema<IOrder>({
     paymentMethod: { type: String, enum: ["CASH", "CARD", "OTHER"], default: "CASH" },
     sumupCheckoutId: { type: String },
     sumupPaymentId: { type: String },
-    posDeviceId: { type: Schema.Types.ObjectId, ref: 'PosDevice' }
+    posDeviceId: { type: Schema.Types.ObjectId, ref: 'PosDevice' },
+    stockOverrideApproved: { type: Boolean, default: false }
 }, {
     timestamps: true
 });
