@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createPublicOrder } from "../actions"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
+import { type StockShortage } from "@/lib/inventory"
 
 interface Product {
     _id: string
@@ -51,6 +52,7 @@ export default function CheckoutPage() {
     const [tableNumber, setTableNumber] = useState("")
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [checkoutError, setCheckoutError] = useState<string | null>(null)
+    const [checkoutShortages, setCheckoutShortages] = useState<StockShortage[]>([])
     const [eventSettings, setEventSettings] = useState<EventCheckoutConfig | null>(null)
     const normalizedTableValue = normalizeTableValue(tableNumber)
     const tableValueValid = isTableValueValid(tableNumber)
@@ -75,6 +77,7 @@ export default function CheckoutPage() {
 
     const handleSubmit = async () => {
         setCheckoutError(null)
+        setCheckoutShortages([])
 
         if (eventSettings?.askName && !customerName.trim()) {
             setCheckoutError("Inserisci il tuo nome")
@@ -106,6 +109,11 @@ export default function CheckoutPage() {
             router.push(`/menu/success?code=${result.shortCode}`)
         } else {
             setCheckoutError(result.error || "Non è stato possibile inviare l'ordine. Riprova.")
+            if ("stockShortages" in result && Array.isArray(result.stockShortages)) {
+                setCheckoutShortages(result.stockShortages)
+            } else {
+                setCheckoutShortages([])
+            }
             setIsSubmitting(false)
         }
     }
@@ -166,6 +174,7 @@ export default function CheckoutPage() {
                                     onChange={(e) => {
                                         setCustomerName(e.target.value)
                                         if (checkoutError) setCheckoutError(null)
+                                        if (checkoutShortages.length > 0) setCheckoutShortages([])
                                     }}
                                 />
                             </div>
@@ -187,6 +196,7 @@ export default function CheckoutPage() {
                                                     onClick={() => {
                                                         setTableNumber(table)
                                                         if (checkoutError) setCheckoutError(null)
+                                                        if (checkoutShortages.length > 0) setCheckoutShortages([])
                                                     }}
                                                     className={`rounded-xl border-2 px-3 py-2 text-sm font-black transition-colors ${isActive ? "border-orange-600 bg-orange-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-orange-300"}`}
                                                 >
@@ -205,6 +215,7 @@ export default function CheckoutPage() {
                                         onChange={(e) => {
                                             setTableNumber(e.target.value)
                                             if (checkoutError) setCheckoutError(null)
+                                            if (checkoutShortages.length > 0) setCheckoutShortages([])
                                         }}
                                     />
                                 </div>
@@ -218,6 +229,7 @@ export default function CheckoutPage() {
                                         onClick={() => {
                                             setTableNumber("")
                                             if (checkoutError) setCheckoutError(null)
+                                            if (checkoutShortages.length > 0) setCheckoutShortages([])
                                         }}
                                     >
                                         RESET
@@ -242,7 +254,16 @@ export default function CheckoutPage() {
                         role="alert"
                         className="w-full max-w-xl mx-auto mb-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700"
                     >
-                        {checkoutError}
+                        <p>{checkoutError}</p>
+                        {checkoutShortages.length > 0 ? (
+                            <ul className="mt-2 space-y-1 text-xs font-bold">
+                                {checkoutShortages.map((shortage) => (
+                                    <li key={`${shortage.productId}-${shortage.requestedQuantity}`}>
+                                        {shortage.productName}: richiesti {shortage.requestedQuantity}, disponibili {shortage.availableQuantity}
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : null}
                     </div>
                 ) : null}
                 <Button
