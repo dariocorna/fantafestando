@@ -9,6 +9,17 @@ import { PrinterService } from "@/lib/printer"
 import { createSumUpCheckout } from "@/lib/sumup"
 import { decryptSecret } from "@/lib/secrets"
 import { getOrderCodeFromOrder, parseOrderNumberInput } from "@/lib/order-code"
+import {
+    aggregateCartQuantities,
+    applyStockDecrement,
+    collectStockShortages,
+    isStockTracked,
+    normalizeStockQuantity,
+    type CartStockItem,
+    type ProductStockInfo,
+    type StockMode,
+    type StockShortage
+} from "@/lib/inventory"
 
 interface PosPaymentCapabilities {
     hasCashBox: boolean
@@ -60,6 +71,244 @@ function validatePaymentMethodAvailability(
     return null
 }
 
+interface OrderCartPayloadItem {
+    productId: string
+    snapshotName: string
+    quantity: number
+    selectedOptions?: Array<{ name: string, priceVariation: number }>
+}
+
+interface StockOperationResult {
+    success: boolean
+    error?: string
+    stockShortages?: StockShortage[]
+}
+
+function buildDemandMap(cart: OrderCartPayloadItem[]): Map<string, number> {
+    const demandItems: CartStockItem[] = cart.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        snapshotName: item.snapshotName
+    }))
+    return aggregateCartQuantities(demandItems)
+}
+
+async function loadProductStocks(eventId: string, productIds: string[]): Promise<Map<string, ProductStockInfo>> {
+    const docs = await Product.find({
+        eventId,
+        _id: { $in: productIds }
+    }).select("_id name stockQuantity isSoldOut").lean() as Array<{
+        _id: string | { toString(): string }
+        name: string
+        stockQuantity?: number | null
+        isSoldOut?: boolean
+    }>
+
+    return new Map(
+        docs.map((doc) => [
+            doc._id.toString(),
+            {
+                id: doc._id.toString(),
+                name: doc.name,
+                stockQuantity: normalizeStockQuantity(doc.stockQuantity ?? null),
+                isSoldOut: Boolean(doc.isSoldOut)
+            }
+        ])
+    )
+}
+
+function splitMissingShortages(shortages: StockShortage[]) {
+    const missing = shortages.filter((entry) => entry.productName === "Prodotto non trovato")
+    const stock = shortages.filter((entry) => entry.productName !== "Prodotto non trovato")
+    return { missing, stock }
+}
+
+async function syncSoldOutFlags(eventId: string, productIds: string[]) {
+    const uniqueProductIds = [...new Set(productIds)]
+    if (uniqueProductIds.length === 0) return
+
+    const docs = await Product.find({
+        eventId,
+        _id: { $in: uniqueProductIds }
+    }).select("_id stockQuantity").lean() as Array<{ _id: string | { toString(): string }, stockQuantity?: number | null }>
+
+    for (const doc of docs) {
+        const normalizedStock = normalizeStockQuantity(doc.stockQuantity ?? null)
+        await Product.updateOne(
+            { eventId, _id: doc._id.toString() },
+            {
+                $set: {
+                    stockQuantity: normalizedStock,
+                    isSoldOut: normalizedStock !== null ? normalizedStock <= 0 : false
+                }
+            }
+        )
+    }
+}
+
+async function decrementTrackedStocksStrict(
+    eventId: string,
+    demands: Map<string, number>,
+    products: Map<string, ProductStockInfo>
+): Promise<StockOperationResult> {
+    const applied: Array<{ productId: string, quantity: number }> = []
+
+    for (const [productId, requestedQuantity] of demands.entries()) {
+        const product = products.get(productId)
+        if (!product || !isStockTracked(product.stockQuantity)) continue
+
+        const updated = await Product.findOneAndUpdate(
+            {
+                eventId,
+                _id: productId,
+                stockQuantity: { $gte: requestedQuantity }
+            },
+            { $inc: { stockQuantity: -requestedQuantity } },
+            { new: true }
+        ).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
+
+        if (!updated) {
+            for (const entry of applied) {
+                await Product.updateOne(
+                    { eventId, _id: entry.productId },
+                    { $inc: { stockQuantity: entry.quantity } }
+                )
+            }
+
+            await syncSoldOutFlags(eventId, [...applied.map((entry) => entry.productId), productId])
+
+            const refreshedStocks = await loadProductStocks(eventId, [...demands.keys()])
+            const refreshedShortages = collectStockShortages(demands, refreshedStocks)
+            return {
+                success: false,
+                error: "Scorte non sufficienti per completare l'operazione",
+                stockShortages: refreshedShortages
+            }
+        }
+
+        applied.push({ productId, quantity: requestedQuantity })
+    }
+
+    await syncSoldOutFlags(eventId, applied.map((entry) => entry.productId))
+    return { success: true }
+}
+
+async function decrementTrackedStocksOverride(
+    eventId: string,
+    demands: Map<string, number>,
+    products: Map<string, ProductStockInfo>
+): Promise<StockOperationResult> {
+    const touched: string[] = []
+
+    for (const [productId, requestedQuantity] of demands.entries()) {
+        const product = products.get(productId)
+        if (!product || !isStockTracked(product.stockQuantity)) continue
+
+        const latestDoc = await Product.findOne({
+            eventId,
+            _id: productId
+        }).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
+
+        if (!latestDoc) {
+            return {
+                success: false,
+                error: "Prodotto non trovato durante l'aggiornamento scorte",
+                stockShortages: [{
+                    productId,
+                    productName: product.name,
+                    requestedQuantity,
+                    availableQuantity: 0
+                }]
+            }
+        }
+
+        const normalizedStock = normalizeStockQuantity(latestDoc.stockQuantity ?? null)
+        if (!isStockTracked(normalizedStock)) continue
+
+        const result = applyStockDecrement(normalizedStock, requestedQuantity, "override")
+        await Product.updateOne(
+            { eventId, _id: productId },
+            {
+                $set: {
+                    stockQuantity: result.nextStockQuantity,
+                    isSoldOut: (result.nextStockQuantity ?? 0) <= 0
+                }
+            }
+        )
+        touched.push(productId)
+    }
+
+    await syncSoldOutFlags(eventId, touched)
+    return { success: true }
+}
+
+async function applyStockForPaidOrder(
+    eventId: string,
+    cart: OrderCartPayloadItem[],
+    mode: StockMode
+): Promise<StockOperationResult> {
+    const demands = buildDemandMap(cart)
+    if (demands.size === 0) return { success: true }
+
+    const productIds = [...demands.keys()]
+    const productStocks = await loadProductStocks(eventId, productIds)
+    const shortages = collectStockShortages(demands, productStocks)
+    const { missing, stock } = splitMissingShortages(shortages)
+
+    if (missing.length > 0) {
+        return {
+            success: false,
+            error: "Alcuni prodotti non sono più disponibili",
+            stockShortages: shortages
+        }
+    }
+
+    if (mode === "strict" && stock.length > 0) {
+        return {
+            success: false,
+            error: "Scorte non sufficienti per completare l'operazione",
+            stockShortages: stock
+        }
+    }
+
+    if (mode === "strict") {
+        return decrementTrackedStocksStrict(eventId, demands, productStocks)
+    }
+
+    return decrementTrackedStocksOverride(eventId, demands, productStocks)
+}
+
+async function validateStockForPendingOrder(
+    eventId: string,
+    cart: OrderCartPayloadItem[],
+    mode: StockMode
+): Promise<StockOperationResult> {
+    const demands = buildDemandMap(cart)
+    if (demands.size === 0) return { success: true }
+
+    const productStocks = await loadProductStocks(eventId, [...demands.keys()])
+    const shortages = collectStockShortages(demands, productStocks)
+    const { missing, stock } = splitMissingShortages(shortages)
+
+    if (missing.length > 0) {
+        return {
+            success: false,
+            error: "Alcuni prodotti non sono più disponibili",
+            stockShortages: shortages
+        }
+    }
+
+    if (mode === "strict" && stock.length > 0) {
+        return {
+            success: false,
+            error: "Scorte non sufficienti per completare l'operazione",
+            stockShortages: stock
+        }
+    }
+
+    return { success: true }
+}
+
 export async function createOrder(data: {
     eventId: string,
     customer: { name?: string, table?: string },
@@ -72,7 +321,8 @@ export async function createOrder(data: {
     }>,
     paymentMethod: "CASH" | "CARD" | "OTHER",
     sumupCheckoutId?: string,
-    posDeviceId?: string
+    posDeviceId?: string,
+    allowStockOverride?: boolean
 }) {
     try {
         const capabilitiesResult = await getPosPaymentCapabilities(data.eventId, data.posDeviceId)
@@ -86,6 +336,27 @@ export async function createOrder(data: {
         }
 
         await dbConnect()
+        const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
+        if (data.paymentMethod === "CARD") {
+            const stockCheckResult = await validateStockForPendingOrder(data.eventId, data.cart, stockMode)
+            if (!stockCheckResult.success) {
+                return {
+                    success: false,
+                    error: stockCheckResult.error || "Scorte non sufficienti",
+                    stockShortages: stockCheckResult.stockShortages
+                }
+            }
+        } else {
+            const stockApplyResult = await applyStockForPaidOrder(data.eventId, data.cart, stockMode)
+            if (!stockApplyResult.success) {
+                return {
+                    success: false,
+                    error: stockApplyResult.error || "Scorte non sufficienti",
+                    stockShortages: stockApplyResult.stockShortages
+                }
+            }
+        }
+
         const order = await Order.create({
             eventId: data.eventId,
             status: data.paymentMethod === "CARD" ? "PENDING" : "PAID",
@@ -94,7 +365,8 @@ export async function createOrder(data: {
             cart: data.cart,
             paymentMethod: data.paymentMethod,
             sumupCheckoutId: data.sumupCheckoutId,
-            posDeviceId: data.posDeviceId
+            posDeviceId: data.posDeviceId,
+            stockOverrideApproved: Boolean(data.allowStockOverride)
         })
 
         // Trigger network printing ONLY if PAID immediately.
@@ -312,6 +584,7 @@ export async function completePendingOrderPayment(data: {
     orderId: string
     paymentMethod: "CASH" | "CARD"
     posDeviceId?: string
+    allowStockOverride?: boolean
     customer?: { name?: string, table?: string }
     totalAmount?: number
     cart?: Array<{
@@ -376,9 +649,30 @@ export async function completePendingOrderPayment(data: {
             order.totalAmount = data.totalAmount
         }
 
+        const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
+        const currentCart = order.cart.map((item) => ({
+            productId: item.productId.toString(),
+            snapshotName: item.snapshotName,
+            quantity: item.quantity,
+            selectedOptions: (item.selectedOptions || []).map((option) => ({
+                name: option.name,
+                priceVariation: option.priceVariation
+            }))
+        }))
+
+        const stockApplyResult = await applyStockForPaidOrder(data.eventId, currentCart, stockMode)
+        if (!stockApplyResult.success) {
+            return {
+                success: false,
+                error: stockApplyResult.error || "Scorte non sufficienti",
+                stockShortages: stockApplyResult.stockShortages
+            }
+        }
+
         order.status = "PAID"
         order.paymentMethod = data.paymentMethod
         order.set("posDeviceId", data.posDeviceId || undefined)
+        order.set("stockOverrideApproved", Boolean(data.allowStockOverride))
         await order.save()
 
         revalidatePath("/admin/orders")
