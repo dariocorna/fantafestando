@@ -59,6 +59,13 @@ Sviluppo strutturato in epiche iterabili con piccoli commit ("atomici" come rich
 ### Epica 5: Statistiche Base
 - Pagina per resoconti di fine giornata.
 
+### Epica 9: Magazzino e Scorte Base (in pianificazione)
+- Introduzione campo scorte su prodotto/variante (`stockQuantity`).
+- Decremento scorte solo su transizione ordine a `PAID`.
+- POS con override operativo a stock zero (warning + conferma cassiere).
+- Menu pubblico con esclusione prodotti esauriti.
+- Dettagli funzionali: `docs/inventory-stock.md`.
+
 ## User Review Required
 
 > [!CAUTION]

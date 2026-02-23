@@ -71,12 +71,28 @@ interface IProduct {
   name: string;                 // e.g. "Casoncelli alla Bergamasca"
   basePrice: number;
   isSoldOut: boolean;
+  stockQuantity?: number | null; // null = scorta non tracciata
   variants: Array<{
     optionName: string;         // e.g. "Extra Cheese", "No Onions"
     priceVariation: number;     // e.g. +1.50, 0.00
+    stockQuantity?: number | null; // null = scorta non tracciata
   }>;
 }
 ```
+
+### Estensione Magazzino (Epica 9)
+
+Regole dati previste per la gestione scorte:
+- `stockQuantity = null`: articolo/variante non tracciato a magazzino (illimitato).
+- `stockQuantity = 0`: articolo/variante esaurito.
+- `stockQuantity > 0`: disponibilità residua.
+- `isSoldOut`: flag derivato operativo (allineato allo stato stock durante i flussi di checkout).
+
+Regole di consumo:
+- decremento scorte solo quando l'ordine passa a `PAID`;
+- niente valori negativi (decremento con clamp a `0`);
+- nel POS è consentita forzatura vendita a stock `0` con conferma esplicita cassiere;
+- nel Menu pubblico gli articoli esauriti non sono ordinabili.
 
 ### 4. Ordine / Pre-Ordine
 La struttura è identica sia per il Cloud (Provvisori) sia per Locale (Saldati).
