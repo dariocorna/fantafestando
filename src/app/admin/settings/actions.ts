@@ -215,9 +215,9 @@ export async function cloneEventAction(formData: FormData) {
     // 6. Clona i Prodotti associandoli alle nuove Categorie
     const products = await Product.find({ eventId: sourceEventId }).lean();
     for (const prod of products) {
-        const productStockQuantity = normalizeStockQuantity((prod as { stockQuantity?: number | null }).stockQuantity ?? null);
-        const clonedVariants = (prod.variants || []).map((variant) => {
-            const variantStockQuantity = normalizeStockQuantity((variant as { stockQuantity?: number | null }).stockQuantity ?? null);
+        const productStockQuantity = normalizeStockQuantity(prod.stockQuantity ?? null);
+        const clonedVariants = (prod.variants || []).map((variant: { optionName: string; priceVariation: number; stockQuantity?: number | null }) => {
+            const variantStockQuantity = normalizeStockQuantity(variant.stockQuantity ?? null);
             return {
                 optionName: variant.optionName,
                 priceVariation: variant.priceVariation,
@@ -232,7 +232,7 @@ export async function cloneEventAction(formData: FormData) {
             basePrice: prod.basePrice,
             isSoldOut: productStockQuantity !== null ? productStockQuantity <= 0 : false,
             stockQuantity: productStockQuantity,
-            availableDays: normalizeAvailableDays((prod as { availableDays?: string[] }).availableDays || []),
+            availableDays: normalizeAvailableDays(prod.availableDays || []),
             variants: clonedVariants
         });
     }

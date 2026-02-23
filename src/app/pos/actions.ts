@@ -9,17 +9,13 @@ import { PrinterService } from "@/lib/printer"
 import { createSumUpCheckout } from "@/lib/sumup"
 import { decryptSecret } from "@/lib/secrets"
 import { getOrderCodeFromOrder, parseOrderNumberInput } from "@/lib/order-code"
+import { type StockMode } from "@/lib/inventory"
 import {
-    aggregateCartQuantities,
-    applyStockDecrement,
-    collectStockShortages,
-    isStockTracked,
-    normalizeStockQuantity,
-    type CartStockItem,
-    type ProductStockInfo,
-    type StockMode,
-    type StockShortage
-} from "@/lib/inventory"
+    applyStockForPaidOrder,
+    validateStockForPendingOrder,
+    rollbackStockAdjustments,
+    type StockAdjustment,
+} from "@/lib/stock-operations"
 
 interface PosPaymentCapabilities {
     hasCashBox: boolean
@@ -69,275 +65,6 @@ function validatePaymentMethodAvailability(
     }
 
     return null
-}
-
-interface OrderCartPayloadItem {
-    productId: string
-    snapshotName: string
-    quantity: number
-    selectedOptions?: Array<{ name: string, priceVariation: number }>
-}
-
-interface StockAdjustment {
-    productId: string
-    quantity: number
-}
-
-interface StockOperationResult {
-    success: boolean
-    error?: string
-    stockShortages?: StockShortage[]
-    appliedAdjustments?: StockAdjustment[]
-}
-
-function buildDemandMap(cart: OrderCartPayloadItem[]): Map<string, number> {
-    const demandItems: CartStockItem[] = cart.map((item) => ({
-        productId: item.productId,
-        quantity: item.quantity,
-        snapshotName: item.snapshotName
-    }))
-    return aggregateCartQuantities(demandItems)
-}
-
-async function loadProductStocks(eventId: string, productIds: string[]): Promise<Map<string, ProductStockInfo>> {
-    const docs = await Product.find({
-        eventId,
-        _id: { $in: productIds }
-    }).select("_id name stockQuantity isSoldOut").lean() as Array<{
-        _id: string | { toString(): string }
-        name: string
-        stockQuantity?: number | null
-        isSoldOut?: boolean
-    }>
-
-    return new Map(
-        docs.map((doc) => [
-            doc._id.toString(),
-            {
-                id: doc._id.toString(),
-                name: doc.name,
-                stockQuantity: normalizeStockQuantity(doc.stockQuantity ?? null),
-                isSoldOut: Boolean(doc.isSoldOut)
-            }
-        ])
-    )
-}
-
-function splitMissingShortages(shortages: StockShortage[]) {
-    const missing = shortages.filter((entry) => entry.productName === "Prodotto non trovato")
-    const stock = shortages.filter((entry) => entry.productName !== "Prodotto non trovato")
-    return { missing, stock }
-}
-
-async function syncSoldOutFlags(eventId: string, productIds: string[]) {
-    const uniqueProductIds = [...new Set(productIds)]
-    if (uniqueProductIds.length === 0) return
-
-    const docs = await Product.find({
-        eventId,
-        _id: { $in: uniqueProductIds }
-    }).select("_id stockQuantity").lean() as Array<{ _id: string | { toString(): string }, stockQuantity?: number | null }>
-
-    for (const doc of docs) {
-        const normalizedStock = normalizeStockQuantity(doc.stockQuantity ?? null)
-        await Product.updateOne(
-            { eventId, _id: doc._id.toString() },
-            {
-                $set: {
-                    stockQuantity: normalizedStock,
-                    isSoldOut: normalizedStock !== null ? normalizedStock <= 0 : false
-                }
-            }
-        )
-    }
-}
-
-function aggregateStockAdjustments(adjustments: StockAdjustment[]): StockAdjustment[] {
-    const totals = new Map<string, number>()
-    for (const adjustment of adjustments) {
-        const productId = adjustment.productId?.trim()
-        const quantity = Number(adjustment.quantity)
-        if (!productId || !Number.isFinite(quantity) || quantity <= 0) continue
-        totals.set(productId, (totals.get(productId) || 0) + quantity)
-    }
-    return [...totals.entries()].map(([productId, quantity]) => ({ productId, quantity }))
-}
-
-async function rollbackStockAdjustments(eventId: string, adjustments: StockAdjustment[]) {
-    const aggregatedAdjustments = aggregateStockAdjustments(adjustments)
-    if (aggregatedAdjustments.length === 0) return
-
-    for (const adjustment of aggregatedAdjustments) {
-        await Product.updateOne(
-            { eventId, _id: adjustment.productId },
-            { $inc: { stockQuantity: adjustment.quantity } }
-        )
-    }
-
-    await syncSoldOutFlags(eventId, aggregatedAdjustments.map((entry) => entry.productId))
-}
-
-async function decrementTrackedStocksStrict(
-    eventId: string,
-    demands: Map<string, number>,
-    products: Map<string, ProductStockInfo>
-): Promise<StockOperationResult> {
-    const applied: StockAdjustment[] = []
-
-    for (const [productId, requestedQuantity] of demands.entries()) {
-        const product = products.get(productId)
-        if (!product || !isStockTracked(product.stockQuantity)) continue
-
-        const updated = await Product.findOneAndUpdate(
-            {
-                eventId,
-                _id: productId,
-                stockQuantity: { $gte: requestedQuantity }
-            },
-            { $inc: { stockQuantity: -requestedQuantity } },
-            { new: true }
-        ).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
-
-        if (!updated) {
-            await rollbackStockAdjustments(eventId, applied)
-
-            const refreshedStocks = await loadProductStocks(eventId, [...demands.keys()])
-            const refreshedShortages = collectStockShortages(demands, refreshedStocks)
-            return {
-                success: false,
-                error: "Scorte non sufficienti per completare l'operazione",
-                stockShortages: refreshedShortages,
-                appliedAdjustments: []
-            }
-        }
-
-        applied.push({ productId, quantity: requestedQuantity })
-    }
-
-    await syncSoldOutFlags(eventId, applied.map((entry) => entry.productId))
-    return { success: true, appliedAdjustments: applied }
-}
-
-async function decrementTrackedStocksOverride(
-    eventId: string,
-    demands: Map<string, number>,
-    products: Map<string, ProductStockInfo>
-): Promise<StockOperationResult> {
-    const touched: string[] = []
-    const applied: StockAdjustment[] = []
-
-    for (const [productId, requestedQuantity] of demands.entries()) {
-        const product = products.get(productId)
-        if (!product || !isStockTracked(product.stockQuantity)) continue
-
-        const latestDoc = await Product.findOne({
-            eventId,
-            _id: productId
-        }).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
-
-        if (!latestDoc) {
-            await rollbackStockAdjustments(eventId, applied)
-            return {
-                success: false,
-                error: "Prodotto non trovato durante l'aggiornamento scorte",
-                stockShortages: [{
-                    productId,
-                    productName: product.name,
-                    requestedQuantity,
-                    availableQuantity: 0
-                }],
-                appliedAdjustments: []
-            }
-        }
-
-        const normalizedStock = normalizeStockQuantity(latestDoc.stockQuantity ?? null)
-        if (!isStockTracked(normalizedStock)) continue
-
-        const result = applyStockDecrement(normalizedStock, requestedQuantity, "override")
-        await Product.updateOne(
-            { eventId, _id: productId },
-            {
-                $set: {
-                    stockQuantity: result.nextStockQuantity,
-                    isSoldOut: (result.nextStockQuantity ?? 0) <= 0
-                }
-            }
-        )
-        if (result.appliedQuantity > 0) {
-            applied.push({ productId, quantity: result.appliedQuantity })
-        }
-        touched.push(productId)
-    }
-
-    await syncSoldOutFlags(eventId, touched)
-    return { success: true, appliedAdjustments: applied }
-}
-
-async function applyStockForPaidOrder(
-    eventId: string,
-    cart: OrderCartPayloadItem[],
-    mode: StockMode
-): Promise<StockOperationResult> {
-    const demands = buildDemandMap(cart)
-    if (demands.size === 0) return { success: true }
-
-    const productIds = [...demands.keys()]
-    const productStocks = await loadProductStocks(eventId, productIds)
-    const shortages = collectStockShortages(demands, productStocks)
-    const { missing, stock } = splitMissingShortages(shortages)
-
-    if (missing.length > 0) {
-        return {
-            success: false,
-            error: "Alcuni prodotti non sono più disponibili",
-            stockShortages: shortages
-        }
-    }
-
-    if (mode === "strict" && stock.length > 0) {
-        return {
-            success: false,
-            error: "Scorte non sufficienti per completare l'operazione",
-            stockShortages: stock
-        }
-    }
-
-    if (mode === "strict") {
-        return decrementTrackedStocksStrict(eventId, demands, productStocks)
-    }
-
-    return decrementTrackedStocksOverride(eventId, demands, productStocks)
-}
-
-async function validateStockForPendingOrder(
-    eventId: string,
-    cart: OrderCartPayloadItem[],
-    mode: StockMode
-): Promise<StockOperationResult> {
-    const demands = buildDemandMap(cart)
-    if (demands.size === 0) return { success: true }
-
-    const productStocks = await loadProductStocks(eventId, [...demands.keys()])
-    const shortages = collectStockShortages(demands, productStocks)
-    const { missing, stock } = splitMissingShortages(shortages)
-
-    if (missing.length > 0) {
-        return {
-            success: false,
-            error: "Alcuni prodotti non sono più disponibili",
-            stockShortages: shortages
-        }
-    }
-
-    if (mode === "strict" && stock.length > 0) {
-        return {
-            success: false,
-            error: "Scorte non sufficienti per completare l'operazione",
-            stockShortages: stock
-        }
-    }
-
-    return { success: true }
 }
 
 export async function createOrder(data: {
@@ -537,20 +264,23 @@ export async function loadPendingOrderByCode(data: {
 
         await dbConnect()
         const parsedNumber = parseOrderNumberInput(normalizedCode)
-        let foundOrder: {
+
+        interface PendingOrderResult {
             _id: string | { toString(): string }
             pickupNumber?: number
             totalAmount: number
             customer?: { name?: string, table?: string }
             cart: Array<{ productId: string | { toString(): string }, snapshotName: string, quantity: number }>
-        } | null = null
+        }
+
+        let foundOrder: PendingOrderResult | null = null
 
         if (parsedNumber !== null) {
             foundOrder = await Order.findOne({
                 eventId: data.eventId,
                 status: "PENDING",
                 pickupNumber: parsedNumber
-            }).lean() as typeof foundOrder
+            }).lean() as PendingOrderResult | null
         }
 
         // Legacy fallback: old pending orders used the last 4 chars of _id as code.
@@ -561,7 +291,7 @@ export async function loadPendingOrderByCode(data: {
                 .lean()
             foundOrder = (pendingOrders.find(order =>
                 order._id.toString().slice(-4).toUpperCase() === normalizedCode
-            ) || null) as typeof foundOrder
+            ) || null) as PendingOrderResult | null
         }
 
         if (!foundOrder) {
@@ -728,11 +458,11 @@ export async function completePendingOrderPayment(data: {
         }
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
-        const currentCart = order.cart.map((item) => ({
+        const currentCart = order.cart.map((item: { productId: { toString(): string }, snapshotName: string, quantity: number, selectedOptions?: Array<{ name: string, priceVariation: number }> }) => ({
             productId: item.productId.toString(),
             snapshotName: item.snapshotName,
             quantity: item.quantity,
-            selectedOptions: (item.selectedOptions || []).map((option) => ({
+            selectedOptions: (item.selectedOptions || []).map((option: { name: string, priceVariation: number }) => ({
                 name: option.name,
                 priceVariation: option.priceVariation
             }))

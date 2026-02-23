@@ -14,4 +14,8 @@ const UserSchema = new Schema<IUser>({
     timestamps: true
 });
 
+if (process.env.NODE_ENV === "development") {
+    delete mongoose.models.User;
+}
+
 export default mongoose.models.User || mongoose.model<IUser>('User', UserSchema);
