@@ -50,6 +50,7 @@ export default function CheckoutPage() {
     const [customerName, setCustomerName] = useState("")
     const [tableNumber, setTableNumber] = useState("")
     const [isSubmitting, setIsSubmitting] = useState(false)
+    const [checkoutError, setCheckoutError] = useState<string | null>(null)
     const [eventSettings, setEventSettings] = useState<EventCheckoutConfig | null>(null)
     const normalizedTableValue = normalizeTableValue(tableNumber)
     const tableValueValid = isTableValueValid(tableNumber)
@@ -73,9 +74,15 @@ export default function CheckoutPage() {
     const totalPrice = cart.reduce((acc, item) => acc + (item.basePrice * item.quantity), 0)
 
     const handleSubmit = async () => {
-        if (eventSettings?.askName && !customerName) return alert("Inserisci il tuo nome")
+        setCheckoutError(null)
+
+        if (eventSettings?.askName && !customerName.trim()) {
+            setCheckoutError("Inserisci il tuo nome")
+            return
+        }
         if (eventSettings?.askTable && !tableValueValid) {
-            return alert("Inserisci il tavolo oppure selezionalo dalla lista")
+            setCheckoutError("Inserisci il tavolo oppure selezionalo dalla lista")
+            return
         }
 
         setIsSubmitting(true)
@@ -98,7 +105,7 @@ export default function CheckoutPage() {
             localStorage.removeItem("osg_cart")
             router.push(`/menu/success?code=${result.shortCode}`)
         } else {
-            alert(result.error)
+            setCheckoutError(result.error || "Non è stato possibile inviare l'ordine. Riprova.")
             setIsSubmitting(false)
         }
     }
@@ -156,7 +163,10 @@ export default function CheckoutPage() {
                                     className="h-14 pl-12 rounded-2xl bg-slate-50 border-none font-bold text-lg"
                                     placeholder="Es: Mario Rossi"
                                     value={customerName}
-                                    onChange={(e) => setCustomerName(e.target.value)}
+                                    onChange={(e) => {
+                                        setCustomerName(e.target.value)
+                                        if (checkoutError) setCheckoutError(null)
+                                    }}
                                 />
                             </div>
                         </div>
@@ -174,7 +184,10 @@ export default function CheckoutPage() {
                                                 <button
                                                     key={table}
                                                     type="button"
-                                                    onClick={() => setTableNumber(table)}
+                                                    onClick={() => {
+                                                        setTableNumber(table)
+                                                        if (checkoutError) setCheckoutError(null)
+                                                    }}
                                                     className={`rounded-xl border-2 px-3 py-2 text-sm font-black transition-colors ${isActive ? "border-orange-600 bg-orange-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-orange-300"}`}
                                                 >
                                                     {table}
@@ -189,7 +202,10 @@ export default function CheckoutPage() {
                                         className="h-14 pl-12 rounded-2xl bg-white border border-slate-200 font-bold text-lg"
                                         placeholder="Es: B02 oppure VIP TERRAZZA"
                                         value={tableNumber}
-                                        onChange={(e) => setTableNumber(e.target.value)}
+                                        onChange={(e) => {
+                                            setTableNumber(e.target.value)
+                                            if (checkoutError) setCheckoutError(null)
+                                        }}
                                     />
                                 </div>
                                 <div className="flex items-center justify-between">
@@ -199,7 +215,10 @@ export default function CheckoutPage() {
                                     <button
                                         type="button"
                                         className="text-xs font-black text-slate-500 hover:text-slate-800"
-                                        onClick={() => setTableNumber("")}
+                                        onClick={() => {
+                                            setTableNumber("")
+                                            if (checkoutError) setCheckoutError(null)
+                                        }}
                                     >
                                         RESET
                                     </button>
@@ -218,6 +237,14 @@ export default function CheckoutPage() {
 
             {/* Submit Button */}
             <div className="fixed bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent">
+                {checkoutError ? (
+                    <div
+                        role="alert"
+                        className="w-full max-w-xl mx-auto mb-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700"
+                    >
+                        {checkoutError}
+                    </div>
+                ) : null}
                 <Button
                     disabled={isSubmitting}
                     onClick={handleSubmit}
