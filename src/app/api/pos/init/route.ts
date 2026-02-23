@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/mongoose";
 import Event from "@/models/Event";
 import Category from "@/models/Category";
@@ -8,10 +8,12 @@ import "@/models/Printer"; // Import to register schema for .populate()
 import "@/models/Peripheral"; // Import to register schema for .populate()
 import { parsePredefinedTablesInput } from "@/lib/table-presets";
 import { getCurrentDayCode, isProductAvailableToday } from "@/lib/product-availability";
+import { getStockStatus } from "@/lib/inventory";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
     try {
         await dbConnect();
+        const channel = request.nextUrl.searchParams.get("channel") === "pos" ? "pos" : "menu";
 
         // 1. Find active event (or the latest one as fallback)
         let event = await Event.findOne({ active: true, archived: { $ne: true } }).lean();
@@ -29,9 +31,25 @@ export async function GET() {
         // 3. Fetch products for this event
         const products = await Product.find({ eventId: event._id }).lean();
         const currentDayCode = getCurrentDayCode("Europe/Rome");
-        const availableProducts = products.filter((product) =>
+        const dayAvailableProducts = products.filter((product) =>
             isProductAvailableToday((product as { availableDays?: string[] }).availableDays || [], currentDayCode)
         );
+        const availableProducts = dayAvailableProducts
+            .filter((product) => {
+                if (channel === "pos") return true;
+                const stockStatus = getStockStatus(
+                    (product as { stockQuantity?: number | null }).stockQuantity ?? null,
+                    Boolean((product as { isSoldOut?: boolean }).isSoldOut)
+                );
+                return stockStatus !== "OUT";
+            })
+            .map((product) => ({
+                ...product,
+                stockStatus: getStockStatus(
+                    (product as { stockQuantity?: number | null }).stockQuantity ?? null,
+                    Boolean((product as { isSoldOut?: boolean }).isSoldOut)
+                )
+            }));
         const availableCategoryIds = new Set(
             availableProducts.map((product) => String((product as { categoryId: unknown }).categoryId))
         );
