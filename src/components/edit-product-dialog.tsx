@@ -30,7 +30,7 @@ export function EditProductDialog({
     categories,
     updateAction
 }: {
-    product: { id: string, name: string, categoryId: string, basePrice: number, availableDays?: string[] },
+    product: { id: string, name: string, categoryId: string, basePrice: number, stockQuantity?: number | null, availableDays?: string[] },
     eventId?: string,
     categories: { id: string, name: string }[],
     updateAction: (formData: FormData) => Promise<void>
@@ -99,6 +99,22 @@ export function EditProductDialog({
                         <div className="grid gap-2">
                             <Label htmlFor="basePrice">Prezzo Base (€)</Label>
                             <Input id="basePrice" name="basePrice" type="number" step="0.01" defaultValue={product.basePrice} required />
+                        </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="prod-edit-stock-quantity">Scorte</Label>
+                            <Input
+                                id="prod-edit-stock-quantity"
+                                name="stockQuantity"
+                                type="number"
+                                min="0"
+                                step="1"
+                                inputMode="numeric"
+                                defaultValue={product.stockQuantity ?? ""}
+                                placeholder="Illimitato"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Lascia vuoto per prodotto sempre disponibile.
+                            </p>
                         </div>
                         <div className="grid gap-3">
                             <div className="flex items-center justify-between">

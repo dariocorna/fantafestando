@@ -87,6 +87,21 @@ export function CreateProductDialog({
                             <Label htmlFor="basePrice">Prezzo Base (€)</Label>
                             <Input id="basePrice" name="basePrice" type="number" step="0.01" placeholder="5.00" required />
                         </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="prod-stock-quantity">Scorte</Label>
+                            <Input
+                                id="prod-stock-quantity"
+                                name="stockQuantity"
+                                type="number"
+                                min="0"
+                                step="1"
+                                inputMode="numeric"
+                                placeholder="Illimitato"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Lascia vuoto per prodotto sempre disponibile.
+                            </p>
+                        </div>
                         <div className="grid gap-3">
                             <div className="flex items-center justify-between">
                                 <Label className="text-sm">Disponibilità Giorni</Label>
