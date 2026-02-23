@@ -26,4 +26,8 @@ const EventSchema = new Schema<IEvent>({
     timestamps: true
 });
 
+if (process.env.NODE_ENV === "development") {
+    delete mongoose.models.Event;
+}
+
 export default mongoose.models.Event || mongoose.model<IEvent>('Event', EventSchema);

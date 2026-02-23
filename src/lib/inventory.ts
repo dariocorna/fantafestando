@@ -35,7 +35,7 @@ export function parseStockQuantityInput(raw?: string | null): number | null {
     const trimmed = raw.trim()
     if (!trimmed) return null
 
-    const parsed = Number(trimmed.replace(",", "."))
+    const parsed = Number(trimmed.replace(/,/g, "."))
     if (!Number.isFinite(parsed)) return null
 
     return normalizeStockQuantity(parsed)
