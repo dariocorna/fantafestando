@@ -328,14 +328,14 @@ export default async function AdminCatalog() {
                                 <TableCell>{p.basePrice.toFixed(2)} €</TableCell>
                                 <TableCell>
                                     <span
-                                        className={`rounded-full px-2 py-1 text-xs font-bold ${getStockStatus((p as { stockQuantity?: number | null }).stockQuantity, p.isSoldOut) === "OUT"
+                                        className={`rounded-full px-2 py-1 text-xs font-bold ${getStockStatus(p.stockQuantity, p.isSoldOut) === "OUT"
                                             ? "bg-red-100 text-red-700"
-                                            : getStockStatus((p as { stockQuantity?: number | null }).stockQuantity, p.isSoldOut) === "LOW"
+                                            : getStockStatus(p.stockQuantity, p.isSoldOut) === "LOW"
                                                 ? "bg-amber-100 text-amber-700"
                                                 : "bg-slate-100 text-slate-700"
                                             }`}
                                     >
-                                        {getStockLabel((p as { stockQuantity?: number | null }).stockQuantity, p.isSoldOut)}
+                                        {getStockLabel(p.stockQuantity, p.isSoldOut)}
                                     </span>
                                 </TableCell>
                                 <TableCell>
@@ -350,7 +350,7 @@ export default async function AdminCatalog() {
                                                 <span>
                                                     {v.optionName} ({v.priceVariation >= 0 ? '+' : ''}{v.priceVariation}€)
                                                     {" · "}
-                                                    {getStockLabel((v as { stockQuantity?: number | null }).stockQuantity, false)}
+                                                    {getStockLabel(v.stockQuantity, false)}
                                                 </span>
                                                 <form action={removeVariant} className="flex items-center">
                                                     <input type="hidden" name="productId" value={String(p._id)} />
@@ -371,7 +371,7 @@ export default async function AdminCatalog() {
                                             name: p.name,
                                             categoryId: getReferencedId(p.categoryId) || "",
                                             basePrice: p.basePrice,
-                                            stockQuantity: (p as { stockQuantity?: number | null }).stockQuantity ?? null,
+                                            stockQuantity: p.stockQuantity ?? null,
                                             availableDays: normalizeAvailableDays(p.availableDays)
                                         }}
                                         eventId={currentEventId}
