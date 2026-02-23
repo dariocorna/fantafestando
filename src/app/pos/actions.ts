@@ -78,10 +78,16 @@ interface OrderCartPayloadItem {
     selectedOptions?: Array<{ name: string, priceVariation: number }>
 }
 
+interface StockAdjustment {
+    productId: string
+    quantity: number
+}
+
 interface StockOperationResult {
     success: boolean
     error?: string
     stockShortages?: StockShortage[]
+    appliedAdjustments?: StockAdjustment[]
 }
 
 function buildDemandMap(cart: OrderCartPayloadItem[]): Map<string, number> {
@@ -146,12 +152,37 @@ async function syncSoldOutFlags(eventId: string, productIds: string[]) {
     }
 }
 
+function aggregateStockAdjustments(adjustments: StockAdjustment[]): StockAdjustment[] {
+    const totals = new Map<string, number>()
+    for (const adjustment of adjustments) {
+        const productId = adjustment.productId?.trim()
+        const quantity = Number(adjustment.quantity)
+        if (!productId || !Number.isFinite(quantity) || quantity <= 0) continue
+        totals.set(productId, (totals.get(productId) || 0) + quantity)
+    }
+    return [...totals.entries()].map(([productId, quantity]) => ({ productId, quantity }))
+}
+
+async function rollbackStockAdjustments(eventId: string, adjustments: StockAdjustment[]) {
+    const aggregatedAdjustments = aggregateStockAdjustments(adjustments)
+    if (aggregatedAdjustments.length === 0) return
+
+    for (const adjustment of aggregatedAdjustments) {
+        await Product.updateOne(
+            { eventId, _id: adjustment.productId },
+            { $inc: { stockQuantity: adjustment.quantity } }
+        )
+    }
+
+    await syncSoldOutFlags(eventId, aggregatedAdjustments.map((entry) => entry.productId))
+}
+
 async function decrementTrackedStocksStrict(
     eventId: string,
     demands: Map<string, number>,
     products: Map<string, ProductStockInfo>
 ): Promise<StockOperationResult> {
-    const applied: Array<{ productId: string, quantity: number }> = []
+    const applied: StockAdjustment[] = []
 
     for (const [productId, requestedQuantity] of demands.entries()) {
         const product = products.get(productId)
@@ -168,21 +199,15 @@ async function decrementTrackedStocksStrict(
         ).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
 
         if (!updated) {
-            for (const entry of applied) {
-                await Product.updateOne(
-                    { eventId, _id: entry.productId },
-                    { $inc: { stockQuantity: entry.quantity } }
-                )
-            }
-
-            await syncSoldOutFlags(eventId, [...applied.map((entry) => entry.productId), productId])
+            await rollbackStockAdjustments(eventId, applied)
 
             const refreshedStocks = await loadProductStocks(eventId, [...demands.keys()])
             const refreshedShortages = collectStockShortages(demands, refreshedStocks)
             return {
                 success: false,
                 error: "Scorte non sufficienti per completare l'operazione",
-                stockShortages: refreshedShortages
+                stockShortages: refreshedShortages,
+                appliedAdjustments: []
             }
         }
 
@@ -190,7 +215,7 @@ async function decrementTrackedStocksStrict(
     }
 
     await syncSoldOutFlags(eventId, applied.map((entry) => entry.productId))
-    return { success: true }
+    return { success: true, appliedAdjustments: applied }
 }
 
 async function decrementTrackedStocksOverride(
@@ -199,6 +224,7 @@ async function decrementTrackedStocksOverride(
     products: Map<string, ProductStockInfo>
 ): Promise<StockOperationResult> {
     const touched: string[] = []
+    const applied: StockAdjustment[] = []
 
     for (const [productId, requestedQuantity] of demands.entries()) {
         const product = products.get(productId)
@@ -210,6 +236,7 @@ async function decrementTrackedStocksOverride(
         }).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
 
         if (!latestDoc) {
+            await rollbackStockAdjustments(eventId, applied)
             return {
                 success: false,
                 error: "Prodotto non trovato durante l'aggiornamento scorte",
@@ -218,7 +245,8 @@ async function decrementTrackedStocksOverride(
                     productName: product.name,
                     requestedQuantity,
                     availableQuantity: 0
-                }]
+                }],
+                appliedAdjustments: []
             }
         }
 
@@ -235,11 +263,14 @@ async function decrementTrackedStocksOverride(
                 }
             }
         )
+        if (result.appliedQuantity > 0) {
+            applied.push({ productId, quantity: result.appliedQuantity })
+        }
         touched.push(productId)
     }
 
     await syncSoldOutFlags(eventId, touched)
-    return { success: true }
+    return { success: true, appliedAdjustments: applied }
 }
 
 async function applyStockForPaidOrder(
@@ -324,6 +355,7 @@ export async function createOrder(data: {
     posDeviceId?: string,
     allowStockOverride?: boolean
 }) {
+    let stockAdjustmentsToRollback: StockAdjustment[] = []
     try {
         const capabilitiesResult = await getPosPaymentCapabilities(data.eventId, data.posDeviceId)
         if (!capabilitiesResult.success) {
@@ -337,7 +369,9 @@ export async function createOrder(data: {
 
         await dbConnect()
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
-        if (data.paymentMethod === "CARD") {
+        const isCardPayment = data.paymentMethod === "CARD"
+
+        if (isCardPayment) {
             const stockCheckResult = await validateStockForPendingOrder(data.eventId, data.cart, stockMode)
             if (!stockCheckResult.success) {
                 return {
@@ -355,19 +389,55 @@ export async function createOrder(data: {
                     stockShortages: stockApplyResult.stockShortages
                 }
             }
+            stockAdjustmentsToRollback = stockApplyResult.appliedAdjustments || []
         }
 
         const order = await Order.create({
             eventId: data.eventId,
-            status: data.paymentMethod === "CARD" ? "PENDING" : "PAID",
+            status: isCardPayment ? "PENDING" : "PAID",
             customer: data.customer,
             totalAmount: data.totalAmount,
             cart: data.cart,
             paymentMethod: data.paymentMethod,
-            sumupCheckoutId: data.sumupCheckoutId,
+            sumupCheckoutId: isCardPayment ? undefined : data.sumupCheckoutId,
             posDeviceId: data.posDeviceId,
             stockOverrideApproved: Boolean(data.allowStockOverride)
         })
+        stockAdjustmentsToRollback = []
+
+        if (isCardPayment) {
+            const legacyCheckoutId = data.sumupCheckoutId?.trim()
+            if (legacyCheckoutId) {
+                await Order.updateOne(
+                    { _id: order._id, eventId: data.eventId, status: "PENDING" },
+                    { $set: { sumupCheckoutId: legacyCheckoutId } }
+                )
+            } else {
+                const sumupResult = await triggerSumUpPayment(data.totalAmount, data.eventId, data.posDeviceId)
+                if (!sumupResult.success || !sumupResult.checkoutId) {
+                    await Order.updateOne(
+                        { _id: order._id, eventId: data.eventId, status: "PENDING" },
+                        { $set: { status: "CANCELLED" } }
+                    )
+                    return {
+                        success: false,
+                        error: sumupResult.error || "Errore durante l'inizializzazione del pagamento elettronico"
+                    }
+                }
+
+                const checkoutLinkResult = await Order.updateOne(
+                    { _id: order._id, eventId: data.eventId, status: "PENDING" },
+                    { $set: { sumupCheckoutId: sumupResult.checkoutId } }
+                )
+                if (!checkoutLinkResult.acknowledged || checkoutLinkResult.matchedCount !== 1) {
+                    await Order.updateOne(
+                        { _id: order._id, eventId: data.eventId, status: "PENDING" },
+                        { $set: { status: "CANCELLED" } }
+                    )
+                    return { success: false, error: "Impossibile associare il checkout SumUp all'ordine" }
+                }
+            }
+        }
 
         // Trigger network printing ONLY if PAID immediately.
         // Printing must never block order creation.
@@ -382,6 +452,13 @@ export async function createOrder(data: {
         revalidatePath("/admin/orders")
         return { success: true, orderId: order._id.toString() }
     } catch (error) {
+        if (stockAdjustmentsToRollback.length > 0) {
+            try {
+                await rollbackStockAdjustments(data.eventId, stockAdjustmentsToRollback)
+            } catch (rollbackError) {
+                console.error("Create Order rollback error:", rollbackError)
+            }
+        }
         console.error("Create Order Error:", error)
         return { success: false, error: "Failed to create order" }
     }
@@ -594,6 +671,7 @@ export async function completePendingOrderPayment(data: {
         selectedOptions?: Array<{ name: string, priceVariation: number }>
     }>
 }) {
+    let stockAdjustmentsToRollback: StockAdjustment[] = []
     try {
         if (!data.eventId || !data.orderId) {
             return { success: false, error: "Dati ordine incompleti" }
@@ -668,16 +746,25 @@ export async function completePendingOrderPayment(data: {
                 stockShortages: stockApplyResult.stockShortages
             }
         }
+        stockAdjustmentsToRollback = stockApplyResult.appliedAdjustments || []
 
         order.status = "PAID"
         order.paymentMethod = data.paymentMethod
         order.set("posDeviceId", data.posDeviceId || undefined)
         order.set("stockOverrideApproved", Boolean(data.allowStockOverride))
         await order.save()
+        stockAdjustmentsToRollback = []
 
         revalidatePath("/admin/orders")
         return { success: true, orderId: order._id.toString() }
     } catch (error) {
+        if (stockAdjustmentsToRollback.length > 0) {
+            try {
+                await rollbackStockAdjustments(data.eventId, stockAdjustmentsToRollback)
+            } catch (rollbackError) {
+                console.error("Complete Pending Order rollback error:", rollbackError)
+            }
+        }
         console.error("Complete Pending Order Error:", error)
         return { success: false, error: "Errore durante la chiusura dell'ordine" }
     }
