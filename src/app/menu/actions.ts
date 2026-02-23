@@ -11,7 +11,8 @@ import {
     aggregateCartQuantities,
     collectStockShortages,
     normalizeStockQuantity,
-    type ProductStockInfo
+    type ProductStockInfo,
+    type StockShortage
 } from "@/lib/inventory"
 
 export async function createPublicOrder(data: {
@@ -25,6 +26,24 @@ export async function createPublicOrder(data: {
         selectedOptions: Array<{ name: string, priceVariation: number }>
     }>
 }) {
+    const formatShortagesError = (shortages: StockShortage[]) => {
+        if (shortages.length === 0) {
+            return "Alcuni prodotti non sono più disponibili nelle quantità richieste. Aggiorna il carrello."
+        }
+
+        const names = shortages
+            .map((entry) => entry.productName)
+            .filter((name) => Boolean(name && name.trim()))
+            .slice(0, 3)
+
+        if (names.length === 0) {
+            return "Alcuni prodotti non sono più disponibili nelle quantità richieste. Aggiorna il carrello."
+        }
+
+        const suffix = shortages.length > names.length ? ", ..." : ""
+        return `Scorte insufficienti per: ${names.join(", ")}${suffix}. Aggiorna il carrello.`
+    }
+
     try {
         if (!data.eventId || data.cart.length === 0) {
             return { success: false, error: "Carrello non valido" }
@@ -91,7 +110,8 @@ export async function createPublicOrder(data: {
         if (stockShortages.length > 0) {
             return {
                 success: false,
-                error: "Alcuni prodotti non sono più disponibili nelle quantità richieste. Aggiorna il carrello."
+                error: formatShortagesError(stockShortages),
+                stockShortages
             }
         }
 
