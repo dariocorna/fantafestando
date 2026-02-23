@@ -7,6 +7,12 @@ import { revalidatePath } from "next/cache"
 import { PrinterService } from "@/lib/printer"
 import { getNextPublicOrderNumber, getOrderCodeFromOrder } from "@/lib/order-code"
 import { getCurrentDayCode, isProductAvailableToday } from "@/lib/product-availability"
+import {
+    aggregateCartQuantities,
+    collectStockShortages,
+    normalizeStockQuantity,
+    type ProductStockInfo
+} from "@/lib/inventory"
 
 export async function createPublicOrder(data: {
     eventId: string,
@@ -36,7 +42,13 @@ export async function createPublicOrder(data: {
         const products = await Product.find({
             eventId: data.eventId,
             _id: { $in: productIds }
-        }).select("_id availableDays").lean() as Array<{ _id: unknown, availableDays?: string[] }>
+        }).select("_id name availableDays stockQuantity isSoldOut").lean() as Array<{
+            _id: unknown
+            name: string
+            availableDays?: string[]
+            stockQuantity?: number | null
+            isSoldOut?: boolean
+        }>
 
         if (products.length !== productIds.length) {
             return { success: false, error: "Alcuni prodotti non sono più disponibili. Aggiorna il carrello." }
@@ -54,6 +66,32 @@ export async function createPublicOrder(data: {
             return {
                 success: false,
                 error: "Alcuni prodotti non sono più disponibili oggi. Torna al menu e aggiorna il carrello."
+            }
+        }
+
+        const demands = aggregateCartQuantities(
+            data.cart.map((item) => ({
+                productId: item.productId,
+                quantity: item.quantity,
+                snapshotName: item.snapshotName
+            }))
+        )
+        const productStockMap = new Map<string, ProductStockInfo>(
+            products.map((product) => [
+                String(product._id),
+                {
+                    id: String(product._id),
+                    name: product.name,
+                    stockQuantity: normalizeStockQuantity(product.stockQuantity ?? null),
+                    isSoldOut: Boolean(product.isSoldOut)
+                }
+            ])
+        )
+        const stockShortages = collectStockShortages(demands, productStockMap)
+        if (stockShortages.length > 0) {
+            return {
+                success: false,
+                error: "Alcuni prodotti non sono più disponibili nelle quantità richieste. Aggiorna il carrello."
             }
         }
 
