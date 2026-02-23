@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label"
 import { createOrder, triggerSumUpPayment, loadPendingOrderByCode, completePendingOrderPayment, listRecentPendingOrders } from "./actions"
 import { getCategoryTheme } from "@/lib/category-colors"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
+import { getStockLabel, getStockStatus, type StockShortage } from "@/lib/inventory"
 
 interface ICategory {
     _id: string
@@ -26,6 +27,9 @@ interface IProduct {
     name: string
     basePrice: number
     categoryId: string
+    stockQuantity?: number | null
+    isSoldOut?: boolean
+    stockStatus?: "UNLIMITED" | "OK" | "LOW" | "OUT"
 }
 
 interface IEvent {
@@ -123,6 +127,7 @@ export default function PosPage() {
     const [loadedPendingOrder, setLoadedPendingOrder] = useState<LoadedPendingOrder | null>(null)
     const [recentPendingOrders, setRecentPendingOrders] = useState<RecentPendingOrder[]>([])
     const [isRecentOrdersLoading, setIsRecentOrdersLoading] = useState(false)
+    const [stockShortages, setStockShortages] = useState<StockShortage[]>([])
 
     // Info Cliente
     const [customerName, setCustomerName] = useState("")
@@ -131,7 +136,7 @@ export default function PosPage() {
     // Caricamento iniziale: evento attivo e menu
     useEffect(() => {
         const loadInitialData = async () => {
-            const res = await fetch('/api/pos/init')
+            const res = await fetch('/api/pos/init?channel=pos')
             const data = await res.json()
             if (data.event) {
                 setActiveEvent(data.event)
@@ -244,6 +249,9 @@ export default function PosPage() {
     const handleCheckoutDialogOpenChange = (open: boolean) => {
         if (isProcessing || isPrintMockActive) return
         setIsCheckoutOpen(open)
+        if (!open) {
+            setStockShortages([])
+        }
     }
 
     const runMockPrintFlow = useCallback(async () => {
@@ -306,7 +314,7 @@ export default function PosPage() {
         setIsCodeDialogOpen(false)
     }
 
-    const handleCheckout = async () => {
+    const handleCheckout = async (allowStockOverride = false) => {
         if (!activeEvent?._id) {
             alert("Evento non disponibile")
             return
@@ -346,6 +354,7 @@ export default function PosPage() {
                 orderId: loadedPendingOrder.id,
                 paymentMethod: effectivePaymentMethod,
                 posDeviceId: selectedPosDeviceId,
+                allowStockOverride,
                 customer: {
                     name: customerName || undefined,
                     table: normalizedTableValue || undefined
@@ -365,9 +374,14 @@ export default function PosPage() {
                 resetCheckoutForm()
                 resetPendingOrder()
                 setIsCheckoutOpen(false)
+                setStockShortages([])
                 alert("Ordine completato correttamente")
             } else {
-                alert("Errore durante la chiusura ordine: " + completionResult.error)
+                if (completionResult.stockShortages?.length) {
+                    setStockShortages(completionResult.stockShortages)
+                } else {
+                    alert("Errore durante la chiusura ordine: " + completionResult.error)
+                }
             }
 
             setIsProcessing(false)
@@ -403,7 +417,8 @@ export default function PosPage() {
             })),
             paymentMethod: effectivePaymentMethod,
             sumupCheckoutId,
-            posDeviceId: selectedPosDeviceId
+            posDeviceId: selectedPosDeviceId,
+            allowStockOverride
         }
 
         const result = await createOrder(orderData)
@@ -411,8 +426,13 @@ export default function PosPage() {
             await runMockPrintFlow()
             resetCheckoutForm()
             setIsCheckoutOpen(false)
+            setStockShortages([])
         } else {
-            alert("Errore durante la creazione dell'ordine: " + result.error)
+            if (result.stockShortages?.length) {
+                setStockShortages(result.stockShortages)
+            } else {
+                alert("Errore durante la creazione dell'ordine: " + result.error)
+            }
         }
         setIsProcessing(false)
     }
@@ -461,19 +481,34 @@ export default function PosPage() {
                 <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 content-start text-slate-800 dark:text-slate-100">
                     {products
                         .filter(p => p.categoryId === activeCategory)
-                        .map(p => (
-                            <button
-                                key={p._id}
-                                onClick={() => addToCart(p)}
-                                className="flex flex-col h-40 p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md active:scale-95 transition-all text-left"
-                                style={{ borderColor: activeCategoryTheme.border }}
-                            >
-                                <span className="font-bold text-lg leading-tight mb-2 line-clamp-2">{p.name}</span>
-                                <span className="mt-auto font-black text-xl" style={{ color: activeCategoryTheme.base }}>
-                                    {p.basePrice.toFixed(2)} €
-                                </span>
-                            </button>
-                        ))
+                        .map(p => {
+                            const stockStatus = p.stockStatus || getStockStatus(p.stockQuantity ?? null, Boolean(p.isSoldOut))
+                            const stockLabel = getStockLabel(p.stockQuantity ?? null, Boolean(p.isSoldOut))
+
+                            return (
+                                <button
+                                    key={p._id}
+                                    onClick={() => addToCart(p)}
+                                    className="flex flex-col h-40 p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md active:scale-95 transition-all text-left"
+                                    style={{ borderColor: stockStatus === "OUT" ? "#ef4444" : activeCategoryTheme.border }}
+                                >
+                                    <span className="font-bold text-lg leading-tight mb-2 line-clamp-2">{p.name}</span>
+                                    <span
+                                        className={`inline-flex w-fit rounded-full px-2 py-1 text-[10px] font-bold ${stockStatus === "OUT"
+                                            ? "bg-red-100 text-red-700"
+                                            : stockStatus === "LOW"
+                                                ? "bg-amber-100 text-amber-700"
+                                                : "bg-slate-100 text-slate-700"
+                                            }`}
+                                    >
+                                        {stockLabel}
+                                    </span>
+                                    <span className="mt-auto font-black text-xl" style={{ color: activeCategoryTheme.base }}>
+                                        {p.basePrice.toFixed(2)} €
+                                    </span>
+                                </button>
+                            )
+                        })
                     }
                 </div>
             </div>
@@ -711,12 +746,36 @@ export default function PosPage() {
                                     </Button>
                                     <Button
                                         className="flex-1 py-8 text-xl font-bold rounded-2xl bg-green-600 hover:bg-green-700"
-                                        onClick={handleCheckout}
+                                        onClick={() => void handleCheckout()}
                                         disabled={checkoutDisabled}
                                     >
                                         {isProcessing ? <Loader2 className="animate-spin" /> : "CONFERMA"}
                                     </Button>
                                 </div>
+                                {stockShortages.length > 0 ? (
+                                    <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 space-y-3">
+                                        <p className="text-sm font-black text-amber-800">
+                                            Scorte insufficienti rilevate. Conferma per procedere comunque.
+                                        </p>
+                                        <ul className="space-y-1">
+                                            {stockShortages.map((shortage) => (
+                                                <li key={shortage.productId} className="text-xs font-semibold text-amber-700">
+                                                    {shortage.productName}: richiesti {shortage.requestedQuantity}, disponibili {shortage.availableQuantity}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                        <div className="flex justify-end">
+                                            <Button
+                                                type="button"
+                                                className="rounded-xl bg-amber-600 hover:bg-amber-700"
+                                                onClick={() => void handleCheckout(true)}
+                                                disabled={isProcessing}
+                                            >
+                                                Prosegui comunque
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : null}
                             </>
                         )}
                     </div>
