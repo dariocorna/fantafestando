@@ -1,21 +1,297 @@
-export default function AdminDashboard() {
+import Link from "next/link";
+import { ArrowDownRight, ArrowUpRight, CreditCard, Download, Receipt, Wallet } from "lucide-react";
+import { getAdminContextEvent } from "@/lib/events";
+import dbConnect from "@/lib/mongoose";
+import Order from "@/models/Order";
+import Product from "@/models/Product";
+import type { IEvent } from "@/models/Event";
+import {
+    computeDashboardStats,
+    formatDashboardDateTime,
+    getPaymentMethodLabel,
+    type DashboardOrderInput,
+    type DashboardProductInput
+} from "@/lib/dashboard-stats";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+const currencyFormatter = new Intl.NumberFormat("it-IT", {
+    style: "currency",
+    currency: "EUR"
+});
+
+const numberFormatter = new Intl.NumberFormat("it-IT");
+
+interface OrderProjection {
+    _id: unknown
+    status?: string
+    createdAt?: Date | string
+    totalAmount?: number
+    paymentMethod?: string
+    cart?: Array<{
+        productId?: unknown
+        snapshotName?: string
+        quantity?: number
+    }>
+}
+
+interface ProductProjection {
+    _id: unknown
+    name: string
+}
+
+function formatCurrency(value: number): string {
+    return currencyFormatter.format(value)
+}
+
+export default async function AdminDashboard() {
+    const contextEvent = await getAdminContextEvent() as IEvent | null;
+
+    if (!contextEvent) {
+        return (
+            <div className="text-center p-10 text-muted-foreground">
+                Nessuna festa attiva o selezionata. Seleziona una festa dalla barra in alto.
+            </div>
+        );
+    }
+
+    const eventId = String(contextEvent._id);
+    await dbConnect();
+
+    const [orders, products] = await Promise.all([
+        Order.find({ eventId, status: "PAID" })
+            .sort({ createdAt: -1 })
+            .select("_id status createdAt totalAmount paymentMethod cart")
+            .lean() as Promise<OrderProjection[]>,
+        Product.find({ eventId }).select("_id name").lean() as Promise<ProductProjection[]>
+    ]);
+
+    const dashboardOrders: DashboardOrderInput[] = orders.map((order) => ({
+        id: String(order._id),
+        status: order.status || "PAID",
+        createdAt: order.createdAt || null,
+        totalAmount: order.totalAmount ?? 0,
+        paymentMethod: order.paymentMethod || "OTHER",
+        cart: Array.isArray(order.cart)
+            ? order.cart.map((item) => ({
+                productId: item.productId ? String(item.productId) : null,
+                snapshotName: item.snapshotName || null,
+                quantity: item.quantity ?? 0
+            }))
+            : []
+    }));
+
+    const dashboardProducts: DashboardProductInput[] = products.map((product) => ({
+        id: String(product._id),
+        name: product.name
+    }));
+
+    const stats = computeDashboardStats({
+        orders: dashboardOrders,
+        products: dashboardProducts,
+        bestSellerLimit: 8,
+        underperformingLimit: 8,
+        underperformingThreshold: 1
+    });
+
+    const kpis = [
+        {
+            title: "Incasso Totale",
+            value: formatCurrency(stats.summary.totalRevenue),
+            description: "Ordini saldati evento corrente",
+            icon: <Wallet className="h-4 w-4 text-slate-500" />,
+            testId: "dashboard-kpi-total"
+        },
+        {
+            title: "Incasso Contanti",
+            value: formatCurrency(stats.summary.cashRevenue),
+            description: "Pagamenti CASH",
+            icon: <ArrowDownRight className="h-4 w-4 text-emerald-600" />,
+            testId: "dashboard-kpi-cash"
+        },
+        {
+            title: "Incasso Carta",
+            value: formatCurrency(stats.summary.cardRevenue),
+            description: "Pagamenti CARD / POS",
+            icon: <CreditCard className="h-4 w-4 text-blue-600" />,
+            testId: "dashboard-kpi-card"
+        },
+        {
+            title: "Ordini Saldati",
+            value: numberFormatter.format(stats.summary.paidOrdersCount),
+            description: "Totale operazioni concluse",
+            icon: <Receipt className="h-4 w-4 text-violet-600" />,
+            testId: "dashboard-kpi-orders"
+        },
+        {
+            title: "Ticket Medio",
+            value: formatCurrency(stats.summary.averageTicket),
+            description: "Incasso medio per ordine",
+            icon: <ArrowUpRight className="h-4 w-4 text-amber-600" />,
+            testId: "dashboard-kpi-average"
+        }
+    ];
+
     return (
         <div className="space-y-6">
-            <h1 className="text-3xl font-bold tracking-tight">Dashboard overview</h1>
-            <p className="text-muted-foreground">Benvenuto nel pannello di controllo OSGFest. Da qui puoi configurare il catalogo dei prodotti, monitorare le feste attive e controllare lo storico degli ordini in tempo reale.</p>
-
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                {/* Placeholder cards per mockup metriche */}
-                <div className="rounded-xl border bg-card text-card-foreground shadow">
-                    <div className="p-6 flex flex-row items-center justify-between space-y-0 pb-2">
-                        <h3 className="tracking-tight text-sm font-medium">Ordini Totali</h3>
-                    </div>
-                    <div className="p-6 pt-0">
-                        <div className="text-2xl font-bold">+0</div>
-                        <p className="text-xs text-muted-foreground">Oggi</p>
-                    </div>
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                    <h1 className="text-3xl font-bold tracking-tight">Dashboard Statistiche</h1>
+                    <p className="text-muted-foreground">
+                        Festa: <span className="font-semibold text-foreground">{contextEvent.name}</span> · Aggiornata alle{" "}
+                        {formatDashboardDateTime(stats.generatedAt)}
+                    </p>
+                </div>
+                <div className="flex gap-2">
+                    <Button asChild variant="outline" size="sm">
+                        <Link href="/admin/export?format=csv">
+                            <Download className="h-4 w-4" />
+                            Export CSV
+                        </Link>
+                    </Button>
+                    <Button asChild variant="outline" size="sm">
+                        <Link href="/admin/export?format=xls">
+                            <Download className="h-4 w-4" />
+                            Export Excel
+                        </Link>
+                    </Button>
                 </div>
             </div>
+
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                {kpis.map((kpi) => (
+                    <Card key={kpi.title}>
+                        <CardHeader className="pb-2">
+                            <div className="flex items-center justify-between">
+                                <CardTitle className="text-sm font-medium">{kpi.title}</CardTitle>
+                                {kpi.icon}
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-black tracking-tight" data-testid={kpi.testId}>
+                                {kpi.value}
+                            </div>
+                            <CardDescription>{kpi.description}</CardDescription>
+                        </CardContent>
+                    </Card>
+                ))}
+            </div>
+
+            <div className="grid gap-6 xl:grid-cols-2">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Top Prodotti</CardTitle>
+                        <CardDescription>Classifica per quantita venduta.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead className="w-[70px]">#</TableHead>
+                                    <TableHead>Prodotto</TableHead>
+                                    <TableHead className="text-right">Quantita</TableHead>
+                                    <TableHead className="text-right">Ordini</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {stats.bestSellers.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={4} className="text-center text-muted-foreground">
+                                            Nessun ordine saldato per questa festa.
+                                        </TableCell>
+                                    </TableRow>
+                                ) : (
+                                    stats.bestSellers.map((metric, index) => (
+                                        <TableRow key={metric.productId}>
+                                            <TableCell className="font-semibold">#{index + 1}</TableCell>
+                                            <TableCell className="font-medium">{metric.productName}</TableCell>
+                                            <TableCell className="text-right">{numberFormatter.format(metric.quantitySold)}</TableCell>
+                                            <TableCell className="text-right">{numberFormatter.format(metric.ordersCount)}</TableCell>
+                                        </TableRow>
+                                    ))
+                                )}
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Prodotti Sotto-Performanti</CardTitle>
+                        <CardDescription>Prodotti con vendite minime o nulle (soglia ≤ 1).</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead className="w-[70px]">#</TableHead>
+                                    <TableHead>Prodotto</TableHead>
+                                    <TableHead className="text-right">Quantita</TableHead>
+                                    <TableHead className="text-right">Ordini</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {stats.underperforming.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={4} className="text-center text-muted-foreground">
+                                            Nessun prodotto sotto soglia.
+                                        </TableCell>
+                                    </TableRow>
+                                ) : (
+                                    stats.underperforming.map((metric, index) => (
+                                        <TableRow key={metric.productId}>
+                                            <TableCell className="font-semibold">#{index + 1}</TableCell>
+                                            <TableCell className="font-medium">{metric.productName}</TableCell>
+                                            <TableCell className="text-right">{numberFormatter.format(metric.quantitySold)}</TableCell>
+                                            <TableCell className="text-right">{numberFormatter.format(metric.ordersCount)}</TableCell>
+                                        </TableRow>
+                                    ))
+                                )}
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
+            </div>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Ultimi Ordini Saldati</CardTitle>
+                    <CardDescription>Dettaglio operativo degli ultimi movimenti registrati.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead>Data</TableHead>
+                                <TableHead>Ordine</TableHead>
+                                <TableHead>Pagamento</TableHead>
+                                <TableHead className="text-right">Articoli</TableHead>
+                                <TableHead className="text-right">Importo</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {stats.paidOrders.length === 0 ? (
+                                <TableRow>
+                                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                                        Nessun ordine saldato disponibile.
+                                    </TableCell>
+                                </TableRow>
+                            ) : (
+                                stats.paidOrders.slice(0, 10).map((order) => (
+                                    <TableRow key={order.orderId}>
+                                        <TableCell className="font-medium">{formatDashboardDateTime(order.createdAt)}</TableCell>
+                                        <TableCell className="font-mono text-xs">{order.orderId}</TableCell>
+                                        <TableCell>{getPaymentMethodLabel(order.paymentMethod)}</TableCell>
+                                        <TableCell className="text-right">{numberFormatter.format(order.itemCount)}</TableCell>
+                                        <TableCell className="text-right font-semibold">{formatCurrency(order.totalAmount)}</TableCell>
+                                    </TableRow>
+                                ))
+                            )}
+                        </TableBody>
+                    </Table>
+                </CardContent>
+            </Card>
         </div>
     );
 }
