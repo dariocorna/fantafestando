@@ -200,15 +200,9 @@ test.describe("Disponibilità prodotti per giorno", () => {
         await page.goto("/menu/checkout");
         await expect(page.getByText(productName)).toBeVisible();
 
-        let dialogMessage = "";
-        page.once("dialog", async (dialog) => {
-            dialogMessage = dialog.message();
-            await dialog.accept();
-        });
-
         await page.getByRole("button", { name: /INVIA ORDINE/i }).click();
-
-        await expect.poll(() => dialogMessage).toContain("non sono più disponibili oggi");
+        const errorBanner = page.getByRole("alert").filter({ hasText: /non sono più disponibili oggi/i }).first();
+        await expect(errorBanner).toBeVisible();
         await expect(page).toHaveURL(/\/menu\/checkout/);
     });
 });
