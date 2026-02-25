@@ -189,3 +189,27 @@ La UI del POS deve riflettere le periferiche effettivamente associate al Punto C
 
 - Notifica in tempo reale al cassiere quando un ordine WebApp viene creato.
 - Eventuale integrazione con WebSocket o polling avanzato.
+
+---
+
+## ⬜ Epica: Emulazione Stampanti
+
+- Virtualizzazione/emulazione stampanti termiche per sviluppo e test locale.
+- Simulazione ricevute/comande senza hardware fisico.
+- Diagnostica e validazione del routing stampe in ambienti non produttivi.
+
+---
+
+## ⬜ Epica: Deploy progetto su macchina virtuale
+
+- Pacchettizzazione e rilascio del gestionale su VM dedicata.
+- Configurazione servizi runtime (app, database, reverse proxy) e persistenza dati.
+- Procedure operative di backup/ripristino e aggiornamento.
+
+---
+
+## ⬜ Epica: Supporto Pagamenti Satispay
+
+- Integrazione metodo di pagamento Satispay nel flusso POS.
+- Gestione stato transazione e chiusura ordine coerente con la contabilità cassa.
+- Tracciamento/reportistica incassi Satispay in dashboard e export.
