@@ -1,8 +1,8 @@
-# Implementation Plan — Epic 16: Deploy su Macchina Virtuale (Bergamo)
+# Implementation Plan — Epic 16: Deploy su Macchina Virtuale
 
 ## 1. Obiettivo e Vincoli
 
-Obiettivo: deployare OSGFest su VM `ssh bergamo` con stack indipendente in Docker per applicazione e MongoDB, mantenendo Apache già installato come edge reverse proxy + terminazione TLS Let's Encrypt.
+Obiettivo: deployare OSGFest su una VM target con stack indipendente in Docker per applicazione e MongoDB, mantenendo Apache già installato come edge reverse proxy + terminazione TLS Let's Encrypt.
 
 Vincoli confermati:
 - Deploy applicativo indipendente da Apache (Apache resta solo entrypoint HTTP/HTTPS).
