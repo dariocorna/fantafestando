@@ -1,5 +1,11 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+const QuickDiscountPresetSchema = new Schema({
+    label: { type: String, required: true, trim: true },
+    type: { type: String, enum: ["PERCENT", "FIXED"], required: true },
+    value: { type: Number, min: 0, required: true }
+}, { _id: false });
+
 export interface IEvent extends Document {
     name: string;
     active: boolean;
@@ -8,6 +14,15 @@ export interface IEvent extends Document {
         askName: boolean;
         askTable: boolean;
         defaultCashierPrinterIp?: string;
+        quickDiscountPresets?: Array<{
+            label: string;
+            type: "PERCENT" | "FIXED";
+            value: number;
+        }>;
+        quickStaffDiscountEnabled?: boolean;
+        quickStaffDiscountLabel?: string;
+        quickStaffDiscountType?: "PERCENT" | "FIXED";
+        quickStaffDiscountValue?: number;
     };
     predefinedTables: string[];
 }
@@ -19,7 +34,12 @@ const EventSchema = new Schema<IEvent>({
     settings: {
         askName: { type: Boolean, default: false },
         askTable: { type: Boolean, default: false },
-        defaultCashierPrinterIp: { type: String }
+        defaultCashierPrinterIp: { type: String },
+        quickDiscountPresets: { type: [QuickDiscountPresetSchema], default: [] },
+        quickStaffDiscountEnabled: { type: Boolean, default: false },
+        quickStaffDiscountLabel: { type: String, default: "Staff" },
+        quickStaffDiscountType: { type: String, enum: ["PERCENT", "FIXED"], default: "PERCENT" },
+        quickStaffDiscountValue: { type: Number, min: 0, default: 50 }
     },
     predefinedTables: { type: [String], default: [] }
 }, {

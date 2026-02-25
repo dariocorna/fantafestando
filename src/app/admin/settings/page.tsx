@@ -5,6 +5,7 @@ import { getAdminContextEvent } from "@/lib/events";
 import { IEvent } from "@/models/Event";
 import { Button } from "@/components/ui/button";
 import { ActiveEventSettingsForm } from "./settings-form";
+import { resolveQuickDiscountPresetsFromSettings } from "@/lib/quick-discount-presets";
 
 export default async function AdminSettings() {
     const contextEvent = await getAdminContextEvent() as IEvent | null;
@@ -17,7 +18,12 @@ export default async function AdminSettings() {
             active: contextEvent.active,
             settings: {
                 askName: contextEvent.settings?.askName ?? false,
-                askTable: contextEvent.settings?.askTable ?? false
+                askTable: contextEvent.settings?.askTable ?? false,
+                quickDiscountPresets: resolveQuickDiscountPresetsFromSettings(contextEvent.settings),
+                quickStaffDiscountEnabled: contextEvent.settings?.quickStaffDiscountEnabled ?? false,
+                quickStaffDiscountLabel: contextEvent.settings?.quickStaffDiscountLabel || "Staff",
+                quickStaffDiscountType: contextEvent.settings?.quickStaffDiscountType || "PERCENT",
+                quickStaffDiscountValue: contextEvent.settings?.quickStaffDiscountValue ?? 50
             },
             predefinedTables: Array.isArray(contextEvent.predefinedTables) ? contextEvent.predefinedTables : []
         }

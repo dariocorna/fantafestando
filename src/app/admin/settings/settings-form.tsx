@@ -9,6 +9,11 @@ import { Loader2, CheckCircle2, Plus, X, Upload, Trash2 } from "lucide-react";
 import { updateEventSettingsAction } from "./actions";
 import { useState } from "react";
 import { MAX_PREDEFINED_TABLES, normalizeTableValue, parsePredefinedTablesInput } from "@/lib/table-presets";
+import {
+    MAX_QUICK_DISCOUNT_PRESETS,
+    resolveQuickDiscountPresetsFromSettings,
+    type QuickDiscountType
+} from "@/lib/quick-discount-presets";
 
 interface ActiveEventSettingsFormProps {
     event: {
@@ -17,6 +22,15 @@ interface ActiveEventSettingsFormProps {
         settings?: {
             askName?: boolean;
             askTable?: boolean;
+            quickDiscountPresets?: Array<{
+                label: string;
+                type: "PERCENT" | "FIXED";
+                value: number;
+            }>;
+            quickStaffDiscountEnabled?: boolean;
+            quickStaffDiscountLabel?: string;
+            quickStaffDiscountType?: "PERCENT" | "FIXED";
+            quickStaffDiscountValue?: number;
         };
         predefinedTables?: string[];
     };
@@ -36,9 +50,28 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
             Number.MAX_SAFE_INTEGER
         )
     );
+    const [quickDiscountPresets, setQuickDiscountPresets] = useState<Array<{
+        label: string;
+        type: QuickDiscountType;
+        value: string;
+    }>>(() =>
+        resolveQuickDiscountPresetsFromSettings(event.settings).map((preset) => ({
+            label: preset.label,
+            type: preset.type,
+            value: String(preset.value)
+        }))
+    );
 
     const predefinedTablesCount = predefinedTables.length;
     const predefinedTablesOverLimit = predefinedTablesCount > MAX_PREDEFINED_TABLES;
+    const quickDiscountPresetCount = quickDiscountPresets.length;
+    const quickDiscountPresetsPayload = JSON.stringify(
+        quickDiscountPresets.map((preset) => ({
+            label: preset.label,
+            type: preset.type,
+            value: preset.value.trim().replace(",", ".")
+        }))
+    );
 
     const addSingleTable = () => {
         const normalized = normalizeTableValue(newTableValue);
@@ -100,6 +133,27 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
         setTablesError(null);
     };
 
+    const addQuickDiscountPreset = () => {
+        if (quickDiscountPresetCount >= MAX_QUICK_DISCOUNT_PRESETS) return;
+        setQuickDiscountPresets((prev) => [...prev, { label: "", type: "PERCENT", value: "10" }]);
+        setError(null);
+    };
+
+    const removeQuickDiscountPreset = (index: number) => {
+        setQuickDiscountPresets((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
+        setError(null);
+    };
+
+    const updateQuickDiscountPreset = (
+        index: number,
+        updates: Partial<{ label: string; type: QuickDiscountType; value: string; }>
+    ) => {
+        setQuickDiscountPresets((prev) => prev.map((preset, currentIndex) => (
+            currentIndex === index ? { ...preset, ...updates } : preset
+        )));
+        setError(null);
+    };
+
     async function handleSubmit(formData: FormData) {
         setSaved(false);
         setError(null);
@@ -118,6 +172,7 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
         <form action={handleSubmit}>
             <input type="hidden" name="eventId" value={String(event._id)} />
             <input type="hidden" name="predefinedTables" value={predefinedTables.join("\n")} />
+            <input type="hidden" name="quickDiscountPresets" value={quickDiscountPresetsPayload} />
             <CardContent className="grid gap-6 py-6">
                 <div className="grid gap-4 sm:grid-cols-2">
                     <div className="flex flex-row items-center space-x-3 space-y-0 rounded-md border p-4 shadow-sm hover:bg-slate-50 transition-colors">
@@ -168,6 +223,91 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                         </div>
                     </div>
 
+                </div>
+
+                <div className="space-y-4 rounded-md border p-4 shadow-sm">
+                    <div className="space-y-1">
+                        <Label className="text-sm font-medium">
+                            Preset Sconti Rapidi POS
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                            Configura più preset (es. Staff 50%, Promo 10%) disponibili nella Scheda Sconti del carrello POS.
+                        </p>
+                    </div>
+                    <div className="flex items-center justify-between rounded-md border bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                        <span>Preset configurati: {quickDiscountPresetCount}/{MAX_QUICK_DISCOUNT_PRESETS}</span>
+                        <Button
+                            id="quick-discount-add-preset"
+                            type="button"
+                            variant="outline"
+                            className="h-8 gap-2 text-xs font-bold"
+                            onClick={addQuickDiscountPreset}
+                            disabled={quickDiscountPresetCount >= MAX_QUICK_DISCOUNT_PRESETS}
+                        >
+                            <Plus className="h-3.5 w-3.5" />
+                            Aggiungi preset
+                        </Button>
+                    </div>
+
+                    {quickDiscountPresetCount === 0 ? (
+                        <p className="rounded-md border border-dashed bg-white p-3 text-xs italic text-muted-foreground">
+                            Nessun preset configurato: il POS mostrerà solo le opzioni sconto avanzate.
+                        </p>
+                    ) : (
+                        <div className="space-y-3">
+                            {quickDiscountPresets.map((preset, index) => (
+                                <div key={`quick-preset-${index}`} className="rounded-md border bg-white p-3">
+                                    <div className="grid gap-3 sm:grid-cols-[1.3fr_0.9fr_0.9fr_auto]">
+                                        <div className="space-y-1">
+                                            <Label htmlFor={`quickDiscountLabel-${index}`} className="text-xs font-medium">Etichetta</Label>
+                                            <Input
+                                                id={`quickDiscountLabel-${index}`}
+                                                data-testid={`quick-discount-label-${index}`}
+                                                value={preset.label}
+                                                onChange={(e) => updateQuickDiscountPreset(index, { label: e.target.value })}
+                                                placeholder="Es: Staff"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label htmlFor={`quickDiscountType-${index}`} className="text-xs font-medium">Tipo</Label>
+                                            <select
+                                                id={`quickDiscountType-${index}`}
+                                                data-testid={`quick-discount-type-${index}`}
+                                                value={preset.type}
+                                                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                onChange={(e) => updateQuickDiscountPreset(index, { type: e.target.value as QuickDiscountType })}
+                                            >
+                                                <option value="PERCENT">Percentuale (%)</option>
+                                                <option value="FIXED">Importo fisso (€)</option>
+                                            </select>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label htmlFor={`quickDiscountValue-${index}`} className="text-xs font-medium">Valore</Label>
+                                            <Input
+                                                id={`quickDiscountValue-${index}`}
+                                                data-testid={`quick-discount-value-${index}`}
+                                                value={preset.value}
+                                                onChange={(e) => updateQuickDiscountPreset(index, { value: e.target.value })}
+                                                placeholder={preset.type === "PERCENT" ? "Es: 50" : "Es: 2.00"}
+                                                inputMode="decimal"
+                                            />
+                                        </div>
+                                        <div className="flex items-end">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="h-9 gap-1 text-xs font-bold text-red-700 hover:text-red-800"
+                                                onClick={() => removeQuickDiscountPreset(index)}
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                                Rimuovi
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
                 <div className="space-y-4 rounded-md border p-4 shadow-sm">

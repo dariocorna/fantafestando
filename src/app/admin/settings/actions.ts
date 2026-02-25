@@ -16,6 +16,12 @@ import {
 } from "@/lib/table-presets";
 import { normalizeAvailableDays } from "@/lib/product-availability";
 import { normalizeStockQuantity } from "@/lib/inventory";
+import {
+    MAX_QUICK_DISCOUNT_PRESETS,
+    resolveQuickDiscountPresetsFromSettings,
+    toLegacyQuickDiscountSettings,
+    validateQuickDiscountPresets
+} from "@/lib/quick-discount-presets";
 
 function revalidateHardwareViews() {
     revalidatePath("/admin/settings/hardware");
@@ -69,6 +75,7 @@ export async function updateEventSettingsAction(formData: FormData) {
     const askName = formData.get("askName") === "on";
     const askTable = formData.get("askTable") === "on";
     const defaultCashierPrinterIp = formData.get("defaultCashierPrinterIp") as string;
+    const quickDiscountPresetsRaw = (formData.get("quickDiscountPresets") as string | null)?.trim() || "";
     const active = formData.get("active") === "on";
     const predefinedTablesInput = formData.get("predefinedTables") as string | null;
     const normalizedInputTables = parsePredefinedTablesInput(predefinedTablesInput, Number.MAX_SAFE_INTEGER);
@@ -99,6 +106,41 @@ export async function updateEventSettingsAction(formData: FormData) {
         return { error: `Puoi inserire al massimo ${MAX_PREDEFINED_TABLES} tavoli predefiniti` };
     }
 
+    let quickDiscountPresets = resolveQuickDiscountPresetsFromSettings(null);
+    if (quickDiscountPresetsRaw) {
+        let parsedQuickDiscountPresets: unknown;
+        try {
+            parsedQuickDiscountPresets = JSON.parse(quickDiscountPresetsRaw);
+        } catch {
+            return { error: "Formato preset sconti non valido" };
+        }
+
+        const validatedPresets = validateQuickDiscountPresets(parsedQuickDiscountPresets, MAX_QUICK_DISCOUNT_PRESETS);
+        if (!validatedPresets.success) {
+            return { error: validatedPresets.error };
+        }
+        quickDiscountPresets = validatedPresets.presets;
+    } else {
+        // Backward compatibility for old forms posting a single quickStaff preset.
+        const quickStaffDiscountEnabled = formData.get("quickStaffDiscountEnabled") === "on";
+        const quickStaffDiscountLabel = (formData.get("quickStaffDiscountLabel") as string | null)?.trim() || "Staff";
+        const quickStaffDiscountTypeRaw = (formData.get("quickStaffDiscountType") as string | null)?.trim().toUpperCase();
+        const quickStaffDiscountType = quickStaffDiscountTypeRaw === "FIXED" ? "FIXED" : "PERCENT";
+        const quickStaffDiscountValueRaw = (formData.get("quickStaffDiscountValue") as string | null)?.trim() || "";
+        const parsedQuickStaffDiscountValue = Number(quickStaffDiscountValueRaw.replace(",", "."));
+        const quickStaffDiscountValue = Number.isFinite(parsedQuickStaffDiscountValue)
+            ? Number(Math.max(0, parsedQuickStaffDiscountValue).toFixed(2))
+            : (quickStaffDiscountType === "PERCENT" ? 50 : 0);
+
+        quickDiscountPresets = resolveQuickDiscountPresetsFromSettings({
+            quickStaffDiscountEnabled,
+            quickStaffDiscountLabel,
+            quickStaffDiscountType,
+            quickStaffDiscountValue
+        });
+    }
+    const legacyQuickDiscount = toLegacyQuickDiscountSettings(quickDiscountPresets);
+
     const predefinedTables = distinctPredefinedTablesCount > MAX_PREDEFINED_TABLES
         ? normalizedInputTables
         : parsePredefinedTablesInput(predefinedTablesInput, MAX_PREDEFINED_TABLES);
@@ -116,6 +158,11 @@ export async function updateEventSettingsAction(formData: FormData) {
                 "settings.askName": askName,
                 "settings.askTable": askTable,
                 "settings.defaultCashierPrinterIp": defaultCashierPrinterIp,
+                "settings.quickDiscountPresets": quickDiscountPresets,
+                "settings.quickStaffDiscountEnabled": legacyQuickDiscount.quickStaffDiscountEnabled,
+                "settings.quickStaffDiscountLabel": legacyQuickDiscount.quickStaffDiscountLabel,
+                "settings.quickStaffDiscountType": legacyQuickDiscount.quickStaffDiscountType,
+                "settings.quickStaffDiscountValue": legacyQuickDiscount.quickStaffDiscountValue,
                 predefinedTables
             },
             // Cleanup legacy global SumUp configuration: now managed via Peripherals.
@@ -145,6 +192,8 @@ export async function cloneEventAction(formData: FormData) {
         Array.isArray(sourceEvent.predefinedTables) ? sourceEvent.predefinedTables.join("\n") : "",
         Number.MAX_SAFE_INTEGER
     );
+    const quickDiscountPresets = resolveQuickDiscountPresetsFromSettings(sourceEvent.settings);
+    const legacyQuickDiscount = toLegacyQuickDiscountSettings(quickDiscountPresets);
 
     // 1. Crea la nuova festa
     const newEvent = await Event.create({
@@ -154,7 +203,12 @@ export async function cloneEventAction(formData: FormData) {
         settings: {
             askName: sourceEvent.settings?.askName ?? false,
             askTable: sourceEvent.settings?.askTable ?? false,
-            defaultCashierPrinterIp: sourceEvent.settings?.defaultCashierPrinterIp
+            defaultCashierPrinterIp: sourceEvent.settings?.defaultCashierPrinterIp,
+            quickDiscountPresets,
+            quickStaffDiscountEnabled: legacyQuickDiscount.quickStaffDiscountEnabled,
+            quickStaffDiscountLabel: legacyQuickDiscount.quickStaffDiscountLabel,
+            quickStaffDiscountType: legacyQuickDiscount.quickStaffDiscountType,
+            quickStaffDiscountValue: legacyQuickDiscount.quickStaffDiscountValue
         },
         predefinedTables: clonedPredefinedTables
     });
