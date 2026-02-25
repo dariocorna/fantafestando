@@ -18,7 +18,8 @@ import {
     listRecentPendingOrders,
     getCashSessionStatus,
     openCashSession,
-    closeCashSession
+    closeCashSession,
+    getCashSessionClosurePreview
 } from "./actions"
 import { getCategoryTheme } from "@/lib/category-colors"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
@@ -119,6 +120,17 @@ interface ClosedCashSessionSummaryState {
     closedAt: string
 }
 
+interface CloseCashSessionPreviewState {
+    sessionId: string
+    openedAt: string
+    openingFloatAmount: number
+    paidOrdersCount: number
+    cashSalesAmount: number
+    cardSalesAmount: number
+    otherSalesAmount: number
+    expectedCashAmount: number
+}
+
 interface FeedbackModalState {
     open: boolean
     tone: "error" | "success" | "info"
@@ -173,6 +185,8 @@ export default function PosPage() {
     const [closingCountedCashAmountInput, setClosingCountedCashAmountInput] = useState("")
     const [closingNotes, setClosingNotes] = useState("")
     const [lastClosedSummary, setLastClosedSummary] = useState<ClosedCashSessionSummaryState | null>(null)
+    const [closeCashSessionPreview, setCloseCashSessionPreview] = useState<CloseCashSessionPreviewState | null>(null)
+    const [isCloseCashSessionPreviewLoading, setIsCloseCashSessionPreviewLoading] = useState(false)
     const [feedbackModal, setFeedbackModal] = useState<FeedbackModalState>({
         open: false,
         tone: "info",
@@ -189,8 +203,12 @@ export default function PosPage() {
         const result = await getCashSessionStatus({ eventId, posDeviceId })
         if (result.success) {
             setCashSession(result.session)
+            if (!result.session) {
+                setCloseCashSessionPreview(null)
+            }
         } else {
             setCashSession(null)
+            setCloseCashSessionPreview(null)
         }
         setIsCashSessionLoading(false)
     }
@@ -227,6 +245,7 @@ export default function PosPage() {
         localStorage.setItem('osgfest_pos_id', id)
         setIsPosSelectorOpen(false)
         setLastClosedSummary(null)
+        setCloseCashSessionPreview(null)
         if (activeEventId) {
             void loadCashSessionStatusFor(activeEventId, id)
         }
@@ -386,6 +405,38 @@ export default function PosPage() {
         setIsOpenCashDialogOpen(false)
     }
 
+    const handleOpenCloseCashDialog = async () => {
+        if (!activeEventId || !selectedPosDeviceId) {
+            showFeedbackModal("Seleziona prima una cassa")
+            return
+        }
+
+        if (!cashSession) {
+            showFeedbackModal("Nessuna sessione cassa aperta")
+            return
+        }
+
+        setClosingCountedCashAmountInput("")
+        setClosingNotes("")
+        setCloseCashSessionPreview(null)
+        setIsCloseCashSessionPreviewLoading(true)
+
+        const previewResult = await getCashSessionClosurePreview({
+            eventId: activeEventId,
+            posDeviceId: selectedPosDeviceId
+        })
+
+        setIsCloseCashSessionPreviewLoading(false)
+
+        if (!previewResult.success) {
+            showFeedbackModal(previewResult.error || "Errore durante il calcolo del contante atteso")
+            return
+        }
+
+        setCloseCashSessionPreview(previewResult.preview)
+        setIsCloseCashDialogOpen(true)
+    }
+
     const handleCloseCashSession = async () => {
         if (!activeEventId || !selectedPosDeviceId) {
             showFeedbackModal("Seleziona prima una cassa")
@@ -418,6 +469,7 @@ export default function PosPage() {
         }
 
         setCashSession(null)
+        setCloseCashSessionPreview(null)
         setClosingCountedCashAmountInput("")
         setClosingNotes("")
         setLastClosedSummary(result.summary)
@@ -738,12 +790,8 @@ export default function PosPage() {
                                     size="sm"
                                     variant="outline"
                                     className="border-emerald-300 bg-white font-black text-emerald-700"
-                                    onClick={() => {
-                                        setClosingCountedCashAmountInput("")
-                                        setClosingNotes("")
-                                        setIsCloseCashDialogOpen(true)
-                                    }}
-                                    disabled={isCashSessionLoading || isCashSessionActionLoading || isProcessing || isPrintMockActive}
+                                    onClick={() => void handleOpenCloseCashDialog()}
+                                    disabled={isCashSessionLoading || isCashSessionActionLoading || isCloseCashSessionPreviewLoading || isProcessing || isPrintMockActive}
                                 >
                                     <Wallet size={14} />
                                     Chiudi Cassa
@@ -1101,8 +1149,31 @@ export default function PosPage() {
                     <div className="space-y-5 p-8">
                         <div className="rounded-2xl border bg-slate-50 p-4 text-sm">
                             <p className="text-xs font-black uppercase tracking-widest text-slate-500">Sessione attiva</p>
-                            <p className="mt-1 font-semibold">Aperta alle {formatSessionDateTime(cashSession?.openedAt)}</p>
-                            <p className="font-semibold">Fondo iniziale: {formatEuro(cashSession?.openingFloatAmount || 0)}</p>
+                            <p className="mt-1 font-semibold">Aperta alle {formatSessionDateTime(closeCashSessionPreview?.openedAt || cashSession?.openedAt)}</p>
+                            <p className="font-semibold">Fondo iniziale: {formatEuro(closeCashSessionPreview?.openingFloatAmount ?? cashSession?.openingFloatAmount ?? 0)}</p>
+                        </div>
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm">
+                            <p className="text-xs font-black uppercase tracking-widest text-emerald-700">Contante atteso</p>
+                            {isCloseCashSessionPreviewLoading ? (
+                                <p className="mt-1 font-semibold text-emerald-700">Calcolo in corso...</p>
+                            ) : closeCashSessionPreview ? (
+                                <>
+                                    <p className="mt-1 text-xl font-black text-emerald-700">
+                                        {formatEuro(closeCashSessionPreview.expectedCashAmount)}
+                                    </p>
+                                    <p className="text-xs font-semibold text-emerald-700">
+                                        Fondo + incassi in contanti (esclusi pagamenti elettronici)
+                                    </p>
+                                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs font-semibold text-emerald-800">
+                                        <p>Incasso contanti: {formatEuro(closeCashSessionPreview.cashSalesAmount)}</p>
+                                        <p>Incasso carta/POS: {formatEuro(closeCashSessionPreview.cardSalesAmount)}</p>
+                                        <p>Incasso altro: {formatEuro(closeCashSessionPreview.otherSalesAmount)}</p>
+                                        <p>Ordini saldati: {closeCashSessionPreview.paidOrdersCount}</p>
+                                    </div>
+                                </>
+                            ) : (
+                                <p className="mt-1 font-semibold text-emerald-700">Nessun dato disponibile.</p>
+                            )}
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="closing-counted-cash" className="text-sm font-bold uppercase tracking-widest text-slate-500">
@@ -1135,7 +1206,7 @@ export default function PosPage() {
                                 variant="outline"
                                 className="flex-1 rounded-xl py-6 text-base font-bold"
                                 onClick={() => setIsCloseCashDialogOpen(false)}
-                                disabled={isCashSessionActionLoading}
+                                disabled={isCashSessionActionLoading || isCloseCashSessionPreviewLoading}
                             >
                                 ANNULLA
                             </Button>
@@ -1143,7 +1214,7 @@ export default function PosPage() {
                                 type="button"
                                 className="flex-1 rounded-xl bg-emerald-600 py-6 text-base font-black hover:bg-emerald-700"
                                 onClick={() => void handleCloseCashSession()}
-                                disabled={isCashSessionActionLoading}
+                                disabled={isCashSessionActionLoading || isCloseCashSessionPreviewLoading}
                             >
                                 {isCashSessionActionLoading ? <Loader2 className="animate-spin" /> : "CONFERMA CHIUSURA"}
                             </Button>

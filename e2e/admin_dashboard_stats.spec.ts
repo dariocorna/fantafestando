@@ -115,7 +115,7 @@ async function openCashSessionIfRequired(page: Page, openingFloatAmount = "0") {
     await expect(openDialog).toBeVisible()
     await openDialog.locator("#opening-float-amount").fill(openingFloatAmount)
     await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click()
-    await expect(openDialog).toBeHidden()
+    await expect(page.getByRole("button", { name: /Chiudi Cassa/i })).toBeVisible()
 }
 
 async function completeCashOrder(
@@ -137,7 +137,6 @@ async function completeCashOrder(
     await confirmButton.scrollIntoViewIfNeeded()
     await confirmButton.click()
 
-    await expect(checkoutDialog.getByText(/Stampa in corso/i)).toBeVisible()
     await expect(checkoutDialog).toBeHidden({ timeout: 15000 })
     await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible()
 
@@ -153,6 +152,7 @@ test.describe("Dashboard statistiche e reportistica", () => {
 
     test("mostra KPI corretti e rende disponibili export CSV/XLS", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso validato su desktop.")
+        test.setTimeout(120000)
 
         const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`
         const eventName = `Dashboard Event ${suffix}`

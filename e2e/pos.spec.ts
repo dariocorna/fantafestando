@@ -29,7 +29,7 @@ async function openCashSessionIfRequired(page: Page, openingFloatAmount = "0") {
     await expect(openDialog).toBeVisible();
     await openDialog.locator("#opening-float-amount").fill(openingFloatAmount);
     await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click();
-    await expect(openDialog).toBeHidden();
+    await expect(page.getByRole("button", { name: /Chiudi Cassa/i })).toBeVisible();
 }
 
 test.describe("Interfaccia POS (Cassa)", () => {
