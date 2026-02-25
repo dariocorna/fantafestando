@@ -4,6 +4,8 @@ import { getAdminContextEvent } from "@/lib/events";
 import dbConnect from "@/lib/mongoose";
 import Order from "@/models/Order";
 import Product from "@/models/Product";
+import CashSession from "@/models/CashSession";
+import "@/models/PosDevice";
 import type { IEvent } from "@/models/Event";
 import {
     computeDashboardStats,
@@ -41,8 +43,30 @@ interface ProductProjection {
     name: string
 }
 
+interface CashSessionProjection {
+    _id: unknown
+    status?: "OPEN" | "CLOSED"
+    openedAt?: Date | string
+    closedAt?: Date | string
+    openingFloatAmount?: number
+    closingCountedCashAmount?: number
+    paidOrdersCount?: number
+    expectedCashAmount?: number
+    varianceAmount?: number
+    posDeviceId?: {
+        _id?: unknown
+        name?: string
+    } | unknown
+}
+
 function formatCurrency(value: number): string {
     return currencyFormatter.format(value)
+}
+
+function getPosDeviceName(value: CashSessionProjection["posDeviceId"]): string {
+    if (!value || typeof value !== "object") return "Postazione non trovata"
+    const withName = value as { name?: string }
+    return withName.name?.trim() || "Postazione non trovata"
 }
 
 export default async function AdminDashboard() {
@@ -59,12 +83,17 @@ export default async function AdminDashboard() {
     const eventId = String(contextEvent._id);
     await dbConnect();
 
-    const [orders, products] = await Promise.all([
+    const [orders, products, cashSessions] = await Promise.all([
         Order.find({ eventId, status: "PAID" })
             .sort({ createdAt: -1 })
             .select("_id status createdAt totalAmount paymentMethod cart")
             .lean() as Promise<OrderProjection[]>,
-        Product.find({ eventId }).select("_id name").lean() as Promise<ProductProjection[]>
+        Product.find({ eventId }).select("_id name").lean() as Promise<ProductProjection[]>,
+        CashSession.find({ eventId })
+            .sort({ openedAt: -1 })
+            .populate({ path: "posDeviceId", select: "_id name" })
+            .select("_id status openedAt closedAt openingFloatAmount closingCountedCashAmount paidOrdersCount expectedCashAmount varianceAmount posDeviceId")
+            .lean() as Promise<CashSessionProjection[]>
     ]);
 
     const dashboardOrders: DashboardOrderInput[] = orders.map((order) => ({
@@ -287,6 +316,92 @@ export default async function AdminDashboard() {
                                         <TableCell className="text-right font-semibold">{formatCurrency(order.totalAmount)}</TableCell>
                                     </TableRow>
                                 ))
+                            )}
+                        </TableBody>
+                    </Table>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Sessioni Cassa</CardTitle>
+                    <CardDescription>Storico aperture/chiusure postazioni cassa con download report.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <Table data-testid="cash-sessions-table">
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead>Stato</TableHead>
+                                <TableHead>Postazione</TableHead>
+                                <TableHead>Apertura</TableHead>
+                                <TableHead>Chiusura</TableHead>
+                                <TableHead className="text-right">Fondo</TableHead>
+                                <TableHead className="text-right">Contante Atteso</TableHead>
+                                <TableHead className="text-right">Contato</TableHead>
+                                <TableHead className="text-right">Differenza</TableHead>
+                                <TableHead className="text-right">Ordini</TableHead>
+                                <TableHead className="text-right">Report</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {cashSessions.length === 0 ? (
+                                <TableRow>
+                                    <TableCell colSpan={10} className="text-center text-muted-foreground">
+                                        Nessuna sessione cassa registrata.
+                                    </TableCell>
+                                </TableRow>
+                            ) : (
+                                cashSessions.map((session) => {
+                                    const sessionId = String(session._id)
+                                    const isClosed = session.status === "CLOSED"
+                                    return (
+                                        <TableRow key={sessionId} data-testid={`cash-session-row-${sessionId}`}>
+                                            <TableCell>
+                                                <span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${isClosed ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                                                    {isClosed ? "Chiusa" : "Aperta"}
+                                                </span>
+                                            </TableCell>
+                                            <TableCell className="font-medium">{getPosDeviceName(session.posDeviceId)}</TableCell>
+                                            <TableCell>{formatDashboardDateTime(session.openedAt)}</TableCell>
+                                            <TableCell>{formatDashboardDateTime(session.closedAt)}</TableCell>
+                                            <TableCell className="text-right">{formatCurrency(session.openingFloatAmount ?? 0)}</TableCell>
+                                            <TableCell className="text-right">
+                                                {isClosed ? formatCurrency(session.expectedCashAmount ?? 0) : "-"}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                {isClosed ? formatCurrency(session.closingCountedCashAmount ?? 0) : "-"}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                {isClosed ? formatCurrency(session.varianceAmount ?? 0) : "-"}
+                                            </TableCell>
+                                            <TableCell className="text-right">{numberFormatter.format(session.paidOrdersCount ?? 0)}</TableCell>
+                                            <TableCell className="text-right">
+                                                {isClosed ? (
+                                                    <div className="flex justify-end gap-2">
+                                                        <Button asChild variant="outline" size="sm">
+                                                            <Link
+                                                                href={`/admin/cash-sessions/export?sessionId=${sessionId}&format=csv`}
+                                                                data-testid={`cash-session-report-csv-${sessionId}`}
+                                                            >
+                                                                CSV
+                                                            </Link>
+                                                        </Button>
+                                                        <Button asChild variant="outline" size="sm">
+                                                            <Link
+                                                                href={`/admin/cash-sessions/export?sessionId=${sessionId}&format=xls`}
+                                                                data-testid={`cash-session-report-xls-${sessionId}`}
+                                                            >
+                                                                XLS
+                                                            </Link>
+                                                        </Button>
+                                                    </div>
+                                                ) : (
+                                                    "-"
+                                                )}
+                                            </TableCell>
+                                        </TableRow>
+                                    )
+                                })
                             )}
                         </TableBody>
                     </Table>
