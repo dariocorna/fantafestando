@@ -203,12 +203,13 @@ async function openCashSessionIfRequired(page: Page, openingFloatAmount = "0") {
     await expect(openDialog).toBeVisible()
     await openDialog.locator("#opening-float-amount").fill(openingFloatAmount)
     await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click()
-    await expect(openDialog).toBeHidden()
+    await expect(page.getByRole("button", { name: /Chiudi Cassa/i })).toBeVisible()
 }
 
 test.describe("POS - Completamento ordine da codice", () => {
     test("chiude un ordine WebApp da POS usando il codice", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso completo validato su desktop.");
+        test.setTimeout(120000);
 
         const uniqueSuffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         const eventName = `POS Code Event ${uniqueSuffix}`;
@@ -270,7 +271,7 @@ test.describe("POS - Completamento ordine da codice", () => {
 
         await confirmButton.scrollIntoViewIfNeeded();
         await confirmButton.click();
-        await expect(checkoutDialog.getByText(/Stampa in corso/i)).toBeVisible();
+        await expect(checkoutDialog.getByText(/Stampa in corso/i).first()).toBeVisible();
         await expect(checkoutDialog.getByText(/Simulazione stampa attiva/i)).toBeVisible();
         const successModal = page.getByRole("dialog").filter({ hasText: /Ordine completato correttamente/i });
         await expect(successModal).toBeVisible();

@@ -107,7 +107,7 @@ async function setProductAvailableDay(page: Page, productName: string, dayLabel:
     await dialog.getByRole("button", { name: "Salva Modifiche", exact: true }).click();
 
     await expect(dialog).toBeHidden();
-    await expect(productRow.getByText(dayLabel, { exact: false })).toBeVisible();
+    await expect(productRow.getByText(dayLabel, { exact: true })).toBeVisible();
 }
 
 test.describe("Disponibilità prodotti per giorno", () => {
@@ -144,7 +144,7 @@ test.describe("Disponibilità prodotti per giorno", () => {
         });
 
         const limitedProductRow = page.locator("tr").filter({ hasText: limitedProductName });
-        await expect(limitedProductRow.getByText(hiddenDayLabel, { exact: false })).toBeVisible();
+        await expect(limitedProductRow.getByText(hiddenDayLabel, { exact: true })).toBeVisible();
 
         await page.goto("/menu");
         await page.waitForResponse(

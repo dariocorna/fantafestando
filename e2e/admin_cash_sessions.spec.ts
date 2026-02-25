@@ -63,7 +63,12 @@ async function configureCashPos(
     await expect(page.getByText(posName)).toBeVisible()
 }
 
-async function createStockProduct(page: Page, categoryName: string, productName: string, stockQuantity: string) {
+async function createCategoryAndProduct(
+    page: Page,
+    categoryName: string,
+    productName: string,
+    price: string
+) {
     await page.goto("/admin/catalog")
 
     await page.click("#new-category-btn")
@@ -74,14 +79,11 @@ async function createStockProduct(page: Page, categoryName: string, productName:
     await page.click("#new-product-btn")
     const dialog = page.getByRole("dialog")
     await dialog.getByLabel("Nome").fill(productName)
-    await dialog.getByLabel("Prezzo Base (€)").fill("8.00")
+    await dialog.getByLabel("Prezzo Base (€)").fill(price)
     await dialog.locator('select[name="categoryId"]').selectOption({ label: categoryName })
-    await dialog.getByLabel("Scorte").fill(stockQuantity)
     await dialog.getByRole("button", { name: "Salva Prodotto", exact: true }).click()
     await expect(dialog).toBeHidden()
-
-    const productRow = page.locator("tr").filter({ hasText: productName })
-    await expect(productRow).toContainText("Scorte basse")
+    await expect(page.getByText(productName)).toBeVisible()
 }
 
 async function openPosAndSelectDevice(page: Page, posName: string) {
@@ -90,7 +92,7 @@ async function openPosAndSelectDevice(page: Page, posName: string) {
     await page.reload()
 
     await page.waitForResponse(
-        response => response.url().includes("/api/pos/init") && response.ok(),
+        (response) => response.url().includes("/api/pos/init") && response.ok(),
         { timeout: 10000 }
     )
 
@@ -103,11 +105,8 @@ async function openPosAndSelectDevice(page: Page, posName: string) {
     }
 }
 
-async function openCashSessionIfRequired(page: Page, openingFloatAmount = "0") {
-    const openButton = page.getByRole("button", { name: /Apri Cassa/i })
-    if (!(await openButton.isVisible())) return
-
-    await openButton.click()
+async function openCashSession(page: Page, openingFloatAmount: string) {
+    await page.getByRole("button", { name: /Apri Cassa/i }).click()
     const openDialog = page.getByRole("dialog").filter({ hasText: /Apertura Cassa/i })
     await expect(openDialog).toBeVisible()
     await openDialog.locator("#opening-float-amount").fill(openingFloatAmount)
@@ -115,86 +114,86 @@ async function openCashSessionIfRequired(page: Page, openingFloatAmount = "0") {
     await expect(page.getByRole("button", { name: /Chiudi Cassa/i })).toBeVisible()
 }
 
-async function closeSuccessModalIfVisible(page: Page) {
+async function completeCashOrder(page: Page, productName: string) {
+    const productButton = page.locator("button").filter({ hasText: new RegExp(productName) }).first()
+    await productButton.click()
+
+    await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()
+    const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i })
+    await expect(checkoutDialog).toBeVisible()
+    await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click()
+    await expect(checkoutDialog).toBeHidden({ timeout: 15000 })
+
     const successModal = page.getByRole("dialog").filter({ hasText: /Ordine completato correttamente/i })
-    if (!(await successModal.isVisible())) return
-    await successModal.getByRole("button", { name: "OK", exact: true }).click()
-    await expect(successModal).toBeHidden()
+    if (await successModal.isVisible()) {
+        await successModal.getByRole("button", { name: "OK", exact: true }).click()
+        await expect(successModal).toBeHidden()
+    }
 }
 
-test.describe("Magazzino e scorte base", () => {
+async function closeCashSession(page: Page, countedCash: string) {
+    await page.getByRole("button", { name: /Chiudi Cassa/i }).click()
+    const closeDialog = page.getByRole("dialog").filter({ hasText: /Chiusura Cassa/i })
+    await expect(closeDialog).toBeVisible()
+    await closeDialog.locator("#closing-counted-cash").fill(countedCash)
+    await expect(closeDialog.getByRole("button", { name: "CONFERMA CHIUSURA", exact: true })).toBeEnabled()
+    await closeDialog.getByRole("button", { name: "CONFERMA CHIUSURA", exact: true }).click()
+    await expect(page.getByRole("button", { name: /Apri Cassa/i })).toBeVisible()
+}
+
+test.describe("Admin sessioni cassa", () => {
     test.describe.configure({ mode: "serial" })
 
-    test("gestisce esaurimento menu e override POS con conferma cassiere", async ({ page, isMobile }) => {
+    test("mostra sessione chiusa e permette download report CSV/XLS", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso validato su desktop.")
         test.setTimeout(120000)
 
         const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`
-        const eventName = `Stock Event ${suffix}`
-        const categoryName = `Stock Cat ${suffix}`
-        const productName = `Stock Product ${suffix}`
+        const eventName = `Cash Sessions Event ${suffix}`
         const printerName = `Cashier ${suffix}`
         const cashBoxName = `CashBox ${suffix}`
         const posName = `POS ${suffix}`
+        const categoryName = `Cash Sessions Cat ${suffix}`
+        const productName = `Cash Sessions Product ${suffix}`
 
         await createAndActivateEvent(page, eventName)
         await configureCashPos(page, printerName, `192.168.1.${Math.floor(Math.random() * 150) + 50}`, cashBoxName, posName)
-        await createStockProduct(page, categoryName, productName, "1")
-
-        await page.goto("/menu")
-        await page.waitForResponse(
-            response => response.url().includes("/api/pos/init") && response.ok(),
-            { timeout: 10000 }
-        )
-        await expect(page.getByText(productName)).toBeVisible()
+        await createCategoryAndProduct(page, categoryName, productName, "6.00")
 
         await openPosAndSelectDevice(page, posName)
-        await openCashSessionIfRequired(page)
+        await openCashSession(page, "100")
+        await completeCashOrder(page, productName)
+        await closeCashSession(page, "106")
 
-        const productButton = page.locator("button").filter({ hasText: productName }).first()
-        await expect(productButton).toContainText(/Scorte basse/i)
-        await productButton.click()
+        await page.goto("/admin")
+        const sessionsTable = page.getByTestId("cash-sessions-table")
+        await expect(sessionsTable).toBeVisible({ timeout: 15000 })
+        const row = sessionsTable.locator("tr").filter({ hasText: new RegExp(posName) }).first()
+        await expect(row).toBeVisible()
+        await expect(row).toContainText(/Chiusa/i)
+        await expect(row).toContainText(/106,00\s*€/i)
 
-        await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()
-        const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i })
-        await expect(checkoutDialog).toBeVisible()
-        await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click()
-        await expect(checkoutDialog.getByText(/Stampa in corso/i).first()).toBeVisible()
-        await expect(checkoutDialog).toBeHidden({ timeout: 15000 })
-        await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible()
-        await closeSuccessModalIfVisible(page)
+        const csvLink = row.getByRole("link", { name: "CSV", exact: true }).first()
+        const xlsLink = row.getByRole("link", { name: "XLS", exact: true }).first()
 
-        await page.goto("/admin/catalog")
-        const productRow = page.locator("tr").filter({ hasText: productName })
-        await expect(productRow).toContainText("Esaurito")
+        const csvHref = await csvLink.getAttribute("href")
+        const xlsHref = await xlsLink.getAttribute("href")
+        expect(csvHref).toBeTruthy()
+        expect(xlsHref).toBeTruthy()
 
-        await page.goto("/menu")
-        await page.waitForResponse(
-            response => response.url().includes("/api/pos/init") && response.ok(),
-            { timeout: 10000 }
-        )
-        await expect(page.getByText(productName)).toHaveCount(0)
+        const csvResponse = await page.request.get(csvHref || "")
+        expect(csvResponse.ok()).toBeTruthy()
+        expect(csvResponse.headers()["content-type"]).toContain("text/csv")
+        const csvPayload = await csvResponse.text()
+        expect(csvPayload).toContain("Contante atteso (solo contanti)")
+        expect(csvPayload).toContain(posName)
+        expect(csvPayload).toContain("106.00")
 
-        await page.goto("/pos")
-        await page.waitForResponse(
-            response => response.url().includes("/api/pos/init") && response.ok(),
-            { timeout: 10000 }
-        )
-        const soldOutProductButton = page.locator("button").filter({ hasText: productName }).first()
-        await expect(soldOutProductButton).toContainText(/Esaurito/i)
-        await soldOutProductButton.click()
-
-        await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()
-        await expect(checkoutDialog).toBeVisible()
-        await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click()
-
-        await expect(checkoutDialog.getByText(/Scorte insufficienti rilevate/i)).toBeVisible()
-        await expect(checkoutDialog.getByText(new RegExp(productName))).toBeVisible()
-
-        await checkoutDialog.getByRole("button", { name: "Prosegui comunque", exact: true }).click()
-        await expect(checkoutDialog.getByText(/Stampa in corso/i).first()).toBeVisible()
-        await expect(checkoutDialog).toBeHidden({ timeout: 15000 })
-        await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible()
-        await closeSuccessModalIfVisible(page)
+        const xlsResponse = await page.request.get(xlsHref || "")
+        expect(xlsResponse.ok()).toBeTruthy()
+        expect(xlsResponse.headers()["content-type"]).toContain("application/vnd.ms-excel")
+        const xlsPayload = await xlsResponse.text()
+        expect(xlsPayload).toContain("Sezione\tValore")
+        expect(xlsPayload).toContain(posName)
     })
 })

@@ -20,6 +20,23 @@ export interface PrintJob {
     shortCode?: string;
 }
 
+export interface CashSessionClosingPrintSummary {
+    sessionId: string;
+    posDeviceName?: string;
+    openedAt?: Date | string;
+    closedAt?: Date | string;
+    openingFloatAmount: number;
+    cashSalesAmount: number;
+    cardSalesAmount: number;
+    otherSalesAmount: number;
+    expectedCashAmount: number;
+    closingCountedCashAmount: number;
+    varianceAmount: number;
+    paidOrdersCount: number;
+    openingNotes?: string;
+    closingNotes?: string;
+}
+
 // Define an interface for cart items based on usage
 interface CartItem {
     productId: string;
@@ -27,6 +44,17 @@ interface CartItem {
     quantity: number;
     customKitchenNotes?: string;
     // Add other properties if they exist in the actual Order.cart items
+}
+
+function formatEuro(amount: number): string {
+    return `${amount.toFixed(2)} EUR`;
+}
+
+function formatDateTime(value: Date | string | undefined): string {
+    if (!value) return "-";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "-";
+    return parsed.toLocaleString("it-IT");
 }
 
 export class PrinterService {
@@ -39,7 +67,7 @@ export class PrinterService {
         const printer = new ThermalPrinter({
             type: PrinterTypes.EPSON, // Default for most thermal printers
             interface: `tcp://${job.ip}`,
-            characterSet: "PC1252_ITALIAN" as CharacterSet,
+            characterSet: CharacterSet.WPC1252,
             removeSpecialCharacters: false,
             lineCharacter: "=",
         });
@@ -182,5 +210,77 @@ export class PrinterService {
         // For now, let's stick to the "comande" requirements.
 
         return await Promise.all(printPromises);
+    }
+
+    static async printCashSessionSummary(eventId: string, posDeviceId: string, summary: CashSessionClosingPrintSummary) {
+        if (!eventId || !posDeviceId) return false;
+
+        await dbConnect();
+        const device = await PosDevice.findOne({ _id: posDeviceId, eventId })
+            .populate("printerId")
+            .lean() as (import("@/models/PosDevice").IPosDevice & { printerId?: import("@/models/Printer").IPrinter }) | null;
+
+        const printerIp = device?.printerId?.ip;
+        if (!printerIp) {
+            console.warn(`No cashier printer configured for POS ${posDeviceId}`);
+            return false;
+        }
+
+        const printer = new ThermalPrinter({
+            type: PrinterTypes.EPSON,
+            interface: `tcp://${printerIp}`,
+            characterSet: CharacterSet.WPC1252,
+            removeSpecialCharacters: false,
+            lineCharacter: "=",
+        });
+
+        const isConnected = await printer.isPrinterConnected();
+        if (!isConnected) {
+            console.error(`Cash session summary printer at ${printerIp} is not reachable`);
+            return false;
+        }
+
+        const safeOpeningNotes = summary.openingNotes?.trim();
+        const safeClosingNotes = summary.closingNotes?.trim();
+
+        printer.alignCenter();
+        printer.setTextDoubleHeight();
+        printer.println("CHIUSURA CASSA");
+        printer.setTextNormal();
+        printer.println("--------------------------------");
+        printer.alignLeft();
+        printer.println(`SESSIONE: ${summary.sessionId.slice(-8).toUpperCase()}`);
+        printer.println(`POSTAZIONE: ${summary.posDeviceName || device?.name || "-"}`);
+        printer.println(`APERTURA: ${formatDateTime(summary.openedAt)}`);
+        printer.println(`CHIUSURA: ${formatDateTime(summary.closedAt)}`);
+        printer.println("--------------------------------");
+        printer.println(`FONDO INIZIALE: ${formatEuro(summary.openingFloatAmount)}`);
+        printer.println(`INCASSO CONTANTI: ${formatEuro(summary.cashSalesAmount)}`);
+        printer.println(`INCASSO CARTA: ${formatEuro(summary.cardSalesAmount)}`);
+        printer.println(`INCASSO ALTRO: ${formatEuro(summary.otherSalesAmount)}`);
+        printer.println(`CONTANTE ATTESO: ${formatEuro(summary.expectedCashAmount)}`);
+        printer.println(`CONTANTE CONTATO: ${formatEuro(summary.closingCountedCashAmount)}`);
+        printer.println(`DIFFERENZA: ${formatEuro(summary.varianceAmount)}`);
+        printer.println(`ORDINI SALDATI: ${summary.paidOrdersCount}`);
+        if (safeOpeningNotes) {
+            printer.println("--------------------------------");
+            printer.println(`NOTE APERTURA: ${safeOpeningNotes}`);
+        }
+        if (safeClosingNotes) {
+            printer.println("--------------------------------");
+            printer.println(`NOTE CHIUSURA: ${safeClosingNotes}`);
+        }
+        printer.println("--------------------------------");
+        printer.println(new Date().toLocaleString("it-IT"));
+        printer.cut();
+
+        try {
+            await printer.execute();
+            console.log(`Cash session summary print sent to ${printerIp} successfully`);
+            return true;
+        } catch (error) {
+            console.error(`Cash session summary printer execution error at ${printerIp}:`, error);
+            return false;
+        }
     }
 }
