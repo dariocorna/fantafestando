@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:e2e": "playwright test --project=chromium",
+    "test:e2e:dedicated": "PLAYWRIGHT_PORT=3400 CI=true playwright test --project=chromium",
     "test:ci": "npm run lint && npm run test:unit && CI=true npm run test:e2e",
     "db:up": "docker compose up -d mongodb",
     "db:down": "docker compose stop mongodb"

@@ -75,6 +75,11 @@ npm run db:up       # avvio MongoDB via docker compose
 npm run db:down     # stop MongoDB via docker compose
 ```
 
+E2E su porta dedicata (per evitare conflitti con altre sessioni):
+```bash
+PLAYWRIGHT_PORT=3400 CI=true npx playwright test --project=chromium
+```
+
 ## Testing
 
 Esegui la suite completa locale:
@@ -93,6 +98,7 @@ CI=true npx playwright test --project=chromium
 - Piano architettura: `docs/architecture-plan.md`
 - Schema database: `docs/database-schema.md`
 - Strategia UI: `docs/ui-strategy.md`
+- Deploy VM produzione: `docs/deploy-vm.md`
 
 ## Note
 
