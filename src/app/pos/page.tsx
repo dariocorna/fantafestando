@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { ShoppingCart, User, CreditCard, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X, RefreshCw, Clock3 } from "lucide-react"
+import { useState, useEffect } from "react"
+import { ShoppingCart, User, CreditCard, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X, RefreshCw, Clock3, Wallet } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -11,7 +11,15 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { createOrder, loadPendingOrderByCode, completePendingOrderPayment, listRecentPendingOrders } from "./actions"
+import {
+    createOrder,
+    loadPendingOrderByCode,
+    completePendingOrderPayment,
+    listRecentPendingOrders,
+    getCashSessionStatus,
+    openCashSession,
+    closeCashSession
+} from "./actions"
 import { getCategoryTheme } from "@/lib/category-colors"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
 import { getStockLabel, getStockStatus, type StockShortage } from "@/lib/inventory"
@@ -91,6 +99,33 @@ interface RecentPendingOrder {
     createdAt?: string
 }
 
+interface OpenCashSessionState {
+    id: string
+    openedAt: string
+    openingFloatAmount: number
+    openingNotes?: string
+}
+
+interface ClosedCashSessionSummaryState {
+    sessionId: string
+    openingFloatAmount: number
+    closingCountedCashAmount: number
+    paidOrdersCount: number
+    cashSalesAmount: number
+    cardSalesAmount: number
+    otherSalesAmount: number
+    expectedCashAmount: number
+    varianceAmount: number
+    closedAt: string
+}
+
+interface FeedbackModalState {
+    open: boolean
+    tone: "error" | "success" | "info"
+    title: string
+    message: string
+}
+
 function getPeripheralRef(value: IPosDevice["paymentTerminalId"] | IPosDevice["cashBoxId"]) {
     if (!value || typeof value !== "object") return null
     return value
@@ -128,10 +163,37 @@ export default function PosPage() {
     const [recentPendingOrders, setRecentPendingOrders] = useState<RecentPendingOrder[]>([])
     const [isRecentOrdersLoading, setIsRecentOrdersLoading] = useState(false)
     const [stockShortages, setStockShortages] = useState<StockShortage[]>([])
+    const [cashSession, setCashSession] = useState<OpenCashSessionState | null>(null)
+    const [isCashSessionLoading, setIsCashSessionLoading] = useState(false)
+    const [isCashSessionActionLoading, setIsCashSessionActionLoading] = useState(false)
+    const [isOpenCashDialogOpen, setIsOpenCashDialogOpen] = useState(false)
+    const [isCloseCashDialogOpen, setIsCloseCashDialogOpen] = useState(false)
+    const [openingFloatAmountInput, setOpeningFloatAmountInput] = useState("")
+    const [openingNotes, setOpeningNotes] = useState("")
+    const [closingCountedCashAmountInput, setClosingCountedCashAmountInput] = useState("")
+    const [closingNotes, setClosingNotes] = useState("")
+    const [lastClosedSummary, setLastClosedSummary] = useState<ClosedCashSessionSummaryState | null>(null)
+    const [feedbackModal, setFeedbackModal] = useState<FeedbackModalState>({
+        open: false,
+        tone: "info",
+        title: "",
+        message: ""
+    })
 
     // Info Cliente
     const [customerName, setCustomerName] = useState("")
     const [tableNumber, setTableNumber] = useState("")
+
+    const loadCashSessionStatusFor = async (eventId: string, posDeviceId: string) => {
+        setIsCashSessionLoading(true)
+        const result = await getCashSessionStatus({ eventId, posDeviceId })
+        if (result.success) {
+            setCashSession(result.session)
+        } else {
+            setCashSession(null)
+        }
+        setIsCashSessionLoading(false)
+    }
 
     // Caricamento iniziale: evento attivo e menu
     useEffect(() => {
@@ -150,7 +212,9 @@ export default function PosPage() {
                 const isSavedPosValid = savedPosId && data.posDevices.some((d: IPosDevice) => d._id === savedPosId)
                 if (isSavedPosValid) {
                     setSelectedPosDeviceId(savedPosId)
+                    await loadCashSessionStatusFor(data.event._id, savedPosId)
                 } else {
+                    setCashSession(null)
                     setIsPosSelectorOpen(true)
                 }
             }
@@ -162,6 +226,10 @@ export default function PosPage() {
         setSelectedPosDeviceId(id)
         localStorage.setItem('osgfest_pos_id', id)
         setIsPosSelectorOpen(false)
+        setLastClosedSummary(null)
+        if (activeEventId) {
+            void loadCashSessionStatusFor(activeEventId, id)
+        }
     }
 
     const selectedPosDevice = posDevices.find((d: IPosDevice) => d._id === selectedPosDeviceId)
@@ -218,7 +286,7 @@ export default function PosPage() {
         setPaymentMethod(cashAvailable ? "CASH" : "CARD")
     }
 
-    const loadRecentPendingOrdersForDialog = useCallback(async () => {
+    const loadRecentPendingOrdersForDialog = async () => {
         if (!activeEventId) return
 
         setIsRecentOrdersLoading(true)
@@ -229,7 +297,7 @@ export default function PosPage() {
             setRecentPendingOrders([])
         }
         setIsRecentOrdersLoading(false)
-    }, [activeEventId])
+    }
 
     const formatRecentOrderTime = (createdAt?: string) => {
         if (!createdAt) return ""
@@ -239,11 +307,121 @@ export default function PosPage() {
         }).format(new Date(createdAt))
     }
 
+    const formatEuro = (value: number) => `${value.toFixed(2)} €`
+    const formatSessionDateTime = (value?: string) => {
+        if (!value) return "-"
+        return new Intl.DateTimeFormat("it-IT", {
+            day: "2-digit",
+            month: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit"
+        }).format(new Date(value))
+    }
+
+    const parseAmountInput = (rawValue: string): number | null => {
+        const normalized = rawValue.trim().replace(",", ".")
+        if (!normalized) return 0
+        const parsed = Number(normalized)
+        if (!Number.isFinite(parsed) || parsed < 0) return null
+        return Number(parsed.toFixed(2))
+    }
+
+    const showFeedbackModal = (
+        message: string,
+        tone: FeedbackModalState["tone"] = "error",
+        title?: string
+    ) => {
+        const fallbackTitle =
+            tone === "success"
+                ? "Operazione completata"
+                : tone === "error"
+                    ? "Attenzione"
+                    : "Informazione"
+
+        setFeedbackModal({
+            open: true,
+            tone,
+            title: title || fallbackTitle,
+            message
+        })
+    }
+
     const handleCodeDialogOpenChange = (open: boolean) => {
         setIsCodeDialogOpen(open)
         if (open) {
             void loadRecentPendingOrdersForDialog()
         }
+    }
+
+    const handleOpenCashSession = async () => {
+        if (!activeEventId || !selectedPosDeviceId) {
+            showFeedbackModal("Seleziona prima una cassa")
+            return
+        }
+
+        const openingFloatAmount = parseAmountInput(openingFloatAmountInput)
+        if (openingFloatAmount === null) {
+            showFeedbackModal("Inserisci un fondo cassa valido (>= 0)")
+            return
+        }
+
+        setIsCashSessionActionLoading(true)
+        const result = await openCashSession({
+            eventId: activeEventId,
+            posDeviceId: selectedPosDeviceId,
+            openingFloatAmount,
+            openingNotes
+        })
+        setIsCashSessionActionLoading(false)
+
+        if (!result.success) {
+            showFeedbackModal(result.error || "Errore durante apertura cassa")
+            return
+        }
+
+        setCashSession(result.session)
+        setOpeningFloatAmountInput("")
+        setOpeningNotes("")
+        setLastClosedSummary(null)
+        setIsOpenCashDialogOpen(false)
+    }
+
+    const handleCloseCashSession = async () => {
+        if (!activeEventId || !selectedPosDeviceId) {
+            showFeedbackModal("Seleziona prima una cassa")
+            return
+        }
+
+        if (!cashSession) {
+            showFeedbackModal("Nessuna sessione cassa aperta")
+            return
+        }
+
+        const closingCountedCashAmount = parseAmountInput(closingCountedCashAmountInput)
+        if (closingCountedCashAmount === null) {
+            showFeedbackModal("Inserisci il contante contato in formato valido")
+            return
+        }
+
+        setIsCashSessionActionLoading(true)
+        const result = await closeCashSession({
+            eventId: activeEventId,
+            posDeviceId: selectedPosDeviceId,
+            closingCountedCashAmount,
+            closingNotes
+        })
+        setIsCashSessionActionLoading(false)
+
+        if (!result.success) {
+            showFeedbackModal(result.error || "Errore durante chiusura cassa")
+            return
+        }
+
+        setCashSession(null)
+        setClosingCountedCashAmountInput("")
+        setClosingNotes("")
+        setLastClosedSummary(result.summary)
+        setIsCloseCashDialogOpen(false)
     }
 
     const handleCheckoutDialogOpenChange = (open: boolean) => {
@@ -254,7 +432,7 @@ export default function PosPage() {
         }
     }
 
-    const runMockPrintFlow = useCallback(async () => {
+    const runMockPrintFlow = async () => {
         setIsPrintMockActive(true)
         setPrintProgress(0)
         setPrintStatusLabel("Preparazione comanda...")
@@ -269,7 +447,7 @@ export default function PosPage() {
         setIsPrintMockActive(false)
         setPrintProgress(0)
         setPrintStatusLabel("Preparazione comanda...")
-    }, [])
+    }
 
     const clearTableSelection = () => {
         setTableNumber("")
@@ -277,13 +455,13 @@ export default function PosPage() {
 
     const handleLoadOrderByCode = async (rawCode?: string) => {
         if (!activeEvent?._id) {
-            alert("Evento non disponibile")
+            showFeedbackModal("Evento non disponibile")
             return
         }
 
         const codeToLoad = (rawCode ?? orderCode).trim().toUpperCase()
         if (!codeToLoad) {
-            alert("Inserisci un numero ordine valido")
+            showFeedbackModal("Inserisci un numero ordine valido")
             return
         }
 
@@ -296,7 +474,7 @@ export default function PosPage() {
         setIsCodeLoading(false)
 
         if (!result.success || !result.order) {
-            alert(result.error || "Ordine non trovato")
+            showFeedbackModal(result.error || "Ordine non trovato")
             return
         }
 
@@ -316,32 +494,37 @@ export default function PosPage() {
 
     const handleCheckout = async (allowStockOverride = false) => {
         if (!activeEvent?._id) {
-            alert("Evento non disponibile")
+            showFeedbackModal("Evento non disponibile")
             return
         }
 
         if (!selectedPosDeviceId) {
-            alert("Seleziona prima una cassa")
+            showFeedbackModal("Seleziona prima una cassa")
+            return
+        }
+
+        if (!cashSession) {
+            showFeedbackModal("Cassa chiusa. Apri una sessione cassa prima di incassare.")
             return
         }
 
         if (!cashAvailable && !cardAvailable) {
-            alert("La cassa selezionata non ha metodi di pagamento configurati")
+            showFeedbackModal("La cassa selezionata non ha metodi di pagamento configurati")
             return
         }
 
         if (effectivePaymentMethod === "CASH" && !cashAvailable) {
-            alert("La cassa selezionata non supporta i pagamenti contanti")
+            showFeedbackModal("La cassa selezionata non supporta i pagamenti contanti")
             return
         }
 
         if (effectivePaymentMethod === "CARD" && !cardAvailable) {
-            alert("La cassa selezionata non supporta i pagamenti elettronici")
+            showFeedbackModal("La cassa selezionata non supporta i pagamenti elettronici")
             return
         }
 
         if (activeEvent?.settings?.askTable && !tableValueValid) {
-            alert("Inserisci il tavolo oppure selezionalo dalla lista")
+            showFeedbackModal("Inserisci il tavolo oppure selezionalo dalla lista")
             return
         }
 
@@ -375,12 +558,20 @@ export default function PosPage() {
                 resetPendingOrder()
                 setIsCheckoutOpen(false)
                 setStockShortages([])
-                alert("Ordine completato correttamente")
+                showFeedbackModal(
+                    "Ordine completato correttamente",
+                    "success",
+                    "Pagamento registrato"
+                )
             } else {
                 if (completionResult.stockShortages?.length) {
                     setStockShortages(completionResult.stockShortages)
+                } else if (completionResult.cashSessionRequired) {
+                    setIsCheckoutOpen(false)
+                    setCashSession(null)
+                    setIsOpenCashDialogOpen(true)
                 } else {
-                    alert("Errore durante la chiusura ordine: " + completionResult.error)
+                    showFeedbackModal(`Errore durante la chiusura ordine: ${completionResult.error}`)
                 }
             }
 
@@ -415,15 +606,21 @@ export default function PosPage() {
         } else {
             if (result.stockShortages?.length) {
                 setStockShortages(result.stockShortages)
+            } else if (result.cashSessionRequired) {
+                setIsCheckoutOpen(false)
+                setCashSession(null)
+                setIsOpenCashDialogOpen(true)
             } else {
-                alert("Errore durante la creazione dell'ordine: " + result.error)
+                showFeedbackModal(`Errore durante la creazione dell'ordine: ${result.error}`)
             }
         }
         setIsProcessing(false)
     }
 
     const checkoutDisabled = isProcessing
+        || isCashSessionLoading
         || !selectedPosDeviceId
+        || !cashSession
         || cart.length === 0
         || (!cashAvailable && !cardAvailable)
         || (Boolean(activeEvent?.settings?.askTable) && !tableValueValid)
@@ -519,6 +716,62 @@ export default function PosPage() {
                         <Search size={14} />
                         Carica ordine da codice
                     </button>
+                    <div className={`mt-3 rounded-xl border p-3 ${cashSession ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                                <p className={`text-xs font-black uppercase tracking-widest ${cashSession ? "text-emerald-700" : "text-rose-700"}`}>
+                                    Stato Cassa
+                                </p>
+                                {isCashSessionLoading ? (
+                                    <p className="text-sm font-semibold text-slate-500">Caricamento sessione...</p>
+                                ) : cashSession ? (
+                                    <p className="text-sm font-semibold text-emerald-700">
+                                        Aperta alle {formatSessionDateTime(cashSession.openedAt)} · Fondo {formatEuro(cashSession.openingFloatAmount)}
+                                    </p>
+                                ) : (
+                                    <p className="text-sm font-semibold text-rose-700">Chiusa. Apri la cassa per iniziare gli incassi.</p>
+                                )}
+                            </div>
+                            {cashSession ? (
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="border-emerald-300 bg-white font-black text-emerald-700"
+                                    onClick={() => {
+                                        setClosingCountedCashAmountInput("")
+                                        setClosingNotes("")
+                                        setIsCloseCashDialogOpen(true)
+                                    }}
+                                    disabled={isCashSessionLoading || isCashSessionActionLoading || isProcessing || isPrintMockActive}
+                                >
+                                    <Wallet size={14} />
+                                    Chiudi Cassa
+                                </Button>
+                            ) : (
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    className="bg-rose-600 font-black text-white hover:bg-rose-700"
+                                    onClick={() => setIsOpenCashDialogOpen(true)}
+                                    disabled={isCashSessionLoading || isCashSessionActionLoading}
+                                >
+                                    <Wallet size={14} />
+                                    Apri Cassa
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                    {lastClosedSummary ? (
+                        <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 text-xs font-semibold text-slate-600">
+                            <p className="font-black uppercase tracking-widest text-slate-500">Ultima chiusura</p>
+                            <p className="mt-1">Chiusa alle {formatSessionDateTime(lastClosedSummary.closedAt)}</p>
+                            <p>Atteso: {formatEuro(lastClosedSummary.expectedCashAmount)} · Contato: {formatEuro(lastClosedSummary.closingCountedCashAmount)}</p>
+                            <p className={lastClosedSummary.varianceAmount === 0 ? "text-emerald-700" : "text-amber-700"}>
+                                Differenza: {formatEuro(lastClosedSummary.varianceAmount)}
+                            </p>
+                        </div>
+                    ) : null}
                     <div className="grid grid-cols-2 gap-2 mt-4">
                         <div className="bg-white dark:bg-slate-700 border p-2 rounded-xl flex items-center gap-2">
                             <User size={18} className="text-slate-400" />
@@ -593,12 +846,17 @@ export default function PosPage() {
 
                     <button
                         onClick={() => setIsCheckoutOpen(true)}
-                        disabled={cart.length === 0 || !selectedPosDeviceId || isProcessing || isPrintMockActive}
+                        disabled={cart.length === 0 || !selectedPosDeviceId || !cashSession || isProcessing || isPrintMockActive || isCashSessionLoading}
                         className="w-full py-8 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-3xl font-black text-2xl shadow-xl shadow-blue-200 dark:shadow-none active:scale-[0.98] transition-all flex items-center justify-center gap-3"
                     >
                         <CheckCircle2 size={32} />
                         PAGA ORA
                     </button>
+                    {!cashSession ? (
+                        <p className="text-center text-xs font-black uppercase tracking-widest text-rose-600">
+                            Incasso bloccato: cassa non aperta
+                        </p>
+                    ) : null}
                 </div>
             </div>
 
@@ -763,6 +1021,178 @@ export default function PosPage() {
                                 ) : null}
                             </>
                         )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Modal Apertura Cassa */}
+            <Dialog open={isOpenCashDialogOpen} onOpenChange={setIsOpenCashDialogOpen}>
+                <DialogContent className="max-w-[480px] rounded-3xl p-0 overflow-hidden">
+                    <DialogHeader className="border-b bg-rose-50 px-8 py-6">
+                        <DialogTitle className="flex items-center gap-3 text-2xl font-black text-rose-700">
+                            <Wallet className="h-6 w-6" />
+                            Apertura Cassa
+                        </DialogTitle>
+                        <p className="text-sm font-semibold text-rose-600">
+                            Inserisci il fondo cassa iniziale prima di iniziare gli incassi.
+                        </p>
+                    </DialogHeader>
+                    <div className="space-y-5 p-8">
+                        <div className="space-y-2">
+                            <Label htmlFor="opening-float-amount" className="text-sm font-bold uppercase tracking-widest text-slate-500">
+                                Fondo iniziale (€)
+                            </Label>
+                            <Input
+                                id="opening-float-amount"
+                                value={openingFloatAmountInput}
+                                onChange={(e) => setOpeningFloatAmountInput(e.target.value)}
+                                placeholder="Es: 50.00"
+                                inputMode="decimal"
+                                className="h-14 rounded-2xl border-2 text-2xl font-black text-center"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="opening-notes" className="text-sm font-bold uppercase tracking-widest text-slate-500">
+                                Note apertura (opzionale)
+                            </Label>
+                            <Input
+                                id="opening-notes"
+                                value={openingNotes}
+                                onChange={(e) => setOpeningNotes(e.target.value)}
+                                placeholder="Es: Fondo da cassaforte principale"
+                                className="h-12 rounded-xl"
+                            />
+                        </div>
+                        <div className="flex gap-3 pt-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="flex-1 rounded-xl py-6 text-base font-bold"
+                                onClick={() => setIsOpenCashDialogOpen(false)}
+                                disabled={isCashSessionActionLoading}
+                            >
+                                ANNULLA
+                            </Button>
+                            <Button
+                                type="button"
+                                className="flex-1 rounded-xl bg-rose-600 py-6 text-base font-black hover:bg-rose-700"
+                                onClick={() => void handleOpenCashSession()}
+                                disabled={isCashSessionActionLoading}
+                            >
+                                {isCashSessionActionLoading ? <Loader2 className="animate-spin" /> : "APRI CASSA"}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Modal Chiusura Cassa */}
+            <Dialog open={isCloseCashDialogOpen} onOpenChange={setIsCloseCashDialogOpen}>
+                <DialogContent className="max-w-[560px] rounded-3xl p-0 overflow-hidden">
+                    <DialogHeader className="border-b bg-emerald-50 px-8 py-6">
+                        <DialogTitle className="flex items-center gap-3 text-2xl font-black text-emerald-700">
+                            <Wallet className="h-6 w-6" />
+                            Chiusura Cassa
+                        </DialogTitle>
+                        <p className="text-sm font-semibold text-emerald-600">
+                            Registra il contante contato e conferma la chiusura della sessione corrente.
+                        </p>
+                    </DialogHeader>
+                    <div className="space-y-5 p-8">
+                        <div className="rounded-2xl border bg-slate-50 p-4 text-sm">
+                            <p className="text-xs font-black uppercase tracking-widest text-slate-500">Sessione attiva</p>
+                            <p className="mt-1 font-semibold">Aperta alle {formatSessionDateTime(cashSession?.openedAt)}</p>
+                            <p className="font-semibold">Fondo iniziale: {formatEuro(cashSession?.openingFloatAmount || 0)}</p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="closing-counted-cash" className="text-sm font-bold uppercase tracking-widest text-slate-500">
+                                Contante contato (€)
+                            </Label>
+                            <Input
+                                id="closing-counted-cash"
+                                value={closingCountedCashAmountInput}
+                                onChange={(e) => setClosingCountedCashAmountInput(e.target.value)}
+                                placeholder="Es: 185.40"
+                                inputMode="decimal"
+                                className="h-14 rounded-2xl border-2 text-2xl font-black text-center"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="closing-notes" className="text-sm font-bold uppercase tracking-widest text-slate-500">
+                                Note chiusura (opzionale)
+                            </Label>
+                            <Input
+                                id="closing-notes"
+                                value={closingNotes}
+                                onChange={(e) => setClosingNotes(e.target.value)}
+                                placeholder="Es: consegnato in cassaforte"
+                                className="h-12 rounded-xl"
+                            />
+                        </div>
+                        <div className="flex gap-3 pt-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="flex-1 rounded-xl py-6 text-base font-bold"
+                                onClick={() => setIsCloseCashDialogOpen(false)}
+                                disabled={isCashSessionActionLoading}
+                            >
+                                ANNULLA
+                            </Button>
+                            <Button
+                                type="button"
+                                className="flex-1 rounded-xl bg-emerald-600 py-6 text-base font-black hover:bg-emerald-700"
+                                onClick={() => void handleCloseCashSession()}
+                                disabled={isCashSessionActionLoading}
+                            >
+                                {isCashSessionActionLoading ? <Loader2 className="animate-spin" /> : "CONFERMA CHIUSURA"}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Modal Feedback Operazioni */}
+            <Dialog
+                open={feedbackModal.open}
+                onOpenChange={(open) => setFeedbackModal((prev) => ({ ...prev, open }))}
+            >
+                <DialogContent className="max-w-[460px] rounded-3xl p-0 overflow-hidden">
+                    <DialogHeader
+                        className={`border-b px-8 py-6 ${feedbackModal.tone === "success"
+                            ? "bg-emerald-50"
+                            : feedbackModal.tone === "error"
+                                ? "bg-rose-50"
+                                : "bg-slate-50"
+                            }`}
+                    >
+                        <DialogTitle
+                            className={`text-2xl font-black ${feedbackModal.tone === "success"
+                                ? "text-emerald-700"
+                                : feedbackModal.tone === "error"
+                                    ? "text-rose-700"
+                                    : "text-slate-800"
+                                }`}
+                        >
+                            {feedbackModal.title}
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 p-8">
+                        <p className="text-base font-semibold text-slate-700">{feedbackModal.message}</p>
+                        <div className="flex justify-end">
+                            <Button
+                                type="button"
+                                className={`rounded-xl px-8 font-black ${feedbackModal.tone === "success"
+                                    ? "bg-emerald-600 hover:bg-emerald-700"
+                                    : feedbackModal.tone === "error"
+                                        ? "bg-rose-600 hover:bg-rose-700"
+                                        : "bg-slate-700 hover:bg-slate-800"
+                                    }`}
+                                onClick={() => setFeedbackModal((prev) => ({ ...prev, open: false }))}
+                            >
+                                OK
+                            </Button>
+                        </div>
                     </div>
                 </DialogContent>
             </Dialog>

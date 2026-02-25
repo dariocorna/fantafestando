@@ -4,12 +4,14 @@ import dbConnect from "@/lib/mongoose"
 import Order from "@/models/Order"
 import PosDevice from "@/models/PosDevice"
 import Product from "@/models/Product"
+import CashSession from "@/models/CashSession"
 import { revalidatePath } from "next/cache"
 import { PrinterService } from "@/lib/printer"
 import { createSumUpCheckout } from "@/lib/sumup"
 import { decryptSecret } from "@/lib/secrets"
 import { getOrderCodeFromOrder, parseOrderNumberInput } from "@/lib/order-code"
 import { type StockMode } from "@/lib/inventory"
+import { computeCashSessionSummary } from "@/lib/cash-session"
 import {
     applyStockForPaidOrder,
     validateStockForPendingOrder,
@@ -20,6 +22,32 @@ import {
 interface PosPaymentCapabilities {
     hasCashBox: boolean
     hasPaymentTerminal: boolean
+}
+
+interface OpenCashSessionDto {
+    id: string
+    openedAt: string
+    openingFloatAmount: number
+    openingNotes?: string
+}
+
+function normalizeCurrencyAmount(value: number): number {
+    if (!Number.isFinite(value)) return 0
+    return Number(Math.max(0, value).toFixed(2))
+}
+
+function serializeOpenCashSession(session: {
+    _id: { toString(): string } | string
+    openedAt?: Date
+    openingFloatAmount?: number
+    openingNotes?: string
+}): OpenCashSessionDto {
+    return {
+        id: session._id.toString(),
+        openedAt: (session.openedAt || new Date()).toISOString(),
+        openingFloatAmount: normalizeCurrencyAmount(session.openingFloatAmount ?? 0),
+        openingNotes: session.openingNotes?.trim() || undefined
+    }
 }
 
 async function getPosPaymentCapabilities(eventId: string, posDeviceId?: string): Promise<
@@ -67,6 +95,213 @@ function validatePaymentMethodAvailability(
     return null
 }
 
+async function getOpenCashSession(eventId: string, posDeviceId?: string): Promise<
+    { success: true, session: OpenCashSessionDto } | { success: false, error: string }
+> {
+    if (!eventId || !posDeviceId) {
+        return { success: false, error: "Apri una cassa valida prima di completare il pagamento" }
+    }
+
+    await dbConnect()
+    const openSession = await CashSession.findOne({
+        eventId,
+        posDeviceId,
+        status: "OPEN"
+    })
+        .sort({ openedAt: -1 })
+        .select("_id openedAt openingFloatAmount openingNotes")
+        .lean() as (
+            {
+                _id: { toString(): string } | string
+                openedAt?: Date
+                openingFloatAmount?: number
+                openingNotes?: string
+            } | null
+        )
+
+    if (!openSession) {
+        return { success: false, error: "Cassa chiusa. Esegui prima l'apertura cassa." }
+    }
+
+    return { success: true, session: serializeOpenCashSession(openSession) }
+}
+
+export async function getCashSessionStatus(data: {
+    eventId: string
+    posDeviceId?: string
+}): Promise<
+    { success: true, session: OpenCashSessionDto | null }
+    | { success: false, error: string }
+> {
+    try {
+        if (!data.eventId) {
+            return { success: false, error: "Evento non valido" }
+        }
+
+        const capabilitiesResult = await getPosPaymentCapabilities(data.eventId, data.posDeviceId)
+        if (!capabilitiesResult.success) {
+            return { success: false, error: capabilitiesResult.error }
+        }
+
+        const sessionResult = await getOpenCashSession(data.eventId, data.posDeviceId)
+        if (!sessionResult.success) {
+            return { success: true, session: null }
+        }
+
+        return { success: true, session: sessionResult.session }
+    } catch (error) {
+        console.error("Get Cash Session Status Error:", error)
+        return { success: false, error: "Errore nel recupero stato cassa" }
+    }
+}
+
+export async function openCashSession(data: {
+    eventId: string
+    posDeviceId?: string
+    openingFloatAmount: number
+    openingNotes?: string
+}): Promise<
+    { success: true, session: OpenCashSessionDto }
+    | { success: false, error: string }
+> {
+    try {
+        if (!data.eventId || !data.posDeviceId) {
+            return { success: false, error: "Seleziona una cassa valida prima di aprire la sessione" }
+        }
+
+        const capabilitiesResult = await getPosPaymentCapabilities(data.eventId, data.posDeviceId)
+        if (!capabilitiesResult.success) {
+            return { success: false, error: capabilitiesResult.error }
+        }
+
+        const openingFloatAmount = normalizeCurrencyAmount(data.openingFloatAmount)
+        const openingNotes = data.openingNotes?.trim()
+
+        await dbConnect()
+        const alreadyOpen = await CashSession.findOne({
+            eventId: data.eventId,
+            posDeviceId: data.posDeviceId,
+            status: "OPEN"
+        }).select("_id").lean()
+
+        if (alreadyOpen) {
+            return { success: false, error: "Esiste già una sessione cassa aperta per questa postazione" }
+        }
+
+        const session = await CashSession.create({
+            eventId: data.eventId,
+            posDeviceId: data.posDeviceId,
+            status: "OPEN",
+            openedAt: new Date(),
+            openingFloatAmount,
+            openingNotes: openingNotes || undefined
+        })
+
+        revalidatePath("/pos")
+        return { success: true, session: serializeOpenCashSession(session) }
+    } catch (error) {
+        console.error("Open Cash Session Error:", error)
+        return { success: false, error: "Errore durante l'apertura cassa" }
+    }
+}
+
+export async function closeCashSession(data: {
+    eventId: string
+    posDeviceId?: string
+    closingCountedCashAmount: number
+    closingNotes?: string
+}): Promise<
+    {
+        success: true
+        summary: {
+            sessionId: string
+            openingFloatAmount: number
+            closingCountedCashAmount: number
+            paidOrdersCount: number
+            cashSalesAmount: number
+            cardSalesAmount: number
+            otherSalesAmount: number
+            expectedCashAmount: number
+            varianceAmount: number
+            closedAt: string
+        }
+    }
+    | { success: false, error: string }
+> {
+    try {
+        if (!data.eventId || !data.posDeviceId) {
+            return { success: false, error: "Seleziona una cassa valida prima di chiudere la sessione" }
+        }
+
+        const capabilitiesResult = await getPosPaymentCapabilities(data.eventId, data.posDeviceId)
+        if (!capabilitiesResult.success) {
+            return { success: false, error: capabilitiesResult.error }
+        }
+
+        const closingCountedCashAmount = normalizeCurrencyAmount(data.closingCountedCashAmount)
+        const closingNotes = data.closingNotes?.trim()
+
+        await dbConnect()
+        const openSession = await CashSession.findOne({
+            eventId: data.eventId,
+            posDeviceId: data.posDeviceId,
+            status: "OPEN"
+        })
+
+        if (!openSession) {
+            return { success: false, error: "Nessuna sessione cassa aperta da chiudere" }
+        }
+
+        const paidOrders = await Order.find({
+            eventId: data.eventId,
+            posDeviceId: data.posDeviceId,
+            cashSessionId: openSession._id,
+            status: "PAID"
+        })
+            .select("status paymentMethod totalAmount")
+            .lean() as Array<{ status?: string, paymentMethod?: string, totalAmount?: number }>
+
+        const computed = computeCashSessionSummary({
+            openingFloatAmount: openSession.openingFloatAmount ?? 0,
+            closingCountedCashAmount,
+            orders: paidOrders
+        })
+
+        const closedAt = new Date()
+        openSession.status = "CLOSED"
+        openSession.closedAt = closedAt
+        openSession.closingCountedCashAmount = closingCountedCashAmount
+        openSession.closingNotes = closingNotes || undefined
+        openSession.paidOrdersCount = computed.paidOrdersCount
+        openSession.cashSalesAmount = computed.cashSalesAmount
+        openSession.cardSalesAmount = computed.cardSalesAmount
+        openSession.otherSalesAmount = computed.otherSalesAmount
+        openSession.expectedCashAmount = computed.expectedCashAmount
+        openSession.varianceAmount = computed.varianceAmount
+        await openSession.save()
+
+        revalidatePath("/pos")
+        return {
+            success: true,
+            summary: {
+                sessionId: openSession._id.toString(),
+                openingFloatAmount: normalizeCurrencyAmount(openSession.openingFloatAmount ?? 0),
+                closingCountedCashAmount,
+                paidOrdersCount: computed.paidOrdersCount,
+                cashSalesAmount: computed.cashSalesAmount,
+                cardSalesAmount: computed.cardSalesAmount,
+                otherSalesAmount: computed.otherSalesAmount,
+                expectedCashAmount: computed.expectedCashAmount,
+                varianceAmount: computed.varianceAmount,
+                closedAt: closedAt.toISOString()
+            }
+        }
+    } catch (error) {
+        console.error("Close Cash Session Error:", error)
+        return { success: false, error: "Errore durante la chiusura cassa" }
+    }
+}
+
 export async function createOrder(data: {
     eventId: string,
     customer: { name?: string, table?: string },
@@ -92,6 +327,11 @@ export async function createOrder(data: {
         const paymentValidationError = validatePaymentMethodAvailability(data.paymentMethod, capabilitiesResult.capabilities)
         if (paymentValidationError) {
             return { success: false, error: paymentValidationError }
+        }
+
+        const sessionResult = await getOpenCashSession(data.eventId, data.posDeviceId)
+        if (!sessionResult.success) {
+            return { success: false, error: sessionResult.error, cashSessionRequired: true }
         }
 
         await dbConnect()
@@ -128,6 +368,7 @@ export async function createOrder(data: {
             paymentMethod: data.paymentMethod,
             sumupCheckoutId: isCardPayment ? undefined : data.sumupCheckoutId,
             posDeviceId: data.posDeviceId,
+            cashSessionId: sessionResult.session.id,
             stockOverrideApproved: Boolean(data.allowStockOverride)
         })
         stockAdjustmentsToRollback = []
@@ -417,6 +658,11 @@ export async function completePendingOrderPayment(data: {
             return { success: false, error: paymentValidationError }
         }
 
+        const sessionResult = await getOpenCashSession(data.eventId, data.posDeviceId)
+        if (!sessionResult.success) {
+            return { success: false, error: sessionResult.error, cashSessionRequired: true }
+        }
+
         await dbConnect()
         const order = await Order.findOne({ _id: data.orderId, eventId: data.eventId, status: "PENDING" })
         if (!order) {
@@ -481,6 +727,7 @@ export async function completePendingOrderPayment(data: {
         order.status = "PAID"
         order.paymentMethod = data.paymentMethod
         order.set("posDeviceId", data.posDeviceId || undefined)
+        order.set("cashSessionId", sessionResult.session.id)
         order.set("stockOverrideApproved", Boolean(data.allowStockOverride))
         await order.save()
         stockAdjustmentsToRollback = []
