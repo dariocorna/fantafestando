@@ -20,6 +20,18 @@ async function closePosSelectorIfVisible(page: Page) {
     await expect(selectorTitle).toBeHidden();
 }
 
+async function openCashSessionIfRequired(page: Page, openingFloatAmount = "0") {
+    const openButton = page.getByRole("button", { name: /Apri Cassa/i });
+    if (!(await openButton.isVisible())) return;
+
+    await openButton.click();
+    const openDialog = page.getByRole("dialog").filter({ hasText: /Apertura Cassa/i });
+    await expect(openDialog).toBeVisible();
+    await openDialog.locator("#opening-float-amount").fill(openingFloatAmount);
+    await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click();
+    await expect(openDialog).toBeHidden();
+}
+
 test.describe("Interfaccia POS (Cassa)", () => {
     test("caricamento pagina POS e visualizzazione categorie", async ({ page }) => {
         await page.goto("/pos");
@@ -41,6 +53,8 @@ test.describe("Interfaccia POS (Cassa)", () => {
         const productButton = page.locator("button").filter({ hasText: /€/ }).first();
         await expect(productButton).toBeVisible();
         await productButton.click();
+
+        await openCashSessionIfRequired(page);
 
         const payBtn = page.getByRole("button", { name: /PAGA ORA/i });
         await expect(payBtn).toBeEnabled();

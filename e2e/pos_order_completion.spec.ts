@@ -194,6 +194,18 @@ async function openPosAndSelectDevice(page: Page, posName: string) {
     await expect(page.getByRole("button", { name: new RegExp(`Postazione: ${posName}`) })).toBeVisible();
 }
 
+async function openCashSessionIfRequired(page: Page, openingFloatAmount = "0") {
+    const openButton = page.getByRole("button", { name: /Apri Cassa/i })
+    if (!(await openButton.isVisible())) return
+
+    await openButton.click()
+    const openDialog = page.getByRole("dialog").filter({ hasText: /Apertura Cassa/i })
+    await expect(openDialog).toBeVisible()
+    await openDialog.locator("#opening-float-amount").fill(openingFloatAmount)
+    await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click()
+    await expect(openDialog).toBeHidden()
+}
+
 test.describe("POS - Completamento ordine da codice", () => {
     test("chiude un ordine WebApp da POS usando il codice", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso completo validato su desktop.");
@@ -220,12 +232,7 @@ test.describe("POS - Completamento ordine da codice", () => {
         const orderCode = await createWebOrderAndGetCode(page, productName, { tableCode, usePresetTable: true });
 
         await openPosAndSelectDevice(page, posName);
-
-        const dialogMessages: string[] = [];
-        page.on("dialog", async dialog => {
-            dialogMessages.push(dialog.message());
-            await dialog.accept();
-        });
+        await openCashSessionIfRequired(page);
 
         await page.getByRole("button", { name: /Carica ordine da codice/i }).click();
         const loadDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i });
@@ -265,7 +272,10 @@ test.describe("POS - Completamento ordine da codice", () => {
         await confirmButton.click();
         await expect(checkoutDialog.getByText(/Stampa in corso/i)).toBeVisible();
         await expect(checkoutDialog.getByText(/Simulazione stampa attiva/i)).toBeVisible();
-        await expect.poll(() => dialogMessages.join(" | ")).toContain("Ordine completato correttamente");
+        const successModal = page.getByRole("dialog").filter({ hasText: /Ordine completato correttamente/i });
+        await expect(successModal).toBeVisible();
+        await successModal.getByRole("button", { name: "OK", exact: true }).click();
+        await expect(successModal).toBeHidden();
         await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible();
 
         await page.getByRole("button", { name: /Carica ordine da codice/i }).click();

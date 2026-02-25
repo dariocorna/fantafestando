@@ -93,7 +93,7 @@ async function openPosAndSelectDevice(page: Page, posName: string) {
     await page.reload()
 
     await page.waitForResponse(
-        response => response.url().includes("/api/pos/init") && response.ok(),
+        (response) => response.url().includes("/api/pos/init") && response.ok(),
         { timeout: 10000 }
     )
 
@@ -106,28 +106,9 @@ async function openPosAndSelectDevice(page: Page, posName: string) {
     }
 }
 
-async function openCashSessionIfRequired(page: Page, openingFloatAmount = "0") {
-    const openButton = page.getByRole("button", { name: /Apri Cassa/i })
-    if (!(await openButton.isVisible())) return
-
-    await openButton.click()
-    const openDialog = page.getByRole("dialog").filter({ hasText: /Apertura Cassa/i })
-    await expect(openDialog).toBeVisible()
-    await openDialog.locator("#opening-float-amount").fill(openingFloatAmount)
-    await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click()
-    await expect(openDialog).toBeHidden()
-}
-
-async function completeCashOrder(
-    page: Page,
-    productsToAdd: Array<{ name: string, quantity: number }>
-) {
-    for (const product of productsToAdd) {
-        const productButton = page.locator("button").filter({ hasText: new RegExp(product.name) }).first()
-        for (let i = 0; i < product.quantity; i++) {
-            await productButton.click()
-        }
-    }
+async function completeCashOrder(page: Page, productName: string) {
+    const productButton = page.locator("button").filter({ hasText: new RegExp(productName) }).first()
+    await productButton.click()
 
     await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()
     const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i })
@@ -148,69 +129,51 @@ async function completeCashOrder(
     }
 }
 
-test.describe("Dashboard statistiche e reportistica", () => {
+test.describe("POS apertura e chiusura cassa", () => {
     test.describe.configure({ mode: "serial" })
 
-    test("mostra KPI corretti e rende disponibili export CSV/XLS", async ({ page, isMobile }) => {
+    test("richiede apertura cassa, consente incasso e poi chiusura con riepilogo", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso validato su desktop.")
 
         const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`
-        const eventName = `Dashboard Event ${suffix}`
+        const eventName = `Cash Session Event ${suffix}`
         const printerName = `Cashier ${suffix}`
         const cashBoxName = `CashBox ${suffix}`
         const posName = `POS ${suffix}`
-        const categoryName = `Dashboard Cat ${suffix}`
-        const bestsellerName = `Best Seller ${suffix}`
-        const supportingName = `Supporting ${suffix}`
-        const unsoldName = `Unsold ${suffix}`
+        const categoryName = `Cash Session Cat ${suffix}`
+        const productName = `Cash Product ${suffix}`
 
         await createAndActivateEvent(page, eventName)
         await configureCashPos(page, printerName, `192.168.1.${Math.floor(Math.random() * 150) + 50}`, cashBoxName, posName)
-        await createCategoryAndProducts(page, categoryName, [
-            { name: bestsellerName, price: "4.00" },
-            { name: supportingName, price: "3.00" },
-            { name: unsoldName, price: "6.50" }
-        ])
+        await createCategoryAndProducts(page, categoryName, [{ name: productName, price: "5.00" }])
 
         await openPosAndSelectDevice(page, posName)
-        await openCashSessionIfRequired(page)
-        await completeCashOrder(page, [
-            { name: bestsellerName, quantity: 2 },
-            { name: supportingName, quantity: 1 }
-        ])
 
-        await page.goto("/admin")
+        await expect(page.getByText(/Chiusa\. Apri la cassa per iniziare gli incassi\./i)).toBeVisible()
+        await expect(page.getByRole("button", { name: "PAGA ORA", exact: true })).toBeDisabled()
 
-        await expect(page.getByRole("heading", { name: /Dashboard Statistiche/i })).toBeVisible()
-        await expect(page.getByTestId("dashboard-kpi-total")).toContainText(/11,00\s*€/)
-        await expect(page.getByTestId("dashboard-kpi-cash")).toContainText(/11,00\s*€/)
-        await expect(page.getByTestId("dashboard-kpi-card")).toContainText(/0,00\s*€/)
-        await expect(page.getByTestId("dashboard-kpi-orders")).toContainText(/^1$/)
-        await expect(page.getByTestId("dashboard-kpi-average")).toContainText(/11,00\s*€/)
+        await page.getByRole("button", { name: /Apri Cassa/i }).click()
+        const openDialog = page.getByRole("dialog").filter({ hasText: /Apertura Cassa/i })
+        await expect(openDialog).toBeVisible()
+        await openDialog.locator("#opening-float-amount").fill("50")
+        await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click()
+        await expect(openDialog).toBeHidden()
 
-        const bestsellerRow = page.locator("tr").filter({ hasText: bestsellerName }).first()
-        await expect(bestsellerRow).toBeVisible()
-        await expect(bestsellerRow).toContainText("2")
+        await expect(page.getByText(/Aperta alle/i)).toBeVisible()
+        await expect(page.getByText(/Fondo 50\.00 €/i)).toBeVisible()
 
-        const unsoldRow = page.locator("tr").filter({ hasText: unsoldName }).first()
-        await expect(unsoldRow).toBeVisible()
-        await expect(unsoldRow).toContainText("0")
+        await completeCashOrder(page, productName)
 
-        const csvResponse = await page.request.get("/admin/export?format=csv")
-        expect(csvResponse.ok()).toBeTruthy()
-        expect(csvResponse.headers()["content-type"]).toContain("text/csv")
-        expect(csvResponse.headers()["content-disposition"]).toContain(".csv")
-        const csvPayload = await csvResponse.text()
-        expect(csvPayload).toContain("Incasso totale")
-        expect(csvPayload).toContain(bestsellerName)
-        expect(csvPayload).toContain("11.00")
+        await page.getByRole("button", { name: /Chiudi Cassa/i }).click()
+        const closeDialog = page.getByRole("dialog").filter({ hasText: /Chiusura Cassa/i })
+        await expect(closeDialog).toBeVisible()
+        await closeDialog.locator("#closing-counted-cash").fill("55")
+        await closeDialog.getByRole("button", { name: "CONFERMA CHIUSURA", exact: true }).click()
+        await expect(closeDialog).toBeHidden()
 
-        const xlsResponse = await page.request.get("/admin/export?format=xls")
-        expect(xlsResponse.ok()).toBeTruthy()
-        expect(xlsResponse.headers()["content-type"]).toContain("application/vnd.ms-excel")
-        expect(xlsResponse.headers()["content-disposition"]).toContain(".xls")
-        const xlsPayload = await xlsResponse.text()
-        expect(xlsPayload).toContain("Sezione\tValore")
-        expect(xlsPayload).toContain(unsoldName)
+        await expect(page.getByText(/Chiusa\. Apri la cassa per iniziare gli incassi\./i)).toBeVisible()
+        await expect(page.getByText(/Atteso: 55\.00 € · Contato: 55\.00 €/i)).toBeVisible()
+        await expect(page.getByText(/Differenza: 0\.00 €/i)).toBeVisible()
+        await expect(page.getByRole("button", { name: "PAGA ORA", exact: true })).toBeDisabled()
     })
 })
