@@ -126,7 +126,7 @@ Rifattorizzazione dell'architettura hardware per supportare periferiche modulari
 
 ---
 
-## 🔄 Epica 8: Dashboard Statistiche e Reportistica
+## ✅ Epica 8: Dashboard Statistiche e Reportistica
 
 **Priorità: Alta** — Funzionalità operativa critica.
 
@@ -139,9 +139,11 @@ Rifattorizzazione dell'architettura hardware per supportare periferiche modulari
 - Chiusura cassa POS con indicazione del **contante atteso** (solo cash, esclusi elettronici).
 - Stampa automatica riepilogo chiusura sulla stampante associata alla postazione cassa.
 
+**Test E2E**: `e2e/admin_dashboard_stats.spec.ts`, `e2e/admin_cash_sessions.spec.ts`, `e2e/pos_cash_session.spec.ts`.
+
 ---
 
-## ⬜ Epica 9: Magazzino e Scorte Base
+## ✅ Epica 9: Magazzino e Scorte Base
 
 - Campo giacenza (scorta) sul modello `Product` e su ogni `Variant`.
 - Decremento automatico scorta al passaggio ordine in stato `PAID` (checkout POS cash / chiusura pendente / webhook carta).
@@ -152,6 +154,8 @@ Rifattorizzazione dell'architettura hardware per supportare periferiche modulari
 - Nessuna prenotazione scorte sugli ordini web pendenti: la verifica avviene in chiusura.
 
 Riferimento funzionale dettagliato: `docs/inventory-stock.md`.
+
+**Test E2E**: `e2e/inventory_stock.spec.ts`, `e2e/menu_day_availability.spec.ts`.
 
 ---
 
