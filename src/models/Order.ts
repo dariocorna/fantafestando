@@ -2,6 +2,7 @@ import mongoose, { Schema, Document, Types } from 'mongoose';
 
 export interface IOrder extends Document {
     eventId: Types.ObjectId;
+    cashSessionId?: Types.ObjectId;
     pickupNumber?: number;
     status: "PENDING" | "PAID" | "CANCELLED";
     customer: {
@@ -53,6 +54,7 @@ const OrderSchema = new Schema<IOrder>({
     sumupCheckoutId: { type: String },
     sumupPaymentId: { type: String },
     posDeviceId: { type: Schema.Types.ObjectId, ref: 'PosDevice' },
+    cashSessionId: { type: Schema.Types.ObjectId, ref: 'CashSession' },
     stockOverrideApproved: { type: Boolean, default: false }
 }, {
     timestamps: true
