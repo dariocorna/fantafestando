@@ -106,14 +106,34 @@ export async function rollbackStockAdjustments(eventId: string, adjustments: Sto
     const aggregatedAdjustments = aggregateStockAdjustments(adjustments)
     if (aggregatedAdjustments.length === 0) return
 
+    const targetProductIds = aggregatedAdjustments.map((entry) => entry.productId)
+    const currentStocks = await Product.find({
+        eventId,
+        _id: { $in: targetProductIds }
+    }).select("_id stockQuantity").lean() as Array<{
+        _id: string | { toString(): string }
+        stockQuantity?: number | null
+    }>
+
+    const trackedProductIds = new Set(
+        currentStocks
+            .filter((product) => isStockTracked(normalizeStockQuantity(product.stockQuantity ?? null)))
+            .map((product) => product._id.toString())
+    )
+
+    if (trackedProductIds.size === 0) return
+
+    const updatedTrackedProductIds: string[] = []
     for (const adjustment of aggregatedAdjustments) {
+        if (!trackedProductIds.has(adjustment.productId)) continue
         await Product.updateOne(
             { eventId, _id: adjustment.productId },
             { $inc: { stockQuantity: adjustment.quantity } }
         )
+        updatedTrackedProductIds.push(adjustment.productId)
     }
 
-    await syncSoldOutFlags(eventId, aggregatedAdjustments.map((entry) => entry.productId))
+    await syncSoldOutFlags(eventId, updatedTrackedProductIds)
 }
 
 async function decrementTrackedStocksStrict(
