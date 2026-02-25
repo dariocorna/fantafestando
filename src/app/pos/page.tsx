@@ -24,6 +24,7 @@ import {
 import { getCategoryTheme } from "@/lib/category-colors"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
 import { getStockLabel, getStockStatus, type StockShortage } from "@/lib/inventory"
+import { resolveQuickDiscountPresetsFromSettings, type QuickDiscountPreset } from "@/lib/quick-discount-presets"
 
 interface ICategory {
     _id: string
@@ -47,6 +48,15 @@ interface IEvent {
     settings?: {
         askTable?: boolean
         askName?: boolean
+        quickDiscountPresets?: Array<{
+            label: string
+            type: "PERCENT" | "FIXED"
+            value: number
+        }>
+        quickStaffDiscountEnabled?: boolean
+        quickStaffDiscountLabel?: string
+        quickStaffDiscountType?: "PERCENT" | "FIXED"
+        quickStaffDiscountValue?: number
     }
     predefinedTables?: string[]
 }
@@ -66,11 +76,19 @@ interface IPosDevice {
 }
 
 interface CartItem {
+    lineId: string
     productId: string
     name: string
     price: number
     quantity: number
     variants: string[]
+    isDiscount?: boolean
+    discountPreset?: {
+        label: string
+        type: "PERCENT" | "FIXED"
+        value: number
+        baseAmount: number
+    }
 }
 
 interface LoadedPendingOrder {
@@ -151,6 +169,7 @@ const MOCK_PRINT_STEPS: Array<{ progress: number, label: string, delayMs: number
 ]
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+const DISCOUNT_TAB_ID = "__discounts__"
 
 export default function PosPage() {
     const [activeCategory, setActiveCategory] = useState<string | null>(null)
@@ -267,19 +286,51 @@ export default function PosPage() {
                 ? "CASH"
                 : paymentMethod
 
-    const total = cart.reduce((acc: number, item: CartItem) => acc + (item.price * item.quantity), 0)
-    const effectiveTotal = total
+    const quickDiscountPresets = resolveQuickDiscountPresetsFromSettings(activeEvent?.settings)
+    const productCartItems = cart.filter((item) => !item.isDiscount)
+    const discountCartItems = cart.filter((item) => item.isDiscount)
+    const subtotal = Number(
+        productCartItems.reduce((acc: number, item: CartItem) => acc + (item.price * item.quantity), 0).toFixed(2)
+    )
+    const totalDiscountRequested = Number(
+        Math.max(0, discountCartItems.reduce((acc: number, item: CartItem) => acc + (item.price * item.quantity), 0) * -1).toFixed(2)
+    )
+    const totalDiscountApplied = Number(Math.min(subtotal, totalDiscountRequested).toFixed(2))
+    const effectiveTotal = Number(Math.max(0, subtotal - totalDiscountApplied).toFixed(2))
+    const discountLabels = discountCartItems
+        .map((item) => item.discountPreset?.label?.trim())
+        .filter((label): label is string => Boolean(label))
+    const orderDiscountPayload = totalDiscountApplied > 0
+        ? {
+            type: "FIXED" as const,
+            value: totalDiscountApplied,
+            label: discountLabels.length > 0 ? `Sconti: ${discountLabels.join(", ")}` : "Sconti carrello"
+        }
+        : undefined
+    const discountBaseAmount = effectiveTotal
+
+    const computePresetDiscountAmount = (preset: QuickDiscountPreset, baseAmount: number): number => {
+        const normalizedBase = Number(Math.max(0, baseAmount).toFixed(2))
+        if (normalizedBase <= 0) return 0
+
+        if (preset.type === "PERCENT") {
+            return Number((normalizedBase * (preset.value / 100)).toFixed(2))
+        }
+
+        return Number(Math.min(normalizedBase, preset.value).toFixed(2))
+    }
     const normalizedTableValue = normalizeTableValue(tableNumber)
     const tableValueValid = isTableValueValid(tableNumber)
     const predefinedTables = activeEvent?.predefinedTables || []
 
     const addToCart = (product: IProduct) => {
         setCart((prev: CartItem[]) => {
-            const existing = prev.find((i: CartItem) => i.productId === product._id)
+            const existing = prev.find((i: CartItem) => !i.isDiscount && i.productId === product._id)
             if (existing) {
-                return prev.map((i: CartItem) => i.productId === product._id ? { ...i, quantity: i.quantity + 1 } : i)
+                return prev.map((i: CartItem) => i.lineId === existing.lineId ? { ...i, quantity: i.quantity + 1 } : i)
             }
             return [...prev, {
+                lineId: product._id,
                 productId: product._id,
                 name: product.name,
                 price: product.basePrice,
@@ -289,8 +340,49 @@ export default function PosPage() {
         })
     }
 
-    const removeFromCart = (productId: string) => {
-        setCart((prev: CartItem[]) => prev.filter((i: CartItem) => i.productId !== productId))
+    const addDiscountPresetToCart = (preset: QuickDiscountPreset) => {
+        if (productCartItems.length === 0) {
+            showFeedbackModal("Aggiungi prima almeno un prodotto al carrello")
+            return
+        }
+
+        const discountAmount = computePresetDiscountAmount(preset, discountBaseAmount)
+        if (discountAmount <= 0) {
+            showFeedbackModal("Nessun importo disponibile da scontare")
+            return
+        }
+
+        setCart((prev: CartItem[]) => ([
+            ...prev,
+            (() => {
+                const nextDiscountSequence = prev.reduce((max, item) => {
+                    if (!item.isDiscount) return max
+                    const match = item.lineId.match(/^discount-line-(\d+)$/)
+                    return match ? Math.max(max, Number(match[1])) : max
+                }, 0) + 1
+                const lineId = `discount-line-${nextDiscountSequence}`
+
+                return {
+                    lineId,
+                    productId: lineId,
+                    name: `Sconto ${preset.label}`,
+                    price: Number((discountAmount * -1).toFixed(2)),
+                    quantity: 1,
+                    variants: [],
+                    isDiscount: true,
+                    discountPreset: {
+                        label: preset.label,
+                        type: preset.type,
+                        value: preset.value,
+                        baseAmount: discountBaseAmount
+                    }
+                }
+            })()
+        ]))
+    }
+
+    const removeFromCart = (lineId: string) => {
+        setCart((prev: CartItem[]) => prev.filter((i: CartItem) => i.lineId !== lineId))
     }
 
     const resetPendingOrder = () => {
@@ -533,7 +625,8 @@ export default function PosPage() {
         setLoadedPendingOrder(result.order)
         setCustomerName(result.order.customer?.name || "")
         setTableNumber(normalizeTableValue(result.order.customer?.table || ""))
-        setCart(result.order.items.map((item) => ({
+        setCart(result.order.items.map((item, index) => ({
+            lineId: `${item.productId}-${index}`,
             productId: item.productId,
             name: item.snapshotName,
             price: item.unitPrice,
@@ -579,6 +672,10 @@ export default function PosPage() {
             showFeedbackModal("Inserisci il tavolo oppure selezionalo dalla lista")
             return
         }
+        if (productCartItems.length === 0) {
+            showFeedbackModal("Aggiungi almeno un prodotto prima di procedere al pagamento")
+            return
+        }
 
         setIsProcessing(true)
 
@@ -594,8 +691,10 @@ export default function PosPage() {
                     name: customerName || undefined,
                     table: normalizedTableValue || undefined
                 },
-                totalAmount: total,
-                cart: cart.map((item) => ({
+                totalAmount: effectiveTotal,
+                orderDiscount: orderDiscountPayload,
+                lineDiscounts: [],
+                cart: productCartItems.map((item) => ({
                     productId: item.productId,
                     snapshotName: item.name,
                     quantity: item.quantity,
@@ -637,8 +736,10 @@ export default function PosPage() {
                 name: customerName || undefined,
                 table: normalizedTableValue || undefined
             },
-            totalAmount: total,
-            cart: cart.map(item => ({
+            totalAmount: effectiveTotal,
+            orderDiscount: orderDiscountPayload,
+            lineDiscounts: [],
+            cart: productCartItems.map(item => ({
                 productId: item.productId,
                 snapshotName: item.name,
                 quantity: item.quantity,
@@ -673,7 +774,7 @@ export default function PosPage() {
         || isCashSessionLoading
         || !selectedPosDeviceId
         || !cashSession
-        || cart.length === 0
+        || productCartItems.length === 0
         || (!cashAvailable && !cardAvailable)
         || (Boolean(activeEvent?.settings?.askTable) && !tableValueValid)
 
@@ -709,41 +810,82 @@ export default function PosPage() {
                             </button>
                         )
                     })}
+                    <button
+                        id="discounts-tab-trigger"
+                        onClick={() => setActiveCategory(DISCOUNT_TAB_ID)}
+                        className={`px-8 py-6 rounded-xl font-bold text-lg whitespace-nowrap transition-all shadow-sm border ${activeCategory === DISCOUNT_TAB_ID ? "scale-105 bg-emerald-600 text-white border-emerald-600" : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"}`}
+                    >
+                        Sconti
+                    </button>
                 </div>
 
                 {/* Griglia Prodotti */}
                 <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 content-start text-slate-800 dark:text-slate-100">
-                    {products
-                        .filter(p => p.categoryId === activeCategory)
-                        .map(p => {
-                            const stockStatus = p.stockStatus || getStockStatus(p.stockQuantity ?? null, Boolean(p.isSoldOut))
-                            const stockLabel = getStockLabel(p.stockQuantity ?? null, Boolean(p.isSoldOut))
-
-                            return (
-                                <button
-                                    key={p._id}
-                                    onClick={() => addToCart(p)}
-                                    className="flex flex-col h-40 p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md active:scale-95 transition-all text-left"
-                                    style={{ borderColor: stockStatus === "OUT" ? "#ef4444" : activeCategoryTheme.border }}
-                                >
-                                    <span className="font-bold text-lg leading-tight mb-2 line-clamp-2">{p.name}</span>
-                                    <span
-                                        className={`inline-flex w-fit rounded-full px-2 py-1 text-[10px] font-bold ${stockStatus === "OUT"
-                                            ? "bg-red-100 text-red-700"
-                                            : stockStatus === "LOW"
-                                                ? "bg-amber-100 text-amber-700"
-                                                : "bg-slate-100 text-slate-700"
-                                            }`}
+                    {activeCategory === DISCOUNT_TAB_ID ? (
+                        quickDiscountPresets.length === 0 ? (
+                            <div className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
+                                <p className="text-lg font-black text-slate-700">Nessun preset sconto configurato</p>
+                                <p className="mt-2 text-sm font-semibold text-slate-500">
+                                    Configura i preset da Admin &gt; Impostazioni.
+                                </p>
+                            </div>
+                        ) : (
+                            quickDiscountPresets.map((preset, index) => {
+                                const previewAmount = computePresetDiscountAmount(preset, discountBaseAmount)
+                                return (
+                                    <button
+                                        key={`discount-preset-card-${preset.label}-${preset.type}-${preset.value}-${index}`}
+                                        id={`discount-preset-card-${index}`}
+                                        onClick={() => addDiscountPresetToCart(preset)}
+                                        disabled={productCartItems.length === 0}
+                                        className="flex flex-col h-40 p-4 rounded-xl bg-emerald-50 border border-emerald-200 shadow-sm hover:shadow-md active:scale-95 transition-all text-left disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
-                                        {stockLabel}
-                                    </span>
-                                    <span className="mt-auto font-black text-xl" style={{ color: activeCategoryTheme.base }}>
-                                        {p.basePrice.toFixed(2)} €
-                                    </span>
-                                </button>
-                            )
-                        })
-                    }
+                                        <span className="font-black text-lg leading-tight text-emerald-800 line-clamp-2">{preset.label}</span>
+                                        <span className="mt-2 inline-flex w-fit rounded-full px-2 py-1 text-[10px] font-bold bg-white text-emerald-700 border border-emerald-200">
+                                            {preset.type === "PERCENT" ? `${preset.value}%` : `${preset.value.toFixed(2)} €`}
+                                        </span>
+                                        <span className="mt-auto font-black text-xl text-emerald-700">
+                                            -{previewAmount.toFixed(2)} €
+                                        </span>
+                                        <span className="text-[10px] font-semibold text-emerald-600">
+                                            Tap per aggiungere al carrello
+                                        </span>
+                                    </button>
+                                )
+                            })
+                        )
+                    ) : (
+                        products
+                            .filter(p => p.categoryId === activeCategory)
+                            .map(p => {
+                                const stockStatus = p.stockStatus || getStockStatus(p.stockQuantity ?? null, Boolean(p.isSoldOut))
+                                const stockLabel = getStockLabel(p.stockQuantity ?? null, Boolean(p.isSoldOut))
+
+                                return (
+                                    <button
+                                        key={p._id}
+                                        onClick={() => addToCart(p)}
+                                        className="flex flex-col h-40 p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md active:scale-95 transition-all text-left"
+                                        style={{ borderColor: stockStatus === "OUT" ? "#ef4444" : activeCategoryTheme.border }}
+                                    >
+                                        <span className="font-bold text-lg leading-tight mb-2 line-clamp-2">{p.name}</span>
+                                        <span
+                                            className={`inline-flex w-fit rounded-full px-2 py-1 text-[10px] font-bold ${stockStatus === "OUT"
+                                                ? "bg-red-100 text-red-700"
+                                                : stockStatus === "LOW"
+                                                    ? "bg-amber-100 text-amber-700"
+                                                    : "bg-slate-100 text-slate-700"
+                                                }`}
+                                        >
+                                            {stockLabel}
+                                        </span>
+                                        <span className="mt-auto font-black text-xl" style={{ color: activeCategoryTheme.base }}>
+                                            {p.basePrice.toFixed(2)} €
+                                        </span>
+                                    </button>
+                                )
+                            })
+                    )}
                 </div>
             </div>
 
@@ -868,20 +1010,33 @@ export default function PosPage() {
                             <p className="font-bold">Il carrello è vuoto</p>
                         </div>
                     ) : (
-                        cart.map((item) => (
-                            <div key={item.productId} className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-xl shadow-sm border">
-                                <div className="flex flex-col">
-                                    <span className="font-bold text-slate-800 dark:text-slate-100">{item.name}</span>
-                                    <span className="text-sm text-slate-500">{item.quantity} x {item.price.toFixed(2)} €</span>
+                        cart.map((item) => {
+                            const lineTotal = Number((item.quantity * item.price).toFixed(2))
+                            return (
+                                <div key={item.lineId} className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-xl shadow-sm border">
+                                    <div className="flex flex-col">
+                                        <span className={`font-bold ${item.isDiscount ? "text-emerald-700" : "text-slate-800 dark:text-slate-100"}`}>{item.name}</span>
+                                        {item.isDiscount ? (
+                                            <span className="text-xs font-semibold text-emerald-600">
+                                                {item.discountPreset?.type === "PERCENT"
+                                                    ? `${item.discountPreset.value}% su ${item.discountPreset.baseAmount.toFixed(2)} €`
+                                                    : `Sconto fisso ${item.discountPreset?.value.toFixed(2)} €`}
+                                            </span>
+                                        ) : (
+                                            <span className="text-sm text-slate-500">{item.quantity} x {item.price.toFixed(2)} €</span>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <div className="text-right">
+                                            <span className={`font-black ${item.isDiscount ? "text-emerald-700" : ""}`}>{lineTotal.toFixed(2)} €</span>
+                                        </div>
+                                        <button onClick={() => removeFromCart(item.lineId)} className="text-red-500 p-2">
+                                            <Trash2 size={20} />
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-3">
-                                    <span className="font-black">{(item.quantity * item.price).toFixed(2)} €</span>
-                                    <button onClick={() => removeFromCart(item.productId)} className="text-red-500 p-2">
-                                        <Trash2 size={20} />
-                                    </button>
-                                </div>
-                            </div>
-                        ))
+                            )
+                        })
                     )}
                 </div>
 
@@ -891,10 +1046,14 @@ export default function PosPage() {
                         <span className="text-sm text-slate-500 font-bold uppercase tracking-widest">Totale da Pagare</span>
                         <span className="text-4xl font-black text-blue-600 dark:text-blue-400 leading-none">{effectiveTotal.toFixed(2)} €</span>
                     </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                        <p>Subtotale prodotti: {subtotal.toFixed(2)} €</p>
+                        <p>Sconti applicati: -{totalDiscountApplied.toFixed(2)} €</p>
+                    </div>
 
                     <button
                         onClick={() => setIsCheckoutOpen(true)}
-                        disabled={cart.length === 0 || !selectedPosDeviceId || !cashSession || isProcessing || isPrintMockActive || isCashSessionLoading}
+                        disabled={productCartItems.length === 0 || !selectedPosDeviceId || !cashSession || isProcessing || isPrintMockActive || isCashSessionLoading}
                         className="w-full py-8 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-3xl font-black text-2xl shadow-xl shadow-blue-200 dark:shadow-none active:scale-[0.98] transition-all flex items-center justify-center gap-3"
                     >
                         <CheckCircle2 size={32} />

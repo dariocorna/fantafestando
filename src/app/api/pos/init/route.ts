@@ -9,6 +9,7 @@ import "@/models/Peripheral"; // Import to register schema for .populate()
 import { parsePredefinedTablesInput } from "@/lib/table-presets";
 import { getCurrentDayCode, isProductAvailableToday } from "@/lib/product-availability";
 import { getStockStatus } from "@/lib/inventory";
+import { resolveQuickDiscountPresetsFromSettings, toLegacyQuickDiscountSettings } from "@/lib/quick-discount-presets";
 
 export async function GET(request: NextRequest) {
     try {
@@ -88,11 +89,19 @@ export async function GET(request: NextRequest) {
                 : (device.cashBoxId ? String(device.cashBoxId) : undefined)
         }));
 
+        const quickDiscountPresets = resolveQuickDiscountPresetsFromSettings(event.settings);
+        const legacyQuickDiscount = toLegacyQuickDiscountSettings(quickDiscountPresets);
+
         const sanitizedEvent = {
             ...event,
             settings: {
                 askName: event.settings?.askName ?? false,
-                askTable: event.settings?.askTable ?? false
+                askTable: event.settings?.askTable ?? false,
+                quickDiscountPresets,
+                quickStaffDiscountEnabled: legacyQuickDiscount.quickStaffDiscountEnabled,
+                quickStaffDiscountLabel: legacyQuickDiscount.quickStaffDiscountLabel,
+                quickStaffDiscountType: legacyQuickDiscount.quickStaffDiscountType,
+                quickStaffDiscountValue: legacyQuickDiscount.quickStaffDiscountValue
             },
             predefinedTables: parsePredefinedTablesInput(
                 Array.isArray(event.predefinedTables) ? event.predefinedTables.join("\n") : "",
