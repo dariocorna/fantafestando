@@ -1,0 +1,14 @@
+.git
+.gitignore
+.next
+node_modules
+playwright-report
+test-results
+coverage
+docs
+e2e
+*.log
+.env*
+README.md
+AGENTS.md
+implementation_plan.md
