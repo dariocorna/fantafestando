@@ -118,7 +118,7 @@ async function completeCashOrder(page: Page, productName: string) {
     await confirmButton.scrollIntoViewIfNeeded()
     await confirmButton.click()
 
-    await expect(checkoutDialog.getByText(/Stampa in corso/i)).toBeVisible()
+    await expect(checkoutDialog.getByText(/Stampa in corso/i).first()).toBeVisible()
     await expect(checkoutDialog).toBeHidden({ timeout: 15000 })
     await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible()
 
@@ -134,6 +134,7 @@ test.describe("POS apertura e chiusura cassa", () => {
 
     test("richiede apertura cassa, consente incasso e poi chiusura con riepilogo", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso validato su desktop.")
+        test.setTimeout(120000)
 
         const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`
         const eventName = `Cash Session Event ${suffix}`
@@ -157,7 +158,7 @@ test.describe("POS apertura e chiusura cassa", () => {
         await expect(openDialog).toBeVisible()
         await openDialog.locator("#opening-float-amount").fill("50")
         await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click()
-        await expect(openDialog).toBeHidden()
+        await expect(page.getByRole("button", { name: /Chiudi Cassa/i })).toBeVisible()
 
         await expect(page.getByText(/Aperta alle/i)).toBeVisible()
         await expect(page.getByText(/Fondo 50\.00 €/i)).toBeVisible()
@@ -167,9 +168,13 @@ test.describe("POS apertura e chiusura cassa", () => {
         await page.getByRole("button", { name: /Chiudi Cassa/i }).click()
         const closeDialog = page.getByRole("dialog").filter({ hasText: /Chiusura Cassa/i })
         await expect(closeDialog).toBeVisible()
+        await expect(closeDialog.getByText(/Contante atteso/i)).toBeVisible()
+        await expect(closeDialog.getByText(/Fondo \+ incassi in contanti \(esclusi pagamenti elettronici\)/i)).toBeVisible()
+        await expect(closeDialog.getByText(/55\.00\s*€/i)).toBeVisible()
         await closeDialog.locator("#closing-counted-cash").fill("55")
+        await expect(closeDialog.getByRole("button", { name: "CONFERMA CHIUSURA", exact: true })).toBeEnabled()
         await closeDialog.getByRole("button", { name: "CONFERMA CHIUSURA", exact: true }).click()
-        await expect(closeDialog).toBeHidden()
+        await expect(page.getByRole("button", { name: /Apri Cassa/i })).toBeVisible()
 
         await expect(page.getByText(/Chiusa\. Apri la cassa per iniziare gli incassi\./i)).toBeVisible()
         await expect(page.getByText(/Atteso: 55\.00 € · Contato: 55\.00 €/i)).toBeVisible()
