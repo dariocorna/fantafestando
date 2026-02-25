@@ -44,3 +44,6 @@ next-env.d.ts
 
 # local database
 /data/
+
+# local planning artifacts
+implementation_plan.md
