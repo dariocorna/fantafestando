@@ -189,7 +189,7 @@ test.describe("Magazzino e scorte base", () => {
         await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click()
 
         await expect(checkoutDialog.getByText(/Scorte insufficienti rilevate/i)).toBeVisible()
-        await expect(checkoutDialog.getByText(new RegExp(productName))).toBeVisible()
+        await expect(checkoutDialog.locator("li").filter({ hasText: new RegExp(`^${productName}:`) })).toBeVisible()
 
         await checkoutDialog.getByRole("button", { name: "Prosegui comunque", exact: true }).click()
         await expect(checkoutDialog.getByText(/Stampa in corso/i).first()).toBeVisible()

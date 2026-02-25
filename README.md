@@ -5,9 +5,13 @@ Gestionale per feste locali (Bonate Sotto) con:
 - dashboard admin con metriche vendite e sezione sessioni cassa
 - download report sessione cassa (CSV/XLS) dalla dashboard admin
 - POS touch per cassa
+- sconti POS dinamici con preset rapidi multipli configurabili in admin (es. Staff 50%, Promo cassa)
+- tab "Sconti" nel catalogo POS: ogni tap aggiunge una riga sconto negativa nel carrello con ricalcolo immediato totale
 - chiusura cassa con contante atteso (solo contanti) e stampa riepilogo su stampante associata
+- storno sicuro ordine pagato da admin con ripristino contabile/scorte
 - web app pubblica per ordini cliente
 - integrazione pagamenti elettronici SumUp
+- rimborso SumUp in caso di storno ordine pagato con carta
 - stampa comande su stampanti termiche di rete
 
 ## Stack
