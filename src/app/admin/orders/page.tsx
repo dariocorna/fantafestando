@@ -1,6 +1,7 @@
+import { format } from "date-fns";
+import { getAdminContextEvent } from "@/lib/events";
 import dbConnect from "@/lib/mongoose";
-import Order, { IOrder } from "@/models/Order";
-import { IEvent } from "@/models/Event";
+import Order from "@/models/Order";
 import {
     Table,
     TableBody,
@@ -9,27 +10,65 @@ import {
     TableHeader,
     TableRow
 } from "@/components/ui/table";
-import { format } from "date-fns";
-import { Button } from "@/components/ui/button";
-import { Printer } from "lucide-react";
-import { reprintOrder } from "./actions";
+import type { IEvent } from "@/models/Event";
+import { OrderRowActions } from "./order-row-actions";
+
+interface OrderProjection {
+    _id: unknown
+    status: "PENDING" | "PAID" | "CANCELLED"
+    createdAt?: Date | string
+    customer?: { name?: string, table?: string }
+    cart: Array<{ quantity: number, snapshotName: string }>
+    totalAmount: number
+    discountApplied?: number
+    paymentMethod?: "CASH" | "CARD" | "OTHER"
+    stornoMeta?: {
+        reason?: string
+    }
+}
+
+function getPaymentMethodLabel(paymentMethod?: "CASH" | "CARD" | "OTHER") {
+    if (paymentMethod === "CASH") return "Contanti"
+    if (paymentMethod === "CARD") return "Carta / POS"
+    return "Altro"
+}
 
 export default async function AdminOrders() {
-    await dbConnect();
-    const orders = await Order.find({ status: "PAID" }).sort({ createdAt: -1 }).populate('eventId').lean();
+    const contextEvent = await getAdminContextEvent() as IEvent | null
+    if (!contextEvent) {
+        return (
+            <div className="text-center p-10 text-muted-foreground">
+                Nessuna festa attiva o selezionata. Seleziona una festa dalla barra in alto.
+            </div>
+        )
+    }
 
-    const getTotalRevenue = () => orders.reduce((acc: number, o: IOrder) => acc + o.totalAmount, 0);
+    const eventId = String(contextEvent._id)
+    await dbConnect();
+    const orders = await Order.find({
+        eventId,
+        status: { $in: ["PAID", "CANCELLED"] }
+    })
+        .sort({ createdAt: -1 })
+        .select("_id status createdAt customer cart totalAmount discountApplied paymentMethod stornoMeta.reason")
+        .lean() as OrderProjection[]
+
+    const totalRevenue = orders
+        .filter((order) => order.status === "PAID")
+        .reduce((acc, order) => acc + order.totalAmount, 0)
 
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Storico Ordini</h1>
-                    <p className="text-muted-foreground">Monitoraggio vendite e ordini saldati.</p>
+                    <p className="text-muted-foreground">
+                        Festa selezionata: <span className="font-semibold text-foreground">{contextEvent.name}</span>
+                    </p>
                 </div>
                 <div className="bg-white dark:bg-slate-900 border p-4 rounded-xl shadow-sm">
-                    <span className="text-sm font-bold text-slate-500 uppercase tracking-widest">Totale Incasso</span>
-                    <div className="text-2xl font-black text-green-600">{getTotalRevenue().toFixed(2)} €</div>
+                    <span className="text-sm font-bold text-slate-500 uppercase tracking-widest">Totale Incasso Netto</span>
+                    <div className="text-2xl font-black text-green-600">{totalRevenue.toFixed(2)} €</div>
                 </div>
             </div>
 
@@ -38,45 +77,65 @@ export default async function AdminOrders() {
                     <TableHeader>
                         <TableRow>
                             <TableHead>Data</TableHead>
-                            <TableHead>Festa</TableHead>
+                            <TableHead>Stato</TableHead>
                             <TableHead>Cliente</TableHead>
                             <TableHead>Tavolo</TableHead>
                             <TableHead>Prodotti</TableHead>
+                            <TableHead>Pagamento</TableHead>
+                            <TableHead className="text-right">Sconto</TableHead>
                             <TableHead className="text-right">Importo</TableHead>
-                            <TableHead className="text-right w-[100px]">Azioni</TableHead>
+                            <TableHead className="text-right w-[180px]">Azioni</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {orders.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={6} className="text-center py-10 text-slate-400 font-medium">
+                                <TableCell colSpan={9} className="text-center py-10 text-slate-400 font-medium">
                                     Nessun ordine trovato.
                                 </TableCell>
                             </TableRow>
                         ) : (
-                            orders.map((order: IOrder) => (
+                            orders.map((order) => (
                                 <TableRow key={String(order._id)}>
                                     <TableCell className="font-medium whitespace-nowrap">
                                         {format(new Date(order.createdAt as unknown as string), "dd/MM/yyyy HH:mm")}
                                     </TableCell>
-                                    <TableCell>{(order.eventId as unknown as IEvent)?.name || "N/A"}</TableCell>
+                                    <TableCell>
+                                        {order.status === "PAID" ? (
+                                            <span className="inline-flex rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700">
+                                                Pagato
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex rounded-full bg-rose-100 px-2 py-1 text-xs font-bold text-rose-700">
+                                                Stornato
+                                            </span>
+                                        )}
+                                    </TableCell>
                                     <TableCell>{order.customer?.name || "-"}</TableCell>
                                     <TableCell className="font-bold">{order.customer?.table || "-"}</TableCell>
                                     <TableCell>
                                         <div className="max-w-[200px] truncate" title={order.cart.map((i) => `${i.quantity}x ${i.snapshotName}`).join(", ")}>
                                             {order.cart.map((i) => `${i.quantity}x ${i.snapshotName}`).join(", ")}
                                         </div>
+                                        {order.status === "CANCELLED" && order.stornoMeta?.reason ? (
+                                            <p className="mt-1 text-xs font-semibold text-rose-600">
+                                                Motivo storno: {order.stornoMeta.reason}
+                                            </p>
+                                        ) : null}
                                     </TableCell>
-                                    <TableCell className="text-right font-black text-blue-600">
+                                    <TableCell>{getPaymentMethodLabel(order.paymentMethod)}</TableCell>
+                                    <TableCell className="text-right font-semibold text-amber-700">
+                                        {(order.discountApplied ?? 0).toFixed(2)} €
+                                    </TableCell>
+                                    <TableCell className={`text-right font-black ${order.status === "PAID" ? "text-blue-600" : "text-slate-400 line-through"}`}>
                                         {order.totalAmount.toFixed(2)} €
                                     </TableCell>
                                     <TableCell className="text-right">
-                                        <form action={reprintOrder}>
-                                            <input type="hidden" name="orderId" value={String(order._id)} />
-                                            <Button variant="ghost" size="sm" title="Ristampa comanda">
-                                                <Printer className="h-4 w-4" />
-                                            </Button>
-                                        </form>
+                                        <OrderRowActions
+                                            orderId={String(order._id)}
+                                            canReprint={order.status === "PAID"}
+                                            canStorno={order.status === "PAID"}
+                                        />
                                     </TableCell>
                                 </TableRow>
                             ))
