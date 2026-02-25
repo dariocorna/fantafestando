@@ -18,8 +18,8 @@ Mappatura porte locali host:
 - `127.0.0.1:3102` -> `osgfest-menu:3000`
 
 Domini previsti:
-- `backoffice.<dominio>` -> admin + pos
-- `menu.<dominio>` -> webapp menu
+- `backoffice-osgfest.ddns.net` -> admin + pos
+- `osgfest.ddns.net` -> portale pubblico menu
 
 ## 2. Prerequisiti VM
 
@@ -83,18 +83,18 @@ Esempio `/etc/apache2/sites-available/backoffice-osgfest.conf`:
 
 ```apache
 <VirtualHost *:80>
-    ServerName backoffice.example.org
+    ServerName backoffice-osgfest.ddns.net
     RewriteEngine On
     RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
     RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [R=301,L]
 </VirtualHost>
 
 <VirtualHost *:443>
-    ServerName backoffice.example.org
+    ServerName backoffice-osgfest.ddns.net
 
     SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/backoffice.example.org/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/backoffice.example.org/privkey.pem
+    SSLCertificateFile /etc/letsencrypt/live/backoffice-osgfest.ddns.net/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/backoffice-osgfest.ddns.net/privkey.pem
 
     ProxyPreserveHost On
     RequestHeader set X-Forwarded-Proto "https"
@@ -103,24 +103,24 @@ Esempio `/etc/apache2/sites-available/backoffice-osgfest.conf`:
 </VirtualHost>
 ```
 
-### 5.2 VirtualHost Menu
+### 5.2 VirtualHost Portale Pubblico
 
 Esempio `/etc/apache2/sites-available/menu-osgfest.conf`:
 
 ```apache
 <VirtualHost *:80>
-    ServerName menu.example.org
+    ServerName osgfest.ddns.net
     RewriteEngine On
     RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
     RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [R=301,L]
 </VirtualHost>
 
 <VirtualHost *:443>
-    ServerName menu.example.org
+    ServerName osgfest.ddns.net
 
     SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/menu.example.org/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/menu.example.org/privkey.pem
+    SSLCertificateFile /etc/letsencrypt/live/osgfest.ddns.net/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/osgfest.ddns.net/privkey.pem
 
     ProxyPreserveHost On
     RequestHeader set X-Forwarded-Proto "https"
@@ -140,7 +140,7 @@ sudo systemctl reload apache2
 Emettere certificati (se non già emessi):
 
 ```bash
-sudo certbot --apache -d backoffice.example.org -d menu.example.org
+sudo certbot --apache -d backoffice-osgfest.ddns.net -d osgfest.ddns.net
 ```
 
 ## 6. Aggiornamento applicazione
@@ -154,8 +154,8 @@ git pull
 Verifica post update:
 
 ```bash
-curl -fsS https://backoffice.example.org/api/health
-curl -fsS https://menu.example.org/api/health
+curl -fsS https://backoffice-osgfest.ddns.net/api/health
+curl -fsS https://osgfest.ddns.net/api/health
 ```
 
 ## 7. Rollback
