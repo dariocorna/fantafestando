@@ -2,7 +2,10 @@
 
 Gestionale per feste locali (Bonate Sotto) con:
 - pannello admin per catalogo/eventi/hardware
+- dashboard admin con metriche vendite e sezione sessioni cassa
+- download report sessione cassa (CSV/XLS) dalla dashboard admin
 - POS touch per cassa
+- chiusura cassa con contante atteso (solo contanti) e stampa riepilogo su stampante associata
 - web app pubblica per ordini cliente
 - integrazione pagamenti elettronici SumUp
 - stampa comande su stampanti termiche di rete

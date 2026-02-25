@@ -1,5 +1,11 @@
 # Agent Context
 
+---
+alwaysApply: true
+type: rules
+scope: project
+---
+
 ## Obiettivo del Progetto
 OSGFest è un sistema gestionale per le feste di Bonate Sotto.
 
@@ -27,9 +33,10 @@ Il branch si crea partendo dal branch di sviluppo principale corrente.
 ### Fase 3 — Implementazione (EXECUTION)
 1. Procedere all'implementazione seguendo il piano approvato.
 2. Alla conclusione del codice, scrivere i **test E2E Playwright** esaustivi che coprono tutti i flussi principali della epica.
-3. Eseguire la suite E2E completa: `CI=true npx playwright test --project=chromium`.
-4. **La fase di implementazione è conclusa solo quando tutti i test passano (exit code 0).**
-5. **⛔ PAUSA OBBLIGATORIA**: Notificare l'utente con un riepilogo dei risultati e attendere conferma esplicita prima di procedere ai commit.
+3. Verificare la documentazione esistente (`README.md`, `docs/*`) e aggiornarla **solo se** le novità introdotte non sono già documentate in modo esplicito.
+4. Eseguire la suite E2E completa: `CI=true npx playwright test --project=chromium`.
+5. **La fase di implementazione è conclusa solo quando tutti i test passano (exit code 0).**
+6. **⛔ PAUSA OBBLIGATORIA**: Notificare l'utente con un riepilogo dei risultati e attendere conferma esplicita prima di procedere ai commit.
 
 ### Fase 4 — Rilascio (RELEASE)
 1. Eseguire commit atomici per gruppi logici di modifiche, seguendo la convenzione `feat:`, `fix:`, `docs:`, `test:`, `chore:` con messaggi in **inglese**.
@@ -50,4 +57,5 @@ Il branch si crea partendo dal branch di sviluppo principale corrente.
   - **Requisito Atomicità e PR**: Un commit successivo NON deve correggere errori macroscopici di un commit appena scritto. Se si verifica, i commit vanno uniti (`git rebase -i` / squash) per mantenere la cronologia 100% pulita prima della PR.
 - **Testing**: Sono obbligatori test unitari per coprire ogni nuova funzione introdotta.
 - **Test E2E**: Utilizzare Playwright per implementare test end-to-end sulle funzionalità dell'interfaccia utente.
+- **Documentazione**: Aggiornare la documentazione solo quando le novità della epica non sono già descritte con sufficiente dettaglio nei documenti correnti.
 - **Chiusura Epica**: Un'epica è **completata** solo quando: i test E2E passano ✅, l'utente ha approvato ✅, e la PR è stata mergiata ✅.
