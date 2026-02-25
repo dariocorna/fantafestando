@@ -13,6 +13,13 @@ import { getOrderCodeFromOrder, parseOrderNumberInput } from "@/lib/order-code"
 import { type StockMode } from "@/lib/inventory"
 import { computeCashSessionSummary } from "@/lib/cash-session"
 import {
+    computeOrderDiscounts,
+    type DiscountInput,
+    type LineDiscountInput,
+    type LineDiscountMeta,
+    type OrderDiscountMeta
+} from "@/lib/order-discounts"
+import {
     applyStockForPaidOrder,
     validateStockForPendingOrder,
     rollbackStockAdjustments,
@@ -48,9 +55,163 @@ interface CashSessionPaidOrderProjection {
     totalAmount?: number
 }
 
+interface PosCartSelectedOption {
+    name: string
+    priceVariation: number
+}
+
+interface PosCartItemInput {
+    productId: string
+    snapshotName: string
+    quantity: number
+    selectedOptions: PosCartSelectedOption[]
+}
+
+interface PosOrderPricingResult {
+    baseAmount: number
+    discountApplied: number
+    finalAmount: number
+    cartWithDiscounts: Array<{
+        productId: string
+        snapshotName: string
+        quantity: number
+        selectedOptions: PosCartSelectedOption[]
+        discountApplied: number
+        discountMeta?: LineDiscountMeta
+    }>
+    orderDiscountMeta?: OrderDiscountMeta
+}
+
 function normalizeCurrencyAmount(value: number): number {
     if (!Number.isFinite(value)) return 0
     return Number(Math.max(0, value).toFixed(2))
+}
+
+function toCents(amount: number): number {
+    return Math.round(amount * 100)
+}
+
+function amountsAreEquivalent(left: number, right: number): boolean {
+    return Math.abs(toCents(left) - toCents(right)) <= 1
+}
+
+function sanitizeCartItems(
+    cart: Array<{
+        productId: string
+        snapshotName: string
+        quantity: number
+        selectedOptions?: Array<{ name: string, priceVariation: number }>
+    }>
+): PosCartItemInput[] | null {
+    if (!Array.isArray(cart) || cart.length === 0) return null
+
+    const sanitized: PosCartItemInput[] = []
+    for (const item of cart) {
+        const productId = item.productId?.trim()
+        const snapshotName = item.snapshotName?.trim()
+        const quantity = Number(item.quantity)
+        if (!productId || !snapshotName || !Number.isFinite(quantity) || quantity < 1) {
+            return null
+        }
+
+        const selectedOptions = Array.isArray(item.selectedOptions)
+            ? item.selectedOptions
+                .filter((option) => option && typeof option.name === "string")
+                .map((option) => ({
+                    name: option.name,
+                    priceVariation: Number.isFinite(option.priceVariation)
+                        ? Number(option.priceVariation)
+                        : 0
+                }))
+            : []
+
+        sanitized.push({
+            productId,
+            snapshotName,
+            quantity: Math.floor(quantity),
+            selectedOptions
+        })
+    }
+
+    return sanitized
+}
+
+async function computePricingForCart(data: {
+    eventId: string
+    cart: PosCartItemInput[]
+    declaredTotalAmount?: number
+    orderDiscount?: DiscountInput
+    lineDiscounts?: LineDiscountInput[]
+}): Promise<
+    { success: true, pricing: PosOrderPricingResult }
+    | { success: false, error: string }
+> {
+    const productIds = [...new Set(data.cart.map((item) => item.productId))]
+    const productDocs = await Product.find({
+        eventId: data.eventId,
+        _id: { $in: productIds }
+    }).select("_id basePrice").lean() as Array<{
+        _id: string | { toString(): string }
+        basePrice?: number
+    }>
+
+    if (productDocs.length !== productIds.length) {
+        return { success: false, error: "Impossibile calcolare il totale: prodotti non più disponibili" }
+    }
+
+    const basePriceByProductId = new Map<string, number>()
+    productDocs.forEach((product) => {
+        basePriceByProductId.set(product._id.toString(), normalizeCurrencyAmount(product.basePrice ?? 0))
+    })
+
+    const computedDiscounts = computeOrderDiscounts({
+        lines: data.cart.map((item) => {
+            const basePrice = basePriceByProductId.get(item.productId) ?? 0
+            const optionsDelta = item.selectedOptions.reduce((sum, option) =>
+                sum + normalizeCurrencyAmount(option.priceVariation), 0
+            )
+            return {
+                productId: item.productId,
+                quantity: item.quantity,
+                unitAmount: normalizeCurrencyAmount(basePrice + optionsDelta)
+            }
+        }),
+        orderDiscount: data.orderDiscount,
+        lineDiscounts: data.lineDiscounts
+    })
+
+    if (!computedDiscounts.success) {
+        return { success: false, error: computedDiscounts.error }
+    }
+
+    if (
+        typeof data.declaredTotalAmount === "number"
+        && Number.isFinite(data.declaredTotalAmount)
+        && !amountsAreEquivalent(computedDiscounts.summary.finalAmount, normalizeCurrencyAmount(data.declaredTotalAmount))
+    ) {
+        return { success: false, error: "Totale ordine non coerente con la scontistica applicata" }
+    }
+
+    return {
+        success: true,
+        pricing: {
+            baseAmount: computedDiscounts.summary.baseAmount,
+            discountApplied: computedDiscounts.summary.discountApplied,
+            finalAmount: computedDiscounts.summary.finalAmount,
+            orderDiscountMeta: computedDiscounts.summary.orderDiscountMeta,
+            cartWithDiscounts: data.cart.map((item, index) => {
+                const line = computedDiscounts.summary.lineResults[index]
+                return {
+                    productId: item.productId,
+                    snapshotName: item.snapshotName,
+                    quantity: item.quantity,
+                    selectedOptions: item.selectedOptions,
+                    discountApplied: line?.discountApplied ?? 0,
+                    discountMeta: line?.discountMeta
+                }
+            })
+        }
+    }
 }
 
 function serializeOpenCashSession(session: {
@@ -432,6 +593,8 @@ export async function createOrder(data: {
         quantity: number,
         selectedOptions: Array<{ name: string, priceVariation: number }>
     }>,
+    orderDiscount?: DiscountInput,
+    lineDiscounts?: LineDiscountInput[],
     paymentMethod: "CASH" | "CARD" | "OTHER",
     sumupCheckoutId?: string,
     posDeviceId?: string,
@@ -439,6 +602,11 @@ export async function createOrder(data: {
 }) {
     let stockAdjustmentsToRollback: StockAdjustment[] = []
     try {
+        const sanitizedCart = sanitizeCartItems(data.cart)
+        if (!sanitizedCart) {
+            return { success: false, error: "Dati carrello non validi" }
+        }
+
         const capabilitiesResult = await getPosPaymentCapabilities(data.eventId, data.posDeviceId)
         if (!capabilitiesResult.success) {
             return { success: false, error: capabilitiesResult.error }
@@ -455,11 +623,30 @@ export async function createOrder(data: {
         }
 
         await dbConnect()
+        const pricingResult = await computePricingForCart({
+            eventId: data.eventId,
+            cart: sanitizedCart,
+            declaredTotalAmount: data.totalAmount,
+            orderDiscount: data.orderDiscount,
+            lineDiscounts: data.lineDiscounts
+        })
+        if (!pricingResult.success) {
+            return { success: false, error: pricingResult.error }
+        }
+
+        const payableAmount = pricingResult.pricing.finalAmount
+        const stockPayload = sanitizedCart.map((item) => ({
+            productId: item.productId,
+            snapshotName: item.snapshotName,
+            quantity: item.quantity,
+            selectedOptions: item.selectedOptions
+        }))
+
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
         const isCardPayment = data.paymentMethod === "CARD"
 
         if (isCardPayment) {
-            const stockCheckResult = await validateStockForPendingOrder(data.eventId, data.cart, stockMode)
+            const stockCheckResult = await validateStockForPendingOrder(data.eventId, stockPayload, stockMode)
             if (!stockCheckResult.success) {
                 return {
                     success: false,
@@ -468,7 +655,7 @@ export async function createOrder(data: {
                 }
             }
         } else {
-            const stockApplyResult = await applyStockForPaidOrder(data.eventId, data.cart, stockMode)
+            const stockApplyResult = await applyStockForPaidOrder(data.eventId, stockPayload, stockMode)
             if (!stockApplyResult.success) {
                 return {
                     success: false,
@@ -483,8 +670,10 @@ export async function createOrder(data: {
             eventId: data.eventId,
             status: isCardPayment ? "PENDING" : "PAID",
             customer: data.customer,
-            totalAmount: data.totalAmount,
-            cart: data.cart,
+            totalAmount: payableAmount,
+            discountApplied: pricingResult.pricing.discountApplied,
+            discountMeta: pricingResult.pricing.orderDiscountMeta,
+            cart: pricingResult.pricing.cartWithDiscounts,
             paymentMethod: data.paymentMethod,
             sumupCheckoutId: isCardPayment ? undefined : data.sumupCheckoutId,
             posDeviceId: data.posDeviceId,
@@ -501,7 +690,7 @@ export async function createOrder(data: {
                     { $set: { sumupCheckoutId: legacyCheckoutId } }
                 )
             } else {
-                const sumupResult = await triggerSumUpPayment(data.totalAmount, data.eventId, data.posDeviceId)
+                const sumupResult = await triggerSumUpPayment(payableAmount, data.eventId, data.posDeviceId)
                 if (!sumupResult.success || !sumupResult.checkoutId) {
                     await Order.updateOne(
                         { _id: order._id, eventId: data.eventId, status: "PENDING" },
@@ -755,6 +944,8 @@ export async function completePendingOrderPayment(data: {
     allowStockOverride?: boolean
     customer?: { name?: string, table?: string }
     totalAmount?: number
+    orderDiscount?: DiscountInput
+    lineDiscounts?: LineDiscountInput[]
     cart?: Array<{
         productId: string
         snapshotName: string
@@ -789,24 +980,32 @@ export async function completePendingOrderPayment(data: {
             return { success: false, error: "Ordine non trovato o già chiuso" }
         }
 
-        if (data.cart) {
-            if (data.cart.length === 0) {
-                return { success: false, error: "L'ordine deve contenere almeno un prodotto" }
-            }
+        let orderCartInput: PosCartItemInput[] = []
 
-            const hasInvalidItem = data.cart.some((item) =>
-                !item.productId || !item.snapshotName || !Number.isFinite(item.quantity) || item.quantity < 1
-            )
-            if (hasInvalidItem) {
+        if (data.cart) {
+            const sanitizedCart = sanitizeCartItems(data.cart)
+            if (!sanitizedCart) {
                 return { success: false, error: "Dati carrello non validi" }
             }
+            orderCartInput = sanitizedCart
+        } else {
+            orderCartInput = sanitizeCartItems(
+                order.cart.map((item: {
+                    productId: { toString(): string } | string
+                    snapshotName: string
+                    quantity: number
+                    selectedOptions?: Array<{ name: string, priceVariation: number }>
+                }) => ({
+                    productId: item.productId.toString(),
+                    snapshotName: item.snapshotName,
+                    quantity: item.quantity,
+                    selectedOptions: item.selectedOptions || []
+                }))
+            ) || []
+        }
 
-            order.set("cart", data.cart.map((item) => ({
-                productId: item.productId,
-                snapshotName: item.snapshotName,
-                quantity: item.quantity,
-                selectedOptions: item.selectedOptions || []
-            })))
+        if (orderCartInput.length === 0) {
+            return { success: false, error: "L'ordine deve contenere almeno un prodotto" }
         }
 
         if (data.customer) {
@@ -816,24 +1015,30 @@ export async function completePendingOrderPayment(data: {
             })
         }
 
-        if (typeof data.totalAmount === "number") {
-            if (!Number.isFinite(data.totalAmount) || data.totalAmount < 0) {
-                return { success: false, error: "Totale ordine non valido" }
-            }
-            order.totalAmount = data.totalAmount
+        if (typeof data.totalAmount === "number" && (!Number.isFinite(data.totalAmount) || data.totalAmount < 0)) {
+            return { success: false, error: "Totale ordine non valido" }
         }
 
-        const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
-        const currentCart = order.cart.map((item: { productId: { toString(): string }, snapshotName: string, quantity: number, selectedOptions?: Array<{ name: string, priceVariation: number }> }) => ({
-            productId: item.productId.toString(),
+        const pricingResult = await computePricingForCart({
+            eventId: data.eventId,
+            cart: orderCartInput,
+            declaredTotalAmount: data.totalAmount,
+            orderDiscount: data.orderDiscount,
+            lineDiscounts: data.lineDiscounts
+        })
+        if (!pricingResult.success) {
+            return { success: false, error: pricingResult.error }
+        }
+
+        const payableAmount = pricingResult.pricing.finalAmount
+        const currentCart = orderCartInput.map((item) => ({
+            productId: item.productId,
             snapshotName: item.snapshotName,
             quantity: item.quantity,
-            selectedOptions: (item.selectedOptions || []).map((option: { name: string, priceVariation: number }) => ({
-                name: option.name,
-                priceVariation: option.priceVariation
-            }))
+            selectedOptions: item.selectedOptions
         }))
 
+        const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
         const stockApplyResult = await applyStockForPaidOrder(data.eventId, currentCart, stockMode)
         if (!stockApplyResult.success) {
             return {
@@ -844,6 +1049,10 @@ export async function completePendingOrderPayment(data: {
         }
         stockAdjustmentsToRollback = stockApplyResult.appliedAdjustments || []
 
+        order.set("cart", pricingResult.pricing.cartWithDiscounts)
+        order.totalAmount = payableAmount
+        order.discountApplied = pricingResult.pricing.discountApplied
+        order.set("discountMeta", pricingResult.pricing.orderDiscountMeta || undefined)
         order.status = "PAID"
         order.paymentMethod = data.paymentMethod
         order.set("posDeviceId", data.posDeviceId || undefined)
