@@ -167,10 +167,20 @@ Riferimento funzionale dettagliato: `docs/inventory-stock.md`.
 
 ---
 
-## ⬜ Epica 11: Operazioni Cassa Avanzate
+## ✅ Epica 11: Operazioni Cassa Avanzate
 
-- Sconti dinamici a carrello (es. "% Staff", "-10€ Menu").
-- Storno sicuro di un ordine pagato: cancellazione contabile + rimborso SumUp (se carta).
+- Sconti dinamici nel POS:
+  - preset rapidi multipli configurabili in admin (es. Staff 50%, Promo Cassa) applicabili in 1 tap in una tab "Sconti" affiancata alle categorie prodotto;
+  - applicazione a carrello come riga negativa (simile a prodotto sconto) con ricalcolo immediato del totale;
+- Opzioni sconto custom avanzate rimosse dall'interfaccia operativa principale per semplificare il flusso cassa.
+- Persistenza audit sconti su `Order` (`discountApplied`, `discountMeta`, metadati riga).
+- Storno sicuro ordine pagato da admin con lock idempotente (`stornoMeta`):
+  - annullamento contabile ordine (`status: CANCELLED`);
+  - ripristino scorte tracciate;
+  - rimborso SumUp per ordini carta (con fallback recupero transaction id da checkout).
+- Aggiornamento webhook SumUp con salvataggio `sumupPaymentId` quando disponibile.
+
+**Test E2E**: `e2e/pos_discounts_and_storno.spec.ts`.
 
 ---
 
