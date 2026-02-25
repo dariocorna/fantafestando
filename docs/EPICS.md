@@ -126,7 +126,7 @@ Rifattorizzazione dell'architettura hardware per supportare periferiche modulari
 
 ---
 
-## ⬜ Epica 8: Dashboard Statistiche e Reportistica
+## 🔄 Epica 8: Dashboard Statistiche e Reportistica
 
 **Priorità: Alta** — Funzionalità operativa critica.
 
@@ -134,6 +134,10 @@ Rifattorizzazione dell'architettura hardware per supportare periferiche modulari
 - Dashboard con metriche: incasso contanti vs. carte (SumUp).
 - Tracciamento vendite prodotti (Best Seller, Sotto Performanti).
 - Export CSV/Excel per rendicontazione di fine festa.
+- Sezione **Sessioni Cassa** in admin con storico aperture/chiusure per postazione.
+- Download report sessione cassa (CSV/XLS) dal pannello admin.
+- Chiusura cassa POS con indicazione del **contante atteso** (solo cash, esclusi elettronici).
+- Stampa automatica riepilogo chiusura sulla stampante associata alla postazione cassa.
 
 ---
 

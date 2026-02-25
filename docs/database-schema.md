@@ -58,6 +58,31 @@ interface IPosDevice {
   eventId: ObjectId;
   name: string;                 // e.g. "Cassa Centrale", "Cassa Bar"
   printerId: ObjectId;          // Link obbligatorio a una stampante di tipo CASHIER
+  paymentTerminalId?: ObjectId; // Periferica pagamento elettronico (es. SumUp)
+  cashBoxId?: ObjectId;         // Periferica cassetta contanti
+}
+```
+
+### 5. Sessione Cassa (CashSession)
+Traccia l'apertura/chiusura della cassa per singola postazione e festa.
+```typescript
+interface ICashSession {
+  _id: ObjectId;
+  eventId: ObjectId;
+  posDeviceId: ObjectId;
+  status: "OPEN" | "CLOSED";
+  openedAt: Date;
+  openingFloatAmount: number;       // Fondo iniziale
+  openingNotes?: string;
+  closedAt?: Date;
+  closingCountedCashAmount?: number; // Contante contato in chiusura
+  closingNotes?: string;
+  paidOrdersCount?: number;
+  cashSalesAmount?: number;
+  cardSalesAmount?: number;
+  otherSalesAmount?: number;
+  expectedCashAmount?: number;      // Fondo + vendite CASH (esclude elettronici)
+  varianceAmount?: number;          // contato - atteso
 }
 ```
 
@@ -101,6 +126,9 @@ interface IOrder {
   _id: ObjectId;                // Used as "Short Code" (last 3-4 digits) in POS e.g. "A72"
   eventId: ObjectId;
   status: "PENDING" | "PAID" | "CANCELLED";  // Pending in Cloud -> Paid when confirmed locally
+  paymentMethod: "CASH" | "CARD" | "OTHER";
+  posDeviceId?: ObjectId;
+  cashSessionId?: ObjectId;
   customer: {
     name?: string;
     table?: string;
