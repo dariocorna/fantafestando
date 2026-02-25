@@ -29,3 +29,64 @@ export async function createSumUpCheckout(amount: number, currency: Currency = "
         return { success: false, error: "Failed to initiate payment" };
     }
 }
+
+export async function resolveSumUpTransactionIdByCheckout(checkoutId: string, apiKey?: string) {
+    try {
+        const normalizedCheckoutId = checkoutId?.trim()
+        if (!normalizedCheckoutId) {
+            return { success: false, error: "Missing checkout id" }
+        }
+
+        const resolvedApiKey = resolveApiKey(apiKey)
+        if (!resolvedApiKey) {
+            return { success: false, error: "Missing SumUp API key configuration" }
+        }
+
+        const client = new SumUp({ apiKey: resolvedApiKey })
+        const checkout = await client.checkouts.get(normalizedCheckoutId)
+        const transactionId = checkout.transactions?.[0]?.id?.trim()
+
+        if (!transactionId) {
+            return { success: false, error: "No transaction id available for this checkout" }
+        }
+
+        return { success: true, transactionId }
+    } catch (error) {
+        console.error("SumUp Resolve Transaction Error:", error)
+        return { success: false, error: "Unable to resolve transaction from checkout" }
+    }
+}
+
+export async function refundSumUpTransaction(data: {
+    transactionId: string
+    apiKey?: string
+    amount?: number
+}) {
+    try {
+        const normalizedTransactionId = data.transactionId?.trim()
+        if (!normalizedTransactionId) {
+            return { success: false, error: "Missing transaction id" }
+        }
+
+        const resolvedApiKey = resolveApiKey(data.apiKey)
+        if (!resolvedApiKey) {
+            return { success: false, error: "Missing SumUp API key configuration" }
+        }
+
+        const client = new SumUp({ apiKey: resolvedApiKey })
+        const normalizedAmount = Number(data.amount)
+
+        if (Number.isFinite(normalizedAmount) && normalizedAmount > 0) {
+            await client.transactions.refund(normalizedTransactionId, {
+                amount: Number(normalizedAmount.toFixed(2))
+            })
+        } else {
+            await client.transactions.refund(normalizedTransactionId)
+        }
+
+        return { success: true }
+    } catch (error) {
+        console.error("SumUp Refund Error:", error)
+        return { success: false, error: "Failed to refund transaction" }
+    }
+}

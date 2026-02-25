@@ -30,10 +30,29 @@ function verifyWebhookSignature(rawBody: string, signatureHeader: string, secret
     return expectedCandidates.some(candidate => safeEquals(candidate, normalizedSignature));
 }
 
+function extractSumUpTransactionId(payload: Record<string, unknown>): string | undefined {
+    const direct = typeof payload.transaction_id === "string" ? payload.transaction_id : undefined
+    if (direct?.trim()) return direct.trim()
+
+    const transaction = payload.transaction
+    if (transaction && typeof transaction === "object") {
+        const nested = (transaction as { id?: unknown }).id
+        if (typeof nested === "string" && nested.trim()) return nested.trim()
+    }
+
+    const data = payload.data
+    if (data && typeof data === "object") {
+        const nested = (data as { transaction_id?: unknown }).transaction_id
+        if (typeof nested === "string" && nested.trim()) return nested.trim()
+    }
+
+    return undefined
+}
+
 export async function POST(req: NextRequest) {
     try {
         const rawBody = await req.text();
-        const payload = JSON.parse(rawBody);
+        const payload = JSON.parse(rawBody) as Record<string, unknown>;
         console.log("[SumUp Webhook] Ricevuto payload:", JSON.stringify(payload));
 
         const webhookSecret = process.env.SUMUP_WEBHOOK_SECRET;
@@ -57,8 +76,8 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        const eventType = payload.event_type;
-        const checkoutId = payload.id; // checkout id is often here or in payload.checkout_id
+        const eventType = typeof payload.event_type === "string" ? payload.event_type : ""
+        const checkoutId = typeof payload.id === "string" ? payload.id : ""
 
         if (eventType === "checkout.succeeded" && checkoutId) {
             await dbConnect();
@@ -110,7 +129,11 @@ export async function POST(req: NextRequest) {
             }
 
             // Aggiorna lo stato dell'ordine
+            const sumupPaymentId = extractSumUpTransactionId(payload)
             order.status = "PAID";
+            if (sumupPaymentId) {
+                order.set("sumupPaymentId", sumupPaymentId)
+            }
             try {
                 await order.save();
             } catch (saveError) {
