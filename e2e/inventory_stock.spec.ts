@@ -103,6 +103,25 @@ async function openPosAndSelectDevice(page: Page, posName: string) {
     }
 }
 
+async function openCashSessionIfRequired(page: Page, openingFloatAmount = "0") {
+    const openButton = page.getByRole("button", { name: /Apri Cassa/i })
+    if (!(await openButton.isVisible())) return
+
+    await openButton.click()
+    const openDialog = page.getByRole("dialog").filter({ hasText: /Apertura Cassa/i })
+    await expect(openDialog).toBeVisible()
+    await openDialog.locator("#opening-float-amount").fill(openingFloatAmount)
+    await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click()
+    await expect(openDialog).toBeHidden()
+}
+
+async function closeSuccessModalIfVisible(page: Page) {
+    const successModal = page.getByRole("dialog").filter({ hasText: /Ordine completato correttamente/i })
+    if (!(await successModal.isVisible())) return
+    await successModal.getByRole("button", { name: "OK", exact: true }).click()
+    await expect(successModal).toBeHidden()
+}
+
 test.describe("Magazzino e scorte base", () => {
     test.describe.configure({ mode: "serial" })
 
@@ -129,6 +148,7 @@ test.describe("Magazzino e scorte base", () => {
         await expect(page.getByText(productName)).toBeVisible()
 
         await openPosAndSelectDevice(page, posName)
+        await openCashSessionIfRequired(page)
 
         const productButton = page.locator("button").filter({ hasText: productName }).first()
         await expect(productButton).toContainText(/Scorte basse/i)
@@ -141,6 +161,7 @@ test.describe("Magazzino e scorte base", () => {
         await expect(checkoutDialog.getByText(/Stampa in corso/i)).toBeVisible()
         await expect(checkoutDialog).toBeHidden({ timeout: 10000 })
         await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible()
+        await closeSuccessModalIfVisible(page)
 
         await page.goto("/admin/catalog")
         const productRow = page.locator("tr").filter({ hasText: productName })
@@ -173,5 +194,6 @@ test.describe("Magazzino e scorte base", () => {
         await expect(checkoutDialog.getByText(/Stampa in corso/i)).toBeVisible()
         await expect(checkoutDialog).toBeHidden({ timeout: 10000 })
         await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible()
+        await closeSuccessModalIfVisible(page)
     })
 })
