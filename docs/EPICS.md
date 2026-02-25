@@ -200,11 +200,15 @@ La UI del POS deve riflettere le periferiche effettivamente associate al Punto C
 
 ---
 
-## ⬜ Epica: Deploy progetto su macchina virtuale
+## ✅ Epica: Deploy progetto su macchina virtuale
 
 - Pacchettizzazione e rilascio del gestionale su VM dedicata.
 - Configurazione servizi runtime (app, database, reverse proxy) e persistenza dati.
 - Procedure operative di backup/ripristino e aggiornamento.
+- Deploy attivo su domini DDNS pubblici:
+  - `https://osgfest.ddns.net` (Menu)
+  - `https://osgfest-backoffice.ddns.net` (Admin/POS)
+- HTTPS abilitato via Certbot + Apache reverse proxy.
 
 ---
 
