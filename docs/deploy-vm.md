@@ -1,6 +1,6 @@
-# Deploy OSGFest su VM (Bergamo)
+# Deploy OSGFest su VM
 
-Guida operativa per deploy produzione su VM `ssh bergamo` mantenendo Apache come edge reverse proxy TLS e stack applicativo in Docker Compose.
+Guida operativa per deploy produzione su VM mantenendo Apache come edge reverse proxy TLS e stack applicativo in Docker Compose.
 
 ## 1. Architettura
 
@@ -39,7 +39,7 @@ Domini previsti:
 Sul server:
 
 ```bash
-ssh bergamo
+ssh <utente>@<host-vm>
 cd /opt
 sudo git clone git@github.com:dariocorna/osgfest.git
 sudo chown -R $USER:$USER osgfest
