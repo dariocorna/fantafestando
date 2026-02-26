@@ -70,7 +70,7 @@ interface IPeripheralRef {
 interface IPosDevice {
     _id: string
     name: string
-    printerId?: string | { _id: string; name: string; ip: string }
+    printerId?: string | { _id: string; name: string; ip: string; port?: number; isVirtual?: boolean; emulatorSlot?: number }
     paymentTerminalId?: string | IPeripheralRef
     cashBoxId?: string | IPeripheralRef
 }
@@ -156,21 +156,19 @@ interface FeedbackModalState {
     message: string
 }
 
+interface PrintDispatchSummaryState {
+    attempted: number
+    succeeded: number
+    failed: number
+    allSuccessful: boolean
+}
+
 function getPeripheralRef(value: IPosDevice["paymentTerminalId"] | IPosDevice["cashBoxId"]) {
     if (!value || typeof value !== "object") return null
     return value
 }
 
-const MOCK_PRINT_STEPS: Array<{ progress: number, label: string, delayMs: number }> = [
-    { progress: 18, label: "Preparazione comanda...", delayMs: 220 },
-    { progress: 44, label: "Invio alla stampante...", delayMs: 320 },
-    { progress: 72, label: "Stampa in corso...", delayMs: 360 },
-    { progress: 100, label: "Stampa completata", delayMs: 260 }
-]
-
-const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 const DISCOUNT_TAB_ID = "__discounts__"
-
 export default function PosPage() {
     const [activeCategory, setActiveCategory] = useState<string | null>(null)
     const [cart, setCart] = useState<CartItem[]>([])
@@ -179,9 +177,6 @@ export default function PosPage() {
     const [activeEvent, setActiveEvent] = useState<IEvent | null>(null)
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
-    const [isPrintMockActive, setIsPrintMockActive] = useState(false)
-    const [printProgress, setPrintProgress] = useState(0)
-    const [printStatusLabel, setPrintStatusLabel] = useState("Preparazione comanda...")
     const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD">("CASH")
     const [posDevices, setPosDevices] = useState<IPosDevice[]>([])
     const [selectedPosDeviceId, setSelectedPosDeviceId] = useState<string | null>(null)
@@ -457,6 +452,11 @@ export default function PosPage() {
         })
     }
 
+    const buildPrintFailureMessage = (summary?: PrintDispatchSummaryState) => {
+        if (!summary || summary.failed === 0) return null
+        return `Pagamento registrato, ma la stampa ha errori: ${summary.succeeded}/${summary.attempted} job inviati, ${summary.failed} falliti. Controlla il Monitor Stampa.`
+    }
+
     const handleCodeDialogOpenChange = (open: boolean) => {
         setIsCodeDialogOpen(open)
         if (open) {
@@ -569,28 +569,11 @@ export default function PosPage() {
     }
 
     const handleCheckoutDialogOpenChange = (open: boolean) => {
-        if (isProcessing || isPrintMockActive) return
+        if (isProcessing) return
         setIsCheckoutOpen(open)
         if (!open) {
             setStockShortages([])
         }
-    }
-
-    const runMockPrintFlow = async () => {
-        setIsPrintMockActive(true)
-        setPrintProgress(0)
-        setPrintStatusLabel("Preparazione comanda...")
-
-        for (const step of MOCK_PRINT_STEPS) {
-            await wait(step.delayMs)
-            setPrintProgress(step.progress)
-            setPrintStatusLabel(step.label)
-        }
-
-        await wait(220)
-        setIsPrintMockActive(false)
-        setPrintProgress(0)
-        setPrintStatusLabel("Preparazione comanda...")
     }
 
     const clearTableSelection = () => {
@@ -703,17 +686,15 @@ export default function PosPage() {
             })
 
             if (completionResult.success) {
-                await runMockPrintFlow()
                 setRecentPendingOrders((prev) => prev.filter((order) => order.id !== completedPendingOrderId))
                 resetCheckoutForm()
                 resetPendingOrder()
                 setIsCheckoutOpen(false)
                 setStockShortages([])
-                showFeedbackModal(
-                    "Ordine completato correttamente",
-                    "success",
-                    "Pagamento registrato"
-                )
+                const printFailureMessage = buildPrintFailureMessage(completionResult.printSummary)
+                if (printFailureMessage) {
+                    showFeedbackModal(printFailureMessage, "error", "Errore stampa")
+                }
             } else {
                 if (completionResult.stockShortages?.length) {
                     setStockShortages(completionResult.stockShortages)
@@ -752,10 +733,13 @@ export default function PosPage() {
 
         const result = await createOrder(orderData)
         if (result.success) {
-            await runMockPrintFlow()
             resetCheckoutForm()
             setIsCheckoutOpen(false)
             setStockShortages([])
+            const printFailureMessage = buildPrintFailureMessage(result.printSummary)
+            if (printFailureMessage) {
+                showFeedbackModal(printFailureMessage, "error", "Errore stampa")
+            }
         } else {
             if (result.stockShortages?.length) {
                 setStockShortages(result.stockShortages)
@@ -933,7 +917,7 @@ export default function PosPage() {
                                     variant="outline"
                                     className="border-emerald-300 bg-white font-black text-emerald-700"
                                     onClick={() => void handleOpenCloseCashDialog()}
-                                    disabled={isCashSessionLoading || isCashSessionActionLoading || isCloseCashSessionPreviewLoading || isProcessing || isPrintMockActive}
+                                    disabled={isCashSessionLoading || isCashSessionActionLoading || isCloseCashSessionPreviewLoading || isProcessing}
                                 >
                                     <Wallet size={14} />
                                     Chiudi Cassa
@@ -1053,7 +1037,7 @@ export default function PosPage() {
 
                     <button
                         onClick={() => setIsCheckoutOpen(true)}
-                        disabled={productCartItems.length === 0 || !selectedPosDeviceId || !cashSession || isProcessing || isPrintMockActive || isCashSessionLoading}
+                        disabled={productCartItems.length === 0 || !selectedPosDeviceId || !cashSession || isProcessing || isCashSessionLoading}
                         className="w-full py-8 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-3xl font-black text-2xl shadow-xl shadow-blue-200 dark:shadow-none active:scale-[0.98] transition-all flex items-center justify-center gap-3"
                     >
                         <CheckCircle2 size={32} />
@@ -1082,26 +1066,7 @@ export default function PosPage() {
                     </div>
 
                     <div className="p-8 space-y-6">
-                        {isPrintMockActive ? (
-                            <div className="space-y-5">
-                                <div className="rounded-2xl border border-blue-200 bg-blue-50 p-6">
-                                    <p className="text-xs font-black uppercase tracking-widest text-blue-600">Fase Stampa (Mock)</p>
-                                    <p className="mt-1 text-2xl font-black text-blue-700">Stampa in corso...</p>
-                                    <p className="mt-2 text-sm font-semibold text-blue-600">{printStatusLabel}</p>
-                                    <div className="mt-5 h-3 w-full overflow-hidden rounded-full bg-blue-100">
-                                        <div
-                                            className="h-full rounded-full bg-blue-600 transition-all duration-300 ease-out"
-                                            style={{ width: `${printProgress}%` }}
-                                        />
-                                    </div>
-                                    <p className="mt-2 text-right text-sm font-black text-blue-700">{printProgress}%</p>
-                                </div>
-                                <p className="text-center text-sm font-semibold text-slate-500">
-                                    Simulazione stampa attiva: integrazione stampante reale in arrivo.
-                                </p>
-                            </div>
-                        ) : (
-                            <>
+                        <>
                                 {activeEvent?.settings?.askName && (
                                     <div className="space-y-3">
                                         <Label htmlFor="checkout-customer-name" className="text-lg font-bold">Nome Cliente</Label>
@@ -1190,7 +1155,7 @@ export default function PosPage() {
                                         variant="outline"
                                         className="flex-1 py-8 text-xl font-bold rounded-2xl"
                                         onClick={() => handleCheckoutDialogOpenChange(false)}
-                                        disabled={isProcessing || isPrintMockActive}
+                                        disabled={isProcessing}
                                     >
                                         ANNULLA
                                     </Button>
@@ -1227,7 +1192,6 @@ export default function PosPage() {
                                     </div>
                                 ) : null}
                             </>
-                        )}
                     </div>
                 </DialogContent>
             </Dialog>

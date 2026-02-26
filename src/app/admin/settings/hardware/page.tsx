@@ -7,7 +7,16 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Printer as PrinterIcon, ArrowLeft, Smartphone, Box } from "lucide-react";
 import { DeleteForm } from "@/components/delete-form";
-import { deletePrinterAction, createPrinterAction, updatePrinterAction, createPeripheralAction, updatePeripheralAction, deletePeripheralAction } from "../actions";
+import {
+    deletePrinterAction,
+    createPrinterAction,
+    updatePrinterAction,
+    createPeripheralAction,
+    updatePeripheralAction,
+    deletePeripheralAction,
+    provisionVirtualPrintersAction,
+    createManualPrintJobAction
+} from "../actions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -16,10 +25,21 @@ import { HardwareFormWrapper } from "@/components/hardware-form-wrapper";
 import { EditPrinterDialog } from "@/components/edit-printer-dialog";
 import { PeripheralDialog } from "@/components/peripheral-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PrintJobsMonitor } from "@/components/print-jobs-monitor";
 
 export default async function HardwarePage() {
     const eventId = await getAdminContextEventId();
     if (!eventId) return <div>Seleziona una festa prima.</div>;
+
+    async function handleProvisionVirtualPrinters(formData: FormData) {
+        "use server";
+        await provisionVirtualPrintersAction(formData);
+    }
+
+    async function handleCreateManualPrintJob(formData: FormData) {
+        "use server";
+        await createManualPrintJobAction(formData);
+    }
 
     await dbConnect();
     const printers = await Printer.find({ eventId }).sort({ name: 1 }).lean();
@@ -40,39 +60,58 @@ export default async function HardwarePage() {
             </div>
 
             <Tabs defaultValue="printers" className="w-full">
-                <TabsList className="grid w-full grid-cols-2 max-w-[400px]">
+                <TabsList className="grid w-full grid-cols-3 max-w-[560px]">
                     <TabsTrigger value="printers">Stampanti</TabsTrigger>
                     <TabsTrigger value="peripherals">Periferiche</TabsTrigger>
+                    <TabsTrigger value="monitor">Monitor Stampa</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="printers" className="space-y-4 pt-4">
                     <div className="flex justify-between items-center">
                         <h2 className="text-xl font-semibold">Stampanti Termiche</h2>
-                        <HardwareDialog title="Aggiungi Nuova Stampante" buttonText="Nuova Stampante">
-                            <HardwareFormWrapper action={createPrinterAction}>
+                        <div className="flex items-center gap-2">
+                            <form action={handleProvisionVirtualPrinters}>
                                 <input type="hidden" name="eventId" value={eventId} />
-                                <div className="space-y-2">
-                                    <Label htmlFor="name">Nome Stampante</Label>
-                                    <Input id="name" name="name" placeholder="Es: Cucina, Bar..." required />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="ip">Indirizzo IP</Label>
-                                    <Input id="ip" name="ip" placeholder="192.168.1.100" required />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="printer-type">Tipo Stampante</Label>
-                                    <Select name="type" defaultValue="KITCHEN">
-                                        <SelectTrigger id="printer-type">
-                                            <SelectValue placeholder="Seleziona tipo" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="CASHIER">Cassa (Scontrino Cliente)</SelectItem>
-                                            <SelectItem value="KITCHEN">Reparto (Comanda Piatto)</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </HardwareFormWrapper>
-                        </HardwareDialog>
+                                <Button type="submit" variant="outline">Provisiona 10 virtuali</Button>
+                            </form>
+                            <HardwareDialog title="Aggiungi Nuova Stampante" buttonText="Nuova Stampante">
+                                <HardwareFormWrapper action={createPrinterAction}>
+                                    <input type="hidden" name="eventId" value={eventId} />
+                                    <div className="space-y-2">
+                                        <Label htmlFor="name">Nome Stampante</Label>
+                                        <Input id="name" name="name" placeholder="Es: Cucina, Bar..." required />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="ip">Indirizzo IP</Label>
+                                        <Input id="ip" name="ip" placeholder="192.168.1.100 o printer-emulator" required />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="port">Porta TCP</Label>
+                                        <Input id="port" name="port" type="number" defaultValue={9100} min={1} max={65535} required />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="isVirtual">Stampante virtuale</Label>
+                                        <input id="isVirtual" name="isVirtual" type="checkbox" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="emulatorSlot">Slot emulatore (1-10, se virtuale)</Label>
+                                        <Input id="emulatorSlot" name="emulatorSlot" type="number" min={1} max={10} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="printer-type">Tipo Stampante</Label>
+                                        <Select name="type" defaultValue="KITCHEN">
+                                            <SelectTrigger id="printer-type">
+                                                <SelectValue placeholder="Seleziona tipo" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="CASHIER">Cassa (Scontrino Cliente)</SelectItem>
+                                                <SelectItem value="KITCHEN">Reparto (Comanda Piatto)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </HardwareFormWrapper>
+                            </HardwareDialog>
+                        </div>
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -86,12 +125,24 @@ export default async function HardwarePage() {
                                 </CardHeader>
                                 <CardContent>
                                     <div className="text-sm text-muted-foreground mb-4">
-                                        <p>IP: <span className="font-mono font-medium text-foreground">{printer.ip}</span></p>
+                                        <p>Destinazione: <span className="font-mono font-medium text-foreground">{printer.ip}:{printer.port || 9100}</span></p>
                                         <p>Tipo: <span className="font-medium text-foreground">{printer.type === 'CASHIER' ? 'Cassa' : 'Reparto'}</span></p>
+                                        <p>Modalità: <span className="font-medium text-foreground">{printer.isVirtual ? "Virtuale" : "Reale"}</span></p>
+                                        {printer.isVirtual && (
+                                            <p>Slot: <span className="font-medium text-foreground">{printer.emulatorSlot || "-"}</span></p>
+                                        )}
                                     </div>
                                     <div className="flex justify-end gap-2 mt-4">
                                         <EditPrinterDialog
-                                            printer={{ id: String(printer._id), name: printer.name, ip: printer.ip, type: printer.type }}
+                                            printer={{
+                                                id: String(printer._id),
+                                                name: printer.name,
+                                                ip: printer.ip,
+                                                port: printer.port || 9100,
+                                                type: printer.type,
+                                                isVirtual: Boolean(printer.isVirtual),
+                                                emulatorSlot: printer.emulatorSlot
+                                            }}
                                             eventId={eventId}
                                             updateAction={updatePrinterAction}
                                         />
@@ -150,6 +201,27 @@ export default async function HardwarePage() {
                             </Card>
                         ))}
                     </div>
+                </TabsContent>
+
+                <TabsContent value="monitor" className="space-y-4 pt-4">
+                    <div className="flex justify-end">
+                        <form action={handleCreateManualPrintJob}>
+                            <input type="hidden" name="eventId" value={eventId} />
+                            {printers[0]?._id ? (
+                                <input type="hidden" name="printerId" value={String(printers[0]._id)} />
+                            ) : null}
+                            <Button type="submit" variant="outline">Genera Ricevuta Demo</Button>
+                        </form>
+                    </div>
+                    <PrintJobsMonitor
+                        eventId={eventId}
+                        printers={printers.map((printer: IPrinter) => ({
+                            id: String(printer._id),
+                            name: printer.name,
+                            ip: printer.ip,
+                            port: printer.port || 9100
+                        }))}
+                    />
                 </TabsContent>
             </Tabs>
         </div>

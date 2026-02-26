@@ -24,7 +24,7 @@ export function CreateCategoryDialog({
     createAction
 }: {
     eventId: string,
-    printers: { id: string, name: string, ip: string }[],
+    printers: { id: string, name: string, ip: string, port?: number }[],
     createAction: (formData: FormData) => Promise<void>
 }) {
     const [open, setOpen] = useState(false);
@@ -84,7 +84,9 @@ export function CreateCategoryDialog({
                             <select id="printerId" name="printerId" aria-label="Stampante Reparto" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background">
                                 <option value="">Nessuna (Copia singola in cassa)</option>
                                 {printers.map((p) => (
-                                    <option key={p.id} value={p.id}>{p.name} ({p.ip})</option>
+                                    <option key={p.id} value={p.id}>
+                                        {p.name} ({p.port && p.port !== 9100 ? `${p.ip}:${p.port}` : p.ip})
+                                    </option>
                                 ))}
                             </select>
                         </div>

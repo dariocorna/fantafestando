@@ -24,11 +24,12 @@ export function EditPrinterDialog({
     eventId,
     updateAction
 }: {
-    printer: { id: string, name: string, ip: string, type: "CASHIER" | "KITCHEN" },
+    printer: { id: string, name: string, ip: string, port?: number, type: "CASHIER" | "KITCHEN", isVirtual?: boolean, emulatorSlot?: number },
     eventId?: string,
     updateAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | undefined>
 }) {
     const [open, setOpen] = useState(false);
+    const [isVirtual, setIsVirtual] = useState(Boolean(printer.isVirtual));
     const router = useRouter();
 
     async function handleSubmit(formData: FormData) {
@@ -64,6 +65,44 @@ export function EditPrinterDialog({
                             <Label htmlFor="printer-edit-ip">Indirizzo IP</Label>
                             <Input id="printer-edit-ip" name="ip" defaultValue={printer.ip} required />
                         </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="printer-edit-port">Porta TCP</Label>
+                            <Input
+                                id="printer-edit-port"
+                                name="port"
+                                type="number"
+                                defaultValue={printer.port || 9100}
+                                min={1}
+                                max={65535}
+                                required
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="printer-edit-virtual" className="cursor-pointer">Stampante virtuale</Label>
+                            <input
+                                id="printer-edit-virtual"
+                                name="isVirtual"
+                                type="checkbox"
+                                defaultChecked={isVirtual}
+                                onChange={(event) => setIsVirtual(event.currentTarget.checked)}
+                            />
+                        </div>
+                        {isVirtual ? (
+                            <div className="space-y-2">
+                                <Label htmlFor="printer-edit-emulator-slot">Slot emulatore (1-10)</Label>
+                                <Input
+                                    id="printer-edit-emulator-slot"
+                                    name="emulatorSlot"
+                                    type="number"
+                                    defaultValue={printer.emulatorSlot || 1}
+                                    min={1}
+                                    max={10}
+                                    required={isVirtual}
+                                />
+                            </div>
+                        ) : (
+                            <input type="hidden" name="emulatorSlot" value="" />
+                        )}
                         <div className="space-y-2">
                             <Label htmlFor="printer-edit-type">Tipo Stampante</Label>
                             <Select name="type" defaultValue={printer.type}>

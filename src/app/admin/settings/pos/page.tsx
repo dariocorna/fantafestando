@@ -73,7 +73,7 @@ export default async function PosDevicesPage() {
                                         <SelectContent>
                                             {cashierPrinters.map((p: IPrinter) => (
                                                 <SelectItem key={String(p._id)} value={String(p._id)}>
-                                                    {p.name} ({p.ip})
+                                                    {p.name} ({p.port && p.port !== 9100 ? `${p.ip}:${p.port}` : p.ip})
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>

@@ -12,6 +12,10 @@
     "test:e2e": "playwright test --project=chromium",
     "test:e2e:dedicated": "PLAYWRIGHT_PORT=3400 CI=true playwright test --project=chromium",
     "test:ci": "npm run lint && npm run test:unit && CI=true npm run test:e2e",
+    "printer:emulator": "node scripts/printer-emulator.mjs",
+    "printer:up": "docker compose up -d printer-emulator",
+    "printer:down": "docker compose stop printer-emulator",
+    "printer:logs": "docker compose logs -f printer-emulator",
     "db:up": "docker compose up -d mongodb",
     "db:down": "docker compose stop mongodb"
   },
