@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test"
+import { ensureAdminAuthenticated } from "./utils/auth"
 
 async function createAndActivateEvent(page: Page, eventName: string) {
-    await page.goto("/admin/settings/events")
+    await ensureAdminAuthenticated(page, "/admin/settings/events")
 
     await page.click("#new-event-btn")
     const dialog = page.getByRole("dialog")
