@@ -440,6 +440,9 @@ export async function updatePrinterAction(formData: FormData) {
 }
 
 export async function provisionVirtualPrintersAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const submittedEventId = formData.get("eventId") as string | null;
     const contextEventId = await requireContextEventId();
     const scopedEvent = resolveEventScope(contextEventId, submittedEventId);
@@ -504,6 +507,9 @@ export async function provisionVirtualPrintersAction(formData: FormData) {
 }
 
 export async function createManualPrintJobAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const submittedEventId = formData.get("eventId") as string | null;
     const submittedPrinterId = (formData.get("printerId") as string | null)?.trim() || "";
 
