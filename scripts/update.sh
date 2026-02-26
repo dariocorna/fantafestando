@@ -18,5 +18,8 @@ fi
 echo "[update] Updating services..."
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d ${BUILD_ARG} --remove-orphans
 
+echo "[update] Applying database migrations..."
+"${ROOT_DIR}/scripts/migrate-order-pickup-index.sh"
+
 echo "[update] Current service status:"
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
