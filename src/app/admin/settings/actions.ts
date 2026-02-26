@@ -7,6 +7,7 @@ import Event from "@/models/Event";
 import Category from "@/models/Category";
 import Product from "@/models/Product";
 import Printer from "@/models/Printer";
+import PrintJob from "@/models/PrintJob";
 import PosDevice from "@/models/PosDevice";
 import Peripheral from "@/models/Peripheral";
 import { revalidatePath } from "next/cache";
@@ -22,6 +23,11 @@ import {
     toLegacyQuickDiscountSettings,
     validateQuickDiscountPresets
 } from "@/lib/quick-discount-presets";
+import {
+    DEFAULT_PRINTER_PORT,
+    MAX_VIRTUAL_PRINTER_SLOTS,
+    normalizePrinterConfig
+} from "@/lib/printer-config";
 
 function revalidateHardwareViews() {
     revalidatePath("/admin/settings/hardware");
@@ -222,6 +228,9 @@ export async function cloneEventAction(formData: FormData) {
             eventId: newEvent._id,
             name: printer.name,
             ip: printer.ip,
+            port: typeof printer.port === "number" ? printer.port : 9100,
+            isVirtual: Boolean(printer.isVirtual),
+            emulatorSlot: typeof printer.emulatorSlot === "number" ? printer.emulatorSlot : undefined,
             type: printer.type
         });
         printerMap.set(String(printer._id), newPrinter._id);
@@ -299,17 +308,36 @@ export async function cloneEventAction(formData: FormData) {
 export async function createPrinterAction(formData: FormData) {
     const submittedEventId = formData.get("eventId") as string | null;
     const name = formData.get("name") as string;
-    const ip = formData.get("ip") as string;
+    const ip = formData.get("ip");
+    const port = formData.get("port");
+    const isVirtual = formData.get("isVirtual") === "on";
+    const emulatorSlot = formData.get("emulatorSlot");
     const type = formData.get("type") as "CASHIER" | "KITCHEN";
 
-    if (!name || !ip || !type) return { error: "Dati mancanti" };
+    if (!name || !type) return { error: "Dati mancanti" };
+
+    const normalizedConfig = normalizePrinterConfig({
+        ip,
+        port,
+        isVirtual,
+        emulatorSlot
+    });
+    if (!normalizedConfig.success) return { error: normalizedConfig.error };
 
     const contextEventId = await requireContextEventId();
     const scopedEvent = resolveEventScope(contextEventId, submittedEventId);
     if ("error" in scopedEvent) return { error: scopedEvent.error };
 
     await dbConnect();
-    await Printer.create({ eventId: scopedEvent.eventId, name, ip, type });
+    await Printer.create({
+        eventId: scopedEvent.eventId,
+        name: name.trim(),
+        ip: normalizedConfig.data.ip,
+        port: normalizedConfig.data.port,
+        isVirtual: normalizedConfig.data.isVirtual,
+        emulatorSlot: normalizedConfig.data.emulatorSlot,
+        type
+    });
 
     revalidateHardwareViews();
     return { success: true };
@@ -342,10 +370,21 @@ export async function updatePrinterAction(formData: FormData) {
     const id = formData.get("id") as string;
     const submittedEventId = formData.get("eventId") as string | null;
     const name = formData.get("name") as string;
-    const ip = formData.get("ip") as string;
+    const ip = formData.get("ip");
+    const port = formData.get("port");
+    const isVirtual = formData.get("isVirtual") === "on";
+    const emulatorSlot = formData.get("emulatorSlot");
     const type = formData.get("type") as "CASHIER" | "KITCHEN";
 
-    if (!id || !name || !ip || !type) return { error: "Dati mancanti" };
+    if (!id || !name || !type) return { error: "Dati mancanti" };
+
+    const normalizedConfig = normalizePrinterConfig({
+        ip,
+        port,
+        isVirtual,
+        emulatorSlot
+    });
+    if (!normalizedConfig.success) return { error: normalizedConfig.error };
 
     const contextEventId = await requireContextEventId();
     const scopedEvent = resolveEventScope(contextEventId, submittedEventId);
@@ -354,7 +393,14 @@ export async function updatePrinterAction(formData: FormData) {
     await dbConnect();
     const updatedPrinter = await Printer.findOneAndUpdate(
         { _id: id, eventId: scopedEvent.eventId },
-        { name, ip, type },
+        {
+            name: name.trim(),
+            ip: normalizedConfig.data.ip,
+            port: normalizedConfig.data.port,
+            isVirtual: normalizedConfig.data.isVirtual,
+            emulatorSlot: normalizedConfig.data.emulatorSlot,
+            type
+        },
         { new: true }
     ).select("_id").lean();
 
@@ -364,6 +410,144 @@ export async function updatePrinterAction(formData: FormData) {
 
     revalidateHardwareViews();
     return { success: true };
+}
+
+export async function provisionVirtualPrintersAction(formData: FormData) {
+    const submittedEventId = formData.get("eventId") as string | null;
+    const contextEventId = await requireContextEventId();
+    const scopedEvent = resolveEventScope(contextEventId, submittedEventId);
+    if ("error" in scopedEvent) return { error: scopedEvent.error };
+
+    await dbConnect();
+
+    const createdOrUpdated: string[] = [];
+    const existingPrinters = await Printer.find({
+        eventId: scopedEvent.eventId,
+        isVirtual: true,
+        emulatorSlot: { $gte: 1, $lte: MAX_VIRTUAL_PRINTER_SLOTS }
+    }).select("_id emulatorSlot type").lean() as Array<{
+        _id: unknown;
+        emulatorSlot?: number;
+        type?: "CASHIER" | "KITCHEN";
+    }>;
+
+    const bySlot = new Map<number, { _id: unknown; type?: "CASHIER" | "KITCHEN" }>();
+    existingPrinters.forEach((printer) => {
+        if (typeof printer.emulatorSlot === "number") {
+            bySlot.set(printer.emulatorSlot, { _id: printer._id, type: printer.type });
+        }
+    });
+
+    for (let slot = 1; slot <= MAX_VIRTUAL_PRINTER_SLOTS; slot += 1) {
+        const port = 19099 + slot;
+        const existing = bySlot.get(slot);
+
+        if (existing) {
+            await Printer.updateOne(
+                { _id: existing._id, eventId: scopedEvent.eventId },
+                {
+                    $set: {
+                        ip: "printer-emulator",
+                        port,
+                        isVirtual: true,
+                        emulatorSlot: slot
+                    }
+                }
+            );
+        } else {
+            await Printer.create({
+                eventId: scopedEvent.eventId,
+                name: `Virtual Printer ${String(slot).padStart(2, "0")}`,
+                ip: "printer-emulator",
+                port,
+                isVirtual: true,
+                emulatorSlot: slot,
+                type: slot === 1 ? "CASHIER" : "KITCHEN"
+            });
+        }
+
+        createdOrUpdated.push(`S${slot}`);
+    }
+
+    revalidateHardwareViews();
+    return {
+        success: true,
+        name: `${createdOrUpdated.length} stampanti virtuali configurate`
+    };
+}
+
+export async function createManualPrintJobAction(formData: FormData) {
+    const submittedEventId = formData.get("eventId") as string | null;
+    const submittedPrinterId = (formData.get("printerId") as string | null)?.trim() || "";
+
+    const contextEventId = await requireContextEventId();
+    const scopedEvent = resolveEventScope(contextEventId, submittedEventId);
+    if ("error" in scopedEvent) return { error: scopedEvent.error };
+
+    await dbConnect();
+
+    let printer = null as ({
+        _id: unknown;
+        ip?: string;
+        port?: number;
+        isVirtual?: boolean;
+    } | null);
+
+    if (submittedPrinterId) {
+        printer = await Printer.findOne({ _id: submittedPrinterId, eventId: scopedEvent.eventId })
+            .select("_id ip port isVirtual")
+            .lean() as ({
+                _id: unknown;
+                ip?: string;
+                port?: number;
+                isVirtual?: boolean;
+            } | null);
+    }
+
+    if (!printer) {
+        printer = await Printer.findOne({ eventId: scopedEvent.eventId })
+            .sort({ createdAt: 1 })
+            .select("_id ip port isVirtual")
+            .lean() as ({
+                _id: unknown;
+                ip?: string;
+                port?: number;
+                isVirtual?: boolean;
+            } | null);
+    }
+
+    const destinationHost = printer?.ip || "demo-printer";
+    const destinationPort = printer?.port || DEFAULT_PRINTER_PORT;
+
+    await PrintJob.create({
+        eventId: scopedEvent.eventId,
+        printerId: printer?._id || undefined,
+        source: "MANUAL_TEST",
+        printType: "MANUAL_TEST",
+        status: "SENT",
+        destinationHost,
+        destinationPort,
+        isVirtual: Boolean(printer?.isVirtual),
+        copies: 1,
+        document: {
+            kind: "MANUAL_TEST",
+            title: "Ricevuta Demo",
+            shortCode: `D-${Date.now().toString().slice(-5)}`,
+            customerName: "Cliente Demo",
+            tableNumber: "12",
+            items: [
+                { name: "Panino Salsiccia", quantity: 2 },
+                { name: "Birra Media", quantity: 1 }
+            ],
+            totals: {
+                totale: "18.00 EUR"
+            },
+            createdAt: new Date().toISOString()
+        }
+    });
+
+    revalidateHardwareViews();
+    return { success: true, name: "Job demo creato" };
 }
 
 export async function createPosDeviceAction(formData: FormData) {

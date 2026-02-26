@@ -26,7 +26,7 @@ export function EditCategoryDialog({
 }: {
     category: { id: string, name: string, uiColor: string, printerId?: string },
     eventId?: string,
-    printers: { id: string, name: string, ip: string }[],
+    printers: { id: string, name: string, ip: string, port?: number }[],
     updateAction: (formData: FormData) => Promise<void>
 }) {
     const [open, setOpen] = useState(false);
@@ -95,7 +95,9 @@ export function EditCategoryDialog({
                             >
                                 <option value="">Nessuna (Copia singola in cassa)</option>
                                 {printers.map(p => (
-                                    <option key={p.id} value={p.id}>{p.name} ({p.ip})</option>
+                                    <option key={p.id} value={p.id}>
+                                        {p.name} ({p.port && p.port !== 9100 ? `${p.ip}:${p.port}` : p.ip})
+                                    </option>
                                 ))}
                             </select>
                         </div>

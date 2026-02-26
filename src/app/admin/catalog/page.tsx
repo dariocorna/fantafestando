@@ -247,7 +247,12 @@ export default async function AdminCatalog() {
                     <h2 className="text-2xl font-bold">Categorie</h2>
                     <CreateCategoryDialog
                         eventId={currentEventId}
-                        printers={printers.filter((p: IPrinter) => p.type === 'KITCHEN').map((p: IPrinter) => ({ id: String(p._id), name: p.name, ip: p.ip }))}
+                        printers={printers.filter((p: IPrinter) => p.type === 'KITCHEN').map((p: IPrinter) => ({
+                            id: String(p._id),
+                            name: p.name,
+                            ip: p.ip,
+                            port: p.port || 9100
+                        }))}
                         createAction={createCategory}
                     />
                 </div>
@@ -280,7 +285,12 @@ export default async function AdminCatalog() {
                                             printerId: getReferencedId(cat.printerId)
                                         }}
                                         eventId={currentEventId}
-                                        printers={printers.filter((p: IPrinter) => p.type === 'KITCHEN').map((p: IPrinter) => ({ id: String(p._id), name: p.name, ip: p.ip }))}
+                                        printers={printers.filter((p: IPrinter) => p.type === 'KITCHEN').map((p: IPrinter) => ({
+                                            id: String(p._id),
+                                            name: p.name,
+                                            ip: p.ip,
+                                            port: p.port || 9100
+                                        }))}
                                         updateAction={updateCategory}
                                     />
                                     <DeleteForm

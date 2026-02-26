@@ -12,5 +12,22 @@ services:
     volumes:
       - mongodb_data:/data/db
 
+  printer-emulator:
+    image: node:20-alpine
+    container_name: osgfest_printer_emulator
+    restart: unless-stopped
+    working_dir: /app
+    command: ["node", "scripts/printer-emulator.mjs"]
+    environment:
+      - PRINTER_EMULATOR_START_PORT=19100
+      - PRINTER_EMULATOR_COUNT=10
+      - PRINTER_EMULATOR_OUTPUT_DIR=/data/printer-emulator
+    volumes:
+      - ./:/app:ro
+      - printer_emulator_data:/data/printer-emulator
+    ports:
+      - "19100-19109:19100-19109"
+
 volumes:
   mongodb_data:
+  printer_emulator_data:

@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
 
         // 4. Fetch POS Devices for this event
         const posDevices = await PosDevice.find({ eventId: event._id })
-            .populate({ path: "printerId", select: "name ip" })
+            .populate({ path: "printerId", select: "name ip port isVirtual emulatorSlot" })
             .populate({ path: "paymentTerminalId", select: "name type" })
             .populate({ path: "cashBoxId", select: "name type" })
             .lean();
@@ -70,7 +70,10 @@ export async function GET(request: NextRequest) {
                 ? {
                     _id: String((device.printerId as { _id: unknown })._id),
                     name: (device.printerId as { name?: string }).name || "",
-                    ip: (device.printerId as { ip?: string }).ip || ""
+                    ip: (device.printerId as { ip?: string }).ip || "",
+                    port: (device.printerId as { port?: number }).port || 9100,
+                    isVirtual: Boolean((device.printerId as { isVirtual?: boolean }).isVirtual),
+                    emulatorSlot: (device.printerId as { emulatorSlot?: number }).emulatorSlot
                 }
                 : (device.printerId ? String(device.printerId) : undefined),
             paymentTerminalId: device.paymentTerminalId && typeof device.paymentTerminalId === "object"
