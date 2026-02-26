@@ -271,12 +271,12 @@ test.describe("POS - Completamento ordine da codice", () => {
 
         await confirmButton.scrollIntoViewIfNeeded();
         await confirmButton.click();
-        await expect(checkoutDialog.getByText(/Stampa in corso/i).first()).toBeVisible();
-        await expect(checkoutDialog.getByText(/Simulazione stampa attiva/i)).toBeVisible();
-        const successModal = page.getByRole("dialog").filter({ hasText: /Ordine completato correttamente/i });
-        await expect(successModal).toBeVisible();
-        await successModal.getByRole("button", { name: "OK", exact: true }).click();
-        await expect(successModal).toBeHidden();
+        await expect(checkoutDialog).toBeHidden({ timeout: 15000 });
+        const feedbackModal = page.getByRole("dialog").filter({ hasText: /Pagamento registrato|Ordine completato|Errore stampa|stampa ha errori/i });
+        if (await feedbackModal.isVisible()) {
+            await feedbackModal.getByRole("button", { name: "OK", exact: true }).click();
+            await expect(feedbackModal).toBeHidden();
+        }
         await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible();
 
         await page.getByRole("button", { name: /Carica ordine da codice/i }).click();

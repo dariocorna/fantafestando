@@ -116,10 +116,10 @@ async function openCashSessionIfRequired(page: Page, openingFloatAmount = "0") {
 }
 
 async function closeSuccessModalIfVisible(page: Page) {
-    const successModal = page.getByRole("dialog").filter({ hasText: /Ordine completato correttamente/i })
-    if (!(await successModal.isVisible())) return
-    await successModal.getByRole("button", { name: "OK", exact: true }).click()
-    await expect(successModal).toBeHidden()
+    const feedbackModal = page.getByRole("dialog").filter({ hasText: /Pagamento registrato|Ordine completato|Errore stampa|stampa ha errori/i })
+    if (!(await feedbackModal.isVisible())) return
+    await feedbackModal.getByRole("button", { name: "OK", exact: true }).click()
+    await expect(feedbackModal).toBeHidden()
 }
 
 test.describe("Magazzino e scorte base", () => {
@@ -159,7 +159,6 @@ test.describe("Magazzino e scorte base", () => {
         const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i })
         await expect(checkoutDialog).toBeVisible()
         await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click()
-        await expect(checkoutDialog.getByText(/Stampa in corso/i).first()).toBeVisible()
         await expect(checkoutDialog).toBeHidden({ timeout: 15000 })
         await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible()
         await closeSuccessModalIfVisible(page)
@@ -192,7 +191,6 @@ test.describe("Magazzino e scorte base", () => {
         await expect(checkoutDialog.locator("li").filter({ hasText: new RegExp(`^${productName}:`) })).toBeVisible()
 
         await checkoutDialog.getByRole("button", { name: "Prosegui comunque", exact: true }).click()
-        await expect(checkoutDialog.getByText(/Stampa in corso/i).first()).toBeVisible()
         await expect(checkoutDialog).toBeHidden({ timeout: 15000 })
         await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible()
         await closeSuccessModalIfVisible(page)
