@@ -37,6 +37,8 @@ npm install
 ```bash
 MONGODB_URI=mongodb://root:password@localhost:27017/osgfest?authSource=admin
 AUTH_SECRET=replace-with-a-long-random-secret
+APP_VERSION=0.1.0
+APP_BUILD=
 
 # Opzionali / in base alla funzionalita'
 SUMUP_API_KEY=
@@ -111,4 +113,5 @@ CI=true npx playwright test --project=chromium
 ## Note
 
 - Le integrazioni SumUp e webhook richiedono la configurazione delle relative variabili ambiente.
+- In Admin la versione mostrata usa `APP_VERSION` (fallback: `package.json`), con suffisso opzionale `APP_BUILD`.
 - Il README descrive lo stato corrente del repository `master`.
