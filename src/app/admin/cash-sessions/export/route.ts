@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import dbConnect from "@/lib/mongoose"
+import { adminUnauthorizedJson, ensureAdminSession } from "@/lib/authz"
 import { getAdminContextEvent } from "@/lib/events"
 import type { IEvent } from "@/models/Event"
 import CashSession from "@/models/CashSession"
@@ -94,6 +95,11 @@ function normalizeAmount(value: number | null | undefined): number {
 
 export async function GET(request: NextRequest) {
     try {
+        const sessionCheck = await ensureAdminSession()
+        if (!sessionCheck.ok) {
+            return adminUnauthorizedJson(sessionCheck)
+        }
+
         const format = request.nextUrl.searchParams.get("format")?.trim().toLowerCase() || "csv"
         const sessionId = request.nextUrl.searchParams.get("sessionId")?.trim() || ""
 

@@ -1,4 +1,5 @@
 import dbConnect from "@/lib/mongoose";
+import { ensureAdminSession } from "@/lib/authz";
 import Category, { ICategory } from "@/models/Category";
 import Product, { IProduct } from "@/models/Product";
 import Printer, { IPrinter } from "@/models/Printer";
@@ -65,6 +66,9 @@ export default async function AdminCatalog() {
 
     async function createCategory(formData: FormData) {
         "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return;
+
         const submittedEventId = formData.get("eventId") as string | null;
         const name = formData.get("name") as string;
         const uiColor = normalizeCategoryColor(formData.get("uiColor") as string | null);
@@ -88,6 +92,9 @@ export default async function AdminCatalog() {
 
     async function createProduct(formData: FormData) {
         "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return;
+
         const submittedEventId = formData.get("eventId") as string | null;
         const name = formData.get("name") as string;
         const categoryId = formData.get("categoryId") as string;
@@ -119,6 +126,9 @@ export default async function AdminCatalog() {
 
     async function deleteCategory(formData: FormData) {
         "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return;
+
         const submittedEventId = formData.get("eventId") as string | null;
         const id = formData.get("id") as string;
         const normalizedSubmittedEventId = submittedEventId?.trim();
@@ -135,6 +145,9 @@ export default async function AdminCatalog() {
 
     async function updateCategory(formData: FormData) {
         "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return;
+
         const submittedEventId = formData.get("eventId") as string | null;
         const id = formData.get("id") as string;
         const name = formData.get("name") as string;
@@ -160,6 +173,9 @@ export default async function AdminCatalog() {
 
     async function deleteProduct(formData: FormData) {
         "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return;
+
         const submittedEventId = formData.get("eventId") as string | null;
         const id = formData.get("id") as string;
         const normalizedSubmittedEventId = submittedEventId?.trim();
@@ -173,6 +189,9 @@ export default async function AdminCatalog() {
 
     async function updateProduct(formData: FormData) {
         "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return;
+
         const submittedEventId = formData.get("eventId") as string | null;
         const id = formData.get("id") as string;
         const name = formData.get("name") as string;
@@ -205,6 +224,9 @@ export default async function AdminCatalog() {
 
     async function addVariant(formData: FormData) {
         "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return;
+
         const submittedEventId = formData.get("eventId") as string | null;
         const productId = formData.get("productId") as string;
         const optionName = formData.get("optionName") as string;
@@ -225,6 +247,9 @@ export default async function AdminCatalog() {
 
     async function removeVariant(formData: FormData) {
         "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return;
+
         const submittedEventId = formData.get("eventId") as string | null;
         const productId = formData.get("productId") as string;
         const optionName = formData.get("optionName") as string;
