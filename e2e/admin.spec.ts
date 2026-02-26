@@ -49,6 +49,8 @@ test.describe('Pannello Amministrazione', () => {
     });
 
     test('navigazione pagine admin senza errori 404', async ({ page, isMobile }) => {
+        await expect(page.getByTestId('admin-app-version')).toContainText(/^v/);
+
         const navItems = [
             { title: 'Dashboard', url: /\/admin$/, path: '/admin' },
             { title: 'Catalogo', url: /\/admin\/catalog/, path: '/admin/catalog' },
