@@ -199,6 +199,8 @@ export function PrintJobsMonitor({
     const [statusFilter, setStatusFilter] = useState<"ALL" | PrintJobStatus>("ALL");
     const [printerFilter, setPrinterFilter] = useState<string>("ALL");
     const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+    const [isRetrying, setIsRetrying] = useState(false);
+    const [retryMessage, setRetryMessage] = useState<string | null>(null);
 
     const loadJobs = useCallback(async () => {
         setIsLoading(true);
@@ -242,6 +244,27 @@ export function PrintJobsMonitor({
         () => jobs.find((job) => job.id === selectedJobId) || jobs[0] || null,
         [jobs, selectedJobId]
     );
+
+    const retrySelectedJob = useCallback(async () => {
+        if (!selectedJob || selectedJob.status !== "FAILED") return;
+
+        setIsRetrying(true);
+        setRetryMessage(null);
+        const response = await fetch(`/api/admin/print-jobs/${selectedJob.id}`, {
+            method: "POST"
+        });
+        const payload = await response.json().catch(() => ({} as { error?: string }));
+
+        if (!response.ok) {
+            setRetryMessage(payload.error || "Reinvio fallito");
+            setIsRetrying(false);
+            return;
+        }
+
+        setRetryMessage("Reinvio eseguito, aggiorno lo stato...");
+        await loadJobs();
+        setIsRetrying(false);
+    }, [loadJobs, selectedJob]);
 
     return (
         <div className="space-y-4">
@@ -349,6 +372,16 @@ export function PrintJobsMonitor({
                                         <p className="text-rose-700"><span className="font-semibold">Errore:</span> {selectedJob.errorMessage}</p>
                                     ) : null}
                                 </div>
+                                {selectedJob.status === "FAILED" ? (
+                                    <div className="flex items-center gap-2">
+                                        <Button type="button" variant="outline" onClick={() => void retrySelectedJob()} disabled={isRetrying}>
+                                            {isRetrying ? "Reinvio..." : "Reinvia job fallito"}
+                                        </Button>
+                                        {retryMessage ? (
+                                            <p className="text-xs text-slate-600">{retryMessage}</p>
+                                        ) : null}
+                                    </div>
+                                ) : null}
                                 {renderDocumentPreview(selectedJob.document)}
                             </div>
                         )}

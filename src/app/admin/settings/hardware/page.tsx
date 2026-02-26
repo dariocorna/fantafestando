@@ -133,6 +133,11 @@ export default async function HardwarePage() {
                                         )}
                                     </div>
                                     <div className="flex justify-end gap-2 mt-4">
+                                        <form action={handleCreateManualPrintJob}>
+                                            <input type="hidden" name="eventId" value={eventId} />
+                                            <input type="hidden" name="printerId" value={String(printer._id)} />
+                                            <Button type="submit" variant="outline">Stampa test</Button>
+                                        </form>
                                         <EditPrinterDialog
                                             printer={{
                                                 id: String(printer._id),

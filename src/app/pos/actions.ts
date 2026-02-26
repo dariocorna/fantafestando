@@ -5,6 +5,7 @@ import Order from "@/models/Order"
 import PosDevice from "@/models/PosDevice"
 import Product from "@/models/Product"
 import CashSession from "@/models/CashSession"
+import PrintJob from "@/models/PrintJob"
 import { revalidatePath } from "next/cache"
 import { PrinterService } from "@/lib/printer"
 import { createSumUpCheckout } from "@/lib/sumup"
@@ -1115,5 +1116,50 @@ export async function completePendingOrderPayment(data: {
         }
         console.error("Complete Pending Order Error:", error)
         return { success: false, error: "Errore durante la chiusura dell'ordine" }
+    }
+}
+
+export async function retryFailedOrderPrintJobs(data: {
+    eventId: string
+    orderId: string
+}): Promise<
+    { success: true, retried: number, failed: number, attempted: number }
+    | { success: false, error: string }
+> {
+    try {
+        if (!data.eventId || !data.orderId) {
+            return { success: false, error: "Dati mancanti per il reinvio stampa" }
+        }
+
+        await dbConnect()
+        const failedJobs = await PrintJob.find({
+            eventId: data.eventId,
+            orderId: data.orderId,
+            status: "FAILED"
+        })
+            .sort({ createdAt: 1 })
+            .select("_id")
+            .lean() as Array<{ _id: { toString(): string } | string }>
+
+        if (failedJobs.length === 0) {
+            return { success: true, retried: 0, failed: 0, attempted: 0 }
+        }
+
+        const results = await Promise.all(
+            failedJobs.map((job) => PrinterService.retryPrintJobById(data.eventId, job._id.toString()))
+        )
+
+        const retried = results.filter((result) => result.success).length
+        const failed = results.length - retried
+
+        return {
+            success: true,
+            attempted: results.length,
+            retried,
+            failed
+        }
+    } catch (error) {
+        console.error("Retry Failed Order Print Jobs Error:", error)
+        return { success: false, error: "Errore durante il reinvio delle stampe fallite" }
     }
 }

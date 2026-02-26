@@ -19,7 +19,8 @@ import {
     getCashSessionStatus,
     openCashSession,
     closeCashSession,
-    getCashSessionClosurePreview
+    getCashSessionClosurePreview,
+    retryFailedOrderPrintJobs
 } from "./actions"
 import { getCategoryTheme } from "@/lib/category-colors"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
@@ -154,6 +155,11 @@ interface FeedbackModalState {
     tone: "error" | "success" | "info"
     title: string
     message: string
+    action?: {
+        type: "RETRY_FAILED_PRINTS"
+        eventId: string
+        orderId: string
+    }
 }
 
 interface PrintDispatchSummaryState {
@@ -207,6 +213,8 @@ export default function PosPage() {
         title: "",
         message: ""
     })
+    const [isRetryingFailedPrints, setIsRetryingFailedPrints] = useState(false)
+    const [retryPrintsFeedback, setRetryPrintsFeedback] = useState<string | null>(null)
 
     // Info Cliente
     const [customerName, setCustomerName] = useState("")
@@ -435,7 +443,8 @@ export default function PosPage() {
     const showFeedbackModal = (
         message: string,
         tone: FeedbackModalState["tone"] = "error",
-        title?: string
+        title?: string,
+        action?: FeedbackModalState["action"]
     ) => {
         const fallbackTitle =
             tone === "success"
@@ -448,13 +457,46 @@ export default function PosPage() {
             open: true,
             tone,
             title: title || fallbackTitle,
-            message
+            message,
+            action
         })
+        setRetryPrintsFeedback(null)
+        setIsRetryingFailedPrints(false)
     }
 
     const buildPrintFailureMessage = (summary?: PrintDispatchSummaryState) => {
         if (!summary || summary.failed === 0) return null
         return `Pagamento registrato, ma la stampa ha errori: ${summary.succeeded}/${summary.attempted} job inviati, ${summary.failed} falliti. Controlla il Monitor Stampa.`
+    }
+
+    const handleRetryFailedPrintsFromModal = async () => {
+        const action = feedbackModal.action
+        if (!action || action.type !== "RETRY_FAILED_PRINTS") return
+
+        setIsRetryingFailedPrints(true)
+        setRetryPrintsFeedback(null)
+        const result = await retryFailedOrderPrintJobs({
+            eventId: action.eventId,
+            orderId: action.orderId
+        })
+        setIsRetryingFailedPrints(false)
+
+        if (!result.success) {
+            setRetryPrintsFeedback(result.error || "Reinvio non riuscito")
+            return
+        }
+
+        if (result.attempted === 0) {
+            setRetryPrintsFeedback("Nessun job fallito da reinviare per questo ordine.")
+            return
+        }
+
+        if (result.failed > 0) {
+            setRetryPrintsFeedback(`Reinvio completato parzialmente: ${result.retried}/${result.attempted} inviati.`)
+            return
+        }
+
+        setRetryPrintsFeedback(`Reinvio completato: ${result.retried}/${result.attempted} job inviati.`)
     }
 
     const handleCodeDialogOpenChange = (open: boolean) => {
@@ -693,7 +735,11 @@ export default function PosPage() {
                 setStockShortages([])
                 const printFailureMessage = buildPrintFailureMessage(completionResult.printSummary)
                 if (printFailureMessage) {
-                    showFeedbackModal(printFailureMessage, "error", "Errore stampa")
+                    showFeedbackModal(printFailureMessage, "error", "Errore stampa", {
+                        type: "RETRY_FAILED_PRINTS",
+                        eventId: activeEvent._id,
+                        orderId: completionResult.orderId
+                    })
                 }
             } else {
                 if (completionResult.stockShortages?.length) {
@@ -738,7 +784,11 @@ export default function PosPage() {
             setStockShortages([])
             const printFailureMessage = buildPrintFailureMessage(result.printSummary)
             if (printFailureMessage) {
-                showFeedbackModal(printFailureMessage, "error", "Errore stampa")
+                showFeedbackModal(printFailureMessage, "error", "Errore stampa", {
+                    type: "RETRY_FAILED_PRINTS",
+                    eventId: activeEvent._id,
+                    orderId: result.orderId
+                })
             }
         } else {
             if (result.stockShortages?.length) {
@@ -1349,7 +1399,13 @@ export default function PosPage() {
             {/* Modal Feedback Operazioni */}
             <Dialog
                 open={feedbackModal.open}
-                onOpenChange={(open) => setFeedbackModal((prev) => ({ ...prev, open }))}
+                onOpenChange={(open) => {
+                    setFeedbackModal((prev) => ({ ...prev, open }))
+                    if (!open) {
+                        setRetryPrintsFeedback(null)
+                        setIsRetryingFailedPrints(false)
+                    }
+                }}
             >
                 <DialogContent className="max-w-[460px] rounded-3xl p-0 overflow-hidden">
                     <DialogHeader
@@ -1373,7 +1429,18 @@ export default function PosPage() {
                     </DialogHeader>
                     <div className="space-y-4 p-8">
                         <p className="text-base font-semibold text-slate-700">{feedbackModal.message}</p>
-                        <div className="flex justify-end">
+                        <div className="flex items-center justify-end gap-3">
+                            {feedbackModal.action?.type === "RETRY_FAILED_PRINTS" ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="rounded-xl px-6 font-bold"
+                                    onClick={() => void handleRetryFailedPrintsFromModal()}
+                                    disabled={isRetryingFailedPrints}
+                                >
+                                    {isRetryingFailedPrints ? "Reinvio..." : "Riprova stampa"}
+                                </Button>
+                            ) : null}
                             <Button
                                 type="button"
                                 className={`rounded-xl px-8 font-black ${feedbackModal.tone === "success"
@@ -1387,6 +1454,9 @@ export default function PosPage() {
                                 OK
                             </Button>
                         </div>
+                        {retryPrintsFeedback ? (
+                            <p className="text-sm font-semibold text-slate-600">{retryPrintsFeedback}</p>
+                        ) : null}
                     </div>
                 </DialogContent>
             </Dialog>
