@@ -13,5 +13,8 @@ fi
 echo "[deploy] Starting OSGFest production stack..."
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --build --remove-orphans
 
+echo "[deploy] Applying database migrations..."
+"${ROOT_DIR}/scripts/migrate-order-pickup-index.sh"
+
 echo "[deploy] Current service status:"
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
