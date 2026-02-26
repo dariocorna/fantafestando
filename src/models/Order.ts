@@ -125,7 +125,13 @@ const OrderSchema = new Schema<IOrder>({
     timestamps: true
 });
 
-OrderSchema.index({ eventId: 1, pickupNumber: 1 }, { unique: true, sparse: true });
+OrderSchema.index(
+    { eventId: 1, pickupNumber: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { pickupNumber: { $type: "number" } }
+    }
+);
 
 if (process.env.NODE_ENV === "development") {
     delete mongoose.models.Order;

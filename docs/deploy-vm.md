@@ -60,6 +60,10 @@ cd /opt/osgfest
 ./scripts/deploy.sh
 ```
 
+`deploy.sh` applica automaticamente una migrazione DB idempotente per l'indice
+ordini `eventId + pickupNumber` (unique parziale su `pickupNumber` numerico).
+Questo evita errori `E11000` sui flussi POS che non usano `pickupNumber`.
+
 Verifica:
 
 ```bash
@@ -150,6 +154,8 @@ cd /opt/osgfest
 git pull
 ./scripts/update.sh
 ```
+
+Anche `update.sh` riesegue automaticamente la migrazione indice ordini.
 
 Verifica post update:
 
