@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/mongoose";
 import { getAdminContextEventId } from "@/lib/events";
 import PrintJob from "@/models/PrintJob";
+import { PrinterService } from "@/lib/printer";
 
 const allowedPrintTypes = new Set(["CUSTOMER_ORDER", "KITCHEN_ORDER", "CASHIER_SUMMARY", "CASH_SESSION_SUMMARY", "MANUAL_TEST"]);
 
@@ -88,6 +89,33 @@ export async function GET(
         });
     } catch (error) {
         console.error("Print Job detail API error:", error);
+        return NextResponse.json({ error: "Errore interno" }, { status: 500 });
+    }
+}
+
+export async function POST(
+    _request: NextRequest,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    try {
+        const contextEventId = await getAdminContextEventId();
+        if (!contextEventId) {
+            return NextResponse.json({ error: "Nessuna festa selezionata" }, { status: 400 });
+        }
+
+        const { id } = await params;
+        if (!id) {
+            return NextResponse.json({ error: "ID job mancante" }, { status: 400 });
+        }
+
+        const result = await PrinterService.retryPrintJobById(contextEventId, id);
+        if (!result.success) {
+            return NextResponse.json({ error: result.error }, { status: 400 });
+        }
+
+        return NextResponse.json({ success: true });
+    } catch (error) {
+        console.error("Print Job retry API error:", error);
         return NextResponse.json({ error: "Errore interno" }, { status: 500 });
     }
 }
