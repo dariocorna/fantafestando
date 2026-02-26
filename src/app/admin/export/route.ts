@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/mongoose";
+import { adminUnauthorizedJson, ensureAdminSession } from "@/lib/authz";
 import { getAdminContextEvent } from "@/lib/events";
 import Order from "@/models/Order";
 import Product from "@/models/Product";
@@ -54,6 +55,11 @@ function getTimestampTag(value: Date): string {
 
 export async function GET(request: NextRequest) {
     try {
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) {
+            return adminUnauthorizedJson(sessionCheck);
+        }
+
         const format = request.nextUrl.searchParams.get("format")?.trim().toLowerCase() || "csv";
         if (format !== "csv" && format !== "xls") {
             return NextResponse.json(

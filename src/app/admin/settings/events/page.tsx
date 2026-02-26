@@ -1,4 +1,5 @@
 import dbConnect from "@/lib/mongoose";
+import { ensureAdminSession } from "@/lib/authz";
 import Event, { IEvent } from "@/models/Event";
 import Category from "@/models/Category";
 import Product from "@/models/Product";
@@ -18,6 +19,9 @@ export default async function EventsPage() {
 
     async function deleteEvent(formData: FormData) {
         "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return;
+
         const eventId = formData.get("eventId") as string;
         if (!eventId) return;
 
@@ -36,6 +40,9 @@ export default async function EventsPage() {
 
     async function archiveEvent(formData: FormData) {
         "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return;
+
         const eventId = formData.get("eventId") as string;
         if (!eventId) return;
 

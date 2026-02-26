@@ -2,6 +2,7 @@
 
 import dbConnect from "@/lib/mongoose";
 import { getAdminContextEventId } from "@/lib/events";
+import { ensureAdminSession } from "@/lib/authz";
 import Order from "@/models/Order";
 import PosDevice from "@/models/PosDevice";
 import "@/models/Peripheral";
@@ -72,6 +73,11 @@ async function resolveSumUpApiKeyForOrder(eventId: string, posDeviceId?: string)
 }
 
 export async function reprintOrderById(orderId: string) {
+    const sessionCheck = await ensureAdminSession()
+    if (!sessionCheck.ok) {
+        return { success: false, error: sessionCheck.error }
+    }
+
     const normalizedOrderId = orderId?.trim()
     if (!normalizedOrderId) {
         return { success: false, error: "Ordine non valido" }
@@ -90,6 +96,11 @@ export async function reprintOrder(formData: FormData) {
 }
 
 export async function stornoPaidOrderById(orderId: string, reason?: string) {
+    const sessionCheck = await ensureAdminSession()
+    if (!sessionCheck.ok) {
+        return { success: false, error: sessionCheck.error }
+    }
+
     const normalizedOrderId = orderId?.trim()
     if (!normalizedOrderId) {
         return { success: false, error: "Ordine non valido" }

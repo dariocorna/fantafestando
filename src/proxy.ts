@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import { auth } from '@/auth';
 import { normalizeAppSurface, resolveSurfaceRedirect } from './lib/runtime-surface';
 
 function shouldSkipPath(pathname: string): boolean {
@@ -10,8 +11,12 @@ function shouldSkipPath(pathname: string): boolean {
         || pathname.startsWith('/sitemap.xml');
 }
 
-export function proxy(request: NextRequest) {
-    const { pathname } = request.nextUrl;
+function isAdminPath(pathname: string): boolean {
+    return pathname === '/admin' || pathname.startsWith('/admin/');
+}
+
+export const proxy = auth((request) => {
+    const { pathname, search } = request.nextUrl;
     if (shouldSkipPath(pathname)) {
         return NextResponse.next();
     }
@@ -19,6 +24,22 @@ export function proxy(request: NextRequest) {
     const surface = normalizeAppSurface(process.env.APP_SURFACE);
     const redirectPath = resolveSurfaceRedirect(surface, pathname);
     if (!redirectPath) {
+        if (isAdminPath(pathname)) {
+            if (!request.auth?.user) {
+                const loginUrl = request.nextUrl.clone();
+                loginUrl.pathname = '/login';
+                loginUrl.searchParams.set('callbackUrl', `${pathname}${search}`);
+                return NextResponse.redirect(loginUrl);
+            }
+
+            if (request.auth.user.role !== 'ADMIN') {
+                const posUrl = request.nextUrl.clone();
+                posUrl.pathname = '/pos';
+                posUrl.search = '';
+                return NextResponse.redirect(posUrl);
+            }
+        }
+
         return NextResponse.next();
     }
 
@@ -26,7 +47,7 @@ export function proxy(request: NextRequest) {
     url.pathname = redirectPath;
     url.search = '';
     return NextResponse.redirect(url);
-}
+});
 
 export const config = {
     matcher: '/:path*',
