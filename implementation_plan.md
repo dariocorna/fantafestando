@@ -1,141 +1,146 @@
-# Implementation Plan — Epic 16: Deploy su Macchina Virtuale
+# Implementation Plan — Epic 17: Emulazione Stampanti Termiche
 
-## 1. Obiettivo e Vincoli
+## 1. Obiettivo e vincoli
 
-Obiettivo: deployare OSGFest su una VM target con stack indipendente in Docker per applicazione e MongoDB, mantenendo Apache già installato come edge reverse proxy + terminazione TLS Let's Encrypt.
+Obiettivo: introdurre una modalità di emulazione stampanti ESC/POS via rete LAN (TCP) per sviluppo, test e demo, mantenendo invariato il flusso di stampa reale in produzione.
 
 Vincoli confermati:
-- Deploy applicativo indipendente da Apache (Apache resta solo entrypoint HTTP/HTTPS).
-- Due domini pubblici:
-  - `backoffice.<dominio>` per Admin + POS/Cassa.
-  - `menu.<dominio>` per WebApp Menu pubblico.
-- Container dedicati previsti:
-  - `mongo`
-  - `osgfest-backoffice`
-  - `osgfest-menu`
+- Stack backend attuale: Next.js + Node.js/TypeScript.
+- Libreria stampa reale già in uso: `node-thermal-printer`.
+- Le stampanti emulabili devono essere configurabili da Admin come quelle reali.
+- Servono fino a 10 stampanti virtuali avviabili con Docker.
+- Serve una vista Admin runtime per vedere le ricevute renderizzate (uso demo), oltre alla diagnostica tecnica.
+- Test E2E da eseguire su porta dedicata (`PLAYWRIGHT_PORT`) per evitare conflitti con altre sessioni.
 
-## 2. Analisi Integrazione con Codice Esistente
+## 2. Analisi integrazione con codice esistente
 
-- Applicazione attuale Next.js monolitica con route già separate (`/admin`, `/pos`, menu pubblico).
-- Deploy target: due runtime separati della stessa codebase con configurazione differente via env.
-- Nessuna modifica al modello dati Mongo richiesta per questa epica.
-- Nessuna nuova API business richiesta: focus su infrastruttura, bootstrap, healthcheck e configurazione.
+Stato attuale:
+- `src/lib/printer.ts` invia stampa via `node-thermal-printer` su `tcp://<ip>`.
+- Il modello `Printer` (`src/models/Printer.ts`) salva `ip` ma non `port`.
+- La UI hardware (`/admin/settings/hardware`) gestisce nome, IP e tipo (`CASHIER | KITCHEN`).
+- Non esiste un archivio storico dei job di stampa né una preview admin.
 
-## 3. Architettura di Deploy
+Impatto:
+- Per supportare emulatori multipli serve separare host e porta.
+- Per la preview runtime serve persistere i metadati del job e un payload renderizzabile.
+- La pipeline di stampa va resa osservabile senza rompere il comportamento attuale.
 
-### 3.1 Livello Edge (Host)
-- Apache su host VM:
-  - VirtualHost HTTPS `backoffice.<dominio>` -> `http://127.0.0.1:3101`
-  - VirtualHost HTTPS `menu.<dominio>` -> `http://127.0.0.1:3102`
-- Certificati TLS gestiti con Certbot (Let's Encrypt) su Apache.
+## 3. Scelte architetturali
 
-### 3.2 Livello Applicativo (Docker Compose)
-- Servizi:
-  - `mongo` con volume persistente (`mongo_data`).
-  - `osgfest-backoffice` (admin + pos).
-  - `osgfest-menu` (menu pubblico).
-- Network Docker privata per comunicazione interna.
-- Porte pubblicate solo in localhost host (`127.0.0.1:3101`, `127.0.0.1:3102`) per ridurre superficie esposta.
-- Policy restart: `unless-stopped`.
+### 3.1 Libreria e trasporto di stampa
+- Mantenere `node-thermal-printer` come driver principale (coerenza con codice e stampa reale).
+- Estendere il transport a `tcp://<host>:<port>` con default `9100`.
 
-### 3.3 Configurazione Runtime
-- File `.env.production` con:
-  - connessione Mongo
-  - variabili auth/sessione
-  - variabili endpoint pubblici per i due host
-- Variabile di modalità runtime (`APP_SURFACE=backoffice|menu`) per controllare comportamento/visibilità se necessario.
+### 3.2 Modello dati stampanti
+- Estendere `Printer` con:
+  - `port: number` (default `9100`)
+  - `isVirtual: boolean` (default `false`)
+  - `emulatorSlot?: number` (1..10, opzionale)
+- Compatibilità retroattiva:
+  - stampanti esistenti migrate con `port=9100`, `isVirtual=false`.
 
-## 4. Artefatti da Implementare
+### 3.3 Tracciamento e preview dei job
+- Introdurre un nuovo modello `PrintJob` per audit/preview:
+  - `eventId`, `printerId`, `orderId?`, `source` (`ORDER`, `CASH_SESSION`, `MANUAL_TEST`)
+  - `status` (`QUEUED`, `SENT`, `FAILED`)
+  - `destinationHost`, `destinationPort`, `isVirtual`
+  - `document` (payload strutturato per rendering UI)
+  - `rawCapturePath?` (dump ESC/POS catturato dall’emulatore)
+  - `errorMessage?`, `createdAt`
+- La preview Admin userà `document` (non parsing raw ESC/POS in tempo reale).
+- I dump raw restano disponibili per diagnostica tecnica.
 
-1. `docker-compose.prod.yml`
-- Definizione servizi `mongo`, `osgfest-backoffice`, `osgfest-menu`.
-- Volumi persistenti e healthcheck.
+### 3.4 Emulatore Docker
+- Aggiungere un servizio `printer-emulator` (Node TCP server) con 10 listener.
+- Range porte proposto: `19100-19109` (evita conflitti con 9100 fisica).
+- Ogni listener salva il buffer raw ricevuto su volume persistente.
+- Output minimo dell’emulatore:
+  - file `.bin` raw per job
+  - metadati (`printerSlot`, timestamp, bytes)
+- In compose produzione, emulatore opzionale via profilo `demo`.
 
-2. `Dockerfile` multi-stage aggiornato (se necessario)
-- Build riproducibile produzione.
-- Target runtime leggero.
+## 4. Modelli/schema, API/actions, UI
 
-3. Script operativi
-- `scripts/deploy.sh`: bootstrap iniziale su VM.
-- `scripts/update.sh`: pull/build/restart controllato.
-- `scripts/rollback.sh`: rollback a versione precedente.
-- `scripts/backup-mongo.sh` e `scripts/restore-mongo.sh`.
+### 4.1 Modelli/Schema
+1. Aggiornare `Printer` con i nuovi campi (`port`, `isVirtual`, `emulatorSlot`).
+2. Creare `PrintJob` per tracking e preview.
+3. Script di migrazione dati stampanti legacy (`port=9100`).
 
-4. Documentazione
-- `docs/deploy-vm.md` con runbook completo:
-  - prerequisiti VM
-  - setup iniziale
-  - configurazione Apache vhost
-  - rilascio e aggiornamento
-  - backup/restore
-  - troubleshooting
+### 4.2 API/Actions
+1. Aggiornare `createPrinterAction` / `updatePrinterAction` con validazioni:
+   - host non vuoto
+   - porta numerica 1..65535
+   - `emulatorSlot` coerente quando `isVirtual=true`
+2. Nuova action admin: `provisionVirtualPrintersAction`:
+   - crea/aggiorna 10 stampanti virtuali per evento.
+3. Nuove API admin:
+   - `GET /api/admin/print-jobs` (filtri per stampante/stato/intervallo temporale)
+   - `GET /api/admin/print-jobs/:id` (dettaglio + preview)
+4. Aggiornare `PrinterService`:
+   - risoluzione destinazione `host:port`
+   - persistenza `PrintJob` in ogni invio
+   - stato `FAILED` con errore connessione.
 
-5. Healthcheck
-- Endpoint applicativo leggero (`/api/health` o equivalente) per monitoraggio e verifiche deploy.
+### 4.3 UI Admin
+1. Hardware:
+   - aggiungere campi `Porta TCP`, `Stampante virtuale`, `Slot emulatore`.
+   - bottone “Provisiona 10 stampanti virtuali”.
+2. Nuova pagina Admin “Monitor Stampa”:
+   - elenco job in tempo reale (polling breve).
+   - dettaglio con preview ricevuta renderizzata.
+   - badge stato (`SENT` / `FAILED`) e destinazione (`host:port`).
 
-## 5. Modelli/Schema, API/Actions, UI
+## 5. Strategia di test
 
-### 5.1 Modelli/Schema
-- Nessuna modifica prevista su modelli Mongo (`Product`, `Order`, `Event`, ecc.).
+### 5.1 Test unitari
+- Validazione input stampanti (`host/porta/slot`).
+- Serializzazione `PrintJob.document`.
+- Mapping destinazioni reali vs virtuali.
 
-### 5.2 API/Actions
-- Aggiunta solo tecnica: endpoint healthcheck read-only.
-- Nessuna modifica funzionale alle action business.
+### 5.2 Test integrazione backend
+- `PrinterService`:
+  - successo connessione verso emulatore TCP.
+  - errore connessione con marcatura `FAILED`.
+- API `print-jobs`:
+  - filtri e ordinamento.
 
-### 5.3 UI
-- Nessun nuovo componente UI business.
-- Solo eventuali guard/redirect minimi se richiesti per separare surface backoffice/menu in runtime dedicati.
+### 5.3 Test E2E Playwright
+- Estendere `e2e/hardware.spec.ts`:
+  - creazione/modifica stampante con porta + virtual flag.
+  - provisioning 10 virtual printers.
+- Nuovo spec `e2e/printer_emulation.spec.ts`:
+  - genera ordine (menu/POS), verifica creazione `PrintJob`.
+  - verifica comparsa preview in pagina monitor.
+  - verifica stato errore quando stampante non raggiungibile.
+- Esecuzione finale:
+  - `PLAYWRIGHT_PORT=3400 CI=true npx playwright test --project=chromium`
 
-## 6. Strategia Test
+## 6. Piano di esecuzione (Fase 3)
 
-### 6.1 Test Tecnici Deploy
-- Validazione compose:
-  - `docker compose -f docker-compose.prod.yml config`
-- Smoke test container:
-  - servizi up/down
-  - reachability su porte localhost
-- Verifica persistenza Mongo dopo restart.
+1. Estendere schema `Printer` e azioni admin.
+2. Implementare `PrintJob` e logging nel `PrinterService`.
+3. Implementare servizio `printer-emulator` + integrazione Docker.
+4. Implementare UI monitor stampa con preview runtime.
+5. Scrivere/aggiornare test unitari.
+6. Scrivere test E2E dedicati.
+7. Eseguire suite E2E completa su porta dedicata.
+8. Fermarsi per approvazione utente prima dei commit.
 
-### 6.2 Test E2E Playwright (obbligatori)
-- Eseguire suite completa: `CI=true npx playwright test --project=chromium`.
-- Aggiungere test smoke deploy-oriented (se mancanti):
-  - raggiungibilità backoffice route principale.
-  - raggiungibilità menu pubblico.
-  - flusso base ordine/menu non regressivo.
-  - accesso pagina POS dal dominio backoffice.
+## 7. Rischi e mitigazioni
 
-### 6.3 Criteri di Completamento Fase Implementazione
-- Tutti i test E2E passano (exit code 0).
-- Runbook riproducibile su VM pulita.
-- HTTPS operativo via Apache per entrambi i domini.
+- Rischio: divergenza tra preview e output fisico ESC/POS.
+  - Mitigazione: preview basata su payload applicativo + dump raw allegato.
+- Rischio: crescita storage per raw capture.
+  - Mitigazione: retention configurabile (es. ultimi N giorni/job).
+- Rischio: conflitti porte in ambienti condivisi.
+  - Mitigazione: range dedicato 19100-19109 e variabili env configurabili.
+- Rischio: regressioni su stampa reale.
+  - Mitigazione: default invariato (`port=9100`, `isVirtual=false`) + test regressione.
 
-## 7. Sequenza di Esecuzione (Fase 3)
+## 8. Deliverable dell’epica
 
-1. Preparare artefatti Docker produzione.
-2. Introdurre healthcheck applicativo.
-3. Scrivere script deploy/update/backup/restore.
-4. Redigere documentazione `docs/deploy-vm.md`.
-5. Validare localmente compose + smoke test.
-6. Eseguire test unitari e E2E completi.
-7. Preparare riepilogo risultati e fermarsi per approvazione utente.
-
-## 8. Rischi e Mitigazioni
-
-- Rischio: conflitti porte con servizi host.
-  - Mitigazione: bind esplicito su 127.0.0.1 e porte dedicate 3101/3102.
-
-- Rischio: variabili env incomplete in produzione.
-  - Mitigazione: template `.env.production.example` + checklist pre-deploy.
-
-- Rischio: regressioni dovute a runtime separati.
-  - Mitigazione: smoke test per entrambe le superfici + suite E2E completa.
-
-- Rischio: restore backup non verificato.
-  - Mitigazione: test restore obbligatorio documentato nel runbook.
-
-## 9. Deliverable Finali Epica
-
-- Configurazione deploy Docker produzione.
-- Script operativi deploy/update/rollback/backup/restore.
-- Documentazione completa per VM Bergamo + Apache TLS.
-- Test E2E passing con evidenza risultato.
+- Estensione modello stampanti con host/porta/modalità virtuale.
+- Servizio emulatore Docker con 10 endpoint TCP.
+- Tracciamento persistente `PrintJob` con stati ed errori.
+- Nuova vista Admin “Monitor Stampa” con preview runtime.
+- Test unitari + E2E Playwright passing.

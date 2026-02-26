@@ -42,6 +42,8 @@ AUTH_SECRET=replace-with-a-long-random-secret
 SUMUP_API_KEY=
 SUMUP_WEBHOOK_SECRET=
 EVENT_SETTINGS_ENCRYPTION_KEY=
+PRINTER_EMULATOR_HOST=127.0.0.1
+PRINTER_EMULATOR_START_PORT=19100
 ```
 
 3. Avvia MongoDB locale:
@@ -75,6 +77,7 @@ npm run lint        # linting
 npm run test:unit   # test unitari
 npm run test:e2e    # test E2E Playwright (Chromium)
 npm run test:ci     # lint + unit + E2E (CI=true)
+npm run printer:emulator  # avvio emulatore ESC/POS TCP (10 porte)
 npm run db:up       # avvio MongoDB via docker compose
 npm run db:down     # stop MongoDB via docker compose
 ```
@@ -103,6 +106,7 @@ CI=true npx playwright test --project=chromium
 - Schema database: `docs/database-schema.md`
 - Strategia UI: `docs/ui-strategy.md`
 - Deploy VM produzione: `docs/deploy-vm.md`
+- Emulazione stampanti: `docs/printer-emulation.md`
 
 ## Note
 
