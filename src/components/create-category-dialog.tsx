@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,14 +29,29 @@ export function CreateCategoryDialog({
 }) {
     const [open, setOpen] = useState(false);
     const [selectedColor, setSelectedColor] = useState(DEFAULT_CATEGORY_COLOR);
+    const [submitError, setSubmitError] = useState<string | null>(null);
 
     async function handleSubmit(formData: FormData) {
-        await createAction(formData);
-        setOpen(false);
+        setSubmitError(null);
+        try {
+            await createAction(formData);
+            setOpen(false);
+        } catch (error) {
+            console.error("Errore durante il salvataggio categoria", error);
+            setSubmitError("Salvataggio non riuscito. Verifica connessione e riprova.");
+        }
     }
 
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog
+            open={open}
+            onOpenChange={(nextOpen) => {
+                setOpen(nextOpen);
+                if (!nextOpen) {
+                    setSubmitError(null);
+                }
+            }}
+        >
             <DialogTrigger asChild>
                 <Button size="sm" id="new-category-btn">+ Nuova Categoria</Button>
             </DialogTrigger>
@@ -44,6 +59,9 @@ export function CreateCategoryDialog({
                 <form action={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle>Aggiungi Categoria</DialogTitle>
+                        <DialogDescription>
+                            Crea una nuova categoria prodotto e associa eventuale stampante reparto.
+                        </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <input type="hidden" name="eventId" value={eventId} />
@@ -91,6 +109,11 @@ export function CreateCategoryDialog({
                             </select>
                         </div>
                     </div>
+                    {submitError ? (
+                        <p className="text-sm font-medium text-red-600" role="alert">
+                            {submitError}
+                        </p>
+                    ) : null}
                     <DialogFooter>
                         <SubmitButton />
                     </DialogFooter>

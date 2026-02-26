@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,14 +31,29 @@ export function EditCategoryDialog({
 }) {
     const [open, setOpen] = useState(false);
     const [selectedColor, setSelectedColor] = useState(() => normalizeCategoryColor(category.uiColor));
+    const [submitError, setSubmitError] = useState<string | null>(null);
 
     async function handleSubmit(formData: FormData) {
-        await updateAction(formData);
-        setOpen(false);
+        setSubmitError(null);
+        try {
+            await updateAction(formData);
+            setOpen(false);
+        } catch (error) {
+            console.error("Errore durante l'aggiornamento categoria", error);
+            setSubmitError("Aggiornamento non riuscito. Verifica connessione e riprova.");
+        }
     }
 
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog
+            open={open}
+            onOpenChange={(nextOpen) => {
+                setOpen(nextOpen);
+                if (nextOpen) {
+                    setSubmitError(null);
+                }
+            }}
+        >
             <DialogTrigger asChild>
                 <Button variant="outline" size="icon" className="h-7 w-7" aria-label="Modifica">
                     <Pencil className="h-4 w-4" />
@@ -48,6 +63,9 @@ export function EditCategoryDialog({
                 <form action={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle>Modifica Categoria</DialogTitle>
+                        <DialogDescription>
+                            Aggiorna nome, colore e stampante reparto della categoria.
+                        </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <input type="hidden" name="id" value={category.id} />
@@ -102,6 +120,11 @@ export function EditCategoryDialog({
                             </select>
                         </div>
                     </div>
+                    {submitError ? (
+                        <p className="text-sm font-medium text-red-600" role="alert">
+                            {submitError}
+                        </p>
+                    ) : null}
                     <DialogFooter>
                         <SubmitButton />
                     </DialogFooter>
