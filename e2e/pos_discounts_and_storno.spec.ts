@@ -1,11 +1,27 @@
 import { expect, test, type Page } from "@playwright/test"
 import { ensureAdminAuthenticated } from "./utils/auth"
 
+async function openCreateEventDialog(page: Page) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        await page.click("#new-event-btn")
+        const dialog = page.getByRole("dialog")
+        if (await dialog.isVisible({ timeout: 3000 }).catch(() => false)) {
+            return dialog
+        }
+
+        if (attempt < 2) {
+            await ensureAdminAuthenticated(page, "/admin/settings/events")
+        }
+    }
+
+    throw new Error("Dialog creazione festa non disponibile")
+}
+
 async function createAndActivateEvent(page: Page, eventName: string) {
     await ensureAdminAuthenticated(page, "/admin/settings/events")
 
-    await page.click("#new-event-btn")
-    const dialog = page.getByRole("dialog")
+    const dialog = await openCreateEventDialog(page)
+    await expect(dialog).toBeVisible({ timeout: 10000 })
     await dialog.locator("#name").fill(eventName)
     await dialog.getByRole("button", { name: "Salva", exact: true }).click()
 
