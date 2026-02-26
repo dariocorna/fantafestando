@@ -26,6 +26,7 @@ import { EditPrinterDialog } from "@/components/edit-printer-dialog";
 import { PeripheralDialog } from "@/components/peripheral-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PrintJobsMonitor } from "@/components/print-jobs-monitor";
+import { ManualPrintActionState, ManualPrintButton } from "@/components/manual-print-button";
 
 export default async function HardwarePage() {
     const eventId = await getAdminContextEventId();
@@ -36,9 +37,14 @@ export default async function HardwarePage() {
         await provisionVirtualPrintersAction(formData);
     }
 
-    async function handleCreateManualPrintJob(formData: FormData) {
+    async function handleCreateManualPrintJob(
+        _state: ManualPrintActionState,
+        formData: FormData
+    ): Promise<ManualPrintActionState> {
         "use server";
-        await createManualPrintJobAction(formData);
+        const result = await createManualPrintJobAction(formData);
+        if (result?.error) return { error: result.error };
+        return { success: "Stampa inviata alla coda." };
     }
 
     await dbConnect();
@@ -133,11 +139,13 @@ export default async function HardwarePage() {
                                         )}
                                     </div>
                                     <div className="flex justify-end gap-2 mt-4">
-                                        <form action={handleCreateManualPrintJob}>
-                                            <input type="hidden" name="eventId" value={eventId} />
-                                            <input type="hidden" name="printerId" value={String(printer._id)} />
-                                            <Button type="submit" variant="outline">Stampa test</Button>
-                                        </form>
+                                        <ManualPrintButton
+                                            eventId={eventId}
+                                            printerId={String(printer._id)}
+                                            action={handleCreateManualPrintJob}
+                                            label="Stampa test"
+                                            variant="outline"
+                                        />
                                         <EditPrinterDialog
                                             printer={{
                                                 id: String(printer._id),
@@ -210,13 +218,13 @@ export default async function HardwarePage() {
 
                 <TabsContent value="monitor" className="space-y-4 pt-4">
                     <div className="flex justify-end">
-                        <form action={handleCreateManualPrintJob}>
-                            <input type="hidden" name="eventId" value={eventId} />
-                            {printers[0]?._id ? (
-                                <input type="hidden" name="printerId" value={String(printers[0]._id)} />
-                            ) : null}
-                            <Button type="submit" variant="outline">Genera Ricevuta Demo</Button>
-                        </form>
+                        <ManualPrintButton
+                            eventId={eventId}
+                            printerId={printers[0]?._id ? String(printers[0]._id) : undefined}
+                            action={handleCreateManualPrintJob}
+                            label="Genera Ricevuta Demo"
+                            variant="outline"
+                        />
                     </div>
                     <PrintJobsMonitor
                         eventId={eventId}
