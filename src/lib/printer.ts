@@ -79,6 +79,21 @@ interface PrinterDestinationRef {
     emulatorSlot?: number;
 }
 
+function asString(value: unknown): string {
+    if (typeof value === "string") return value;
+    if (typeof value === "number") return String(value);
+    return "";
+}
+
+function asNumber(value: unknown): number | undefined {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    return undefined;
+}
+
 function formatEuro(amount: number): string {
     return `${amount.toFixed(2)} EUR`;
 }
@@ -800,5 +815,92 @@ export class PrinterService {
             });
             return false;
         }
+    }
+
+    static async retryPrintJobById(eventId: string, jobId: string) {
+        if (!eventId || !jobId) {
+            return { success: false, error: "Parametri mancanti" } as const;
+        }
+
+        await dbConnect();
+        const job = await PrintJobModel.findOne({ _id: jobId, eventId })
+            .populate("printerId", "ip port isVirtual emulatorSlot")
+            .lean() as ({
+                _id: { toString(): string };
+                eventId: { toString(): string };
+                printerId?: {
+                    _id?: unknown;
+                    ip?: string;
+                    port?: number;
+                    isVirtual?: boolean;
+                    emulatorSlot?: number;
+                } | null;
+                orderId?: { toString(): string } | null;
+                source: PrintJobSource;
+                printType: PrintJobType;
+                copies?: number;
+                destinationHost?: string;
+                destinationPort?: number;
+                isVirtual?: boolean;
+                document?: Record<string, unknown>;
+            } | null);
+
+        if (!job) {
+            return { success: false, error: "Job non trovato" } as const;
+        }
+
+        if (job.printType === "CASH_SESSION_SUMMARY") {
+            return { success: false, error: "Reinvio non supportato per chiusure cassa" } as const;
+        }
+
+        const document = (job.document && typeof job.document === "object")
+            ? job.document as Record<string, unknown>
+            : {};
+        const documentItems = Array.isArray(document.items)
+            ? document.items as Array<Record<string, unknown>>
+            : [];
+        const documentTotals = Array.isArray(document.totals)
+            ? document.totals as Array<Record<string, unknown>>
+            : [];
+
+        const printJob: PrinterCommandJob = {
+            ip: job.printerId?.ip || asString(job.destinationHost),
+            port: job.printerId?.port || job.destinationPort || DEFAULT_PRINTER_PORT,
+            emulatorSlot: job.printerId?.emulatorSlot,
+            printerId: job.printerId?._id ? String(job.printerId._id) : undefined,
+            eventId,
+            source: job.source,
+            printType: job.printType,
+            isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual),
+            title: asString(document.title) || "RICEVUTA",
+            items: documentItems.map((item) => ({
+                name: asString(item.name) || "Voce",
+                quantity: asNumber(item.quantity) || 1,
+                notes: asString(item.notes) || undefined,
+                unitPrice: asNumber(item.unitPrice),
+                lineTotal: asNumber(item.lineTotal),
+                selectedOptions: Array.isArray(item.selectedOptions)
+                    ? (item.selectedOptions as Array<Record<string, unknown>>).map((opt) => ({
+                        name: asString(opt.name),
+                        priceVariation: asNumber(opt.priceVariation) || 0
+                    }))
+                    : undefined
+            })),
+            totals: documentTotals.map((row) => ({
+                label: asString(row.label),
+                value: asString(row.value)
+            })).filter((row) => row.label),
+            customerName: asString(document.customerName) || undefined,
+            tableNumber: asString(document.tableNumber) || undefined,
+            orderId: asString(document.orderId) || job.orderId?.toString() || job._id.toString(),
+            shortCode: asString(document.shortCode) || undefined
+        };
+
+        const printed = await this.printComanda(printJob, job.copies || 1);
+        if (!printed) {
+            return { success: false, error: "Invio stampa fallito" } as const;
+        }
+
+        return { success: true } as const;
     }
 }
