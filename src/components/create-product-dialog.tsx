@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,11 +34,18 @@ export function CreateProductDialog({
 }) {
     const [open, setOpen] = useState(false);
     const [availableDays, setAvailableDays] = useState<DayCode[]>([]);
+    const [submitError, setSubmitError] = useState<string | null>(null);
 
     async function handleSubmit(formData: FormData) {
-        await createAction(formData);
-        setOpen(false);
-        setAvailableDays([]);
+        setSubmitError(null);
+        try {
+            await createAction(formData);
+            setOpen(false);
+            setAvailableDays([]);
+        } catch (error) {
+            console.error("Errore durante il salvataggio prodotto", error);
+            setSubmitError("Salvataggio non riuscito. Verifica connessione e riprova.");
+        }
     }
 
     const toggleDay = (day: DayCode) => {
@@ -57,6 +64,7 @@ export function CreateProductDialog({
                 setOpen(nextOpen);
                 if (!nextOpen) {
                     setAvailableDays([]);
+                    setSubmitError(null);
                 }
             }}
         >
@@ -67,6 +75,9 @@ export function CreateProductDialog({
                 <form action={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle>Aggiungi Prodotto</DialogTitle>
+                        <DialogDescription>
+                            Compila i campi per creare un nuovo prodotto nel catalogo.
+                        </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <input type="hidden" name="eventId" value={eventId} />
@@ -135,6 +146,11 @@ export function CreateProductDialog({
                             </div>
                         </div>
                     </div>
+                    {submitError ? (
+                        <p className="text-sm font-medium text-red-600" role="alert">
+                            {submitError}
+                        </p>
+                    ) : null}
                     <DialogFooter>
                         <SubmitButton />
                     </DialogFooter>
