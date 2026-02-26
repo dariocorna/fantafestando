@@ -31,6 +31,13 @@ interface PosPaymentCapabilities {
     hasPaymentTerminal: boolean
 }
 
+interface PrintDispatchSummary {
+    attempted: number
+    succeeded: number
+    failed: number
+    allSuccessful: boolean
+}
+
 interface OpenCashSessionDto {
     id: string
     openedAt: string
@@ -296,6 +303,19 @@ function validatePaymentMethodAvailability(
     }
 
     return null
+}
+
+function summarizePrintDispatch(results: boolean[] | undefined): PrintDispatchSummary {
+    const normalized = Array.isArray(results) ? results : []
+    const attempted = normalized.length
+    const succeeded = normalized.filter(Boolean).length
+    const failed = attempted - succeeded
+    return {
+        attempted,
+        succeeded,
+        failed,
+        allSuccessful: attempted > 0 && failed === 0
+    }
 }
 
 async function getOpenCashSession(eventId: string, posDeviceId?: string): Promise<
@@ -716,18 +736,26 @@ export async function createOrder(data: {
             }
         }
 
+        let printSummary: PrintDispatchSummary | undefined
+
         // Trigger network printing ONLY if PAID immediately.
-        // Printing must never block order creation.
         if (order.status === "PAID") {
             try {
-                await PrinterService.routeOrderToPrinters(order._id.toString(), data.posDeviceId)
+                const printResults = await PrinterService.routeOrderToPrinters(order._id.toString(), data.posDeviceId)
+                printSummary = summarizePrintDispatch(printResults)
             } catch (printError) {
                 console.error("Order created but printer routing failed:", printError)
+                printSummary = {
+                    attempted: 1,
+                    succeeded: 0,
+                    failed: 1,
+                    allSuccessful: false
+                }
             }
         }
 
         revalidatePath("/admin/orders")
-        return { success: true, orderId: order._id.toString() }
+        return { success: true, orderId: order._id.toString(), printSummary }
     } catch (error) {
         if (stockAdjustmentsToRollback.length > 0) {
             try {
@@ -1061,8 +1089,22 @@ export async function completePendingOrderPayment(data: {
         await order.save()
         stockAdjustmentsToRollback = []
 
+        let printSummary: PrintDispatchSummary | undefined
+        try {
+            const printResults = await PrinterService.routeOrderToPrinters(order._id.toString(), data.posDeviceId)
+            printSummary = summarizePrintDispatch(printResults)
+        } catch (printError) {
+            console.error("Pending order completed but printer routing failed:", printError)
+            printSummary = {
+                attempted: 1,
+                succeeded: 0,
+                failed: 1,
+                allSuccessful: false
+            }
+        }
+
         revalidatePath("/admin/orders")
-        return { success: true, orderId: order._id.toString() }
+        return { success: true, orderId: order._id.toString(), printSummary }
     } catch (error) {
         if (stockAdjustmentsToRollback.length > 0) {
             try {
