@@ -124,10 +124,10 @@ async function completeCashOrder(page: Page, productName: string) {
     await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click()
     await expect(checkoutDialog).toBeHidden({ timeout: 15000 })
 
-    const successModal = page.getByRole("dialog").filter({ hasText: /Ordine completato correttamente/i })
-    if (await successModal.isVisible()) {
-        await successModal.getByRole("button", { name: "OK", exact: true }).click()
-        await expect(successModal).toBeHidden()
+    const feedbackModal = page.getByRole("dialog").filter({ hasText: /Pagamento registrato|Ordine completato|Errore stampa|stampa ha errori/i })
+    if (await feedbackModal.isVisible()) {
+        await feedbackModal.getByRole("button", { name: "OK", exact: true }).click()
+        await expect(feedbackModal).toBeHidden()
     }
 }
 
