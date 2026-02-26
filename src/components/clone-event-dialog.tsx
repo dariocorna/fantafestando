@@ -27,7 +27,7 @@ export function CloneEventDialog({ sourceEventId, sourceEventName }: CloneEventD
     async function handleSubmit(formData: FormData) {
         startTransition(async () => {
             const result = await cloneEventAction(formData);
-            if (result.success) {
+            if ("success" in result && result.success) {
                 setOpen(false);
             }
         });

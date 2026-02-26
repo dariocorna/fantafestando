@@ -22,7 +22,7 @@ export function CreateEventDialog() {
     async function handleSubmit(formData: FormData) {
         startTransition(async () => {
             const result = await createEventAction(formData);
-            if (result.success) {
+            if ("success" in result && result.success) {
                 setOpen(false);
             }
         });

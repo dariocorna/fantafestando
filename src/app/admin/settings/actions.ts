@@ -2,6 +2,7 @@
 
 import dbConnect from "@/lib/mongoose";
 import { getAdminContextEventId } from "@/lib/events";
+import { ensureAdminSession } from "@/lib/authz";
 import { encryptSecret, isEncryptedSecret } from "@/lib/secrets";
 import Event from "@/models/Event";
 import Category from "@/models/Category";
@@ -60,7 +61,18 @@ function getConfigString(config: unknown, key: string): string | undefined {
     return typeof value === "string" ? value : undefined;
 }
 
+async function requireAdminAuthorization() {
+    const sessionCheck = await ensureAdminSession();
+    if (!sessionCheck.ok) {
+        return { error: sessionCheck.error } as const;
+    }
+    return null;
+}
+
 export async function createEventAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const name = formData.get("name") as string;
     if (!name) return { error: "Nome obbligatorio" };
 
@@ -77,6 +89,9 @@ export async function createEventAction(formData: FormData) {
 }
 
 export async function updateEventSettingsAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const eventId = formData.get("eventId") as string;
     const askName = formData.get("askName") === "on";
     const askTable = formData.get("askTable") === "on";
@@ -185,6 +200,9 @@ export async function updateEventSettingsAction(formData: FormData) {
 }
 
 export async function cloneEventAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const sourceEventId = formData.get("sourceEventId") as string;
     const newName = formData.get("newName") as string;
     if (!sourceEventId || !newName) return { error: "Dati mancanti" };
@@ -306,6 +324,9 @@ export async function cloneEventAction(formData: FormData) {
 
 // PRINTER ACTIONS
 export async function createPrinterAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const submittedEventId = formData.get("eventId") as string | null;
     const name = formData.get("name") as string;
     const ip = formData.get("ip");
@@ -344,6 +365,9 @@ export async function createPrinterAction(formData: FormData) {
 }
 
 export async function deletePrinterAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const id = formData.get("id") as string;
     const submittedEventId = formData.get("eventId") as string | null;
     if (!id) return { error: "ID stampante mancante" };
@@ -367,6 +391,9 @@ export async function deletePrinterAction(formData: FormData) {
 }
 
 export async function updatePrinterAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const id = formData.get("id") as string;
     const submittedEventId = formData.get("eventId") as string | null;
     const name = formData.get("name") as string;
@@ -551,6 +578,9 @@ export async function createManualPrintJobAction(formData: FormData) {
 }
 
 export async function createPosDeviceAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const submittedEventId = formData.get("eventId") as string | null;
     const name = formData.get("name") as string;
     const printerId = formData.get("printerId") as string;
@@ -611,6 +641,9 @@ export async function createPosDeviceAction(formData: FormData) {
 }
 
 export async function deletePosDeviceAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const id = formData.get("id") as string;
     const submittedEventId = formData.get("eventId") as string | null;
     if (!id) return { error: "ID punto cassa mancante" };
@@ -631,6 +664,9 @@ export async function deletePosDeviceAction(formData: FormData) {
 }
 
 export async function updatePosDeviceAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const id = formData.get("id") as string;
     const submittedEventId = formData.get("eventId") as string | null;
     const name = formData.get("name") as string;
@@ -700,6 +736,9 @@ export async function updatePosDeviceAction(formData: FormData) {
 
 // PERIPHERAL ACTIONS
 export async function createPeripheralAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const submittedEventId = formData.get("eventId") as string | null;
     const name = formData.get("name") as string;
     const type = formData.get("type") as "SUMUP" | "CASH_BOX" | "OTHER";
@@ -732,6 +771,9 @@ export async function createPeripheralAction(formData: FormData) {
 }
 
 export async function deletePeripheralAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const id = formData.get("id") as string;
     const submittedEventId = formData.get("eventId") as string | null;
     if (!id) return { error: "ID periferica mancante" };
@@ -756,6 +798,9 @@ export async function deletePeripheralAction(formData: FormData) {
 }
 
 export async function updatePeripheralAction(formData: FormData) {
+    const authError = await requireAdminAuthorization();
+    if (authError) return authError;
+
     const id = formData.get("id") as string;
     const submittedEventId = formData.get("eventId") as string | null;
     const name = formData.get("name") as string;

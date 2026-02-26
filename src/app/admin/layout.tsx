@@ -4,6 +4,10 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { AdminEventSelector } from "@/components/admin-event-selector";
 import { getAllEvents, getAdminContextEventId } from "@/lib/events";
 import { getAppVersionLabel } from "@/lib/app-version";
+import { requireAdminPageSession } from "@/lib/authz";
+import { signOut } from "@/auth";
+import { Button } from "@/components/ui/button";
+import { LogOut } from "lucide-react";
 
 export const metadata: Metadata = {
     title: "Admin Dashboard | OSGFest",
@@ -15,6 +19,7 @@ export default async function AdminLayout({
 }: Readonly<{
     children: React.ReactNode;
 }>) {
+    const adminUser = await requireAdminPageSession();
     const events = await getAllEvents();
     const selectableEvents = events.filter(event => !event.archived);
     // Convertiamo l'id a stringa per inviarlo al Client Component
@@ -25,6 +30,11 @@ export default async function AdminLayout({
     }));
     const currentEventId = await getAdminContextEventId();
     const appVersionLabel = getAppVersionLabel();
+
+    async function logoutAdmin() {
+        "use server";
+        await signOut({ redirectTo: "/login" });
+    }
 
     return (
         <SidebarProvider>
@@ -43,8 +53,17 @@ export default async function AdminLayout({
                             </span>
                         </div>
                     </div>
-                    <div className="flex items-center">
+                    <div className="flex items-center gap-3">
+                        <span className="text-sm text-slate-500 dark:text-slate-400">
+                            {adminUser.username}
+                        </span>
                         <AdminEventSelector events={serializedEvents} currentEventId={currentEventId} />
+                        <form action={logoutAdmin}>
+                            <Button type="submit" variant="outline" size="sm" className="gap-1">
+                                <LogOut className="h-4 w-4" />
+                                Esci
+                            </Button>
+                        </form>
                     </div>
                 </header>
                 <div className="p-6">
