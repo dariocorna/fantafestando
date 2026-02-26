@@ -10,7 +10,9 @@ services:
     volumes:
       - mongo_data:/data/db
     networks:
-      - osgfest_net
+      osgfest_net:
+        aliases:
+          - mongo
     healthcheck:
       test:
         - CMD-SHELL
@@ -41,6 +43,8 @@ services:
       NODE_ENV: production
       APP_SURFACE: backoffice
       MONGODB_URI: ${MONGODB_URI:?MONGODB_URI is required}
+      PRINTER_EMULATOR_HOST: ${PRINTER_EMULATOR_HOST:-printer-emulator}
+      PRINTER_EMULATOR_START_PORT: ${PRINTER_EMULATOR_START_PORT:-19100}
       PORT: 3000
     ports:
       - '127.0.0.1:3101:3000'
@@ -73,6 +77,8 @@ services:
       NODE_ENV: production
       APP_SURFACE: menu
       MONGODB_URI: ${MONGODB_URI:?MONGODB_URI is required}
+      PRINTER_EMULATOR_HOST: ${PRINTER_EMULATOR_HOST:-printer-emulator}
+      PRINTER_EMULATOR_START_PORT: ${PRINTER_EMULATOR_START_PORT:-19100}
       PORT: 3000
     ports:
       - '127.0.0.1:3102:3000'
