@@ -117,3 +117,6 @@ volumes:
 networks:
   osgfest_net:
     name: osgfest_net
+    ipam:
+      config:
+        - subnet: 10.202.0.0/24

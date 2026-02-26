@@ -11,6 +11,8 @@ services:
       - MONGO_INITDB_DATABASE=osgfest
     volumes:
       - mongodb_data:/data/db
+    networks:
+      - osgfest_dev_net
 
   printer-emulator:
     image: node:20-alpine
@@ -27,7 +29,16 @@ services:
       - printer_emulator_data:/data/printer-emulator
     ports:
       - "19100-19109:19100-19109"
+    networks:
+      - osgfest_dev_net
 
 volumes:
   mongodb_data:
   printer_emulator_data:
+
+networks:
+  osgfest_dev_net:
+    name: osgfest_dev_net
+    ipam:
+      config:
+        - subnet: 10.201.0.0/24
