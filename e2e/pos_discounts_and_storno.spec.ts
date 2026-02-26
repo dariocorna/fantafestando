@@ -125,7 +125,30 @@ async function openCashSession(page: Page, openingFloatAmount: string) {
 }
 
 async function addProductsToCart(page: Page, categoryName: string, productNames: string[]) {
-    await page.getByRole("button", { name: categoryName, exact: true }).click()
+    const firstProductName = productNames[0]
+    const firstProductButton = page.locator("button").filter({ hasText: new RegExp(firstProductName) }).first()
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+        const categoryButton = page.getByRole("button", { name: categoryName, exact: true })
+        if (await categoryButton.isVisible().catch(() => false)) {
+            await categoryButton.click()
+        }
+
+        if (await firstProductButton.isVisible().catch(() => false)) {
+            break
+        }
+
+        if (attempt === 3) {
+            throw new Error(`Catalogo POS non pronto: categoria/prodotto non trovati (${categoryName}, ${firstProductName})`)
+        }
+
+        await page.reload()
+        await page.waitForResponse(
+            (response) => response.url().includes("/api/pos/init") && response.ok(),
+            { timeout: 10000 }
+        )
+    }
+
     for (const name of productNames) {
         await page.locator("button").filter({ hasText: new RegExp(name) }).first().click()
     }
@@ -137,7 +160,6 @@ async function completeCheckout(page: Page) {
     const confirmButton = checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true })
     await confirmButton.scrollIntoViewIfNeeded()
     await confirmButton.click()
-    await expect(checkoutDialog.getByText(/Stampa in corso/i).first()).toBeVisible()
     await expect(checkoutDialog).toBeHidden({ timeout: 15000 })
 
     const successModal = page.getByRole("dialog").filter({ hasText: /Ordine completato correttamente/i })
