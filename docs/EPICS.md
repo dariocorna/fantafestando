@@ -159,11 +159,19 @@ Riferimento funzionale dettagliato: `docs/inventory-stock.md`.
 
 ---
 
-## ⬜ Epica 10: Sicurezza e Ruoli (RBAC)
+## ✅ Epica 10: Sicurezza e Ruoli (RBAC)
 
 - Differenziazione ruoli: **Admin/Gestione** vs. **Cassiere**.
 - Restrizione rigida delle rotte `/admin` ai soli utenti Gestori.
+- Login credenziali via DB (`User`) con verifica `bcrypt` e ruolo propagato in sessione JWT/Auth.js.
+- Defense in depth su backoffice:
+  - guard rete su `proxy` per `/admin`;
+  - guard server-side su layout admin;
+  - controllo autorizzazione su server action/route admin (settings, catalogo, ordini, export).
+- Pagina `/login` dedicata + logout backoffice.
 - (Opzionale) PIN Cassa per passaggio rapido di sessione tra volontari.
+
+**Test E2E**: `e2e/rbac_admin_access.spec.ts` (suite Chromium completa verde).
 
 ---
 

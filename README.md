@@ -3,6 +3,7 @@
 Gestionale per feste locali (Bonate Sotto) con:
 - pannello admin per catalogo/eventi/hardware
 - dashboard admin con metriche vendite e sezione sessioni cassa
+- autenticazione RBAC per backoffice (`ADMIN`/`CASHIER`) con blocco accesso `/admin` ai soli `ADMIN`
 - download report sessione cassa (CSV/XLS) dalla dashboard admin
 - POS touch per cassa
 - sconti POS dinamici con preset rapidi multipli configurabili in admin (es. Staff 50%, Promo cassa)
@@ -37,6 +38,7 @@ npm install
 ```bash
 MONGODB_URI=mongodb://root:password@localhost:27017/osgfest?authSource=admin
 AUTH_SECRET=replace-with-a-long-random-secret
+AUTH_ALLOW_DEV_CREDENTIALS=true
 APP_VERSION=0.1.0
 APP_BUILD=
 
@@ -67,7 +69,9 @@ App disponibile su `http://localhost:3000`.
 - `GET /menu`: web app ordini pubblica
 - `GET /login`: login admin
 
-Credenziali di sviluppo attuali (placeholder): `admin / admin`.
+Accesso backoffice:
+- ambienti standard: utenti letti da MongoDB collection `User` (`username`, `passwordHash`, `role`) con verifica password `bcrypt`;
+- sviluppo locale: fallback `admin / admin` attivo solo fuori produzione (disattivabile con `AUTH_ALLOW_DEV_CREDENTIALS=false`).
 
 ## Script principali
 
