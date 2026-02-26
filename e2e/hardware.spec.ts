@@ -1,10 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
+import { ensureAdminAuthenticated } from "./utils/auth";
 
 async function gotoAdmin(page: Page) {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
-            await page.goto("/admin", { waitUntil: "domcontentloaded", timeout: 60000 });
+            await ensureAdminAuthenticated(page, "/admin");
             return;
         } catch (error) {
             lastError = error;
@@ -18,9 +19,14 @@ async function ensureAdminEventContext(page: Page) {
     const selector = page.getByTestId("admin-event-selector");
 
     await gotoAdmin(page);
+    if (!(await selector.innerText()).includes("Seleziona Festa")) {
+        await expect(selector).toBeEnabled({ timeout: 10000 });
+        return;
+    }
+
     await page.click('[data-testid="admin-event-selector"]');
     const firstOption = page.getByRole("option").first();
-    if (await firstOption.isVisible().catch(() => false)) {
+    if (await firstOption.isVisible({ timeout: 3000 }).catch(() => false)) {
         await firstOption.click();
         await expect(selector).not.toContainText("Seleziona Festa", { timeout: 10000 });
         await expect(selector).toBeEnabled({ timeout: 10000 });
@@ -37,8 +43,10 @@ async function ensureAdminEventContext(page: Page) {
     await expect(page.getByText(eventName)).toBeVisible({ timeout: 10000 });
 
     await gotoAdmin(page);
-    await page.click('[data-testid="admin-event-selector"]');
-    await page.getByRole("option").first().click();
+    if ((await selector.innerText()).includes("Seleziona Festa")) {
+        await page.click('[data-testid="admin-event-selector"]');
+        await page.getByRole("option", { name: new RegExp(eventName) }).click();
+    }
     await expect(selector).not.toContainText("Seleziona Festa", { timeout: 10000 });
     await expect(selector).toBeEnabled({ timeout: 10000 });
     await page.waitForLoadState("networkidle");
@@ -156,7 +164,7 @@ test.describe("Gestione Hardware ed Elettronica", () => {
         const editedPrinterIp = "192.168.1.100";
         await editPrinterDialog.getByLabel("Indirizzo IP").fill(editedPrinterIp);
         await editPrinterDialog.getByRole("button", { name: "Salva Modifiche", exact: true }).click();
-        await expect(page.getByText(editedPrinterIp)).toBeVisible();
+        await expect(printerCard.getByText(editedPrinterIp)).toBeVisible();
 
         // Crea POS
         await page.goto("/admin/settings/pos");

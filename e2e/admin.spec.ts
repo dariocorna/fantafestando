@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { ensureAdminAuthenticated } from './utils/auth';
 
 async function gotoAdmin(page: import('@playwright/test').Page) {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
-            await page.goto('/admin', { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await ensureAdminAuthenticated(page, '/admin');
             return;
         } catch (error) {
             lastError = error;
