@@ -39,7 +39,7 @@ npm install
 MONGODB_URI=mongodb://root:password@localhost:27017/osgfest?authSource=admin
 AUTH_SECRET=replace-with-a-long-random-secret
 AUTH_ALLOW_DEV_CREDENTIALS=true
-APP_VERSION=0.1.0
+APP_VERSION=0.2.0
 APP_BUILD=
 
 # Opzionali / in base alla funzionalita'
