@@ -149,6 +149,8 @@ sudo certbot --apache -d backoffice-osgfest.ddns.net -d osgfest.ddns.net
 
 ## 6. Aggiornamento applicazione
 
+### 6.1 Flusso standard (server come clone Git)
+
 ```bash
 cd /opt/osgfest
 git pull
@@ -163,6 +165,68 @@ Verifica post update:
 curl -fsS https://backoffice-osgfest.ddns.net/api/health
 curl -fsS https://osgfest.ddns.net/api/health
 ```
+
+### 6.2 Flusso consigliato per Bergamo (deploy del compilato locale)
+
+Usare questo flusso quando vuoi evitare build applicativa sulla VM e pubblicare
+esattamente gli artefatti generati in locale.
+
+1. Build locale:
+
+```bash
+cd /path/to/osgfest
+npm ci
+npm run build
+```
+
+2. Sync codice+artefatti su VM:
+
+```bash
+rsync -az --delete \
+  --exclude '.git' \
+  --exclude 'node_modules' \
+  --exclude '.next/cache' \
+  --exclude '.env*' \
+  ./ bergamo:/opt/osgfest/
+```
+
+3. Rebuild immagine e restart stack (forzando aggiornamento runtime):
+
+```bash
+BUILD_SHA=$(git rev-parse --short HEAD)
+ssh bergamo '
+  cd /opt/osgfest &&
+  if grep -q "^APP_BUILD=" .env.production; then
+    sed -i -E "s/^APP_BUILD=.*/APP_BUILD='"${BUILD_SHA}"'/" .env.production
+  else
+    echo "APP_BUILD='"${BUILD_SHA}"'" >> .env.production
+  fi &&
+  docker compose --env-file .env.production -f docker-compose.prod.yml build --no-cache osgfest-backoffice osgfest-menu &&
+  docker compose --env-file .env.production -f docker-compose.prod.yml --profile demo up -d --remove-orphans
+'
+```
+
+4. Verifica release effettiva:
+
+```bash
+ssh bergamo 'curl -fsS http://127.0.0.1:3101/api/health'
+ssh bergamo 'curl -fsS http://127.0.0.1:3102/api/health'
+```
+
+Controllare che `release` nei payload `/api/health` corrisponda al commit atteso.
+
+### 6.3 Checklist anti-regressioni deploy
+
+- `MONGODB_URI` in `.env.production` deve puntare a `mongo` (hostname di rete compose), non a IP hardcoded.
+- Se usi stampanti virtuali, avvia lo stack con profilo `demo` e mantieni:
+  - `PRINTER_EMULATOR_HOST=printer-emulator`
+  - `PRINTER_EMULATOR_START_PORT=19100`
+- Aggiorna `APP_BUILD` a ogni deploy (commit short SHA) per avere in admin la release effettiva.
+- Quando vedi codice vecchio dopo un deploy, esegui `build --no-cache` prima di `up -d`.
+- Dopo ogni deploy verifica sempre:
+  - stato container (`docker compose ... ps`)
+  - endpoint health locali (`127.0.0.1:3101/3102`)
+  - release pubblicata (`/api/health`).
 
 ## 7. Rollback
 
