@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,10 +39,17 @@ export function EditProductDialog({
     const [availableDays, setAvailableDays] = useState<DayCode[]>(
         normalizeAvailableDays(product.availableDays || [])
     );
+    const [submitError, setSubmitError] = useState<string | null>(null);
 
     async function handleSubmit(formData: FormData) {
-        await updateAction(formData);
-        setOpen(false);
+        setSubmitError(null);
+        try {
+            await updateAction(formData);
+            setOpen(false);
+        } catch (error) {
+            console.error("Errore durante l'aggiornamento prodotto", error);
+            setSubmitError("Aggiornamento non riuscito. Verifica connessione e riprova.");
+        }
     }
 
     const toggleDay = (day: DayCode) => {
@@ -61,6 +68,7 @@ export function EditProductDialog({
                 setOpen(nextOpen);
                 if (nextOpen) {
                     setAvailableDays(normalizeAvailableDays(product.availableDays || []));
+                    setSubmitError(null);
                 }
             }}
         >
@@ -73,6 +81,9 @@ export function EditProductDialog({
                 <form action={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle>Modifica Prodotto</DialogTitle>
+                        <DialogDescription>
+                            Aggiorna i campi del prodotto selezionato.
+                        </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <input type="hidden" name="id" value={product.id} />
@@ -149,6 +160,11 @@ export function EditProductDialog({
                             </div>
                         </div>
                     </div>
+                    {submitError ? (
+                        <p className="text-sm font-medium text-red-600" role="alert">
+                            {submitError}
+                        </p>
+                    ) : null}
                     <DialogFooter>
                         <SubmitButton />
                     </DialogFooter>

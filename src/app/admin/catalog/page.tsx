@@ -18,6 +18,7 @@ import { DeleteForm } from "@/components/delete-form";
 import {
     Dialog,
     DialogContent,
+    DialogDescription,
     DialogHeader,
     DialogTitle,
     DialogTrigger,
@@ -400,6 +401,9 @@ export default async function AdminCatalog() {
                                                 <input type="hidden" name="eventId" value={currentEventId} />
                                                 <DialogHeader>
                                                     <DialogTitle>Gestisci Varianti per {p.name}</DialogTitle>
+                                                    <DialogDescription>
+                                                        Aggiungi una nuova opzione variante con prezzo e scorte dedicate.
+                                                    </DialogDescription>
                                                 </DialogHeader>
                                                 <div className="grid gap-4 py-4">
                                                     <div className="grid gap-2">
