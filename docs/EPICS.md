@@ -56,6 +56,22 @@ PWA pubblica per i clienti della festa.
 
 ---
 
+## ✅ Epica GitHub #17/#18: PWA Menu dedicata
+
+Completamento della PWA per il solo frontale pubblico `menu`.
+
+- Manifest dedicato su `GET /manifest-menu.webmanifest` con scope `/menu/`.
+- Service worker dedicato `sw-menu.js` (strategia online-first) con cache versionata su release.
+- Prompt installazione PWA nel layout `menu`.
+- Branding UI menu allineato alle nuove grafiche e icone ufficiali.
+- Nessuna modalità offline operativa per `menu` (coerente con il flusso ordine online).
+- Nessuna PWA su `admin` in questa epica (rinviata a epica futura).
+
+**Test E2E**: `e2e/pwa.spec.ts`.
+**Issue collegate**: `#17`, `#18` (chiuse).
+
+---
+
 ## ✅ Epica 5: Smistamento e Stampe di Rete
 
 Routing intelligente delle stampe termiche ESC/POS.
