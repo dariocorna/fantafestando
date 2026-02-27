@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { motion, AnimatePresence } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { getCategoryTheme } from "@/lib/category-colors"
+import Image from "next/image"
 
 interface Product {
     _id: string
@@ -79,22 +80,36 @@ export default function CustomerMenu() {
     }
 
     return (
-        <div className="min-h-screen bg-slate-50 pb-32">
+        <div className="min-h-screen bg-gradient-to-b from-[#dbeafe] via-[#eef4fb] to-[#f8fafc] pb-32">
             {/* Header / Hero */}
-            <div className="bg-white px-6 pt-12 pb-6 border-b shadow-sm sticky top-0 z-40">
-                <div className="flex justify-between items-center mb-6">
-                    <div>
-                        <h1 className="text-2xl font-black text-slate-800 tracking-tight">
-                            {activeEvent?.name || "Menù Osgfest"}
-                        </h1>
-                        <p className="text-slate-400 text-sm font-bold flex items-center gap-1">
-                            <Info size={14} /> Tocca i prodotti per aggiungerli
-                        </p>
+            <div className="sticky top-0 z-40 border-b border-sky-100 bg-white/90 px-4 pb-5 pt-4 shadow-sm backdrop-blur md:px-6">
+                <div className="mx-auto max-w-2xl">
+                    <div className="mb-4 rounded-3xl border border-sky-100 bg-gradient-to-r from-white to-[#eef7ff] p-3 shadow-sm">
+                        <div className="flex items-center gap-3">
+                            <Image
+                                src="/icons/icon-96x96.png"
+                                alt="Logo Oratorio in Festa"
+                                width={56}
+                                height={56}
+                                className="h-14 w-14 rounded-2xl bg-white p-1 shadow-sm"
+                                priority
+                            />
+                            <div className="min-w-0">
+                                <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[#1e5fb8]">
+                                    Oratorio in Festa
+                                </p>
+                                <h1 className="truncate text-xl font-black tracking-tight text-[#184f9e] md:text-2xl">
+                                    {activeEvent?.name || "Menu OSGFest"}
+                                </h1>
+                                <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-[#2f6bb5] md:text-sm">
+                                    <Info size={14} /> Tocca i prodotti per aggiungerli
+                                </p>
+                            </div>
+                        </div>
                     </div>
-                </div>
 
-                {/* Horizontal Category Scroller */}
-                <div className="flex gap-4 overflow-x-auto scrollbar-hide -mx-6 px-6">
+                    {/* Horizontal Category Scroller */}
+                    <div className="flex gap-3 overflow-x-auto scrollbar-hide -mx-4 px-4 md:-mx-6 md:px-6">
                     {categories.map(cat => {
                         const catTheme = getCategoryTheme(cat.uiColor)
                         const isActive = activeTab === cat._id
@@ -124,6 +139,7 @@ export default function CustomerMenu() {
                             </button>
                         )
                     })}
+                    </div>
                 </div>
             </div>
 
@@ -216,7 +232,7 @@ export default function CustomerMenu() {
                     >
                         <button
                             onClick={() => setIsCartOpen(true)}
-                            className="w-full max-w-lg mx-auto bg-orange-500 p-4 rounded-3xl shadow-xl shadow-orange-200 text-white flex items-center justify-between pointer-events-auto active:scale-95 transition-transform"
+                            className="w-full max-w-lg mx-auto bg-gradient-to-r from-[#1e5fb8] to-[#249fe8] p-4 rounded-3xl shadow-xl shadow-blue-200 text-white flex items-center justify-between pointer-events-auto active:scale-95 transition-transform"
                         >
                             <div className="flex items-center gap-3">
                                 <div className="bg-white/20 w-10 h-10 rounded-2xl flex items-center justify-center font-black">
@@ -259,7 +275,7 @@ export default function CustomerMenu() {
                                 {cart.map(item => (
                                     <div key={item._id} className="flex justify-between items-center">
                                         <div className="flex items-center gap-4">
-                                            <div className="bg-orange-50 text-orange-600 w-8 h-8 rounded-lg flex items-center justify-center font-black">
+                                            <div className="bg-[#fff4cc] text-[#bf7f00] w-8 h-8 rounded-lg flex items-center justify-center font-black">
                                                 {item.quantity}x
                                             </div>
                                             <span className="font-bold text-lg text-slate-800">{item.name}</span>
