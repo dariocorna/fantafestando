@@ -40,24 +40,20 @@ export default async function AdminLayout({
         <SidebarProvider>
             <AppSidebar />
             <main className="w-full bg-slate-50 dark:bg-slate-950 min-h-screen">
-                <header className="flex h-16 items-center border-b px-4 bg-white dark:bg-slate-900 shrink-0 justify-between">
-                    <div className="flex items-center">
+                <header className="flex min-h-16 flex-wrap items-center gap-3 border-b bg-white px-4 py-2 dark:bg-slate-900 shrink-0 justify-between">
+                    <div className="flex min-w-0 items-center">
                         <SidebarTrigger />
-                        <div className="ml-4 flex items-center gap-2">
-                            <div className="font-semibold text-slate-800 dark:text-slate-100">OSGFest Manager</div>
-                            <span
-                                data-testid="admin-app-version"
-                                className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
-                            >
-                                {appVersionLabel}
-                            </span>
+                        <div className="ml-4 flex min-w-0 items-center gap-2">
+                            <div className="truncate font-semibold text-slate-800 dark:text-slate-100">OSGFest Manager</div>
                         </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                        <span className="text-sm text-slate-500 dark:text-slate-400">
+                    <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 sm:w-auto sm:gap-3">
+                        <span className="hidden text-sm text-slate-500 dark:text-slate-400 sm:inline">
                             {adminUser.username}
                         </span>
-                        <AdminEventSelector events={serializedEvents} currentEventId={currentEventId} />
+                        <div className="w-full min-w-0 sm:w-auto">
+                            <AdminEventSelector events={serializedEvents} currentEventId={currentEventId} />
+                        </div>
                         <form action={logoutAdmin}>
                             <Button type="submit" variant="outline" size="sm" className="gap-1">
                                 <LogOut className="h-4 w-4" />
@@ -69,6 +65,12 @@ export default async function AdminLayout({
                 <div className="p-6">
                     {children}
                 </div>
+                <footer className="border-t bg-white px-4 py-3 text-xs text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span>Copyright 2026 OSGFest</span>
+                        <span data-testid="admin-app-version">{appVersionLabel}</span>
+                    </div>
+                </footer>
             </main>
         </SidebarProvider>
     );
