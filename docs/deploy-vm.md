@@ -18,7 +18,7 @@ Mappatura porte locali host:
 - `127.0.0.1:3102` -> `osgfest-menu:3000`
 
 Domini previsti:
-- `backoffice-osgfest.ddns.net` -> admin + pos
+- `osgfest-backoffice.ddns.net` -> admin + pos
 - `osgfest.ddns.net` -> portale pubblico menu
 
 ## 2. Prerequisiti VM
@@ -83,22 +83,22 @@ sudo systemctl reload apache2
 
 ### 5.1 VirtualHost Backoffice
 
-Esempio `/etc/apache2/sites-available/backoffice-osgfest.conf`:
+Esempio `/etc/apache2/sites-available/osgfest-backoffice.conf`:
 
 ```apache
 <VirtualHost *:80>
-    ServerName backoffice-osgfest.ddns.net
+    ServerName osgfest-backoffice.ddns.net
     RewriteEngine On
     RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
     RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [R=301,L]
 </VirtualHost>
 
 <VirtualHost *:443>
-    ServerName backoffice-osgfest.ddns.net
+    ServerName osgfest-backoffice.ddns.net
 
     SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/backoffice-osgfest.ddns.net/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/backoffice-osgfest.ddns.net/privkey.pem
+    SSLCertificateFile /etc/letsencrypt/live/osgfest-backoffice.ddns.net/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/osgfest-backoffice.ddns.net/privkey.pem
 
     ProxyPreserveHost On
     RequestHeader set X-Forwarded-Proto "https"
@@ -136,7 +136,7 @@ Esempio `/etc/apache2/sites-available/menu-osgfest.conf`:
 Attivazione siti:
 
 ```bash
-sudo a2ensite backoffice-osgfest.conf
+sudo a2ensite osgfest-backoffice.conf
 sudo a2ensite menu-osgfest.conf
 sudo systemctl reload apache2
 ```
@@ -144,7 +144,7 @@ sudo systemctl reload apache2
 Emettere certificati (se non già emessi):
 
 ```bash
-sudo certbot --apache -d backoffice-osgfest.ddns.net -d osgfest.ddns.net
+sudo certbot --apache -d osgfest-backoffice.ddns.net -d osgfest.ddns.net
 ```
 
 ## 6. Aggiornamento applicazione
@@ -162,7 +162,7 @@ Anche `update.sh` riesegue automaticamente la migrazione indice ordini.
 Verifica post update:
 
 ```bash
-curl -fsS https://backoffice-osgfest.ddns.net/api/health
+curl -fsS https://osgfest-backoffice.ddns.net/api/health
 curl -fsS https://osgfest.ddns.net/api/health
 ```
 
@@ -252,6 +252,9 @@ Controllare che `release` nei payload `/api/health` corrisponda al commit atteso
   - `PRINTER_EMULATOR_START_PORT=19100`
 - Aggiorna `APP_BUILD` a ogni deploy (commit short SHA) per avere in admin la release effettiva.
 - Quando vedi codice vecchio dopo un deploy, esegui `build --no-cache` prima di `up -d`.
+- Verifica asset PWA pubblicati:
+  - `https://osgfest.ddns.net/manifest-menu.webmanifest`
+  - `https://osgfest.ddns.net/sw-menu.js`
 - Dopo ogni deploy verifica sempre:
   - stato container (`docker compose ... ps`)
   - endpoint health locali (`127.0.0.1:3101/3102`)
