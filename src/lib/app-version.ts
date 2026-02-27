@@ -21,3 +21,7 @@ export function getAppVersionLabel(): string {
 
     return `v${version}`;
 }
+
+export function getAppReleaseKey(): string {
+    return readEnv("APP_BUILD") || getAppVersion();
+}
