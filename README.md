@@ -11,6 +11,7 @@ Gestionale per feste locali (Bonate Sotto) con:
 - chiusura cassa con contante atteso (solo contanti) e stampa riepilogo su stampante associata
 - storno sicuro ordine pagato da admin con ripristino contabile/scorte
 - web app pubblica per ordini cliente
+- PWA dedicata per `menu` (pubblico), installabile e online-first
 - integrazione pagamenti elettronici SumUp
 - rimborso SumUp in caso di storno ordine pagato con carta
 - stampa comande su stampanti termiche di rete
@@ -67,6 +68,7 @@ App disponibile su `http://localhost:3000`.
 - `GET /admin`: pannello amministrazione
 - `GET /pos`: interfaccia punto cassa
 - `GET /menu`: web app ordini pubblica
+- `GET /manifest-menu.webmanifest`: manifest PWA menu
 - `GET /login`: login admin
 
 Accesso backoffice:
@@ -118,4 +120,5 @@ CI=true npx playwright test --project=chromium
 
 - Le integrazioni SumUp e webhook richiedono la configurazione delle relative variabili ambiente.
 - In Admin la versione mostrata usa `APP_VERSION` (fallback: `package.json`), con suffisso opzionale `APP_BUILD`.
+- La PWA `menu` è configurata in modalità online-first: installabile, ma senza flussi offline operativi.
 - Il README descrive lo stato corrente del repository `master`.
