@@ -210,7 +210,7 @@ La UI del POS deve riflettere le periferiche effettivamente associate al Punto C
 
 ---
 
-## 🔄 Epica 17: Emulazione Stampanti
+## ✅ Epica 17: Emulazione Stampanti
 
 - Virtualizzazione stampanti termiche ESC/POS su TCP per sviluppo, test e demo.
 - Supporto a pool di 10 stampanti virtuali via Docker.
@@ -218,7 +218,8 @@ La UI del POS deve riflettere le periferiche effettivamente associate al Punto C
 - Vista Admin runtime con anteprima ricevute renderizzate.
 - Compatibilità con stampanti reali LAN mantenuta (nessuna regressione attesa sul path attuale).
 - Documentazione tecnica: `docs/printer-emulation.md`.
-- Piano implementativo approvazione Fase 2: `implementation_plan.md`.
+
+**Test E2E**: `e2e/printer_emulation.spec.ts`, `e2e/print_retry.spec.ts`.
 
 ---
 
