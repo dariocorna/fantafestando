@@ -171,6 +171,35 @@ curl -fsS https://osgfest.ddns.net/api/health
 Usare questo flusso quando vuoi evitare build applicativa sulla VM e pubblicare
 esattamente gli artefatti generati in locale.
 
+#### Script consigliato (one-command)
+
+```bash
+cd /path/to/osgfest
+./scripts/deploy-bergamo.sh
+```
+
+Alias equivalente:
+
+```bash
+npm run deploy:bergamo
+```
+
+Opzioni principali:
+- `--host <alias-ssh>` (default `bergamo`)
+- `--path <remote-path>` (default `/opt/osgfest`)
+- `--profile <compose-profile>` (default `demo`)
+- `--skip-build` / `--skip-rsync` / `--skip-health-check`
+- `--use-cache` (default build `--no-cache`)
+
+Lo script esegue automaticamente:
+- `npm run build` locale
+- `rsync` verso `${host}:${path}` con exclude sicuri
+- update di `APP_BUILD` in `.env.production` remoto
+- `docker compose build` + `up -d --remove-orphans`
+- health check `127.0.0.1:3101/3102`
+
+#### Flusso manuale equivalente
+
 1. Build locale:
 
 ```bash
