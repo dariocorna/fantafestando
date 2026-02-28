@@ -23,9 +23,12 @@ export interface ComputeCashSessionSummaryOptions {
 
 export interface CashSessionReportOrderInput {
     id?: string | null
+    orderCode?: string | null
     createdAt?: Date | string | null
     paymentMethod?: string | null
     totalAmount?: number | null
+    discountAmount?: number | null
+    netAmount?: number | null
     customerName?: string | null
     customerTable?: string | null
 }
@@ -194,6 +197,14 @@ function buildCashSessionExport(
     rows.push(serializeRow(["Incasso contanti", normalizeAmount(report.cashSalesAmount).toFixed(2)], delimiter))
     rows.push(serializeRow(["Incasso carta", normalizeAmount(report.cardSalesAmount).toFixed(2)], delimiter))
     rows.push(serializeRow(["Incasso altro", normalizeAmount(report.otherSalesAmount).toFixed(2)], delimiter))
+    rows.push(serializeRow([
+        "Totale incassi",
+        (
+            normalizeAmount(report.cashSalesAmount)
+            + normalizeAmount(report.cardSalesAmount)
+            + normalizeAmount(report.otherSalesAmount)
+        ).toFixed(2)
+    ], delimiter))
     rows.push(serializeRow(["Contante atteso (solo contanti)", normalizeAmount(report.expectedCashAmount).toFixed(2)], delimiter))
     rows.push(serializeRow(["Contante contato", normalizeAmount(report.closingCountedCashAmount).toFixed(2)], delimiter))
     rows.push(serializeRow(["Differenza", Number((report.varianceAmount ?? 0).toFixed(2)).toFixed(2)], delimiter))
@@ -226,18 +237,20 @@ function buildCashSessionExport(
     rows.push("")
 
     rows.push("Ordini sessione")
-    rows.push(serializeRow(["Data", "Ordine", "Pagamento", "Cliente", "Tavolo", "Importo"], delimiter))
+    rows.push(serializeRow(["Data", "Codice ordine", "Ordine", "Pagamento", "Cliente", "Tavolo", "Sconto", "Totale netto"], delimiter))
     if (sortedOrders.length === 0) {
-        rows.push(serializeRow(["-", "-", "-", "-", "-", "0.00"], delimiter))
+        rows.push(serializeRow(["-", "-", "-", "-", "-", "-", "0.00", "0.00"], delimiter))
     } else {
         sortedOrders.forEach((order) => {
             rows.push(serializeRow([
                 formatDateTime(order.createdAt, timezone),
+                normalizeText(order.orderCode, "-"),
                 normalizeId(order.id),
                 getPaymentMethodLabel(order.paymentMethod),
                 normalizeText(order.customerName),
                 normalizeText(order.customerTable),
-                normalizeAmount(order.totalAmount).toFixed(2)
+                normalizeAmount(order.discountAmount).toFixed(2),
+                normalizeAmount(order.netAmount ?? order.totalAmount).toFixed(2)
             ], delimiter))
         })
     }
