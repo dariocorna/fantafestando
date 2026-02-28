@@ -56,8 +56,7 @@ test.describe("Selezione Punto Cassa POS", () => {
         }
 
         const selectorTitle = page.getByText(/In quale cassa sei\?/i);
-        await page.waitForTimeout(300);
-        if (await selectorTitle.isVisible()) {
+        if (await selectorTitle.isVisible().catch(() => false)) {
             const firstDevice = await getFirstPosButton(page);
             await firstDevice.click();
             await expect(selectorTitle).toBeHidden();
