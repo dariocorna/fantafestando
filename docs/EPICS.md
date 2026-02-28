@@ -239,6 +239,23 @@ La UI del POS deve riflettere le periferiche effettivamente associate al Punto C
 
 ---
 
+## ✅ Epica GitHub #28/#29: Refactoring template UI tema nuovo logo
+
+Allineamento visuale delle superfici `menu`, `admin` e `pos` con priorita' operativa su leggibilita' e velocita' in cassa.
+
+- Introduzione e consolidamento token brand nel layer globale UI.
+- Restyling `menu` con header brand, footer informativo e coerenza cromatica su pagine core.
+- Restyling `admin` mantenendo densita' informativa e componenti operativi.
+- Evoluzione `pos` con doppia modalita' catalogo configurabile da impostazioni admin:
+  - vista compatta per cassa (colonne categoria sempre visibili);
+  - vista moderna filtrata per categoria (con prezzi e CTA esplicite).
+- Hardening su creazione entita' duplicate (feste/prodotti) con controlli lato admin e copertura test.
+
+**Test E2E**: `e2e/responsive_surfaces.spec.ts`, `e2e/pos_catalog_layout.spec.ts`, `e2e/admin_duplicates.spec.ts`.
+**Issue collegate**: `#28`, `#29` (chiuse).
+
+---
+
 ## ✅ Epica: Deploy progetto su macchina virtuale
 
 - Pacchettizzazione e rilascio del gestionale su VM dedicata.
