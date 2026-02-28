@@ -165,7 +165,7 @@ export function normalizePaymentMethod(paymentMethod: string | null | undefined)
 
 export function getPaymentMethodLabel(paymentMethod: DashboardPaymentMethod): string {
     if (paymentMethod === "CASH") return "Contanti"
-    if (paymentMethod === "CARD") return "Carta / POS"
+    if (paymentMethod === "CARD") return "Elettronico"
     return "Altro"
 }
 
@@ -337,7 +337,7 @@ function buildDashboardExport(
     rows.push(serializeRow(["Generato il", formatDashboardDateTime(stats.generatedAt, timezone)], delimiter))
     rows.push(serializeRow(["Incasso totale", stats.summary.totalRevenue.toFixed(2)], delimiter))
     rows.push(serializeRow(["Incasso contanti", stats.summary.cashRevenue.toFixed(2)], delimiter))
-    rows.push(serializeRow(["Incasso carta", stats.summary.cardRevenue.toFixed(2)], delimiter))
+    rows.push(serializeRow(["Incasso elettronico", stats.summary.cardRevenue.toFixed(2)], delimiter))
     rows.push(serializeRow(["Incasso altro", stats.summary.otherRevenue.toFixed(2)], delimiter))
     rows.push(serializeRow(["Ordini saldati", stats.summary.paidOrdersCount], delimiter))
     rows.push(serializeRow(["Ticket medio", stats.summary.averageTicket.toFixed(2)], delimiter))
