@@ -170,11 +170,14 @@ async function persistMenuHeaderLogo(file: File): Promise<{ url: string } | { er
         return { error: "Rapporto logo non valido: richiesto 10:4 (tolleranza ±12%)." };
     }
 
-    await mkdir(MENU_HEADER_LOGO_UPLOAD_DIR, { recursive: true });
-    const fileName = `menu-header-${Date.now()}-${randomUUID()}.${extension}`;
-    await writeFile(buildMenuHeaderLogoFilePath(fileName), buffer);
-
-    return { url: `${MENU_HEADER_LOGO_URL_PREFIX}/${fileName}` };
+    try {
+        await mkdir(MENU_HEADER_LOGO_UPLOAD_DIR, { recursive: true });
+        const fileName = `menu-header-${Date.now()}-${randomUUID()}.${extension}`;
+        await writeFile(buildMenuHeaderLogoFilePath(fileName), buffer);
+        return { url: `${MENU_HEADER_LOGO_URL_PREFIX}/${fileName}` };
+    } catch {
+        return { error: "Impossibile salvare il logo sul server. Controlla i permessi o riprova." };
+    }
 }
 
 async function deleteMenuHeaderLogoIfManaged(url: string | null | undefined) {
