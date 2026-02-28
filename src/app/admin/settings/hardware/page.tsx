@@ -183,13 +183,13 @@ export default async function HardwarePage() {
                             <Card key={String(p._id)}>
                                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                     <CardTitle className="text-lg font-bold">{p.name}</CardTitle>
-                                    <div className={`p-2 rounded-full ${p.type === 'SUMUP' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'}`}>
-                                        {p.type === 'SUMUP' ? <Smartphone className="h-5 w-5" /> : <Box className="h-5 w-5" />}
+                                    <div className={`p-2 rounded-full ${p.type === 'SUMUP' || p.type === 'ELECTRONIC_MANUAL' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'}`}>
+                                        {p.type === 'SUMUP' || p.type === 'ELECTRONIC_MANUAL' ? <Smartphone className="h-5 w-5" /> : <Box className="h-5 w-5" />}
                                     </div>
                                 </CardHeader>
                                 <CardContent>
                                     <div className="text-sm text-muted-foreground mb-4">
-                                        <p>Tipo: <span className="font-medium text-foreground">{p.type === 'SUMUP' ? 'Terminale Elettronico (SumUp)' : 'Cassetta Contanti'}</span></p>
+                                        <p>Tipo: <span className="font-medium text-foreground">{p.type === 'SUMUP' ? 'Terminale Elettronico (SumUp)' : p.type === 'ELECTRONIC_MANUAL' ? 'Pagamento Elettronico (Manuale)' : 'Cassetta Contanti'}</span></p>
                                         {p.type === 'SUMUP' && <p>Merchant ID: <span className="font-mono text-foreground">{p.config?.merchantId || "Non configurato"}</span></p>}
                                     </div>
                                     <div className="flex justify-end gap-2 mt-4">

@@ -141,9 +141,9 @@ export default async function AdminDashboard() {
             testId: "dashboard-kpi-cash"
         },
         {
-            title: "Incasso Carta",
+            title: "Incasso Elettronico",
             value: formatCurrency(stats.summary.cardRevenue),
-            description: "Pagamenti CARD / POS",
+            description: "Pagamenti elettronici",
             icon: <CreditCard className="h-4 w-4 text-blue-600" />,
             testId: "dashboard-kpi-card"
         },

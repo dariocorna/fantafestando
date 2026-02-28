@@ -86,7 +86,7 @@ function normalizePaymentMethod(value: string | null | undefined): CashSessionPa
 function getPaymentMethodLabel(value: string | null | undefined): string {
     const method = normalizePaymentMethod(value)
     if (method === "CASH") return "Contanti"
-    if (method === "CARD") return "Carta / POS"
+    if (method === "CARD") return "Elettronico"
     return "Altro"
 }
 
@@ -195,7 +195,7 @@ function buildCashSessionExport(
     rows.push(serializeRow(["Chiusura", formatDateTime(report.closedAt, timezone)], delimiter))
     rows.push(serializeRow(["Fondo iniziale", normalizeAmount(report.openingFloatAmount).toFixed(2)], delimiter))
     rows.push(serializeRow(["Incasso contanti", normalizeAmount(report.cashSalesAmount).toFixed(2)], delimiter))
-    rows.push(serializeRow(["Incasso carta", normalizeAmount(report.cardSalesAmount).toFixed(2)], delimiter))
+    rows.push(serializeRow(["Incasso elettronico", normalizeAmount(report.cardSalesAmount).toFixed(2)], delimiter))
     rows.push(serializeRow(["Incasso altro", normalizeAmount(report.otherSalesAmount).toFixed(2)], delimiter))
     rows.push(serializeRow([
         "Totale incassi",
