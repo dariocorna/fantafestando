@@ -67,6 +67,7 @@ export async function GET(request: NextRequest) {
                 isVirtual: boolean;
                 copies: number;
                 document: Record<string, unknown>;
+                rawCapturePath?: string;
                 errorMessage?: string;
                 createdAt?: Date;
                 printerId?: unknown;
@@ -82,6 +83,7 @@ export async function GET(request: NextRequest) {
             isVirtual: job.isVirtual,
             copies: job.copies,
             document: job.document || {},
+            rawCapturePath: job.rawCapturePath,
             errorMessage: job.errorMessage,
             createdAt: job.createdAt ? new Date(job.createdAt).toISOString() : new Date(0).toISOString(),
             printer: job.printerId && typeof job.printerId === "object"

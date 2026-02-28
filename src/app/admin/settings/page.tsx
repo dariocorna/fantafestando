@@ -22,6 +22,7 @@ export default async function AdminSettings() {
                 askTable: contextEvent.settings?.askTable ?? false,
                 posCatalogLayout: normalizePosCatalogLayout(contextEvent.settings?.posCatalogLayout),
                 menuHeaderLogoUrl: contextEvent.settings?.menuHeaderLogoUrl || "",
+                receiptHeaderLogoUrl: contextEvent.settings?.receiptHeaderLogoUrl || "",
                 quickDiscountPresets: resolveQuickDiscountPresetsFromSettings(contextEvent.settings),
                 quickStaffDiscountEnabled: contextEvent.settings?.quickStaffDiscountEnabled ?? false,
                 quickStaffDiscountLabel: contextEvent.settings?.quickStaffDiscountLabel || "Staff",
