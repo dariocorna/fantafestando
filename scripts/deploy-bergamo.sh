@@ -108,6 +108,7 @@ if [[ "${SKIP_RSYNC}" == "false" ]]; then
     rsync -rlz --delete \
       --exclude '.git' \
       --exclude '/node_modules' \
+      --exclude '/public/uploads/' \
       --exclude '.next/cache' \
       --exclude '.next/dev' \
       --exclude 'playwright-report' \
@@ -131,6 +132,9 @@ if [[ ! -f .env.production ]]; then
     echo "Missing ${REMOTE_PATH}/.env.production" >&2
     exit 1
 fi
+
+mkdir -p public/uploads/menu-headers
+chmod -R a+rwX public/uploads
 
 if grep -q '^APP_BUILD=' .env.production; then
     sed -i -E "s/^APP_BUILD=.*/APP_BUILD=${BUILD_SHA}/" .env.production
