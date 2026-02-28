@@ -86,7 +86,7 @@ function normalizePaymentMethod(value: string | null | undefined): CashSessionPa
 function getPaymentMethodLabel(value: string | null | undefined): string {
     const method = normalizePaymentMethod(value)
     if (method === "CASH") return "Contanti"
-    if (method === "CARD") return "Elettronico"
+    if (method === "CARD") return "Carta / POS"
     return "Altro"
 }
 

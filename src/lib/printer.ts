@@ -102,7 +102,7 @@ interface PrinterDestinationRef {
 
 function formatPaymentMethod(value: string | undefined): string {
     if (value === "CASH") return "Contanti";
-    if (value === "CARD") return "Elettronico";
+    if (value === "CARD") return "Carta / POS";
     if (value === "OTHER") return "Altro";
     return "-";
 }

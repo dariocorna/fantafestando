@@ -165,7 +165,7 @@ export function normalizePaymentMethod(paymentMethod: string | null | undefined)
 
 export function getPaymentMethodLabel(paymentMethod: DashboardPaymentMethod): string {
     if (paymentMethod === "CASH") return "Contanti"
-    if (paymentMethod === "CARD") return "Elettronico"
+    if (paymentMethod === "CARD") return "Carta / POS"
     return "Altro"
 }
 
