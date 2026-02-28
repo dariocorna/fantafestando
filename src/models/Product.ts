@@ -36,6 +36,8 @@ const ProductSchema = new Schema<IProduct>({
     timestamps: true
 });
 
+ProductSchema.index({ eventId: 1, shortName: 1 });
+
 if (process.env.NODE_ENV === "development") {
     delete mongoose.models.Product;
 }
