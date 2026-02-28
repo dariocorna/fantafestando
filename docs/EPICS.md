@@ -286,3 +286,17 @@ Estensione del catalogo prodotti con campi testuali dedicati ai diversi canali.
 - Compatibilità retroattiva con prodotti legacy senza nuovi campi.
 
 **Issue collegata**: `#22` (chiusa).
+
+---
+
+## ⬜ Epica 30: Report stampe runtime + report sessione cassa
+
+Refactoring dei report di stampa con focus su completezza informativa e leggibilità operativa.
+
+- Nuovo schema canonico `PrintDocumentV2` per i job di stampa.
+- Compatibilità legacy per i documenti job preesistenti.
+- Monitor stampa runtime con anteprima e dettaglio strutturato (metadati, righe, totali, footer).
+- Uniformazione layout termico per comande cliente/reparto, scontrino cassa e chiusura cassa.
+- Export sessione cassa CSV/XLS con campi operativi estesi (`Totale incassi`, `Codice ordine`, `Sconto`, `Totale netto`).
+
+**Issue collegata**: `#24` (aperta).

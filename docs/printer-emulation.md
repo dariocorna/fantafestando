@@ -47,12 +47,33 @@ I listener ricevono stream ESC/POS raw e salvano i job su volume persistente.
 La vista Admin “Monitor Stampa” mostrerà:
 - elenco job con stato (`SENT`, `FAILED`)
 - destinazione (`host:port`)
-- preview ricevuta renderizzata (layout demo)
+- preview ricevuta renderizzata (layout operativo)
 - link al dump raw ESC/POS per diagnostica
 
 Nota tecnica:
-- La preview sarà basata sul payload applicativo (`PrintJob.document`) per affidabilità e semplicità.
+- La preview è basata sul payload applicativo (`PrintJob.document`) normalizzato nello schema `PrintDocumentV2`.
 - Il dump raw resta disponibile per controlli low-level sull’emulazione.
+
+## Schema documento stampa (`PrintDocumentV2`)
+
+I nuovi job salvano un payload canonico `schemaVersion: 2` con struttura stabile:
+- `kind`, `printType`, `title`, `copyLabel`, `referenceCode`, `createdAt`
+- `headerLines[]`
+- `items[]` (qty, name, note, prezzi opzionali)
+- `totals[]` (label, value, emphasis)
+- `footerLines[]`
+- `branding` (`logoPath`, `logoMode`)
+
+Compatibilità:
+- i job legacy restano leggibili tramite normalizzazione runtime (`totals` object -> array, mapping campi storici).
+- retry e monitor supportano sia documenti legacy sia `V2`.
+
+## Branding termico e fallback
+
+Per i print type principali (`CUSTOMER_ORDER`, `CASHIER_SUMMARY`, `CASH_SESSION_SUMMARY`) il sistema tenta di stampare un logo PNG locale, se disponibile:
+- sorgente: `settings.menuHeaderLogoUrl` evento corrente;
+- path consentiti: solo `/uploads/menu-headers/*.png`;
+- fallback: in caso di file assente/non valido/errore stampante, la stampa prosegue in modalità solo testo (nessun blocco del flusso cassa).
 
 ## Integrazione Docker
 
