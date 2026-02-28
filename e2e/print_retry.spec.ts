@@ -101,6 +101,21 @@ test.describe("Print Retry Flows", () => {
         await failedJobButton.click()
         await page.getByRole("button", { name: "Reinvia job fallito" }).click()
         await expect(page.getByText(/Reinvio/i)).toBeVisible()
+
+        // Ripristina la stampante cassa verso emulatore raggiungibile e ritenta il retry
+        await page.getByRole("tab", { name: "Stampanti" }).click()
+        const printerCard = page.locator('[data-slot="card"]', { hasText: printerName }).first()
+        await printerCard.getByRole("button", { name: "Modifica" }).click()
+        const editDialog = page.getByRole("dialog")
+        await editDialog.getByLabel("Indirizzo IP").fill("127.0.0.1")
+        await editDialog.getByLabel("Porta TCP").fill("19100")
+        await editDialog.getByRole("button", { name: "Salva Modifiche", exact: true }).click()
+        await expect(printerCard.getByText("127.0.0.1:19100")).toBeVisible({ timeout: 10000 })
+
+        await page.getByRole("tab", { name: "Monitor Stampa" }).click()
+        await failedJobButton.click()
+        await page.getByRole("button", { name: "Reinvia job fallito" }).click()
+        await expect(page.getByText(/Reinvio/i)).toBeVisible()
     })
 
     test("pos error modal exposes cashier-triggered retry action", async ({ page }) => {
