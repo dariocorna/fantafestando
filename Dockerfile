@@ -11,6 +11,10 @@ COPY .next/standalone ./
 COPY .next/static ./.next/static
 COPY public ./public
 
+# Runtime writes optimized image cache and custom uploaded menu headers.
+RUN mkdir -p /app/.next/cache /app/public/uploads/menu-headers \
+    && chown -R nextjs:nodejs /app/.next /app/public/uploads
+
 EXPOSE 3000
 USER nextjs
 
