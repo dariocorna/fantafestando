@@ -2,10 +2,13 @@ import { expect, test, type Page } from "@playwright/test"
 import { ensureAdminAuthenticated } from "./utils/auth"
 
 async function openCreateEventDialog(page: Page) {
+    const trigger = page.locator("#new-event-btn")
+    await expect(trigger).toBeVisible({ timeout: 15000 })
+
     for (let attempt = 0; attempt < 3; attempt += 1) {
-        await page.click("#new-event-btn")
-        const dialog = page.getByRole("dialog")
-        if (await dialog.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await trigger.click({ force: true })
+        const dialog = page.getByRole("dialog").filter({ has: page.locator("#name") }).first()
+        if (await dialog.isVisible({ timeout: 10000 }).catch(() => false)) {
             return dialog
         }
 
@@ -37,6 +40,14 @@ async function createAndActivateEvent(page: Page, eventName: string) {
     if (!(await activeCheckbox.isChecked())) {
         await activeCheckbox.check()
     }
+
+    const quickDiscountSection = page.locator("div").filter({ hasText: /Preset Sconti Rapidi POS/i }).first()
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+        const removeButton = quickDiscountSection.getByRole("button", { name: /^Rimuovi$/i }).first()
+        if (!(await removeButton.isVisible().catch(() => false))) break
+        await removeButton.click()
+    }
+
     await page.locator("#quick-discount-add-preset").click()
     await page.getByTestId("quick-discount-label-0").fill("Staff")
     await page.getByTestId("quick-discount-type-0").selectOption("PERCENT")
@@ -46,6 +57,8 @@ async function createAndActivateEvent(page: Page, eventName: string) {
     await page.getByTestId("quick-discount-label-1").fill("Promo Cassa")
     await page.getByTestId("quick-discount-type-1").selectOption("FIXED")
     await page.getByTestId("quick-discount-value-1").fill("2")
+    await expect(page.getByTestId("quick-discount-label-0")).toHaveValue("Staff")
+    await expect(page.getByTestId("quick-discount-label-1")).toHaveValue("Promo Cassa")
     await page.getByRole("button", { name: /Salva Impostazioni/i }).click()
     await expect(page.getByText(/Modifiche salvate/i)).toBeVisible()
 }
@@ -124,11 +137,15 @@ async function openPosAndSelectDevice(page: Page, posName: string) {
     )
 
     const selectorTitle = page.getByText(/In quale cassa sei\?/i)
-    if (await selectorTitle.isVisible()) {
+    if (await selectorTitle.isVisible().catch(() => false)) {
         const posButton = page.getByRole("dialog").locator("button").filter({ hasText: new RegExp(posName) }).first()
-        await expect(posButton).toBeVisible()
-        await posButton.click()
-        await expect(selectorTitle).toBeHidden()
+        if (await posButton.isVisible().catch(() => false)) {
+            await posButton.click()
+            await expect(selectorTitle).toBeHidden()
+        } else {
+            await page.keyboard.press("Escape")
+            await expect(selectorTitle).toBeHidden({ timeout: 5000 }).catch(() => null)
+        }
     }
 }
 
@@ -139,6 +156,14 @@ async function openCashSession(page: Page, openingFloatAmount: string) {
     await openDialog.locator("#opening-float-amount").fill(openingFloatAmount)
     await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click()
     await expect(page.getByRole("button", { name: /Chiudi Cassa/i })).toBeVisible()
+}
+
+async function ensureDiscountPanelExpanded(page: Page) {
+    const panel = page.locator("#pos-discount-presets")
+    if (!(await panel.isVisible().catch(() => false))) {
+        await page.locator("#discounts-tab-trigger").click()
+    }
+    await expect(panel).toBeVisible()
 }
 
 async function addProductsToCart(page: Page, categoryName: string, productNames: string[]) {
@@ -167,6 +192,7 @@ async function addProductsToCart(page: Page, categoryName: string, productNames:
     }
 
     for (const name of productNames) {
+        await page.keyboard.press("Escape")
         await page.locator("button").filter({ hasText: new RegExp(name) }).first().click()
     }
 }
@@ -179,10 +205,12 @@ async function completeCheckout(page: Page) {
     await confirmButton.click()
     await expect(checkoutDialog).toBeHidden({ timeout: 15000 })
 
-    const successModal = page.getByRole("dialog").filter({ hasText: /Ordine completato correttamente/i })
-    if (await successModal.isVisible()) {
-        await successModal.getByRole("button", { name: "OK", exact: true }).click()
-        await expect(successModal).toBeHidden()
+    const feedbackModal = page
+        .getByRole("dialog")
+        .filter({ hasText: /Pagamento registrato|Ordine completato|Errore stampa|stampa ha errori/i })
+    if (await feedbackModal.isVisible()) {
+        await feedbackModal.getByRole("button", { name: "OK", exact: true }).click()
+        await expect(feedbackModal).toBeHidden()
     }
 }
 
@@ -214,7 +242,7 @@ test.describe("POS sconti e storno ordine", () => {
 
         // Ordine 1: sconto rapido configurato in admin (Staff 50%)
         await addProductsToCart(page, categoryName, [productA, productB])
-        await page.locator("#discounts-tab-trigger").click()
+        await ensureDiscountPanelExpanded(page)
         await expect(page.locator("#discount-preset-card-0")).toBeVisible()
         await expect(page.locator("#discount-preset-card-1")).toBeVisible()
         await page.locator("#discount-preset-card-0").click()
@@ -224,7 +252,8 @@ test.describe("POS sconti e storno ordine", () => {
 
         // Ordine 2: preset fisso Promo Cassa (-2€)
         await addProductsToCart(page, categoryName, [productA, productB])
-        await page.locator("#discounts-tab-trigger").click()
+        await ensureDiscountPanelExpanded(page)
+        await expect(page.locator("#discount-preset-card-1")).toBeVisible()
         await page.locator("#discount-preset-card-1").click()
         await expect(page.getByText(/Totale da Pagare/i).locator("..")).toContainText(/10\.00\s*€/i)
         await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()

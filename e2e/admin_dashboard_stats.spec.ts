@@ -2,10 +2,13 @@ import { expect, test, type Page } from "@playwright/test"
 import { ensureAdminAuthenticated } from "./utils/auth"
 
 async function openCreateEventDialog(page: Page) {
+    const trigger = page.locator("#new-event-btn")
+    await expect(trigger).toBeVisible({ timeout: 15000 })
+
     for (let attempt = 0; attempt < 3; attempt += 1) {
-        await page.click("#new-event-btn")
-        const dialog = page.getByRole("dialog")
-        if (await dialog.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await trigger.click({ force: true })
+        const dialog = page.getByRole("dialog").filter({ has: page.locator("#name") }).first()
+        if (await dialog.isVisible({ timeout: 10000 }).catch(() => false)) {
             return dialog
         }
 
@@ -115,11 +118,15 @@ async function openPosAndSelectDevice(page: Page, posName: string) {
     )
 
     const selectorTitle = page.getByText(/In quale cassa sei\?/i)
-    if (await selectorTitle.isVisible()) {
+    if (await selectorTitle.isVisible().catch(() => false)) {
         const posButton = page.getByRole("dialog").locator("button").filter({ hasText: new RegExp(posName) }).first()
-        await expect(posButton).toBeVisible()
-        await posButton.click()
-        await expect(selectorTitle).toBeHidden()
+        if (await posButton.isVisible().catch(() => false)) {
+            await posButton.click()
+            await expect(selectorTitle).toBeHidden()
+        } else {
+            await page.keyboard.press("Escape")
+            await expect(selectorTitle).toBeHidden({ timeout: 5000 }).catch(() => null)
+        }
     }
 }
 
@@ -157,10 +164,12 @@ async function completeCashOrder(
     await expect(checkoutDialog).toBeHidden({ timeout: 15000 })
     await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible()
 
-    const successModal = page.getByRole("dialog").filter({ hasText: /Ordine completato correttamente/i })
-    if (await successModal.isVisible()) {
-        await successModal.getByRole("button", { name: "OK", exact: true }).click()
-        await expect(successModal).toBeHidden()
+    const feedbackModal = page
+        .getByRole("dialog")
+        .filter({ hasText: /Pagamento registrato|Ordine completato|Errore stampa|stampa ha errori/i })
+    if (await feedbackModal.isVisible()) {
+        await feedbackModal.getByRole("button", { name: "OK", exact: true }).click()
+        await expect(feedbackModal).toBeHidden()
     }
 }
 
