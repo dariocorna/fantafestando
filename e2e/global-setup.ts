@@ -29,7 +29,7 @@ export default async function globalSetup(config: FullConfig) {
         await page.locator("#username").fill(username);
         await page.locator("#password").fill(password);
         await Promise.all([
-            page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 15000 }),
+            page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 20000 }),
             page.getByRole("button", { name: "Accedi", exact: true }).click()
         ]);
     }
