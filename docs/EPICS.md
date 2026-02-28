@@ -208,14 +208,17 @@ Riferimento funzionale dettagliato: `docs/inventory-stock.md`.
 
 ---
 
-## ⬜ Epica 14: Metodi di Pagamento Dinamici al POS (Dipende da Epica 13)
+## ✅ Epica 14: Metodi di Pagamento Dinamici al POS (Dipende da Epica 13)
 
-La UI del POS deve riflettere le periferiche effettivamente associate al Punto Cassa selezionato.
+La UI del POS riflette le periferiche effettivamente associate al Punto Cassa selezionato.
 
-- Se il POS ha un `paymentTerminalId`, mostrare il bottone "Paga con POS (SumUp)".
-- Se il POS ha un `cashBoxId`, mostrare il bottone "Paga in Contanti".
-- Se non ci sono periferiche, disabilitare entrambe le opzioni o usare un default.
-- Migrazione impostazioni SumUp: da globali (`Event.settings.sumupApiKey`) a specifiche del `Peripheral`.
+- Se il POS ha un `paymentTerminalId`, viene mostrato il bottone "Paga con POS (SumUp)".
+- Se il POS ha un `cashBoxId`, viene mostrato il bottone "Paga in Contanti".
+- Supporto pagamento elettronico manuale (senza terminale fisico) per separazione contabile contanti/elettronico.
+- Logica di pagamento estratta in modulo dedicato `src/lib/payment-logic.ts`.
+
+**Test E2E**: `e2e/pos_electronic_payment.spec.ts`.
+**Issue collegata**: `#14` (chiusa).
 
 ---
 
@@ -299,4 +302,4 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
 - Uniformazione layout termico per comande cliente/reparto, scontrino cassa e chiusura cassa.
 - Export sessione cassa CSV/XLS con campi operativi estesi (`Totale incassi`, `Codice ordine`, `Sconto`, `Totale netto`).
 
-**Issue collegata**: `#24` (aperta).
+**Issue collegata**: `#24` (chiusa).
