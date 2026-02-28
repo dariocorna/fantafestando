@@ -131,6 +131,49 @@ export async function configureCashPos(
     await expect(page.getByText(posName)).toBeVisible();
 }
 
+export async function configureElectronicPos(
+    page: Page,
+    printerName: string,
+    printerIp: string,
+    electronicTerminalName: string,
+    posName: string,
+    options?: ConfigureCashPosOptions,
+) {
+    await page.goto("/admin/settings/hardware");
+
+    await page.getByRole("button", { name: /Nuova Stampante/i }).click();
+    const printerDialog = page.getByRole("dialog");
+    await printerDialog.getByLabel("Nome Stampante").fill(printerName);
+    await printerDialog.getByLabel("Indirizzo IP").fill(printerIp);
+    if (options?.printerPort) {
+        await printerDialog.getByLabel("Porta TCP").fill(options.printerPort);
+    }
+    await printerDialog.getByRole("combobox", { name: "Tipo Stampante" }).click();
+    await page.getByRole("option", { name: "Cassa (Scontrino Cliente)" }).click();
+    await printerDialog.getByRole("button", { name: "Salva", exact: true }).click();
+    await expect(page.getByText(printerName)).toBeVisible();
+
+    await page.getByRole("tab", { name: "Periferiche" }).click();
+    await page.getByRole("button", { name: /Nuova Periferica/i }).click();
+    const peripheralDialog = page.getByRole("dialog");
+    await peripheralDialog.getByLabel("Nome Descrittivo").fill(electronicTerminalName);
+    await peripheralDialog.getByRole("combobox", { name: "Tipo Periferica" }).click();
+    await page.getByRole("option", { name: "Pagamento Carta / POS (Manuale)" }).click();
+    await peripheralDialog.getByRole("button", { name: "Aggiungi Periferica", exact: true }).click();
+    await expect(page.getByText(electronicTerminalName)).toBeVisible();
+
+    await page.goto("/admin/settings/pos");
+    await page.getByRole("button", { name: /Nuovo Dispositivo/i }).click();
+    const posDialog = page.getByRole("dialog");
+    await posDialog.getByLabel("Nome Postazione").fill(posName);
+    await posDialog.getByRole("combobox", { name: "Stampante Associata" }).click();
+    await page.getByRole("option", { name: new RegExp(printerName) }).click();
+    await posDialog.getByRole("combobox", { name: "Terminale Pagamento (Carta / POS)" }).click();
+    await page.getByRole("option", { name: new RegExp(electronicTerminalName) }).click();
+    await posDialog.getByRole("button", { name: "Salva", exact: true }).click();
+    await expect(page.getByText(posName)).toBeVisible();
+}
+
 export function randomIp(): string {
     return `192.168.1.${Math.floor(Math.random() * 150) + 50}`;
 }
@@ -262,6 +305,36 @@ export async function completeCashOrder(
     await page.getByRole("button", { name: "PAGA ORA", exact: true }).click();
     const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i });
     await expect(checkoutDialog).toBeVisible();
+
+    const confirmButton = checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true });
+    await confirmButton.scrollIntoViewIfNeeded();
+    await confirmButton.click();
+
+    await expect(checkoutDialog).toBeHidden({ timeout: 15000 });
+    await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible();
+    await dismissFeedbackModal(page);
+}
+
+export async function completeElectronicOrder(
+    page: Page,
+    products: string | Array<{ name: string; quantity: number }>,
+) {
+    const items = typeof products === "string"
+        ? [{ name: products, quantity: 1 }]
+        : products;
+
+    for (const item of items) {
+        const btn = page.locator("button").filter({ hasText: new RegExp(item.name) }).first();
+        for (let i = 0; i < item.quantity; i++) {
+            await btn.click();
+        }
+    }
+
+    await page.getByRole("button", { name: "PAGA ORA", exact: true }).click();
+    const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i });
+    await expect(checkoutDialog).toBeVisible();
+
+    await checkoutDialog.getByRole("button", { name: /CARTA \/ POS/i }).click();
 
     const confirmButton = checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true });
     await confirmButton.scrollIntoViewIfNeeded();
