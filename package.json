@@ -29,6 +29,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
+    "escpos-parser": "^0.2.0",
     "framer-motion": "^12.34.3",
     "lucide-react": "^0.575.0",
     "mongoose": "^9.2.1",
@@ -42,6 +43,7 @@
     "react-dom": "19.2.3",
     "react-hook-form": "^7.71.2",
     "shadow-cljs": "^3.3.6",
+    "sharp": "^0.34.5",
     "tailwind-merge": "^3.5.0",
     "zod": "^4.3.6"
   },
