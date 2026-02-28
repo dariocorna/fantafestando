@@ -6,6 +6,7 @@ import { IEvent } from "@/models/Event";
 import { Button } from "@/components/ui/button";
 import { ActiveEventSettingsForm } from "./settings-form";
 import { resolveQuickDiscountPresetsFromSettings } from "@/lib/quick-discount-presets";
+import { normalizePosCatalogLayout } from "@/lib/pos-catalog-layout";
 
 export default async function AdminSettings() {
     const contextEvent = await getAdminContextEvent() as IEvent | null;
@@ -19,6 +20,8 @@ export default async function AdminSettings() {
             settings: {
                 askName: contextEvent.settings?.askName ?? false,
                 askTable: contextEvent.settings?.askTable ?? false,
+                posCatalogLayout: normalizePosCatalogLayout(contextEvent.settings?.posCatalogLayout),
+                menuHeaderLogoUrl: contextEvent.settings?.menuHeaderLogoUrl || "",
                 quickDiscountPresets: resolveQuickDiscountPresetsFromSettings(contextEvent.settings),
                 quickStaffDiscountEnabled: contextEvent.settings?.quickStaffDiscountEnabled ?? false,
                 quickStaffDiscountLabel: contextEvent.settings?.quickStaffDiscountLabel || "Staff",

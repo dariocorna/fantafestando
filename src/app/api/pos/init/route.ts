@@ -10,6 +10,10 @@ import { parsePredefinedTablesInput } from "@/lib/table-presets";
 import { getCurrentDayCode, isProductAvailableToday } from "@/lib/product-availability";
 import { getStockStatus } from "@/lib/inventory";
 import { resolveQuickDiscountPresetsFromSettings, toLegacyQuickDiscountSettings } from "@/lib/quick-discount-presets";
+import { normalizePosCatalogLayout } from "@/lib/pos-catalog-layout";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
     try {
@@ -100,6 +104,8 @@ export async function GET(request: NextRequest) {
             settings: {
                 askName: event.settings?.askName ?? false,
                 askTable: event.settings?.askTable ?? false,
+                posCatalogLayout: normalizePosCatalogLayout(event.settings?.posCatalogLayout),
+                menuHeaderLogoUrl: event.settings?.menuHeaderLogoUrl || "",
                 quickDiscountPresets,
                 quickStaffDiscountEnabled: legacyQuickDiscount.quickStaffDiscountEnabled,
                 quickStaffDiscountLabel: legacyQuickDiscount.quickStaffDiscountLabel,
@@ -112,12 +118,19 @@ export async function GET(request: NextRequest) {
             )
         };
 
-        return NextResponse.json({
-            event: sanitizedEvent,
-            categories: availableCategories,
-            products: availableProducts,
-            posDevices: serializedPosDevices
-        });
+        return NextResponse.json(
+            {
+                event: sanitizedEvent,
+                categories: availableCategories,
+                products: availableProducts,
+                posDevices: serializedPosDevices
+            },
+            {
+                headers: {
+                    "Cache-Control": "no-store, no-cache, must-revalidate"
+                }
+            }
+        );
     } catch (error) {
         console.error("POS Init Error:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

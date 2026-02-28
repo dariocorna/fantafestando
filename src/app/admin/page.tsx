@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { BrandSectionHeader } from "@/components/brand/brand-section-header";
 
 const currencyFormatter = new Intl.NumberFormat("it-IT", {
     style: "currency",
@@ -163,10 +164,10 @@ export default async function AdminDashboard() {
     ];
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6" data-testid="admin-dashboard-brand-shell">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Dashboard Statistiche</h1>
+                    <BrandSectionHeader title="Dashboard Statistiche" />
                     <p className="text-muted-foreground">
                         Festa: <span className="font-semibold text-foreground">{contextEvent.name}</span> · Aggiornata alle{" "}
                         {formatDashboardDateTime(stats.generatedAt)}
@@ -190,7 +191,7 @@ export default async function AdminDashboard() {
 
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                 {kpis.map((kpi) => (
-                    <Card key={kpi.title}>
+                    <Card key={kpi.title} className="border-[#d9e6f8] shadow-sm">
                         <CardHeader className="pb-2">
                             <div className="flex items-center justify-between">
                                 <CardTitle className="text-sm font-medium">{kpi.title}</CardTitle>
@@ -208,7 +209,7 @@ export default async function AdminDashboard() {
             </div>
 
             <div className="grid gap-6 xl:grid-cols-2">
-                <Card>
+                <Card className="border-[#d9e6f8] shadow-sm">
                     <CardHeader>
                         <CardTitle>Top Prodotti</CardTitle>
                         <CardDescription>Classifica per quantita venduta.</CardDescription>
@@ -245,7 +246,7 @@ export default async function AdminDashboard() {
                     </CardContent>
                 </Card>
 
-                <Card>
+                <Card className="border-[#d9e6f8] shadow-sm">
                     <CardHeader>
                         <CardTitle>Prodotti Sotto-Performanti</CardTitle>
                         <CardDescription>Prodotti con vendite minime o nulle (soglia ≤ 1).</CardDescription>
@@ -283,7 +284,7 @@ export default async function AdminDashboard() {
                 </Card>
             </div>
 
-            <Card>
+            <Card className="border-[#d9e6f8] shadow-sm">
                 <CardHeader>
                     <CardTitle>Ultimi Ordini Saldati</CardTitle>
                     <CardDescription>Dettaglio operativo degli ultimi movimenti registrati.</CardDescription>

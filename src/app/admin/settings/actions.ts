@@ -1,5 +1,8 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
+import path from "node:path";
 import dbConnect from "@/lib/mongoose";
 import { getAdminContextEventId } from "@/lib/events";
 import { ensureAdminSession } from "@/lib/authz";
@@ -24,6 +27,7 @@ import {
     toLegacyQuickDiscountSettings,
     validateQuickDiscountPresets
 } from "@/lib/quick-discount-presets";
+import { normalizePosCatalogLayout } from "@/lib/pos-catalog-layout";
 import {
     DEFAULT_PRINTER_PORT,
     MAX_VIRTUAL_PRINTER_SLOTS,
@@ -61,6 +65,128 @@ function getConfigString(config: unknown, key: string): string | undefined {
     return typeof value === "string" ? value : undefined;
 }
 
+function escapeRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const MENU_HEADER_LOGO_UPLOAD_DIR = path.join(process.cwd(), "public", "uploads", "menu-headers");
+const MENU_HEADER_LOGO_URL_PREFIX = "/uploads/menu-headers";
+const MENU_HEADER_LOGO_MAX_BYTES = 2 * 1024 * 1024;
+const MENU_HEADER_LOGO_TARGET_RATIO = 10 / 4;
+const MENU_HEADER_LOGO_RATIO_TOLERANCE = 0.12;
+
+const MENU_HEADER_LOGO_ALLOWED_TYPES = new Map<string, string>([
+    ["image/png", "png"],
+    ["image/jpeg", "jpg"],
+]);
+
+function readPngDimensions(buffer: Buffer): { width: number; height: number } | null {
+    if (buffer.length < 24) return null;
+    const isPngSignature =
+        buffer[0] === 0x89 &&
+        buffer[1] === 0x50 &&
+        buffer[2] === 0x4e &&
+        buffer[3] === 0x47 &&
+        buffer[4] === 0x0d &&
+        buffer[5] === 0x0a &&
+        buffer[6] === 0x1a &&
+        buffer[7] === 0x0a;
+    if (!isPngSignature) return null;
+
+    return {
+        width: buffer.readUInt32BE(16),
+        height: buffer.readUInt32BE(20),
+    };
+}
+
+function readJpegDimensions(buffer: Buffer): { width: number; height: number } | null {
+    if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
+    let offset = 2;
+    const sofMarkers = new Set([
+        0xc0, 0xc1, 0xc2, 0xc3,
+        0xc5, 0xc6, 0xc7, 0xc9,
+        0xca, 0xcb, 0xcd, 0xce, 0xcf,
+    ]);
+
+    while (offset + 8 < buffer.length) {
+        if (buffer[offset] !== 0xff) {
+            offset += 1;
+            continue;
+        }
+
+        const marker = buffer[offset + 1];
+        if (marker === 0xd8 || marker === 0xd9) {
+            offset += 2;
+            continue;
+        }
+
+        if (offset + 3 >= buffer.length) return null;
+        const segmentLength = buffer.readUInt16BE(offset + 2);
+        if (segmentLength < 2 || offset + 2 + segmentLength > buffer.length) return null;
+
+        if (sofMarkers.has(marker)) {
+            if (offset + 8 >= buffer.length) return null;
+            const height = buffer.readUInt16BE(offset + 5);
+            const width = buffer.readUInt16BE(offset + 7);
+            return { width, height };
+        }
+
+        offset += 2 + segmentLength;
+    }
+
+    return null;
+}
+
+function extractMenuHeaderLogoDimensions(buffer: Buffer, mimeType: string): { width: number; height: number } | null {
+    if (mimeType === "image/png") return readPngDimensions(buffer);
+    if (mimeType === "image/jpeg") return readJpegDimensions(buffer);
+    return null;
+}
+
+function buildMenuHeaderLogoFilePath(fileName: string) {
+    return path.join(MENU_HEADER_LOGO_UPLOAD_DIR, fileName);
+}
+
+async function persistMenuHeaderLogo(file: File): Promise<{ url: string } | { error: string }> {
+    const extension = MENU_HEADER_LOGO_ALLOWED_TYPES.get(file.type);
+    if (!extension) {
+        return { error: "Formato logo non supportato: usa PNG o JPEG." };
+    }
+    if (file.size <= 0) {
+        return { error: "File logo vuoto." };
+    }
+    if (file.size > MENU_HEADER_LOGO_MAX_BYTES) {
+        return { error: "Logo troppo grande: massimo 2MB." };
+    }
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const dimensions = extractMenuHeaderLogoDimensions(buffer, file.type);
+    if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) {
+        return { error: "Immagine logo non valida o corrotta." };
+    }
+
+    const ratio = dimensions.width / dimensions.height;
+    if (Math.abs(ratio - MENU_HEADER_LOGO_TARGET_RATIO) > MENU_HEADER_LOGO_RATIO_TOLERANCE) {
+        return { error: "Rapporto logo non valido: richiesto 10:4 (tolleranza ±12%)." };
+    }
+
+    await mkdir(MENU_HEADER_LOGO_UPLOAD_DIR, { recursive: true });
+    const fileName = `menu-header-${Date.now()}-${randomUUID()}.${extension}`;
+    await writeFile(buildMenuHeaderLogoFilePath(fileName), buffer);
+
+    return { url: `${MENU_HEADER_LOGO_URL_PREFIX}/${fileName}` };
+}
+
+async function deleteMenuHeaderLogoIfManaged(url: string | null | undefined) {
+    if (!url || !url.startsWith(`${MENU_HEADER_LOGO_URL_PREFIX}/`)) return;
+    const filePath = path.join(process.cwd(), "public", url.replace(/^\//, ""));
+    try {
+        await unlink(filePath);
+    } catch {
+        // Ignore remove errors (file may already be absent)
+    }
+}
+
 async function requireAdminAuthorization() {
     const sessionCheck = await ensureAdminSession();
     if (!sessionCheck.ok) {
@@ -73,15 +199,23 @@ export async function createEventAction(formData: FormData) {
     const authError = await requireAdminAuthorization();
     if (authError) return authError;
 
-    const name = formData.get("name") as string;
+    const name = ((formData.get("name") as string | null) || "").trim();
     if (!name) return { error: "Nome obbligatorio" };
 
     await dbConnect();
+    const existingEvent = await Event.findOne({
+        name: { $regex: new RegExp(`^${escapeRegExp(name)}$`, "i") }
+    }).select("_id").lean();
+
+    if (existingEvent) {
+        return { error: "Esiste già una festa con questo nome" };
+    }
+
     await Event.create({
         name,
         active: false,
         archived: false,
-        settings: { askName: false, askTable: false }
+        settings: { askName: false, askTable: false, posCatalogLayout: "COMPACT_COLUMNS" }
     });
 
     revalidatePath("/admin/settings/events");
@@ -95,14 +229,19 @@ export async function updateEventSettingsAction(formData: FormData) {
     const eventId = formData.get("eventId") as string;
     const askName = formData.get("askName") === "on";
     const askTable = formData.get("askTable") === "on";
+    const posCatalogLayoutRaw = ((formData.get("posCatalogLayout") as string | null) || "").trim();
     const defaultCashierPrinterIp = formData.get("defaultCashierPrinterIp") as string;
     const quickDiscountPresetsRaw = (formData.get("quickDiscountPresets") as string | null)?.trim() || "";
+    const menuHeaderLogoFile = formData.get("menuHeaderLogoFile");
+    const removeMenuHeaderLogo = formData.get("removeMenuHeaderLogo") === "on";
     const active = formData.get("active") === "on";
     const predefinedTablesInput = formData.get("predefinedTables") as string | null;
     const normalizedInputTables = parsePredefinedTablesInput(predefinedTablesInput, Number.MAX_SAFE_INTEGER);
     const distinctPredefinedTablesCount = normalizedInputTables.length;
 
     if (!eventId) return { error: "Event ID obbligatorio" };
+
+    const posCatalogLayout = normalizePosCatalogLayout(posCatalogLayoutRaw);
 
     const contextEventId = await requireContextEventId();
     const scopedEvent = resolveEventScope(contextEventId, eventId);
@@ -111,8 +250,8 @@ export async function updateEventSettingsAction(formData: FormData) {
 
     await dbConnect();
     const targetEvent = await Event.findOne({ _id: scopedEventId, archived: { $ne: true } })
-        .select("archived predefinedTables")
-        .lean() as ({ archived?: boolean; predefinedTables?: string[] } | null);
+        .select("archived predefinedTables settings.menuHeaderLogoUrl")
+        .lean() as ({ archived?: boolean; predefinedTables?: string[]; settings?: { menuHeaderLogoUrl?: string } } | null);
 
     if (!targetEvent) return { error: "Festa non trovata" };
     if (targetEvent.archived) return { error: "Le feste archiviate non sono modificabili" };
@@ -165,34 +304,68 @@ export async function updateEventSettingsAction(formData: FormData) {
     const predefinedTables = distinctPredefinedTablesCount > MAX_PREDEFINED_TABLES
         ? normalizedInputTables
         : parsePredefinedTablesInput(predefinedTablesInput, MAX_PREDEFINED_TABLES);
+    const currentMenuHeaderLogoUrl = targetEvent.settings?.menuHeaderLogoUrl?.trim() || "";
+    let nextMenuHeaderLogoUrl: string | null = null;
+
+    if (menuHeaderLogoFile instanceof File && menuHeaderLogoFile.size > 0) {
+        const uploadResult = await persistMenuHeaderLogo(menuHeaderLogoFile);
+        if ("error" in uploadResult) {
+            return { error: uploadResult.error };
+        }
+        nextMenuHeaderLogoUrl = uploadResult.url;
+    } else if (removeMenuHeaderLogo) {
+        nextMenuHeaderLogoUrl = "";
+    }
+
+    const settingsSet: Record<string, unknown> = {
+        active,
+        "settings.askName": askName,
+        "settings.askTable": askTable,
+        "settings.posCatalogLayout": posCatalogLayout,
+        "settings.defaultCashierPrinterIp": defaultCashierPrinterIp,
+        "settings.quickDiscountPresets": quickDiscountPresets,
+        "settings.quickStaffDiscountEnabled": legacyQuickDiscount.quickStaffDiscountEnabled,
+        "settings.quickStaffDiscountLabel": legacyQuickDiscount.quickStaffDiscountLabel,
+        "settings.quickStaffDiscountType": legacyQuickDiscount.quickStaffDiscountType,
+        "settings.quickStaffDiscountValue": legacyQuickDiscount.quickStaffDiscountValue,
+        predefinedTables
+    };
+    const settingsUnset: Record<string, number> = {
+        // Cleanup legacy global SumUp configuration: now managed via Peripherals.
+        "settings.sumupMerchantCode": 1,
+        "settings.sumupApiKey": 1
+    };
+
+    if (nextMenuHeaderLogoUrl !== null && nextMenuHeaderLogoUrl) {
+        settingsSet["settings.menuHeaderLogoUrl"] = nextMenuHeaderLogoUrl;
+    }
+    if (nextMenuHeaderLogoUrl === "") {
+        settingsUnset["settings.menuHeaderLogoUrl"] = 1;
+    }
 
     if (active) {
         // Deactivate all others first
         await Event.updateMany({ _id: { $ne: scopedEventId } }, { active: false });
     }
 
-    await Event.findOneAndUpdate(
-        { _id: scopedEventId, archived: { $ne: true } },
-        {
-            $set: {
-                active,
-                "settings.askName": askName,
-                "settings.askTable": askTable,
-                "settings.defaultCashierPrinterIp": defaultCashierPrinterIp,
-                "settings.quickDiscountPresets": quickDiscountPresets,
-                "settings.quickStaffDiscountEnabled": legacyQuickDiscount.quickStaffDiscountEnabled,
-                "settings.quickStaffDiscountLabel": legacyQuickDiscount.quickStaffDiscountLabel,
-                "settings.quickStaffDiscountType": legacyQuickDiscount.quickStaffDiscountType,
-                "settings.quickStaffDiscountValue": legacyQuickDiscount.quickStaffDiscountValue,
-                predefinedTables
-            },
-            // Cleanup legacy global SumUp configuration: now managed via Peripherals.
-            $unset: {
-                "settings.sumupMerchantCode": 1,
-                "settings.sumupApiKey": 1
+    try {
+        await Event.findOneAndUpdate(
+            { _id: scopedEventId, archived: { $ne: true } },
+            {
+                $set: settingsSet,
+                $unset: settingsUnset
             }
+        );
+    } catch (error) {
+        if (nextMenuHeaderLogoUrl && nextMenuHeaderLogoUrl.startsWith(`${MENU_HEADER_LOGO_URL_PREFIX}/`)) {
+            await deleteMenuHeaderLogoIfManaged(nextMenuHeaderLogoUrl);
         }
-    );
+        throw error;
+    }
+
+    if (nextMenuHeaderLogoUrl !== null && currentMenuHeaderLogoUrl && currentMenuHeaderLogoUrl !== nextMenuHeaderLogoUrl) {
+        await deleteMenuHeaderLogoIfManaged(currentMenuHeaderLogoUrl);
+    }
 
     revalidatePath("/admin/settings");
     revalidatePath("/admin/settings/events");
@@ -227,6 +400,7 @@ export async function cloneEventAction(formData: FormData) {
         settings: {
             askName: sourceEvent.settings?.askName ?? false,
             askTable: sourceEvent.settings?.askTable ?? false,
+            menuHeaderLogoUrl: sourceEvent.settings?.menuHeaderLogoUrl,
             defaultCashierPrinterIp: sourceEvent.settings?.defaultCashierPrinterIp,
             quickDiscountPresets,
             quickStaffDiscountEnabled: legacyQuickDiscount.quickStaffDiscountEnabled,
