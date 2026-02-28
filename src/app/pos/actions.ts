@@ -26,12 +26,11 @@ import {
     rollbackStockAdjustments,
     type StockAdjustment,
 } from "@/lib/stock-operations"
-
-interface PosPaymentCapabilities {
-    hasCashBox: boolean
-    hasPaymentTerminal: boolean
-    paymentTerminalType?: string
-}
+import {
+    requiresPendingState as computeRequiresPendingState,
+    type PeripheralType,
+    type PosPaymentCapabilities,
+} from "@/lib/payment-logic"
 
 interface PrintDispatchSummary {
     attempted: number
@@ -277,7 +276,7 @@ async function getPosPaymentCapabilities(eventId: string, posDeviceId?: string):
     const posDevice = await PosDevice.findOne({ _id: posDeviceId, eventId })
         .populate({ path: "paymentTerminalId", select: "_id type" })
         .populate({ path: "cashBoxId", select: "_id" })
-        .lean() as ({ paymentTerminalId?: { _id: unknown, type?: string }, cashBoxId?: unknown } | null)
+        .lean() as ({ paymentTerminalId?: { _id: unknown, type?: PeripheralType }, cashBoxId?: unknown } | null)
 
     if (!posDevice) {
         return { success: false, error: "La cassa selezionata non è valida per l'evento corrente" }
@@ -667,7 +666,7 @@ export async function createOrder(data: {
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
         const isCardPayment = data.paymentMethod === "CARD"
-        const requiresPendingState = isCardPayment && capabilitiesResult.capabilities.paymentTerminalType !== "ELECTRONIC_MANUAL"
+        const requiresPendingState = computeRequiresPendingState(data.paymentMethod, capabilitiesResult.capabilities)
 
         if (requiresPendingState) {
             const stockCheckResult = await validateStockForPendingOrder(data.eventId, stockPayload, stockMode)
