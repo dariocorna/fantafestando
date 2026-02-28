@@ -273,3 +273,16 @@ Allineamento visuale delle superfici `menu`, `admin` e `pos` con priorita' opera
 - Integrazione metodo di pagamento Satispay nel flusso POS.
 - Gestione stato transazione e chiusura ordine coerente con la contabilità cassa.
 - Tracciamento/reportistica incassi Satispay in dashboard e export.
+
+---
+
+## 🔄 Issue GitHub #22: Descrizione prodotto menu + shortName operativo
+
+Estensione del catalogo prodotti con campi testuali dedicati ai diversi canali.
+
+- `description` opzionale per il menu pubblico (`/menu`), mostrata solo se valorizzata.
+- `shortName` opzionale per uso operativo POS e stampe, con fallback `shortName || name`.
+- Vincolo applicativo di unicità `shortName` per evento (case-insensitive).
+- Compatibilità retroattiva con prodotti legacy senza nuovi campi.
+
+**Issue collegata**: `#22` (aperta).
