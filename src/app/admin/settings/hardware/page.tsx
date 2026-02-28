@@ -189,7 +189,7 @@ export default async function HardwarePage() {
                                 </CardHeader>
                                 <CardContent>
                                     <div className="text-sm text-muted-foreground mb-4">
-                                        <p>Tipo: <span className="font-medium text-foreground">{p.type === 'SUMUP' ? 'Terminale Elettronico (SumUp)' : p.type === 'ELECTRONIC_MANUAL' ? 'Pagamento Elettronico (Manuale)' : 'Cassetta Contanti'}</span></p>
+                                        <p>Tipo: <span className="font-medium text-foreground">{p.type === 'SUMUP' ? 'Terminale Carta / POS (SumUp)' : p.type === 'ELECTRONIC_MANUAL' ? 'Pagamento Carta / POS (Manuale)' : 'Cassetta Contanti'}</span></p>
                                         {p.type === 'SUMUP' && <p>Merchant ID: <span className="font-mono text-foreground">{p.config?.merchantId || "Non configurato"}</span></p>}
                                     </div>
                                     <div className="flex justify-end gap-2 mt-4">

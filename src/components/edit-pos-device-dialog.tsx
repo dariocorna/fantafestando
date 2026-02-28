@@ -82,14 +82,14 @@ export function EditPosDeviceDialog({
                             </Select>
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="pos-edit-paymentTerminalId">Terminale Pagamento (Elettronico)</Label>
+                            <Label htmlFor="pos-edit-paymentTerminalId">Terminale Pagamento (Carta / POS)</Label>
                             <Select name="paymentTerminalId" defaultValue={posDevice.paymentTerminalId || "none"}>
                                 <SelectTrigger id="pos-edit-paymentTerminalId">
                                     <SelectValue placeholder="Nessuno" />
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="none">Nessuno</SelectItem>
-                                    {peripherals.filter(p => p.type === "SUMUP").map(p => (
+                                    {peripherals.filter(p => p.type === "SUMUP" || p.type === "ELECTRONIC_MANUAL").map(p => (
                                         <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                                     ))}
                                 </SelectContent>

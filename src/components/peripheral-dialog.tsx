@@ -97,8 +97,8 @@ export function PeripheralDialog({
                                     <SelectValue placeholder="Seleziona tipo" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="SUMUP">Terminale SumUp (Elettronico)</SelectItem>
-                                    <SelectItem value="ELECTRONIC_MANUAL">Pagamento Elettronico (Manuale)</SelectItem>
+                                    <SelectItem value="SUMUP">Terminale SumUp (Carta / POS)</SelectItem>
+                                    <SelectItem value="ELECTRONIC_MANUAL">Pagamento Carta / POS (Manuale)</SelectItem>
                                     <SelectItem value="CASH_BOX">Cassetta Contanti (Manuale)</SelectItem>
                                     <SelectItem value="OTHER">Altro</SelectItem>
                                 </SelectContent>

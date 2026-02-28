@@ -29,7 +29,7 @@ interface OrderProjection {
 
 function getPaymentMethodLabel(paymentMethod?: "CASH" | "CARD" | "OTHER") {
     if (paymentMethod === "CASH") return "Contanti"
-    if (paymentMethod === "CARD") return "Elettronico"
+    if (paymentMethod === "CARD") return "Carta / POS"
     return "Altro"
 }
 
