@@ -4,6 +4,8 @@ export interface IProduct extends Document {
     eventId: Types.ObjectId;
     categoryId: Types.ObjectId;
     name: string;
+    shortName?: string;
+    description?: string;
     basePrice: number;
     isSoldOut: boolean;
     stockQuantity: number | null;
@@ -19,6 +21,8 @@ const ProductSchema = new Schema<IProduct>({
     eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
     categoryId: { type: Schema.Types.ObjectId, ref: 'Category', required: true },
     name: { type: String, required: true },
+    shortName: { type: String, trim: true, maxlength: 24 },
+    description: { type: String, trim: true },
     basePrice: { type: Number, required: true },
     isSoldOut: { type: Boolean, default: false },
     stockQuantity: { type: Number, default: null, min: 0 },
