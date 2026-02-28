@@ -615,7 +615,7 @@ export class PrinterService {
             destinationPort,
             isVirtual: Boolean(job.isVirtual),
             copies,
-            document
+            document: document as unknown as Record<string, unknown>
         });
 
         if (!destinationHost) {
@@ -660,7 +660,7 @@ export class PrinterService {
             return false;
         }
 
-        const normalizedDocument = normalizeLegacyPrintDocument(document);
+        const normalizedDocument = normalizeLegacyPrintDocument(document as unknown as Record<string, unknown>);
         const hasLogo = await this.tryPrintLogo(printer, normalizedDocument, printType);
         this.renderPrintDocument(printer, normalizedDocument, !hasLogo);
 
@@ -994,7 +994,7 @@ export class PrinterService {
             destinationPort: printerPort,
             isVirtual,
             copies: 1,
-            document
+            document: document as unknown as Record<string, unknown>
         });
 
         if (!printerHost) {
@@ -1039,7 +1039,7 @@ export class PrinterService {
             return false;
         }
 
-        const normalizedDocument = normalizeLegacyPrintDocument(document);
+        const normalizedDocument = normalizeLegacyPrintDocument(document as unknown as Record<string, unknown>);
         const hasLogo = await this.tryPrintLogo(printer, normalizedDocument, "CASH_SESSION_SUMMARY");
         this.renderPrintDocument(printer, normalizedDocument, !hasLogo);
 
