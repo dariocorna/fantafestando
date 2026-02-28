@@ -45,5 +45,10 @@ test.describe("Printer Emulation", () => {
 
         await expect(page.getByText("Ricevuta Demo")).toBeVisible({ timeout: 15000 });
         await expect(page.getByText("SENT")).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId("print-job-breakdown")).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId("print-job-breakdown")).toContainText("Copia:");
+        await expect(page.getByTestId("print-job-breakdown")).toContainText("Riferimento:");
+        await expect(page.getByTestId("print-job-totals")).toContainText("TOTALE");
+        await expect(page.getByTestId("print-job-preview")).toBeVisible();
     });
 });
