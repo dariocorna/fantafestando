@@ -26,6 +26,7 @@ test.describe("Gestione duplicati amministrazione", () => {
         const eventName = `Dup Event ${suffix}`;
         const categoryName = `Dup Category ${suffix}`;
         const productName = `Dup Product ${suffix}`;
+        const productShortName = `DUP-${suffix}`;
 
         await ensureAdminAuthenticated(page, "/admin/settings/events");
 
@@ -58,6 +59,8 @@ test.describe("Gestione duplicati amministrazione", () => {
         const productDialog = page.getByRole("dialog").filter({ hasText: /Aggiungi Prodotto/i }).first();
         await expect(productDialog).toBeVisible();
         await productDialog.getByLabel("Nome").fill(productName);
+        await productDialog.getByLabel("Etichetta breve POS/Scontrino (opzionale)").fill(productShortName);
+        await productDialog.getByLabel("Descrizione Menu (opzionale)").fill("Descrizione prodotto duplicato test");
         await productDialog.getByLabel("Prezzo Base (€)").fill("5.50");
         await productDialog.locator('select[name="categoryId"]').selectOption({ label: categoryName });
         await productDialog.getByRole("button", { name: "Salva Prodotto", exact: true }).click();
@@ -67,11 +70,12 @@ test.describe("Gestione duplicati amministrazione", () => {
         await page.click("#new-product-btn");
         const duplicateProductDialog = page.getByRole("dialog").filter({ hasText: /Aggiungi Prodotto/i }).first();
         await expect(duplicateProductDialog).toBeVisible();
-        await duplicateProductDialog.getByLabel("Nome").fill(productName.toLowerCase());
+        await duplicateProductDialog.getByLabel("Nome").fill(`Altro nome ${suffix}`);
+        await duplicateProductDialog.getByLabel("Etichetta breve POS/Scontrino (opzionale)").fill(productShortName.toLowerCase());
         await duplicateProductDialog.getByLabel("Prezzo Base (€)").fill("5.50");
         await duplicateProductDialog.locator('select[name="categoryId"]').selectOption({ label: categoryName });
         await duplicateProductDialog.getByRole("button", { name: "Salva Prodotto", exact: true }).click();
-        await expect(duplicateProductDialog.getByRole("alert")).toContainText(/Esiste già un prodotto con questo nome/i);
+        await expect(duplicateProductDialog.getByRole("alert")).toContainText(/Esiste già un prodotto con questo nome breve/i);
         await expect(duplicateProductDialog).toBeVisible();
 
         await duplicateProductDialog.press("Escape");

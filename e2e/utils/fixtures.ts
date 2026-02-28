@@ -152,12 +152,20 @@ export interface ProductDef {
     name: string;
     price: string;
     stock?: string;
+    shortName?: string;
+    description?: string;
 }
 
 export async function createProduct(page: Page, categoryName: string, product: ProductDef) {
     await page.click("#new-product-btn");
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Nome").fill(product.name);
+    if (product.shortName) {
+        await dialog.getByLabel("Etichetta breve POS/Scontrino (opzionale)").fill(product.shortName);
+    }
+    if (product.description) {
+        await dialog.getByLabel("Descrizione Menu (opzionale)").fill(product.description);
+    }
     await dialog.getByLabel("Prezzo Base (€)").fill(product.price);
     await dialog.locator('select[name="categoryId"]').selectOption({ label: categoryName });
     if (product.stock) {
