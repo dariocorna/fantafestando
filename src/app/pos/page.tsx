@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ShoppingCart, User, CreditCard, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X, RefreshCw, Clock3, Wallet } from "lucide-react"
+import { ShoppingCart, User, CreditCard, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X, RefreshCw, Clock3, Wallet, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -22,10 +22,11 @@ import {
     getCashSessionClosurePreview,
     retryFailedOrderPrintJobs
 } from "./actions"
-import { getCategoryTheme } from "@/lib/category-colors"
+import { categoryColorWithAlpha, getCategoryTheme } from "@/lib/category-colors"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
 import { getStockLabel, getStockStatus, type StockShortage } from "@/lib/inventory"
 import { resolveQuickDiscountPresetsFromSettings, type QuickDiscountPreset } from "@/lib/quick-discount-presets"
+import { normalizePosCatalogLayout } from "@/lib/pos-catalog-layout"
 
 interface ICategory {
     _id: string
@@ -49,6 +50,7 @@ interface IEvent {
     settings?: {
         askTable?: boolean
         askName?: boolean
+        posCatalogLayout?: "COMPACT_COLUMNS" | "MODERN_TABS"
         quickDiscountPresets?: Array<{
             label: string
             type: "PERCENT" | "FIXED"
@@ -174,14 +176,14 @@ function getPeripheralRef(value: IPosDevice["paymentTerminalId"] | IPosDevice["c
     return value
 }
 
-const DISCOUNT_TAB_ID = "__discounts__"
 export default function PosPage() {
-    const [activeCategory, setActiveCategory] = useState<string | null>(null)
     const [cart, setCart] = useState<CartItem[]>([])
     const [categories, setCategories] = useState<ICategory[]>([])
+    const [activeCategory, setActiveCategory] = useState<string | null>(null)
     const [products, setProducts] = useState<IProduct[]>([])
     const [activeEvent, setActiveEvent] = useState<IEvent | null>(null)
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
+    const [isDiscountsExpanded, setIsDiscountsExpanded] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
     const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD">("CASH")
     const [posDevices, setPosDevices] = useState<IPosDevice[]>([])
@@ -238,14 +240,14 @@ export default function PosPage() {
     // Caricamento iniziale: evento attivo e menu
     useEffect(() => {
         const loadInitialData = async () => {
-            const res = await fetch('/api/pos/init?channel=pos')
+            const res = await fetch('/api/pos/init?channel=pos', { cache: "no-store" })
             const data = await res.json()
             if (data.event) {
                 setActiveEvent(data.event)
                 setCategories(data.categories)
+                setActiveCategory(data.categories?.[0]?._id ?? null)
                 setProducts(data.products)
                 setPosDevices(data.posDevices)
-                if (data.categories.length > 0) setActiveCategory(data.categories[0]._id)
 
                 // Check localStorage for POS Device
                 const savedPosId = localStorage.getItem('osgfest_pos_id')
@@ -276,7 +278,6 @@ export default function PosPage() {
     const selectedPosDevice = posDevices.find((d: IPosDevice) => d._id === selectedPosDeviceId)
     const selectedPaymentTerminal = getPeripheralRef(selectedPosDevice?.paymentTerminalId)
     const selectedCashBox = getPeripheralRef(selectedPosDevice?.cashBoxId)
-    const activeCategoryTheme = getCategoryTheme(categories.find((c) => c._id === activeCategory)?.uiColor)
     const activeEventId = activeEvent?._id
 
     const cashAvailable = Boolean(selectedCashBox)
@@ -325,6 +326,33 @@ export default function PosPage() {
     const normalizedTableValue = normalizeTableValue(tableNumber)
     const tableValueValid = isTableValueValid(tableNumber)
     const predefinedTables = activeEvent?.predefinedTables || []
+    const categoryColumnsCount = Math.max(categories.length, 1)
+    const isModernCatalogLayout = normalizePosCatalogLayout(activeEvent?.settings?.posCatalogLayout) === "MODERN_TABS"
+    const selectedModernCategoryId = activeCategory && categories.some((category) => category._id === activeCategory)
+        ? activeCategory
+        : (categories[0]?._id ?? null)
+    const productsByCategory = categories.reduce<Record<string, IProduct[]>>((acc, category) => {
+        acc[category._id] = products.filter((product) => product.categoryId === category._id)
+        return acc
+    }, {})
+    const selectedModernCategory = selectedModernCategoryId
+        ? categories.find((category) => category._id === selectedModernCategoryId) || null
+        : null
+    const selectedModernCategoryProducts = selectedModernCategoryId
+        ? productsByCategory[selectedModernCategoryId] || []
+        : []
+    const selectedModernCategoryTheme = getCategoryTheme(selectedModernCategory?.uiColor)
+    const getAdaptiveProductRowMinHeight = (productsCount: number): string => {
+        const safeCount = Math.max(productsCount, 1)
+        const gapPx = 6 // space-y-1.5
+        const reservedVerticalPx = isDiscountsExpanded ? 170 : 120
+
+        // Viewport-based adaptive sizing per column:
+        // - grows on tall screens
+        // - shrinks automatically on smaller heights
+        // - never explodes or collapses thanks to clamp bounds.
+        return `clamp(38px, calc((100dvh - ${reservedVerticalPx}px - ${(safeCount - 1) * gapPx}px) / ${safeCount}), 96px)`
+    }
 
     const addToCart = (product: IProduct) => {
         setCart((prev: CartItem[]) => {
@@ -813,151 +841,350 @@ export default function PosPage() {
         || (Boolean(activeEvent?.settings?.askTable) && !tableValueValid)
 
     return (
-        <div className="flex h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950">
+        <div className="brand-surface-pos flex h-screen w-screen overflow-hidden" data-testid="pos-brand-shell">
             {/* Sinistra: Selezione Prodotti (70%) */}
-            <div className="flex flex-col flex-1 h-full border-r bg-white dark:bg-slate-900">
-                {/* Tab Categorie */}
-                <div className="flex overflow-x-auto gap-2 p-4 bg-slate-50 dark:bg-slate-800 border-b scrollbar-hide shrink-0">
-                    {categories.map(cat => {
-                        const catTheme = getCategoryTheme(cat.uiColor)
-                        const isActive = activeCategory === cat._id
-
-                        return (
-                            <button
-                                key={cat._id}
-                                onClick={() => setActiveCategory(cat._id)}
-                                className={`px-8 py-6 rounded-xl font-bold text-lg whitespace-nowrap transition-all shadow-sm border ${isActive ? "scale-105" : ""}`}
-                                style={isActive
-                                    ? {
-                                        backgroundColor: catTheme.base,
-                                        color: catTheme.onBase,
-                                        borderColor: catTheme.base,
-                                        boxShadow: `0 0 0 4px ${catTheme.softBg}`
-                                    }
-                                    : {
-                                        backgroundColor: catTheme.softBg,
-                                        color: catTheme.base,
-                                        borderColor: catTheme.border
-                                    }}
-                            >
-                                {cat.name}
-                            </button>
-                        )
-                    })}
-                    <button
-                        id="discounts-tab-trigger"
-                        onClick={() => setActiveCategory(DISCOUNT_TAB_ID)}
-                        className={`px-8 py-6 rounded-xl font-bold text-lg whitespace-nowrap transition-all shadow-sm border ${activeCategory === DISCOUNT_TAB_ID ? "scale-105 bg-emerald-600 text-white border-emerald-600" : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"}`}
-                    >
-                        Sconti
-                    </button>
+            <div className="flex h-full flex-1 flex-col border-r border-[#d9e6f8] bg-white">
+                <div className="shrink-0 border-b border-[#d9e6f8] bg-[#f7fbff] px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-xs font-black uppercase tracking-[0.08em] text-[var(--brand-blue-700)]">
+                                Catalogo completo
+                            </h3>
+                            <p className="text-[11px] font-semibold text-slate-500">
+                                {categories.length} categorie • {products.length} prodotti
+                            </p>
+                        </div>
+                        <button
+                            id="discounts-tab-trigger"
+                            onClick={() => setIsDiscountsExpanded((prev) => !prev)}
+                            className={`rounded-md border px-2.5 py-1.5 text-[11px] font-black uppercase tracking-[0.05em] transition-colors ${
+                                isDiscountsExpanded
+                                    ? "border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800"
+                                    : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                            }`}
+                        >
+                            Sconti
+                        </button>
+                    </div>
                 </div>
 
-                {/* Griglia Prodotti */}
-                <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 content-start text-slate-800 dark:text-slate-100">
-                    {activeCategory === DISCOUNT_TAB_ID ? (
-                        quickDiscountPresets.length === 0 ? (
-                            <div className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
-                                <p className="text-lg font-black text-slate-700">Nessun preset sconto configurato</p>
-                                <p className="mt-2 text-sm font-semibold text-slate-500">
-                                    Configura i preset da Admin &gt; Impostazioni.
-                                </p>
-                            </div>
-                        ) : (
-                            quickDiscountPresets.map((preset, index) => {
-                                const previewAmount = computePresetDiscountAmount(preset, discountBaseAmount)
-                                return (
-                                    <button
-                                        key={`discount-preset-card-${preset.label}-${preset.type}-${preset.value}-${index}`}
-                                        id={`discount-preset-card-${index}`}
-                                        onClick={() => addDiscountPresetToCart(preset)}
-                                        disabled={productCartItems.length === 0}
-                                        className="flex flex-col h-40 p-4 rounded-xl bg-emerald-50 border border-emerald-200 shadow-sm hover:shadow-md active:scale-95 transition-all text-left disabled:opacity-60 disabled:cursor-not-allowed"
-                                    >
-                                        <span className="font-black text-lg leading-tight text-emerald-800 line-clamp-2">{preset.label}</span>
-                                        <span className="mt-2 inline-flex w-fit rounded-full px-2 py-1 text-[10px] font-bold bg-white text-emerald-700 border border-emerald-200">
-                                            {preset.type === "PERCENT" ? `${preset.value}%` : `${preset.value.toFixed(2)} €`}
-                                        </span>
-                                        <span className="mt-auto font-black text-xl text-emerald-700">
-                                            -{previewAmount.toFixed(2)} €
-                                        </span>
-                                        <span className="text-[10px] font-semibold text-emerald-600">
-                                            Tap per aggiungere al carrello
-                                        </span>
-                                    </button>
-                                )
-                            })
-                        )
-                    ) : (
-                        products
-                            .filter(p => p.categoryId === activeCategory)
-                            .map(p => {
-                                const stockStatus = p.stockStatus || getStockStatus(p.stockQuantity ?? null, Boolean(p.isSoldOut))
-                                const stockLabel = getStockLabel(p.stockQuantity ?? null, Boolean(p.isSoldOut))
+                <div className="flex-1 overflow-y-auto p-3 text-slate-800">
+                    <div className="space-y-2">
+                        {isDiscountsExpanded ? (
+                            <section
+                                id="pos-discount-presets"
+                                className="border border-[#d9e6f8] bg-white p-2"
+                                data-testid="pos-discount-presets"
+                            >
+                                {quickDiscountPresets.length === 0 ? (
+                                    <div className="border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center">
+                                        <p className="text-sm font-black text-slate-700">Nessun preset sconto configurato</p>
+                                        <p className="mt-1 text-xs font-semibold text-slate-500">
+                                            Configura i preset da Admin &gt; Impostazioni.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {quickDiscountPresets.map((preset, index) => {
+                                            const previewAmount = computePresetDiscountAmount(preset, discountBaseAmount)
+                                            return (
+                                                <button
+                                                    key={`discount-preset-card-${preset.label}-${preset.type}-${preset.value}-${index}`}
+                                                    id={`discount-preset-card-${index}`}
+                                                    onClick={() => addDiscountPresetToCart(preset)}
+                                                    disabled={productCartItems.length === 0}
+                                                    className="inline-flex h-10 min-w-[200px] items-center gap-1.5 border border-emerald-200 bg-emerald-50 px-2 py-1 text-left transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    <span className="max-w-[120px] truncate text-xs font-black leading-tight text-emerald-800">
+                                                        {preset.label}
+                                                    </span>
+                                                    <span className="inline-flex w-fit border border-emerald-200 bg-white px-1 py-0.5 text-[10px] font-bold text-emerald-700">
+                                                        {preset.type === "PERCENT" ? `${preset.value}%` : `${preset.value.toFixed(2)} €`}
+                                                    </span>
+                                                    <span className="ml-auto whitespace-nowrap text-xs font-black text-emerald-700">
+                                                        -{previewAmount.toFixed(2)} €
+                                                    </span>
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+                            </section>
+                        ) : null}
 
-                                return (
-                                    <button
-                                        key={p._id}
-                                        onClick={() => addToCart(p)}
-                                        className="flex flex-col h-40 p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md active:scale-95 transition-all text-left"
-                                        style={{ borderColor: stockStatus === "OUT" ? "#ef4444" : activeCategoryTheme.border }}
-                                    >
-                                        <span className="font-bold text-lg leading-tight mb-2 line-clamp-2">{p.name}</span>
-                                        <span
-                                            className={`inline-flex w-fit rounded-full px-2 py-1 text-[10px] font-bold ${stockStatus === "OUT"
-                                                ? "bg-red-100 text-red-700"
-                                                : stockStatus === "LOW"
-                                                    ? "bg-amber-100 text-amber-700"
-                                                    : "bg-slate-100 text-slate-700"
-                                                }`}
-                                        >
-                                            {stockLabel}
-                                        </span>
-                                        <span className="mt-auto font-black text-xl" style={{ color: activeCategoryTheme.base }}>
-                                            {p.basePrice.toFixed(2)} €
-                                        </span>
-                                    </button>
-                                )
-                            })
-                    )}
+                        <section data-testid="pos-all-categories-catalog">
+                            {isModernCatalogLayout ? (
+                                <div className="space-y-2">
+                                    <div className="flex flex-wrap gap-1 border-b border-[#d9e6f8] pb-2">
+                                        {categories.map((cat) => {
+                                            const catTheme = getCategoryTheme(cat.uiColor)
+                                            const isActive = selectedModernCategoryId === cat._id
+                                            return (
+                                                <button
+                                                    key={cat._id}
+                                                    type="button"
+                                                    onClick={() => setActiveCategory(cat._id)}
+                                                    className="inline-flex min-h-11 items-center gap-1.5 border px-3.5 py-2 text-sm font-black uppercase tracking-[0.04em] transition-all"
+                                                    style={isActive
+                                                        ? {
+                                                            backgroundColor: catTheme.base,
+                                                            color: catTheme.onBase,
+                                                            borderColor: catTheme.base,
+                                                        }
+                                                        : {
+                                                            backgroundColor: categoryColorWithAlpha(cat.uiColor, 0.16),
+                                                            color: catTheme.base,
+                                                            borderColor: catTheme.border,
+                                                        }}
+                                                >
+                                                    {isActive ? <Check size={14} /> : null}
+                                                    <span className="max-w-[170px] truncate">{cat.name}</span>
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+
+                                    {!selectedModernCategory ? (
+                                        <div className="border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-sm font-semibold text-slate-500">
+                                            Nessuna categoria disponibile.
+                                        </div>
+                                    ) : selectedModernCategoryProducts.length === 0 ? (
+                                        <div className="border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-sm font-semibold text-slate-500">
+                                            Nessun prodotto nella categoria selezionata.
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <div
+                                                className="flex items-center justify-between border px-3 py-2"
+                                                style={{
+                                                    borderColor: selectedModernCategoryTheme.border,
+                                                    backgroundColor: categoryColorWithAlpha(selectedModernCategory.uiColor, 0.16),
+                                                }}
+                                            >
+                                                <div className="min-w-0">
+                                                    <p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">
+                                                        Categoria attiva
+                                                    </p>
+                                                    <p
+                                                        className="truncate text-sm font-black uppercase tracking-[0.04em]"
+                                                        style={{ color: selectedModernCategoryTheme.base }}
+                                                    >
+                                                        {selectedModernCategory.name}
+                                                    </p>
+                                                </div>
+                                                <span
+                                                    className="shrink-0 border px-2 py-1 text-xs font-black"
+                                                    style={{
+                                                        color: selectedModernCategoryTheme.base,
+                                                        borderColor: selectedModernCategoryTheme.border,
+                                                        backgroundColor: "white",
+                                                    }}
+                                                >
+                                                    {selectedModernCategoryProducts.length} prodotti
+                                                </span>
+                                            </div>
+
+                                            <div className="grid content-start gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                                                {selectedModernCategoryProducts.map((p, productIndex) => {
+                                                    const stockStatus = p.stockStatus || getStockStatus(p.stockQuantity ?? null, Boolean(p.isSoldOut))
+                                                    const stockLabel = getStockLabel(p.stockQuantity ?? null, Boolean(p.isSoldOut))
+                                                    const showStockPill = stockStatus === "LOW" || stockStatus === "OUT"
+                                                    const stripedBackground = productIndex % 2 === 0
+                                                        ? categoryColorWithAlpha(selectedModernCategory.uiColor, 0.24)
+                                                        : categoryColorWithAlpha(selectedModernCategory.uiColor, 0.14)
+                                                    const cardBorderColor = stockStatus === "OUT" ? "#dc2626" : selectedModernCategoryTheme.base
+
+                                                    return (
+                                                        <button
+                                                            key={p._id}
+                                                            onClick={() => addToCart(p)}
+                                                            data-testid={`pos-product-${p._id}`}
+                                                            className="group relative flex min-h-[136px] flex-col overflow-hidden border-2 text-left transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_20px_rgba(15,23,42,0.12)] active:translate-y-0"
+                                                            style={{ borderColor: cardBorderColor }}
+                                                        >
+                                                            <div
+                                                                className="flex flex-1 flex-col gap-2 px-2.5 py-2.5"
+                                                                style={{
+                                                                    backgroundColor: stockStatus === "OUT"
+                                                                        ? "rgba(254, 226, 226, 0.88)"
+                                                                        : stripedBackground,
+                                                                }}
+                                                            >
+                                                                <p className="line-clamp-3 text-[1.02rem] font-black uppercase leading-tight text-slate-900">
+                                                                    {p.name}
+                                                                </p>
+                                                                <div className="mt-auto flex items-end justify-between gap-2">
+                                                                    {showStockPill ? (
+                                                                        <span
+                                                                            className={`inline-flex w-fit rounded-sm px-1.5 py-0.5 text-[10px] font-bold ${stockStatus === "OUT"
+                                                                                ? "bg-red-100 text-red-700"
+                                                                                : "bg-amber-100 text-amber-700"
+                                                                                }`}
+                                                                        >
+                                                                            {stockLabel}
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span />
+                                                                    )}
+                                                                    <span
+                                                                        className="inline-flex min-w-[96px] justify-center border px-2 py-1 text-lg font-black leading-none"
+                                                                        style={{
+                                                                            color: cardBorderColor,
+                                                                            borderColor: cardBorderColor,
+                                                                            backgroundColor: "rgba(255, 255, 255, 0.88)",
+                                                                        }}
+                                                                    >
+                                                                        {p.basePrice.toFixed(2)} €
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </button>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div
+                                    className="grid content-start gap-1"
+                                    style={{ gridTemplateColumns: `repeat(${categoryColumnsCount}, minmax(0, 1fr))` }}
+                                >
+                                    {categories.map((cat) => {
+                                        const catTheme = getCategoryTheme(cat.uiColor)
+                                        const categoryProducts = productsByCategory[cat._id] || []
+                                        const categoryRowMinHeight = getAdaptiveProductRowMinHeight(categoryProducts.length)
+
+                                        return (
+                                            <article
+                                                key={cat._id}
+                                                className="min-w-0"
+                                                style={{ backgroundColor: categoryColorWithAlpha(cat.uiColor, 0.12) }}
+                                            >
+                                                <header
+                                                    className="mb-1 flex items-center justify-between border-b px-0 py-0.5"
+                                                    style={{
+                                                        backgroundColor: catTheme.softBg,
+                                                        borderColor: catTheme.border,
+                                                    }}
+                                                >
+                                                    <h4
+                                                        className="truncate text-sm font-black uppercase tracking-[0.04em]"
+                                                        style={{ color: catTheme.base }}
+                                                    >
+                                                        {cat.name}
+                                                    </h4>
+                                                    <span
+                                                        className="rounded-sm border px-1.5 py-0.5 text-[10px] font-black"
+                                                        style={{
+                                                            color: catTheme.base,
+                                                            borderColor: catTheme.border,
+                                                            backgroundColor: "white",
+                                                        }}
+                                                    >
+                                                        {categoryProducts.length}
+                                                    </span>
+                                                </header>
+
+                                                {categoryProducts.length === 0 ? (
+                                                    <div className="border border-dashed border-slate-200 bg-slate-50 px-1 py-2 text-center text-xs font-semibold text-slate-500">
+                                                        Nessun prodotto in categoria
+                                                    </div>
+                                                ) : (
+                                                    <div className="space-y-1.5">
+                                                        {categoryProducts.map((p, productIndex) => {
+                                                            const stockStatus = p.stockStatus || getStockStatus(p.stockQuantity ?? null, Boolean(p.isSoldOut))
+                                                            const stockLabel = getStockLabel(p.stockQuantity ?? null, Boolean(p.isSoldOut))
+                                                            const showStockPill = stockStatus === "LOW" || stockStatus === "OUT"
+                                                            const stripedBackground = productIndex % 2 === 0
+                                                                ? categoryColorWithAlpha(cat.uiColor, 0.62)
+                                                                : categoryColorWithAlpha(cat.uiColor, 0.18)
+                                                            const strongInset = categoryColorWithAlpha(cat.uiColor, 0.5)
+
+                                                            return (
+                                                                <button
+                                                                    key={p._id}
+                                                                    onClick={() => addToCart(p)}
+                                                                    data-testid={`pos-product-${p._id}`}
+                                                                    className="flex w-full flex-col items-center justify-center border px-1.5 py-1 text-center transition-all hover:brightness-90 active:scale-[0.99]"
+                                                                    style={{
+                                                                        borderColor: stockStatus === "OUT" ? "#dc2626" : catTheme.base,
+                                                                        borderWidth: "2px",
+                                                                        minHeight: categoryRowMinHeight,
+                                                                        backgroundColor: stockStatus === "OUT"
+                                                                            ? "rgba(239, 68, 68, 0.24)"
+                                                                            : stripedBackground,
+                                                                        boxShadow: stockStatus === "OUT"
+                                                                            ? "inset 0 0 0 1px rgba(185, 28, 28, 0.5)"
+                                                                            : `inset 0 0 0 1px ${strongInset}`,
+                                                                    }}
+                                                                >
+                                                                    <p className="mx-auto w-full max-w-[96%] truncate text-center text-[clamp(14px,0.95vw,20px)] font-black uppercase leading-tight text-slate-800">
+                                                                        {p.name}
+                                                                    </p>
+                                                                    {showStockPill ? (
+                                                                        <span
+                                                                            className={`mx-auto inline-flex w-fit rounded-sm px-1 py-0.5 text-[10px] font-bold ${stockStatus === "OUT"
+                                                                                ? "bg-red-100 text-red-700"
+                                                                                : "bg-amber-100 text-amber-700"
+                                                                                }`}
+                                                                        >
+                                                                            {stockLabel}
+                                                                        </span>
+                                                                    ) : null}
+                                                                </button>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </article>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </section>
+                    </div>
                 </div>
             </div>
 
             {/* Destra: Riepilogo & Carrello (30%) */}
-            <div className="w-[400px] h-full flex flex-col bg-slate-50 dark:bg-slate-900 shrink-0 border-l border-slate-200 dark:border-slate-800">
+            <div
+                className="h-full shrink-0 border-l border-[#d9e6f8] bg-[#f7fbff] flex flex-col"
+                style={{ width: "clamp(280px, 23vw, 380px)" }}
+            >
                 {/* Info Intestazione */}
-                <div className="p-6 border-b bg-white dark:bg-slate-800">
-                    <h2 className="text-xl font-black text-slate-800 dark:text-slate-100 uppercase tracking-tight">
+                <div className="border-b border-[#d9e6f8] bg-white p-4">
+                    <h2 className="text-lg font-black uppercase tracking-tight text-[var(--brand-ink)]">
                         {activeEvent?.name || "Cassa Osgfest"}
                     </h2>
                     <button
                         onClick={() => setIsPosSelectorOpen(true)}
-                        className="text-xs font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1 mt-1 hover:underline"
+                        className="mt-1 flex items-center gap-1 text-xs font-bold text-[var(--brand-blue-700)] hover:underline"
                     >
                         <Monitor size={12} />
                         {selectedPosDevice ? `Postazione: ${selectedPosDevice.name}` : "Seleziona Cassa"}
                     </button>
                     <button
                         onClick={() => handleCodeDialogOpenChange(true)}
-                        className="mt-2 inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
+                        className="mt-2 inline-flex items-center gap-2 rounded-md border border-[#d9e6f8] bg-[#eef5ff] px-2.5 py-1.5 text-xs font-bold text-[var(--brand-blue-700)] transition-colors hover:bg-[#e4efff]"
                     >
                         <Search size={14} />
                         Carica ordine da codice
                     </button>
-                    <div className={`mt-3 rounded-xl border p-3 ${cashSession ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
+                    <div className={`mt-3 rounded-md border p-2.5 ${cashSession ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
                         <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
-                                <p className={`text-xs font-black uppercase tracking-widest ${cashSession ? "text-emerald-700" : "text-rose-700"}`}>
+                                <p className={`text-[10px] font-black uppercase tracking-widest ${cashSession ? "text-emerald-700" : "text-rose-700"}`}>
                                     Stato Cassa
                                 </p>
                                 {isCashSessionLoading ? (
-                                    <p className="text-sm font-semibold text-slate-500">Caricamento sessione...</p>
+                                    <p className="text-xs font-semibold text-slate-500">Caricamento sessione...</p>
                                 ) : cashSession ? (
-                                    <p className="text-sm font-semibold text-emerald-700">
+                                    <p className="text-xs font-semibold text-emerald-700">
                                         Aperta alle {formatSessionDateTime(cashSession.openedAt)} · Fondo {formatEuro(cashSession.openingFloatAmount)}
                                     </p>
                                 ) : (
-                                    <p className="text-sm font-semibold text-rose-700">Chiusa. Apri la cassa per iniziare gli incassi.</p>
+                                    <p className="text-xs font-semibold text-rose-700">Chiusa. Apri la cassa per iniziare gli incassi.</p>
                                 )}
                             </div>
                             {cashSession ? (
@@ -987,7 +1214,7 @@ export default function PosPage() {
                         </div>
                     </div>
                     {lastClosedSummary ? (
-                        <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 text-xs font-semibold text-slate-600">
+                        <div className="mt-3 rounded-md border border-slate-200 bg-white p-2.5 text-xs font-semibold text-slate-600">
                             <p className="font-black uppercase tracking-widest text-slate-500">Ultima chiusura</p>
                             <p className="mt-1">Chiusa alle {formatSessionDateTime(lastClosedSummary.closedAt)}</p>
                             <p>Atteso: {formatEuro(lastClosedSummary.expectedCashAmount)} · Contato: {formatEuro(lastClosedSummary.closingCountedCashAmount)}</p>
@@ -996,8 +1223,8 @@ export default function PosPage() {
                             </p>
                         </div>
                     ) : null}
-                    <div className="grid grid-cols-2 gap-2 mt-4">
-                        <div className="bg-white dark:bg-slate-700 border p-2 rounded-xl flex items-center gap-2">
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                        <div className="flex items-center gap-2 rounded-md border bg-white p-2">
                             <User size={18} className="text-slate-400" />
                             <input
                                 className="bg-transparent border-none focus:outline-none text-sm font-bold w-full"
@@ -1006,7 +1233,7 @@ export default function PosPage() {
                                 onChange={(e) => setCustomerName(e.target.value)}
                             />
                         </div>
-                        <div className="bg-white dark:bg-slate-700 border p-2 rounded-xl flex items-center gap-2">
+                        <div className="flex items-center gap-2 rounded-md border bg-white p-2">
                             <Hash size={18} className="text-slate-400" />
                             <span className="text-sm font-bold truncate">
                                 {normalizedTableValue ? `Tavolo ${normalizedTableValue}` : "Tavolo..."}
@@ -1016,13 +1243,13 @@ export default function PosPage() {
                 </div>
 
                 {/* Elementi Carrello */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                <div className="flex-1 space-y-2 overflow-y-auto p-3">
                     {loadedPendingOrder ? (
-                        <div className="p-4 rounded-2xl border-2 border-indigo-200 bg-indigo-50 space-y-3">
+                        <div className="space-y-2 rounded-md border border-indigo-200 bg-indigo-50 p-3">
                             <div className="flex items-start justify-between gap-2">
                                 <div>
                                     <p className="text-xs uppercase font-bold tracking-widest text-indigo-500">Ordine WebApp Caricato</p>
-                                    <p className="text-lg font-black text-indigo-700">Codice {loadedPendingOrder.code}</p>
+                                    <p className="text-base font-black text-indigo-700">Codice {loadedPendingOrder.code}</p>
                                     <p className="text-xs font-semibold text-indigo-600 mt-1">
                                         Carrello precompilato: puoi aggiungere/rimuovere prodotti prima della chiusura.
                                     </p>
@@ -1039,33 +1266,33 @@ export default function PosPage() {
                     ) : null}
 
                     {cart.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-50 space-y-4">
-                            <ShoppingCart size={64} />
+                        <div className="flex h-full flex-col items-center justify-center space-y-3 text-slate-400 opacity-50">
+                            <ShoppingCart size={52} />
                             <p className="font-bold">Il carrello è vuoto</p>
                         </div>
                     ) : (
                         cart.map((item) => {
                             const lineTotal = Number((item.quantity * item.price).toFixed(2))
                             return (
-                                <div key={item.lineId} className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-xl shadow-sm border">
+                                <div key={item.lineId} className="flex items-center justify-between rounded-md border bg-white p-2.5">
                                     <div className="flex flex-col">
-                                        <span className={`font-bold ${item.isDiscount ? "text-emerald-700" : "text-slate-800 dark:text-slate-100"}`}>{item.name}</span>
+                                        <span className={`text-sm font-bold ${item.isDiscount ? "text-emerald-700" : "text-slate-800 dark:text-slate-100"}`}>{item.name}</span>
                                         {item.isDiscount ? (
-                                            <span className="text-xs font-semibold text-emerald-600">
+                                            <span className="text-[11px] font-semibold text-emerald-600">
                                                 {item.discountPreset?.type === "PERCENT"
                                                     ? `${item.discountPreset.value}% su ${item.discountPreset.baseAmount.toFixed(2)} €`
                                                     : `Sconto fisso ${item.discountPreset?.value.toFixed(2)} €`}
                                             </span>
                                         ) : (
-                                            <span className="text-sm text-slate-500">{item.quantity} x {item.price.toFixed(2)} €</span>
+                                            <span className="text-xs text-slate-500">{item.quantity} x {item.price.toFixed(2)} €</span>
                                         )}
                                     </div>
                                     <div className="flex items-center gap-3">
                                         <div className="text-right">
-                                            <span className={`font-black ${item.isDiscount ? "text-emerald-700" : ""}`}>{lineTotal.toFixed(2)} €</span>
+                                            <span className={`text-sm font-black ${item.isDiscount ? "text-emerald-700" : ""}`}>{lineTotal.toFixed(2)} €</span>
                                         </div>
-                                        <button onClick={() => removeFromCart(item.lineId)} className="text-red-500 p-2">
-                                            <Trash2 size={20} />
+                                        <button onClick={() => removeFromCart(item.lineId)} className="p-1.5 text-red-500">
+                                            <Trash2 size={18} />
                                         </button>
                                     </div>
                                 </div>
@@ -1075,12 +1302,12 @@ export default function PosPage() {
                 </div>
 
                 {/* Footer / Pulsante Pagamento */}
-                <div className="p-6 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 space-y-4">
-                    <div className="flex justify-between items-center mb-2 px-2">
+                <div className="space-y-3 border-t border-[#d9e6f8] bg-white p-4">
+                    <div className="mb-1 flex items-center justify-between px-1">
                         <span className="text-sm text-slate-500 font-bold uppercase tracking-widest">Totale da Pagare</span>
-                        <span className="text-4xl font-black text-blue-600 dark:text-blue-400 leading-none">{effectiveTotal.toFixed(2)} €</span>
+                        <span className="text-3xl font-black leading-none text-[var(--brand-blue-700)]">{effectiveTotal.toFixed(2)} €</span>
                     </div>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-semibold text-slate-600">
                         <p>Subtotale prodotti: {subtotal.toFixed(2)} €</p>
                         <p>Sconti applicati: -{totalDiscountApplied.toFixed(2)} €</p>
                     </div>
@@ -1088,9 +1315,10 @@ export default function PosPage() {
                     <button
                         onClick={() => setIsCheckoutOpen(true)}
                         disabled={productCartItems.length === 0 || !selectedPosDeviceId || !cashSession || isProcessing || isCashSessionLoading}
-                        className="w-full py-8 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-3xl font-black text-2xl shadow-xl shadow-blue-200 dark:shadow-none active:scale-[0.98] transition-all flex items-center justify-center gap-3"
+                        className="brand-cta-primary flex w-full items-center justify-center gap-2 rounded-md py-4 text-lg font-black transition-all active:scale-[0.98] hover:brightness-105 disabled:bg-slate-200 disabled:text-slate-400"
+                        data-testid="pos-pay-cta"
                     >
-                        <CheckCircle2 size={32} />
+                        <CheckCircle2 size={22} />
                         PAGA ORA
                     </button>
                     {!cashSession ? (
@@ -1103,41 +1331,41 @@ export default function PosPage() {
 
             {/* Modal di Checkout */}
             <Dialog open={isCheckoutOpen} onOpenChange={handleCheckoutDialogOpenChange}>
-                <DialogContent className="max-h-[90vh] max-w-[500px] overflow-y-auto rounded-3xl border-none p-0 text-slate-800 dark:text-slate-100">
+                <DialogContent className="max-h-[96dvh] max-w-[560px] overflow-y-auto rounded-2xl border-none p-0 text-slate-800 dark:text-slate-100">
                     <DialogHeader className="sr-only">
                         <DialogTitle>Checkout ordine POS</DialogTitle>
                     </DialogHeader>
-                    <div className="bg-blue-600 p-8 text-white text-center">
-                        <span className="text-blue-200 text-sm font-bold uppercase tracking-widest">Importo Dovuto</span>
-                        <h2 className="text-6xl font-black mt-2">{effectiveTotal.toFixed(2)} €</h2>
+                    <div className="bg-blue-600 px-4 py-4 text-center text-white sm:px-6 sm:py-5">
+                        <span className="text-xs font-bold uppercase tracking-widest text-blue-200">Importo Dovuto</span>
+                        <h2 className="mt-1 text-5xl font-black sm:text-6xl">{effectiveTotal.toFixed(2)} €</h2>
                         {loadedPendingOrder && (
-                            <p className="mt-2 text-sm font-semibold text-blue-100">Codice ordine: {loadedPendingOrder.code}</p>
+                            <p className="mt-1 text-xs font-semibold text-blue-100">Codice ordine: {loadedPendingOrder.code}</p>
                         )}
                     </div>
 
-                    <div className="p-8 space-y-6">
+                    <div className="space-y-4 p-4 sm:space-y-5 sm:p-5">
                         <>
                                 {activeEvent?.settings?.askName && (
-                                    <div className="space-y-3">
-                                        <Label htmlFor="checkout-customer-name" className="text-lg font-bold">Nome Cliente</Label>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="checkout-customer-name" className="text-base font-bold">Nome Cliente</Label>
                                         <Input
                                             id="checkout-customer-name"
                                             value={customerName}
                                             onChange={(e) => setCustomerName(e.target.value)}
                                             placeholder="Inserisci nome cliente"
-                                            className="h-14 rounded-2xl text-lg font-semibold"
+                                            className="h-11 rounded-lg text-base font-semibold"
                                         />
                                     </div>
                                 )}
 
                                 {activeEvent?.settings?.askTable && (
-                                    <div className="space-y-4">
-                                        <Label className="text-lg font-bold">Tavolo</Label>
-                                        <div className="text-center py-4 bg-slate-100 dark:bg-slate-800 rounded-2xl">
-                                            <span className="text-5xl font-black text-blue-600">{normalizedTableValue || "---"}</span>
+                                    <div className="space-y-3">
+                                        <Label className="text-base font-bold">Tavolo</Label>
+                                        <div className="rounded-lg bg-slate-100 py-1.5 text-center dark:bg-slate-800">
+                                            <span className="text-3xl font-black text-blue-600 sm:text-4xl">{normalizedTableValue || "---"}</span>
                                         </div>
                                         {predefinedTables.length > 0 ? (
-                                            <div className="flex flex-wrap gap-2">
+                                            <div className="flex flex-wrap gap-1.5">
                                                 {predefinedTables.map((table) => {
                                                     const isActive = normalizeTableValue(table) === normalizedTableValue
                                                     return (
@@ -1145,7 +1373,7 @@ export default function PosPage() {
                                                             key={table}
                                                             type="button"
                                                             onClick={() => setTableNumber(table)}
-                                                            className={`rounded-xl border-2 px-3 py-2 text-sm font-black transition-colors ${isActive ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
+                                                            className={`rounded-md border-2 px-2.5 py-1.5 text-xs font-black transition-colors ${isActive ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
                                                         >
                                                             {table}
                                                         </button>
@@ -1157,60 +1385,60 @@ export default function PosPage() {
                                             value={tableNumber}
                                             onChange={(e) => setTableNumber(e.target.value)}
                                             placeholder="Es: B02 oppure VIP TERRAZZA"
-                                            className="h-12 rounded-xl border-2 font-semibold"
+                                            className="h-10 rounded-md border-2 font-semibold"
                                         />
                                         <div className="flex items-center justify-between">
                                             <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
                                                 Tavolo selezionato: <span className="text-slate-800">{normalizedTableValue || "---"}</span>
                                             </p>
-                                            <Button type="button" variant="outline" className="rounded-xl font-bold" onClick={clearTableSelection}>
+                                            <Button type="button" variant="outline" className="rounded-md px-3 py-1.5 text-sm font-bold" onClick={clearTableSelection}>
                                                 RESET
                                             </Button>
                                         </div>
                                     </div>
                                 )}
 
-                                <div className="space-y-3">
-                                    <Label className="text-lg font-bold">Metodo di Pagamento</Label>
+                                <div className="space-y-2">
+                                    <Label className="text-base font-bold">Metodo di Pagamento</Label>
                                     {(cashAvailable || cardAvailable) ? (
-                                        <div className="flex gap-3">
+                                        <div className="flex gap-2">
                                             {cashAvailable && (
                                                 <button
                                                     onClick={() => setPaymentMethod("CASH")}
-                                                    className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${effectivePaymentMethod === "CASH" ? "border-green-600 bg-green-50 text-green-700" : "border-slate-200"}`}
+                                                    className={`flex flex-1 flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${effectivePaymentMethod === "CASH" ? "border-green-600 bg-green-50 text-green-700" : "border-slate-200"}`}
                                                 >
-                                                    <Banknote size={32} />
-                                                    <span className="font-bold">CONTANTI</span>
+                                                    <Banknote size={26} />
+                                                    <span className="text-sm font-bold">CONTANTI</span>
                                                 </button>
                                             )}
                                             {cardAvailable && (
                                                 <button
                                                     onClick={() => setPaymentMethod("CARD")}
-                                                    className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${effectivePaymentMethod === "CARD" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200"}`}
+                                                    className={`flex flex-1 flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${effectivePaymentMethod === "CARD" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200"}`}
                                                 >
-                                                    <CreditCard size={32} />
-                                                    <span className="font-bold">CARTA / POS</span>
+                                                    <CreditCard size={26} />
+                                                    <span className="text-sm font-bold">CARTA / POS</span>
                                                 </button>
                                             )}
                                         </div>
                                     ) : (
-                                        <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+                                        <p className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-sm font-semibold text-amber-800">
                                             La postazione selezionata non ha metodi di pagamento configurati. Associa terminale e/o cassetta in impostazioni hardware.
                                         </p>
                                     )}
                                 </div>
 
-                                <div className="flex gap-4 pt-4">
+                                <div className="flex gap-2 pt-2">
                                     <Button
                                         variant="outline"
-                                        className="flex-1 py-8 text-xl font-bold rounded-2xl"
+                                        className="flex-1 rounded-lg py-6 text-xl font-bold"
                                         onClick={() => handleCheckoutDialogOpenChange(false)}
                                         disabled={isProcessing}
                                     >
                                         ANNULLA
                                     </Button>
                                     <Button
-                                        className="flex-1 py-8 text-xl font-bold rounded-2xl bg-green-600 hover:bg-green-700"
+                                        className="flex-1 rounded-lg bg-green-600 py-6 text-xl font-bold hover:bg-green-700"
                                         onClick={() => void handleCheckout()}
                                         disabled={checkoutDisabled}
                                     >
@@ -1218,7 +1446,7 @@ export default function PosPage() {
                                     </Button>
                                 </div>
                                 {stockShortages.length > 0 ? (
-                                    <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 space-y-3">
+                                    <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3">
                                         <p className="text-sm font-black text-amber-800">
                                             Scorte insufficienti rilevate. Conferma per procedere comunque.
                                         </p>

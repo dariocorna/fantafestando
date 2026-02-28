@@ -18,10 +18,16 @@ import { Loader2 } from "lucide-react";
 export function CreateEventDialog() {
     const [open, setOpen] = useState(false);
     const [isPending, startTransition] = useTransition();
+    const [submitError, setSubmitError] = useState<string | null>(null);
 
     async function handleSubmit(formData: FormData) {
+        setSubmitError(null);
         startTransition(async () => {
             const result = await createEventAction(formData);
+            if ("error" in result && result.error) {
+                setSubmitError(result.error);
+                return;
+            }
             if ("success" in result && result.success) {
                 setOpen(false);
             }
@@ -29,7 +35,15 @@ export function CreateEventDialog() {
     }
 
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog
+            open={open}
+            onOpenChange={(nextOpen) => {
+                setOpen(nextOpen);
+                if (!nextOpen) {
+                    setSubmitError(null);
+                }
+            }}
+        >
             <DialogTrigger asChild>
                 <Button id="new-event-btn">+ Nuova Festa</Button>
             </DialogTrigger>
@@ -44,6 +58,11 @@ export function CreateEventDialog() {
                             <Input id="name" name="name" placeholder="Es. Sagra 2025" className="col-span-3" required />
                         </div>
                     </div>
+                    {submitError ? (
+                        <p className="text-sm font-medium text-red-600" role="alert">
+                            {submitError}
+                        </p>
+                    ) : null}
                     <DialogFooter>
                         <Button type="submit" disabled={isPending}>
                             {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

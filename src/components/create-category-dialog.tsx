@@ -25,7 +25,7 @@ export function CreateCategoryDialog({
 }: {
     eventId: string,
     printers: { id: string, name: string, ip: string, port?: number }[],
-    createAction: (formData: FormData) => Promise<void>
+    createAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>
 }) {
     const [open, setOpen] = useState(false);
     const [selectedColor, setSelectedColor] = useState(DEFAULT_CATEGORY_COLOR);
@@ -34,7 +34,11 @@ export function CreateCategoryDialog({
     async function handleSubmit(formData: FormData) {
         setSubmitError(null);
         try {
-            await createAction(formData);
+            const result = await createAction(formData);
+            if (result && typeof result === "object" && "error" in result && result.error) {
+                setSubmitError(result.error);
+                return;
+            }
             setOpen(false);
         } catch (error) {
             console.error("Errore durante il salvataggio categoria", error);
