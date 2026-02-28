@@ -30,6 +30,7 @@ import {
 interface PosPaymentCapabilities {
     hasCashBox: boolean
     hasPaymentTerminal: boolean
+    paymentTerminalType?: string
 }
 
 interface PrintDispatchSummary {
@@ -274,9 +275,9 @@ async function getPosPaymentCapabilities(eventId: string, posDeviceId?: string):
 
     await dbConnect()
     const posDevice = await PosDevice.findOne({ _id: posDeviceId, eventId })
-        .populate({ path: "paymentTerminalId", select: "_id" })
+        .populate({ path: "paymentTerminalId", select: "_id type" })
         .populate({ path: "cashBoxId", select: "_id" })
-        .lean() as ({ paymentTerminalId?: unknown, cashBoxId?: unknown } | null)
+        .lean() as ({ paymentTerminalId?: { _id: unknown, type?: string }, cashBoxId?: unknown } | null)
 
     if (!posDevice) {
         return { success: false, error: "La cassa selezionata non è valida per l'evento corrente" }
@@ -286,7 +287,8 @@ async function getPosPaymentCapabilities(eventId: string, posDeviceId?: string):
         success: true,
         capabilities: {
             hasCashBox: Boolean(posDevice.cashBoxId),
-            hasPaymentTerminal: Boolean(posDevice.paymentTerminalId)
+            hasPaymentTerminal: Boolean(posDevice.paymentTerminalId),
+            paymentTerminalType: posDevice.paymentTerminalId?.type
         }
     }
 }
@@ -665,8 +667,9 @@ export async function createOrder(data: {
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
         const isCardPayment = data.paymentMethod === "CARD"
+        const requiresPendingState = isCardPayment && capabilitiesResult.capabilities.paymentTerminalType !== "ELECTRONIC_MANUAL"
 
-        if (isCardPayment) {
+        if (requiresPendingState) {
             const stockCheckResult = await validateStockForPendingOrder(data.eventId, stockPayload, stockMode)
             if (!stockCheckResult.success) {
                 return {
@@ -689,21 +692,21 @@ export async function createOrder(data: {
 
         const order = await Order.create({
             eventId: data.eventId,
-            status: isCardPayment ? "PENDING" : "PAID",
+            status: requiresPendingState ? "PENDING" : "PAID",
             customer: data.customer,
             totalAmount: payableAmount,
             discountApplied: pricingResult.pricing.discountApplied,
             discountMeta: pricingResult.pricing.orderDiscountMeta,
             cart: pricingResult.pricing.cartWithDiscounts,
             paymentMethod: data.paymentMethod,
-            sumupCheckoutId: isCardPayment ? undefined : data.sumupCheckoutId,
+            sumupCheckoutId: requiresPendingState ? undefined : data.sumupCheckoutId,
             posDeviceId: data.posDeviceId,
             cashSessionId: sessionResult.session.id,
             stockOverrideApproved: Boolean(data.allowStockOverride)
         })
         stockAdjustmentsToRollback = []
 
-        if (isCardPayment) {
+        if (requiresPendingState) {
             const legacyCheckoutId = data.sumupCheckoutId?.trim()
             if (legacyCheckoutId) {
                 await Order.updateOne(
