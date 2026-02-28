@@ -37,6 +37,7 @@ interface ICategory {
 interface IProduct {
     _id: string
     name: string
+    shortName?: string
     basePrice: number
     categoryId: string
     stockQuantity?: number | null
@@ -342,6 +343,7 @@ export default function PosPage() {
         ? productsByCategory[selectedModernCategoryId] || []
         : []
     const selectedModernCategoryTheme = getCategoryTheme(selectedModernCategory?.uiColor)
+    const resolveProductDisplayName = (product: IProduct) => product.shortName?.trim() || product.name
     const getAdaptiveProductRowMinHeight = (productsCount: number): string => {
         const safeCount = Math.max(productsCount, 1)
         const gapPx = 6 // space-y-1.5
@@ -363,7 +365,7 @@ export default function PosPage() {
             return [...prev, {
                 lineId: product._id,
                 productId: product._id,
-                name: product.name,
+                name: resolveProductDisplayName(product),
                 price: product.basePrice,
                 quantity: 1,
                 variants: []
@@ -1011,7 +1013,7 @@ export default function PosPage() {
                                                                 }}
                                                             >
                                                                 <p className="line-clamp-3 text-[1.02rem] font-black uppercase leading-tight text-slate-900">
-                                                                    {p.name}
+                                                                    {resolveProductDisplayName(p)}
                                                                 </p>
                                                                 <div className="mt-auto flex items-end justify-between gap-2">
                                                                     {showStockPill ? (
@@ -1120,7 +1122,7 @@ export default function PosPage() {
                                                                     }}
                                                                 >
                                                                     <p className="mx-auto w-full max-w-[96%] truncate text-center text-[clamp(14px,0.95vw,20px)] font-black uppercase leading-tight text-slate-800">
-                                                                        {p.name}
+                                                                        {resolveProductDisplayName(p)}
                                                                     </p>
                                                                     {showStockPill ? (
                                                                         <span

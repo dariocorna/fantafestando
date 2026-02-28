@@ -42,6 +42,11 @@ import {
     getStockStatus,
     parseStockQuantityInput
 } from "@/lib/inventory";
+import {
+    normalizeProductDescription,
+    normalizeProductShortName,
+    validateProductShortName
+} from "@/lib/product-fields";
 
 function getReferencedId(value: unknown): string | undefined {
     if (!value) return undefined;
@@ -110,6 +115,8 @@ export default async function AdminCatalog() {
 
         const submittedEventId = formData.get("eventId") as string | null;
         const name = ((formData.get("name") as string | null) || "").trim();
+        const shortName = normalizeProductShortName(formData.get("shortName"));
+        const description = normalizeProductDescription(formData.get("description"));
         const categoryId = formData.get("categoryId") as string;
         const basePrice = parseFloat(formData.get("basePrice") as string);
         const stockQuantity = parseStockQuantityInput(formData.get("stockQuantity") as string | null);
@@ -117,6 +124,8 @@ export default async function AdminCatalog() {
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
 
+        const shortNameValidationError = validateProductShortName(shortName);
+        if (shortNameValidationError) return { error: shortNameValidationError };
         if (!name || !categoryId || isNaN(basePrice) || !scopedEventId) return { error: "Dati prodotto non validi" };
         if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return { error: "Festa non valida" };
 
@@ -132,8 +141,20 @@ export default async function AdminCatalog() {
             return { error: "Esiste già un prodotto con questo nome" };
         }
 
+        if (shortName) {
+            const existingShortName = await Product.findOne({
+                eventId: scopedEventId,
+                shortName: { $regex: new RegExp(`^${escapeRegExp(shortName)}$`, "i") }
+            }).select("_id").lean();
+            if (existingShortName) {
+                return { error: "Esiste già un prodotto con questo nome breve" };
+            }
+        }
+
         await Product.create({
             name,
+            shortName,
+            description,
             categoryId,
             basePrice,
             eventId: scopedEventId,
@@ -212,36 +233,70 @@ export default async function AdminCatalog() {
     async function updateProduct(formData: FormData) {
         "use server"
         const sessionCheck = await ensureAdminSession();
-        if (!sessionCheck.ok) return;
+        if (!sessionCheck.ok) return { error: sessionCheck.error };
 
         const submittedEventId = formData.get("eventId") as string | null;
         const id = formData.get("id") as string;
-        const name = formData.get("name") as string;
+        const name = ((formData.get("name") as string | null) || "").trim();
+        const shortName = normalizeProductShortName(formData.get("shortName"));
+        const description = normalizeProductDescription(formData.get("description"));
         const categoryId = formData.get("categoryId") as string;
         const basePrice = parseFloat(formData.get("basePrice") as string);
         const stockQuantity = parseStockQuantityInput(formData.get("stockQuantity") as string | null);
         const availableDays = parseAvailableDaysInput(formData.get("availableDays") as string | null);
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
-        if (!id || !name || !categoryId || isNaN(basePrice) || !scopedEventId) return;
-        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
+        const shortNameValidationError = validateProductShortName(shortName);
+        if (shortNameValidationError) return { error: shortNameValidationError };
+        if (!id || !name || !categoryId || isNaN(basePrice) || !scopedEventId) return { error: "Dati prodotto non validi" };
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return { error: "Festa non valida" };
 
         await dbConnect();
         const category = await Category.findOne({ _id: categoryId, eventId: scopedEventId }).select("_id").lean();
-        if (!category) return;
+        if (!category) return { error: "Categoria non valida" };
+
+        if (shortName) {
+            const existingShortName = await Product.findOne({
+                eventId: scopedEventId,
+                _id: { $ne: id },
+                shortName: { $regex: new RegExp(`^${escapeRegExp(shortName)}$`, "i") }
+            }).select("_id").lean();
+            if (existingShortName) {
+                return { error: "Esiste già un prodotto con questo nome breve" };
+            }
+        }
+
+        const updateSet: Record<string, unknown> = {
+            name,
+            categoryId,
+            basePrice,
+            stockQuantity,
+            isSoldOut: stockQuantity !== null ? stockQuantity <= 0 : false,
+            availableDays
+        };
+        const updateUnset: Record<string, 1> = {};
+
+        if (shortName) {
+            updateSet.shortName = shortName;
+        } else {
+            updateUnset.shortName = 1;
+        }
+
+        if (description) {
+            updateSet.description = description;
+        } else {
+            updateUnset.description = 1;
+        }
 
         await Product.findOneAndUpdate(
             { _id: id, eventId: scopedEventId },
             {
-                name,
-                categoryId,
-                basePrice,
-                stockQuantity,
-                isSoldOut: stockQuantity !== null ? stockQuantity <= 0 : false,
-                availableDays
+                $set: updateSet,
+                ...(Object.keys(updateUnset).length > 0 ? { $unset: updateUnset } : {})
             }
         );
         revalidatePath("/admin/catalog");
+        return { success: true };
     }
 
     async function addVariant(formData: FormData) {
@@ -370,6 +425,7 @@ export default async function AdminCatalog() {
                     <TableHeader>
                         <TableRow>
                             <TableHead>Nome</TableHead>
+                            <TableHead>Nome breve</TableHead>
                             <TableHead>Categoria</TableHead>
                             <TableHead>Prezzo</TableHead>
                             <TableHead>Scorte</TableHead>
@@ -382,6 +438,7 @@ export default async function AdminCatalog() {
                         {products.map((p: IProduct) => (
                             <TableRow key={String(p._id)}>
                                 <TableCell className="font-medium">{p.name}</TableCell>
+                                <TableCell className="font-medium text-slate-600">{p.shortName || "-"}</TableCell>
                                 <TableCell>{(p.categoryId as unknown as ICategory)?.name || "N/A"}</TableCell>
                                 <TableCell>{p.basePrice.toFixed(2)} €</TableCell>
                                 <TableCell>
@@ -427,6 +484,8 @@ export default async function AdminCatalog() {
                                         product={{
                                             id: String(p._id),
                                             name: p.name,
+                                            shortName: p.shortName || "",
+                                            description: p.description || "",
                                             categoryId: getReferencedId(p.categoryId) || "",
                                             basePrice: p.basePrice,
                                             stockQuantity: p.stockQuantity ?? null,

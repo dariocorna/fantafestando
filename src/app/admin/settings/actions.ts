@@ -487,6 +487,8 @@ export async function cloneEventAction(formData: FormData) {
             eventId: newEvent._id,
             categoryId: categoryMap.get(String(prod.categoryId)),
             name: prod.name,
+            shortName: typeof prod.shortName === "string" ? prod.shortName : undefined,
+            description: typeof prod.description === "string" ? prod.description : undefined,
             basePrice: prod.basePrice,
             isSoldOut: productStockQuantity !== null ? productStockQuantity <= 0 : false,
             stockQuantity: productStockQuantity,

@@ -519,7 +519,14 @@ export class PrinterService {
             _id: { toString(): string };
             categoryId: { toString(): string };
             basePrice?: number;
+            shortName?: string;
         }>;
+        const productById = new Map(products.map((product) => [product._id.toString(), product]));
+        const resolvePrintName = (productId: unknown, snapshotName: string) => {
+            const foundProduct = productById.get(String(productId));
+            const shortName = foundProduct?.shortName?.trim();
+            return shortName && shortName.length > 0 ? shortName : snapshotName;
+        };
 
         const categoryIdsFromProducts = Array.from(new Set(products.map((product) => product.categoryId.toString())));
         const categories = await Category.find({ _id: { $in: categoryIdsFromProducts } }).populate("printerId").lean() as Array<{
@@ -540,13 +547,13 @@ export class PrinterService {
             _id: order._id.toString()
         });
         const allOrderItems = order.cart.map((item) => ({
-            name: item.snapshotName,
+            name: resolvePrintName(item.productId, item.snapshotName),
             quantity: item.quantity,
             notes: item.customKitchenNotes
         }));
 
         const cashierReceiptItems = order.cart.map((item) => {
-            const product = products.find((entry) => entry._id.toString() === item.productId.toString());
+            const product = productById.get(item.productId.toString());
             const basePrice = Number(product?.basePrice || 0);
             const optionsTotal = (item.selectedOptions || []).reduce(
                 (sum, option) => sum + Number(option.priceVariation || 0),
@@ -555,7 +562,7 @@ export class PrinterService {
             const unitPrice = Number((basePrice + optionsTotal).toFixed(2));
             const lineTotal = Number((unitPrice * item.quantity).toFixed(2));
             return {
-                name: item.snapshotName,
+                name: resolvePrintName(item.productId, item.snapshotName),
                 quantity: item.quantity,
                 unitPrice,
                 lineTotal,
@@ -592,7 +599,7 @@ export class PrinterService {
         };
 
         order.cart.forEach((item) => {
-            const product = products.find((entry) => entry._id.toString() === item.productId.toString());
+            const product = productById.get(item.productId.toString());
             if (!product) return;
 
             const category = categories.find((entry) => entry._id.toString() === product.categoryId.toString());
@@ -627,13 +634,13 @@ export class PrinterService {
                 }
 
                 kitchenJobsByDestination[destinationKey].items.push({
-                    name: item.snapshotName,
+                    name: resolvePrintName(item.productId, item.snapshotName),
                     quantity: item.quantity,
                     notes: item.customKitchenNotes
                 });
                 const customerJob = ensureCustomerJob(destinationKey);
                 customerJob?.items.push({
-                    name: item.snapshotName,
+                    name: resolvePrintName(item.productId, item.snapshotName),
                     quantity: item.quantity,
                     notes: item.customKitchenNotes
                 });
@@ -642,7 +649,7 @@ export class PrinterService {
 
             const customerJob = ensureCustomerJob("UNASSIGNED");
             customerJob?.items.push({
-                name: item.snapshotName,
+                name: resolvePrintName(item.productId, item.snapshotName),
                 quantity: item.quantity,
                 notes: item.customKitchenNotes
             });

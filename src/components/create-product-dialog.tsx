@@ -13,6 +13,7 @@ import {
     normalizeAvailableDays,
     serializeAvailableDays
 } from "@/lib/product-availability";
+import { MAX_PRODUCT_SHORT_NAME_LENGTH } from "@/lib/product-fields";
 
 function SubmitButton() {
     const { pending } = useFormStatus();
@@ -97,6 +98,28 @@ export function CreateProductDialog({
                         <div className="grid gap-2">
                             <Label htmlFor="prod-name">Nome</Label>
                             <Input id="prod-name" name="name" placeholder="Pasta, Birra..." required />
+                        </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="prod-short-name">Etichetta breve POS/Scontrino (opzionale)</Label>
+                            <Input
+                                id="prod-short-name"
+                                name="shortName"
+                                maxLength={MAX_PRODUCT_SHORT_NAME_LENGTH}
+                                placeholder="Es: BIRRA BIONDA"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Usato in POS e stampe. Massimo {MAX_PRODUCT_SHORT_NAME_LENGTH} caratteri.
+                            </p>
+                        </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="prod-description">Descrizione Menu (opzionale)</Label>
+                            <textarea
+                                id="prod-description"
+                                name="description"
+                                rows={3}
+                                placeholder="Descrizione breve visibile nel menu pubblico..."
+                                className="min-h-[84px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            />
                         </div>
                         <div className="grid gap-2">
                             <Label htmlFor="basePrice">Prezzo Base (€)</Label>

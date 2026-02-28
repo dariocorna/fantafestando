@@ -188,9 +188,11 @@ export default function CustomerMenu() {
                                             >
                                                 <div className="flex-1">
                                                     <h3 className="font-brand-display text-lg font-bold text-[var(--brand-ink)]">{product.name}</h3>
-                                                    <p className="mt-1 pr-4 text-sm text-slate-600 line-clamp-2">
-                                                        {product.description || "Delizioso piatto tipico preparato con ingredienti freschi."}
-                                                    </p>
+                                                    {product.description?.trim() ? (
+                                                        <p className="mt-1 pr-4 text-sm text-slate-600 line-clamp-2">
+                                                            {product.description}
+                                                        </p>
+                                                    ) : null}
                                                     <div className="mt-3 text-lg font-black" style={{ color: catTheme.base }}>
                                                         {product.basePrice.toFixed(2)} €
                                                     </div>
