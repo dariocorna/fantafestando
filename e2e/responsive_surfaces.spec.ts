@@ -46,7 +46,6 @@ test.describe("Responsive surfaces", () => {
         test.skip(!isMobile, "Verifica dedicata solo a viewport mobile");
 
         await ensureAdminAuthenticated(page, "/admin");
-        await page.waitForLoadState("networkidle");
 
         await expect(page.locator("header")).toBeVisible();
         await expectNoHorizontalOverflow(page);
