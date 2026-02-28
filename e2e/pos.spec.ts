@@ -50,7 +50,7 @@ test.describe("Interfaccia POS (Cassa)", () => {
             return;
         }
 
-        const productButton = page.locator("button").filter({ hasText: /€/ }).first();
+        const productButton = page.locator('[data-testid^="pos-product-"]').first();
         await expect(productButton).toBeVisible();
         await productButton.click();
 

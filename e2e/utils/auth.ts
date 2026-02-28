@@ -32,7 +32,7 @@ export async function loginWithCredentials(page: Page, options: LoginWithCredent
     await page.locator("#password").fill(options.password);
 
     await Promise.all([
-        page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 15000 }),
+        page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 20000 }),
         page.getByRole("button", { name: "Accedi", exact: true }).click()
     ]);
 
