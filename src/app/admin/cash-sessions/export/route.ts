@@ -13,6 +13,7 @@ import {
     computeCashSessionSummary,
     type CashSessionOrderInput
 } from "@/lib/cash-session"
+import { getOrderCodeFromOrder } from "@/lib/order-code"
 
 export const dynamic = "force-dynamic"
 
@@ -42,10 +43,12 @@ interface PosDeviceProjection {
 
 interface OrderProjection {
     _id: unknown
+    pickupNumber?: number
     createdAt?: Date | string
     status?: string
     paymentMethod?: string
     totalAmount?: number
+    discountApplied?: number
     cart?: Array<{
         productId?: unknown
         snapshotName?: string
@@ -161,7 +164,7 @@ export async function GET(request: NextRequest) {
                 status: "PAID"
             })
                 .sort({ createdAt: -1 })
-                .select("_id createdAt status paymentMethod totalAmount customer cart")
+                .select("_id pickupNumber createdAt status paymentMethod totalAmount discountApplied customer cart")
                 .lean() as Promise<OrderProjection[]>
         ])
 
@@ -249,9 +252,15 @@ export async function GET(request: NextRequest) {
             })),
             orders: paidOrders.map((order) => ({
                 id: String(order._id),
+                orderCode: getOrderCodeFromOrder({
+                    pickupNumber: order.pickupNumber,
+                    _id: String(order._id)
+                }),
                 createdAt: order.createdAt || null,
                 paymentMethod: order.paymentMethod || "OTHER",
                 totalAmount: normalizeAmount(order.totalAmount),
+                discountAmount: normalizeAmount(order.discountApplied),
+                netAmount: normalizeAmount(order.totalAmount),
                 customerName: order.customer?.name || "",
                 customerTable: order.customer?.table || ""
             }))
