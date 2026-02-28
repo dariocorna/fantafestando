@@ -9,6 +9,8 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-brand-display: var(--font-brand-display);
+  --font-brand-script: var(--font-brand-script);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,6 +51,8 @@
 
 :root {
   --radius: 0.625rem;
+  --font-brand-display: "Montserrat", "Arial", sans-serif;
+  --font-brand-script: "Satisfy", "Georgia", cursive;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -80,6 +84,15 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --brand-blue-700: #1556b1;
+  --brand-blue-500: #169def;
+  --brand-yellow-500: #fdcd18;
+  --brand-sky-50: #f1f6fb;
+  --brand-ink: #0f2f66;
+  --brand-focus: #0a6ecf;
+  --brand-radius-lg: 1rem;
+  --brand-shadow-soft: 0 12px 28px rgb(21 86 177 / 12%);
+  --brand-shadow-strong: 0 20px 50px rgb(21 86 177 / 22%);
 }
 
 .dark {
@@ -122,5 +135,46 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .font-brand-display {
+    font-family: var(--font-brand-display);
+  }
+
+  .font-brand-script {
+    font-family: var(--font-brand-script);
+  }
+
+  .brand-surface-menu {
+    background: linear-gradient(180deg, #e9f2fc 0%, var(--brand-sky-50) 55%, #ffffff 100%);
+  }
+
+  .brand-surface-admin {
+    background: linear-gradient(180deg, #f7fbff 0%, #f2f8ff 100%);
+  }
+
+  .brand-surface-pos {
+    background: linear-gradient(180deg, #f5f9ff 0%, #eef5ff 100%);
+  }
+
+  .brand-cta-primary {
+    background: linear-gradient(120deg, var(--brand-blue-700), var(--brand-blue-500));
+    color: #fff;
+    border: 1px solid transparent;
+    box-shadow: var(--brand-shadow-soft);
+  }
+
+  .brand-chip {
+    border-radius: 9999px;
+    border: 1px solid color-mix(in srgb, var(--brand-blue-700) 20%, #ffffff 80%);
+    background: color-mix(in srgb, var(--brand-blue-500) 12%, #ffffff 88%);
+    color: var(--brand-blue-700);
+  }
+
+  .brand-focus-ring {
+    outline: 3px solid color-mix(in srgb, var(--brand-focus) 35%, transparent 65%);
+    outline-offset: 2px;
   }
 }
