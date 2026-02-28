@@ -94,6 +94,8 @@ interface IProduct {
   eventId: ObjectId;
   categoryId: ObjectId;
   name: string;                 // e.g. "Casoncelli alla Bergamasca"
+  shortName?: string;           // Optional operational label for POS/print (max 24 char)
+  description?: string;         // Optional menu description shown on public menu
   basePrice: number;
   isSoldOut: boolean;
   stockQuantity?: number | null; // null = scorta non tracciata
@@ -138,7 +140,7 @@ interface IOrder {
   discountApplied: number;
   cart: Array<{
     productId: ObjectId;
-    snapshotName: string;       // Name at order time (prevents bugs if product name changes)
+    snapshotName: string;       // Name shown at order time (POS uses shortName||name, menu uses name)
     customKitchenNotes?: string;  // e.g. "Well done for grandpa" - custom note
     quantity: number;
     selectedOptions: Array<{
