@@ -45,6 +45,18 @@ test.describe("Admin sessioni cassa", () => {
             await expect(row).toContainText(/Chiusa/i)
             await expect(row).toContainText(/106,00\s*€/i)
 
+            const anteprimaBtn = row.getByRole("button", { name: "Anteprima" }).first()
+            await expect(anteprimaBtn).toBeVisible()
+            await anteprimaBtn.click()
+
+            const previewDialog = page.getByRole("dialog")
+            await expect(previewDialog).toBeVisible({ timeout: 5000 })
+            await expect(previewDialog).toContainText("Anteprima Chiusura Cassa")
+            await expect(previewDialog).toContainText("CHIUSURA CASSA")
+            await expect(previewDialog).toContainText(posName)
+            await page.keyboard.press("Escape")
+            await expect(previewDialog).toBeHidden()
+
             const csvLink = row.getByRole("link", { name: "CSV", exact: true }).first()
             const xlsLink = row.getByRole("link", { name: "XLS", exact: true }).first()
 
