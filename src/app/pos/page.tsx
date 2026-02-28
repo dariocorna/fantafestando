@@ -1692,101 +1692,107 @@ export default function PosPage() {
 
             {/* Modal Carica Ordine da Codice */}
             <Dialog open={isCodeDialogOpen} onOpenChange={handleCodeDialogOpenChange}>
-                <DialogContent className="max-w-[760px] rounded-3xl p-0 overflow-hidden">
-                    <DialogHeader className="border-b bg-slate-50 px-8 py-6 dark:bg-slate-900">
-                        <DialogTitle className="flex items-center gap-3 text-2xl font-black">
-                            <Search className="h-6 w-6 text-indigo-600" />
+                <DialogContent className="max-w-[680px] rounded-3xl p-0 overflow-hidden">
+                    <DialogHeader className="border-b bg-slate-50 px-6 py-4 dark:bg-slate-900">
+                        <DialogTitle className="flex items-center gap-3 text-xl font-black">
+                            <Search className="h-5 w-5 text-indigo-600" />
                             Carica ordine da codice
                         </DialogTitle>
-                        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
-                            Inserisci il numero ordine oppure seleziona rapidamente uno degli ultimi ordini pendenti.
+                        <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                            Inserisci il numero ordine oppure seleziona uno degli ordini pendenti.
                         </p>
                     </DialogHeader>
-                    <div className="grid gap-6 p-8 md:grid-cols-[1.1fr_1fr]">
-                        <div className="space-y-5">
-                            <div className="space-y-3">
-                                <Label htmlFor="order-code" className="text-sm font-bold uppercase tracking-widest text-slate-500">
-                                    Codice ordine (numero progressivo)
-                                </Label>
-                                <Input
-                                    id="order-code"
-                                    value={orderCode}
-                                    inputMode="numeric"
-                                    onChange={(e) => setOrderCode(e.target.value.toUpperCase())}
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter") {
-                                            e.preventDefault()
-                                            void handleLoadOrderByCode()
-                                        }
-                                    }}
-                                    placeholder="Es: 12"
-                                    maxLength={8}
-                                    className="h-20 rounded-2xl border-2 text-center text-4xl font-black tracking-wide"
-                                />
-                            </div>
-
-                            <div className="flex gap-3">
-                                <Button
-                                    className="h-14 flex-1 rounded-2xl text-lg font-black bg-indigo-600 hover:bg-indigo-700"
-                                    onClick={() => void handleLoadOrderByCode()}
-                                    disabled={isCodeLoading || !orderCode.trim()}
-                                >
-                                    {isCodeLoading ? <Loader2 className="animate-spin" /> : "Carica Ordine"}
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    className="h-14 rounded-2xl px-5 font-bold"
-                                    onClick={() => void loadRecentPendingOrdersForDialog()}
-                                    disabled={isRecentOrdersLoading || isCodeLoading}
-                                >
-                                    {isRecentOrdersLoading ? <Loader2 className="animate-spin" /> : <RefreshCw size={16} />}
-                                    Aggiorna
-                                </Button>
-                            </div>
-
-                            <p className="text-xs font-semibold text-slate-500">
-                                Se preferisci, tocca direttamente un ordine nella lista a destra.
-                            </p>
+                    <div className="space-y-4 p-5">
+                        {/* Barra ricerca compatta */}
+                        <div className="flex items-center gap-2">
+                            <Input
+                                id="order-code"
+                                value={orderCode}
+                                inputMode="numeric"
+                                onChange={(e) => setOrderCode(e.target.value.toUpperCase())}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                        e.preventDefault()
+                                        void handleLoadOrderByCode()
+                                    }
+                                }}
+                                placeholder="Es: 12"
+                                maxLength={8}
+                                className="h-11 flex-1 rounded-xl border-2 text-center text-xl font-black tracking-wide"
+                            />
+                            <Button
+                                className="h-11 rounded-xl px-5 font-black bg-indigo-600 hover:bg-indigo-700"
+                                onClick={() => void handleLoadOrderByCode()}
+                                disabled={isCodeLoading || !orderCode.trim()}
+                            >
+                                {isCodeLoading ? <Loader2 className="animate-spin" size={18} /> : "Carica"}
+                            </Button>
+                            <Button
+                                variant="outline"
+                                className="h-11 rounded-xl px-3 font-bold"
+                                onClick={() => void loadRecentPendingOrdersForDialog()}
+                                disabled={isRecentOrdersLoading || isCodeLoading}
+                            >
+                                {isRecentOrdersLoading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                            </Button>
                         </div>
 
-                        <div className="rounded-2xl border bg-slate-50/80 p-4 dark:bg-slate-900/70">
-                            <h3 className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-500">
-                                <Clock3 size={14} />
-                                Ultimi 10 ordini pendenti
+                        {/* Lista ordini pendenti — griglia 2 colonne */}
+                        <div>
+                            <h3 className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                <Clock3 size={12} />
+                                Ultimi ordini pendenti
                             </h3>
-                            <div className="max-h-[340px] space-y-2 overflow-y-auto pr-1">
-                                {isRecentOrdersLoading ? (
-                                    <div className="flex h-24 items-center justify-center rounded-xl border border-dashed text-slate-400">
-                                        <Loader2 className="animate-spin" />
-                                    </div>
-                                ) : recentPendingOrders.length === 0 ? (
-                                    <div className="rounded-xl border border-dashed p-4 text-sm font-semibold text-slate-500">
-                                        Nessun ordine pendente disponibile.
-                                    </div>
-                                ) : (
-                                    recentPendingOrders.map((order) => (
-                                        <button
-                                            key={order.id}
-                                            className="w-full rounded-xl border bg-white p-3 text-left transition-colors hover:bg-indigo-50 hover:border-indigo-200 dark:bg-slate-800 dark:hover:bg-indigo-950/40"
-                                            onClick={() => void handleLoadOrderByCode(order.code)}
-                                        >
-                                            <div className="flex items-start justify-between gap-2">
-                                                <div>
-                                                    <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Numero ordine</p>
-                                                    <p className="text-2xl font-black text-indigo-700 dark:text-indigo-300">{order.code}</p>
-                                                </div>
-                                                <p className="text-lg font-black text-slate-700 dark:text-slate-200">
-                                                    {order.totalAmount.toFixed(2)} €
-                                                </p>
-                                            </div>
-                                            <div className="mt-1 flex items-center justify-between text-xs font-semibold text-slate-500">
-                                                <span>{order.customer?.name || "Cliente non indicato"}{order.customer?.table ? ` · Tavolo ${order.customer.table}` : ""}</span>
-                                                <span>{formatRecentOrderTime(order.createdAt)}</span>
-                                            </div>
-                                        </button>
-                                    ))
-                                )}
-                            </div>
+                            {isRecentOrdersLoading ? (
+                                <div className="flex h-20 items-center justify-center rounded-xl border border-dashed text-slate-400">
+                                    <Loader2 className="animate-spin" />
+                                </div>
+                            ) : recentPendingOrders.length === 0 ? (
+                                <div className="rounded-xl border border-dashed p-4 text-center text-sm font-semibold text-slate-500">
+                                    Nessun ordine pendente disponibile.
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-2">
+                                    {(() => {
+                                        const oneHourAgo = Date.now() - 60 * 60 * 1000
+                                        const recentOrders = recentPendingOrders
+                                            .filter(o => o.createdAt && new Date(o.createdAt).getTime() >= oneHourAgo)
+                                            .sort((a, b) => new Date(a.createdAt!).getTime() - new Date(b.createdAt!).getTime())
+                                        const olderOrders = recentPendingOrders
+                                            .filter(o => !o.createdAt || new Date(o.createdAt).getTime() < oneHourAgo)
+                                            .sort((a, b) => {
+                                                if (!a.createdAt) return 1
+                                                if (!b.createdAt) return -1
+                                                return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+                                            })
+                                        const sorted = [...recentOrders, ...olderOrders]
+                                        return sorted.map((order) => {
+                                            const isOlderThanOneHour = !order.createdAt || new Date(order.createdAt).getTime() < oneHourAgo
+                                            return (
+                                                <button
+                                                    key={order.id}
+                                                    className={`w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-indigo-50 hover:border-indigo-200 dark:hover:bg-indigo-950/40 ${isOlderThanOneHour ? "bg-slate-50 border-slate-200 opacity-70 dark:bg-slate-900" : "bg-white border-slate-200 dark:bg-slate-800"}`}
+                                                    onClick={() => void handleLoadOrderByCode(order.code)}
+                                                >
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[10px] font-bold uppercase text-slate-400">Ordine</span>
+                                                            <span className="text-xl font-black text-indigo-700 dark:text-indigo-300">{order.code}</span>
+                                                        </div>
+                                                        <span className="text-sm font-black text-slate-700 dark:text-slate-200">
+                                                            {order.totalAmount.toFixed(2)} €
+                                                        </span>
+                                                    </div>
+                                                    <div className="mt-0.5 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                                                        <span className="truncate">{order.customer?.name || "Cliente non indicato"}{order.customer?.table ? ` · T.${order.customer.table}` : ""}</span>
+                                                        <span className="ml-1 shrink-0">{formatRecentOrderTime(order.createdAt)}</span>
+                                                    </div>
+                                                </button>
+                                            )
+                                        })
+                                    })()}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </DialogContent>
