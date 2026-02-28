@@ -105,9 +105,9 @@ fi
 
 if [[ "${SKIP_RSYNC}" == "false" ]]; then
     echo "[deploy-bergamo] Syncing project to ${REMOTE_HOST}:${REMOTE_PATH}..."
-    rsync -az --delete \
+    rsync -rlz --delete \
       --exclude '.git' \
-      --exclude 'node_modules' \
+      --exclude '/node_modules' \
       --exclude '.next/cache' \
       --exclude '.next/dev' \
       --exclude 'playwright-report' \
