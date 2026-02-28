@@ -76,10 +76,13 @@ describe("PrinterService.retryPrintJobById", () => {
                 isVirtual: false
             },
             document: {
+                schemaVersion: 2,
+                printType: "MANUAL_TEST",
+                copyLabel: "COPIA TEST",
                 title: "Ricevuta Demo",
                 orderId: "order-1",
                 shortCode: "D-12345",
-                items: [{ name: "Panino", quantity: 1 }],
+                items: [{ qty: 1, name: "Panino" }],
                 totals: [{ label: "TOTALE", value: "5.00 EUR" }]
             }
         });
@@ -93,11 +96,48 @@ describe("PrinterService.retryPrintJobById", () => {
             source: "ORDER",
             printType: "MANUAL_TEST",
             title: "Ricevuta Demo",
+            copyLabel: "COPIA TEST",
             orderId: "order-1",
             shortCode: "D-12345"
         });
         expect(printComandaSpy.mock.calls[0]?.[1]).toBe(2);
         expect(result).toEqual({ success: true });
+    });
+
+    test("retries legacy print documents with object totals", async () => {
+        mockFindOneJob({
+            _id: { toString: () => "job-legacy" },
+            source: "ORDER",
+            printType: "CUSTOMER_ORDER",
+            copies: 1,
+            destinationHost: "printer-emulator",
+            destinationPort: 19100,
+            document: {
+                kind: "COMANDA",
+                title: "Comanda Cliente",
+                shortCode: "123",
+                customerName: "Mario",
+                tableNumber: "A1",
+                items: [{ name: "Panino", quantity: 2, notes: "No salsa" }],
+                totals: { totale: "10.00 EUR" }
+            }
+        });
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.retryPrintJobById("evt-1", "job-legacy");
+        expect(result).toEqual({ success: true });
+        expect(printComandaSpy).toHaveBeenCalledTimes(1);
+        expect(printComandaSpy.mock.calls[0]?.[0]).toMatchObject({
+            printType: "CUSTOMER_ORDER",
+            title: "Comanda Cliente",
+            shortCode: "123",
+            customerName: "Mario",
+            tableNumber: "A1"
+        });
+        expect(printComandaSpy.mock.calls[0]?.[0].totals).toEqual([
+            { label: "TOTALE", value: "10.00 EUR", emphasis: "strong" }
+        ]);
     });
 
     test("returns retry failure when print dispatch fails", async () => {

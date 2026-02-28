@@ -85,9 +85,12 @@ describe("cash session summary", () => {
             orders: [
                 {
                     id: "order-1",
+                    orderCode: "101",
                     createdAt: "2026-02-25T18:00:00.000Z",
                     paymentMethod: "CASH",
                     totalAmount: 30,
+                    discountAmount: 2,
+                    netAmount: 28,
                     customerName: "Mario",
                     customerTable: "A1"
                 }
@@ -96,8 +99,16 @@ describe("cash session summary", () => {
 
         expect(csv).toContain("Contante atteso (solo contanti)")
         expect(csv).toContain("125.50")
+        expect(csv).toContain("Totale incassi")
+        expect(csv).toContain("87.50")
         expect(csv).toContain("Ordini sessione")
         expect(csv).toContain("order-1")
+        expect(csv).toContain("Codice ordine")
+        expect(csv).toContain("101")
+        expect(csv).toContain("Sconto")
+        expect(csv).toContain("2.00")
+        expect(csv).toContain("Totale netto")
+        expect(csv).toContain("28.00")
         expect(csv).toContain("Contanti")
         expect(csv).toContain("Consumo prodotti sessione")
         expect(csv).toContain("Polenta")
@@ -123,6 +134,7 @@ describe("cash session summary", () => {
 
         expect(xls).toContain("Sezione\tValore")
         expect(xls).toContain("Contante atteso (solo contanti)\t45.00")
+        expect(xls).toContain("Totale incassi\t0.00")
         expect(xls).toContain("Ordini sessione")
         expect(xls).toContain("Consumo prodotti sessione")
         expect(xls).toContain("Panino\t2\t10.00")
