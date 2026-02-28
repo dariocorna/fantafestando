@@ -901,7 +901,7 @@ export async function createPosDeviceAction(formData: FormData) {
         const paymentTerminal = await Peripheral.findOne({
             _id: normalizedPaymentTerminalId,
             eventId: scopedEventId,
-            type: "SUMUP"
+            type: { $in: ["SUMUP", "ELECTRONIC_MANUAL"] }
         }).select("_id").lean();
 
         if (!paymentTerminal) {
@@ -988,7 +988,7 @@ export async function updatePosDeviceAction(formData: FormData) {
         const paymentTerminal = await Peripheral.findOne({
             _id: normalizedPaymentTerminalId,
             eventId: scopedEventId,
-            type: "SUMUP"
+            type: { $in: ["SUMUP", "ELECTRONIC_MANUAL"] }
         }).select("_id").lean();
 
         if (!paymentTerminal) {
