@@ -14,12 +14,18 @@ export function getAppVersion(): string {
 export function getAppVersionLabel(): string {
     const version = getAppVersion();
     const build = readEnv("APP_BUILD");
+    const buildDate = readEnv("APP_BUILD_DATE");
 
-    if (build) {
-        return `v${version} (${build})`;
+    let label = `v${version}`;
+
+    if (build || buildDate) {
+        const parts = [];
+        if (build) parts.push(build);
+        if (buildDate) parts.push(buildDate);
+        label += ` (${parts.join(" - ")})`;
     }
 
-    return `v${version}`;
+    return label;
 }
 
 export function getAppReleaseKey(): string {
