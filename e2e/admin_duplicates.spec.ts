@@ -1,11 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import { ensureAdminAuthenticated } from "./utils/auth";
+import { selectEventContext, uniqueSuffix } from "./utils/fixtures";
 
 async function createEventViaDialog(page: Page, name: string) {
     await page.goto("/admin/settings/events");
 
     const trigger = page.locator("#new-event-btn");
-    await expect(trigger).toBeVisible({ timeout: 15000 });
+    await expect(trigger).toBeVisible();
     await trigger.click();
 
     const dialog = page.getByRole("dialog").filter({ has: page.locator("#name") }).first();
@@ -17,17 +18,11 @@ async function createEventViaDialog(page: Page, name: string) {
     await expect(page.getByText(name)).toBeVisible();
 }
 
-async function selectEventContext(page: Page, eventName: string) {
-    await page.click('[data-testid="admin-event-selector"]');
-    await page.getByRole("option", { name: new RegExp(eventName) }).click();
-    await expect(page.getByTestId("admin-event-selector")).toContainText(eventName);
-}
-
 test.describe("Gestione duplicati amministrazione", () => {
     test("blocca duplicati su feste e prodotti mostrando errore", async ({ page, isMobile }) => {
         test.skip(isMobile, "Scenario verificato su desktop.");
 
-        const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const suffix = uniqueSuffix();
         const eventName = `Dup Event ${suffix}`;
         const categoryName = `Dup Category ${suffix}`;
         const productName = `Dup Product ${suffix}`;
