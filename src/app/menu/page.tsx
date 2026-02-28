@@ -6,13 +6,22 @@ import {
     Info,
     X,
     Plus,
-    Minus
+    Minus,
+    User,
+    Hash,
+    Loader2,
+    Trash2
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { motion, AnimatePresence } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { getCategoryTheme } from "@/lib/category-colors"
 import { BrandSectionHeader } from "@/components/brand/brand-section-header"
+import { createPublicOrder } from "./actions"
+import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
+import { type StockShortage } from "@/lib/inventory"
 
 interface Product {
     _id: string
@@ -38,6 +47,9 @@ interface ActiveEventSummary {
     name: string
     settings?: {
         menuHeaderLogoUrl?: string
+        askName?: boolean
+        askTable?: boolean
+        predefinedTables?: string[]
     }
 }
 
@@ -50,12 +62,29 @@ export default function CustomerMenu() {
     const [isCartOpen, setIsCartOpen] = useState(false)
     const router = useRouter()
 
+    // Checkout state
+    const [customerName, setCustomerName] = useState("")
+    const [tableNumber, setTableNumber] = useState("")
+    const [isSubmitting, setIsSubmitting] = useState(false)
+    const [checkoutError, setCheckoutError] = useState<string | null>(null)
+    const [checkoutShortages, setCheckoutShortages] = useState<StockShortage[]>([])
+
+    const normalizedTableValue = normalizeTableValue(tableNumber)
+    const tableValueValid = isTableValueValid(tableNumber)
+    const predefinedTables = activeEvent?.settings?.predefinedTables || []
+
     useEffect(() => {
         const fetchData = async () => {
             const res = await fetch('/api/pos/init', { cache: "no-store" })
             const data = await res.json()
             if (data.event) {
-                setActiveEvent(data.event)
+                setActiveEvent({
+                    ...data.event,
+                    settings: {
+                        ...data.event.settings,
+                        predefinedTables: Array.isArray(data.event.predefinedTables) ? data.event.predefinedTables : (data.event.settings?.predefinedTables || [])
+                    }
+                })
                 setCategories(data.categories)
                 setProducts(data.products)
                 if (data.categories.length > 0) setActiveTab(data.categories[0]._id)
@@ -86,6 +115,56 @@ export default function CustomerMenu() {
             return prev.filter(i => i._id !== productId)
         })
     }
+
+    const deleteFromCart = (productId: string) => {
+        setCart(prev => prev.filter(i => i._id !== productId))
+    }
+
+    const handleSubmitOrder = async () => {
+        setCheckoutError(null)
+        setCheckoutShortages([])
+
+        if (activeEvent?.settings?.askName && !customerName.trim()) {
+            setCheckoutError("Inserisci il tuo nome")
+            return
+        }
+        if (activeEvent?.settings?.askTable && !tableValueValid) {
+            setCheckoutError("Inserisci il tavolo oppure selezionalo dalla lista")
+            return
+        }
+
+        setIsSubmitting(true)
+        const result = await createPublicOrder({
+            eventId: activeEvent?._id || "",
+            customer: {
+                name: customerName || undefined,
+                table: normalizedTableValue || undefined
+            },
+            totalAmount: totalPrice,
+            cart: cart.map(item => ({
+                productId: item._id,
+                snapshotName: item.name,
+                quantity: item.quantity,
+                selectedOptions: []
+            }))
+        })
+
+        if (result.success) {
+            localStorage.removeItem("osg_cart")
+            router.push(`/menu/success?code=${result.shortCode}`)
+        } else {
+            setCheckoutError(result.error || "Non è stato possibile inviare l'ordine. Riprova.")
+            if ("stockShortages" in result && Array.isArray(result.stockShortages)) {
+                setCheckoutShortages(result.stockShortages)
+            } else {
+                setCheckoutShortages([])
+            }
+            setIsSubmitting(false)
+        }
+    }
+
+    const askName = activeEvent?.settings?.askName ?? false
+    const askTable = activeEvent?.settings?.askTable ?? false
 
     return (
         <div className="brand-surface-menu min-h-screen pb-32" data-testid="menu-brand-shell">
@@ -255,8 +334,9 @@ export default function CustomerMenu() {
                 </div>
             </footer>
 
+            {/* Floating Cart CTA — solo conteggio, no prezzo */}
             <AnimatePresence>
-                {cart.length > 0 && (
+                {cart.length > 0 && !isCartOpen && (
                     <motion.div
                         initial={{ y: 100 }}
                         animate={{ y: 0 }}
@@ -274,15 +354,13 @@ export default function CustomerMenu() {
                                 </div>
                                 <span className="text-lg">Vedi Carrello</span>
                             </div>
-                            <div className="flex items-center gap-2 text-xl">
-                                <span>{totalPrice.toFixed(2)} €</span>
-                                <ArrowRight size={22} />
-                            </div>
+                            <ArrowRight size={22} />
                         </button>
                     </motion.div>
                 )}
             </AnimatePresence>
 
+            {/* Cart Overlay — checkout integrato */}
             <AnimatePresence>
                 {isCartOpen && (
                     <motion.div
@@ -297,43 +375,155 @@ export default function CustomerMenu() {
                             exit={{ y: "100%" }}
                             className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[36px] border border-[#d9e6f8] bg-white p-7"
                         >
-                            <div className="mb-7 flex items-center justify-between">
+                            <div className="mb-5 flex items-center justify-between">
                                 <h2 className="font-brand-display text-3xl font-extrabold text-[var(--brand-ink)]">Il tuo ordine</h2>
                                 <button onClick={() => setIsCartOpen(false)} className="rounded-full bg-slate-100 p-2 text-slate-400">
                                     <X size={24} />
                                 </button>
                             </div>
 
-                            <div className="space-y-5">
+                            {/* Lista articoli con +/- e rimozione */}
+                            <div className="space-y-3">
                                 {cart.map(item => (
-                                    <div key={item._id} className="flex items-center justify-between">
-                                        <div className="flex items-center gap-3">
-                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#fff4cc] font-black text-[#bf7f00]">
-                                                {item.quantity}x
+                                    <div key={item._id} className="flex items-center justify-between gap-3">
+                                        <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-1 rounded-full bg-slate-100 p-0.5">
+                                                <button
+                                                    onClick={() => removeFromCart(item._id)}
+                                                    className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-slate-600"
+                                                >
+                                                    <Minus size={14} />
+                                                </button>
+                                                <span className="w-6 text-center text-sm font-black text-slate-800">{item.quantity}</span>
+                                                <button
+                                                    onClick={() => addToCart(item)}
+                                                    className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--brand-blue-700)] text-white"
+                                                >
+                                                    <Plus size={14} />
+                                                </button>
                                             </div>
-                                            <span className="text-lg font-bold text-slate-800">{item.name}</span>
+                                            <span className="text-base font-bold text-slate-800">{item.name}</span>
                                         </div>
-                                        <span className="font-black text-slate-800">{(item.basePrice * item.quantity).toFixed(2)} €</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-black text-slate-800">{(item.basePrice * item.quantity).toFixed(2)} €</span>
+                                            <button
+                                                onClick={() => deleteFromCart(item._id)}
+                                                className="rounded-full p-1 text-red-400 hover:text-red-600"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
 
-                            <div className="mt-9 space-y-4 border-t border-dashed pt-6">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Totale</span>
-                                    <span className="text-4xl font-black text-[var(--brand-ink)]">{totalPrice.toFixed(2)} €</span>
-                                </div>
+                            {/* Totale */}
+                            <div className="mt-6 flex items-center justify-between border-t border-dashed pt-5">
+                                <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Totale</span>
+                                <span className="text-4xl font-black text-[var(--brand-ink)]">{totalPrice.toFixed(2)} €</span>
+                            </div>
 
-                                <Button
-                                    className="brand-cta-primary h-16 w-full justify-between rounded-2xl px-6 text-lg font-black shadow-none hover:brightness-105"
-                                    onClick={() => {
-                                        localStorage.setItem("osg_cart", JSON.stringify(cart));
-                                        localStorage.setItem("osg_eventId", activeEvent?._id || "");
-                                        router.push("/menu/checkout");
-                                    }}
+                            {/* Form dati consegna (se richiesti) */}
+                            {(askName || askTable) && (
+                                <div className="mt-6 space-y-4 rounded-2xl border border-[#d9e6f8] bg-[#f8fbff] p-5">
+                                    {askName && (
+                                        <div className="space-y-2">
+                                            <Label className="ml-1 text-slate-600 font-bold">Il tuo nome</Label>
+                                            <div className="relative">
+                                                <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
+                                                <Input
+                                                    className="h-12 rounded-2xl border border-[#d9e6f8] bg-white pl-12 text-base font-bold"
+                                                    placeholder="Es: Mario Rossi"
+                                                    value={customerName}
+                                                    onChange={(e) => {
+                                                        setCustomerName(e.target.value)
+                                                        if (checkoutError) setCheckoutError(null)
+                                                        if (checkoutShortages.length > 0) setCheckoutShortages([])
+                                                    }}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {askTable && (
+                                        <div className="space-y-2">
+                                            <Label className="ml-1 text-slate-600 font-bold">Tavolo</Label>
+                                            <div className="space-y-3 rounded-2xl border border-[#d9e6f8] bg-white p-3">
+                                                {predefinedTables.length > 0 ? (
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {predefinedTables.map((table) => {
+                                                            const isActive = normalizeTableValue(table) === normalizedTableValue
+                                                            return (
+                                                                <button
+                                                                    key={table}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setTableNumber(table)
+                                                                        if (checkoutError) setCheckoutError(null)
+                                                                        if (checkoutShortages.length > 0) setCheckoutShortages([])
+                                                                    }}
+                                                                    className={`rounded-xl border-2 px-3 py-1.5 text-sm font-black transition-colors ${isActive ? "border-[var(--brand-blue-700)] bg-[var(--brand-blue-700)] text-white" : "border-slate-200 bg-white text-slate-700 hover:border-[var(--brand-blue-500)]"}`}
+                                                                >
+                                                                    {table}
+                                                                </button>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                ) : null}
+                                                <div className="relative">
+                                                    <Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
+                                                    <Input
+                                                        className="h-12 rounded-2xl border border-[#d9e6f8] bg-[#f8fbff] pl-12 text-base font-bold"
+                                                        placeholder="Es: B02 oppure VIP TERRAZZA"
+                                                        value={tableNumber}
+                                                        onChange={(e) => {
+                                                            setTableNumber(e.target.value)
+                                                            if (checkoutError) setCheckoutError(null)
+                                                            if (checkoutShortages.length > 0) setCheckoutShortages([])
+                                                        }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Errore checkout */}
+                            {checkoutError && (
+                                <div
+                                    role="alert"
+                                    className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700"
                                 >
-                                    PROSEGUI
-                                    <ArrowRight />
+                                    <p>{checkoutError}</p>
+                                    {checkoutShortages.length > 0 ? (
+                                        <ul className="mt-2 space-y-1 text-xs font-bold">
+                                            {checkoutShortages.map((shortage) => (
+                                                <li key={`${shortage.productId}-${shortage.requestedQuantity}`}>
+                                                    {shortage.productName}: richiesti {shortage.requestedQuantity}, disponibili {shortage.availableQuantity}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    ) : null}
+                                </div>
+                            )}
+
+                            {/* Bottone INVIA ORDINE — non floating, in fondo al form */}
+                            <div className="mt-6">
+                                <Button
+                                    disabled={isSubmitting || cart.length === 0}
+                                    onClick={() => void handleSubmitOrder()}
+                                    className="brand-cta-primary flex h-16 w-full items-center justify-center gap-3 rounded-2xl text-lg font-black hover:brightness-105"
+                                    data-testid="menu-submit-order"
+                                >
+                                    {isSubmitting ? (
+                                        <Loader2 className="animate-spin" size={28} />
+                                    ) : (
+                                        <>
+                                            INVIA ORDINE
+                                            <ArrowRight size={24} />
+                                        </>
+                                    )}
                                 </Button>
                             </div>
                         </motion.div>

@@ -190,7 +190,7 @@ function resolveReferenceCode(orderId: string | undefined, shortCode: string | u
 
 function normalizeItems(items: unknown): PrintDocumentItemRow[] {
     if (!Array.isArray(items)) return [];
-    return items
+    const mapped = items
         .map((rawItem) => {
             if (!rawItem || typeof rawItem !== "object") return null;
             const item = rawItem as Record<string, unknown>;
@@ -203,7 +203,7 @@ function normalizeItems(items: unknown): PrintDocumentItemRow[] {
             const lineTotal = asNumber(item.lineTotal);
             const selectedOptions = Array.isArray(item.selectedOptions)
                 ? item.selectedOptions
-                    .map((option) => {
+                    .map((option: unknown) => {
                         if (!option || typeof option !== "object") return null;
                         const optionRecord = option as Record<string, unknown>;
                         const optionName = asTrimmedString(optionRecord.name);
@@ -211,7 +211,7 @@ function normalizeItems(items: unknown): PrintDocumentItemRow[] {
                         return {
                             name: optionName,
                             priceVariation: asNumber(optionRecord.priceVariation)
-                        };
+                        } as PrintDocumentItemOption;
                     })
                     .filter((option): option is PrintDocumentItemOption => Boolean(option))
                 : undefined;
@@ -224,9 +224,9 @@ function normalizeItems(items: unknown): PrintDocumentItemRow[] {
                 unitPrice,
                 lineTotal,
                 selectedOptions
-            };
-        })
-        .filter((item): item is PrintDocumentItemRow => Boolean(item));
+            } as PrintDocumentItemRow;
+        });
+    return mapped.filter((item): item is PrintDocumentItemRow => Boolean(item));
 }
 
 function humanizeLabel(value: string): string {
@@ -240,7 +240,7 @@ function humanizeLabel(value: string): string {
 
 function normalizeTotals(totals: unknown): PrintDocumentTotalRow[] {
     if (Array.isArray(totals)) {
-        return totals
+        const mapped = totals
             .map((rawRow) => {
                 if (!rawRow || typeof rawRow !== "object") return null;
                 const row = rawRow as Record<string, unknown>;
@@ -252,14 +252,14 @@ function normalizeTotals(totals: unknown): PrintDocumentTotalRow[] {
                     label,
                     value,
                     emphasis: emphasis === "strong" ? "strong" : "normal"
-                } satisfies PrintDocumentTotalRow;
-            })
-            .filter((row): row is PrintDocumentTotalRow => Boolean(row));
+                } as PrintDocumentTotalRow;
+            });
+        return mapped.filter((row): row is PrintDocumentTotalRow => Boolean(row));
     }
 
     if (!totals || typeof totals !== "object") return [];
 
-    return Object.entries(totals as Record<string, unknown>)
+    const mappedEntries = Object.entries(totals as Record<string, unknown>)
         .map(([rawLabel, rawValue]) => {
             const value = asTrimmedString(rawValue);
             if (!value) return null;
@@ -267,9 +267,9 @@ function normalizeTotals(totals: unknown): PrintDocumentTotalRow[] {
                 label: humanizeLabel(rawLabel),
                 value,
                 emphasis: rawLabel.toLowerCase().includes("totale") ? "strong" : "normal"
-            } satisfies PrintDocumentTotalRow;
-        })
-        .filter((row): row is PrintDocumentTotalRow => Boolean(row));
+            } as PrintDocumentTotalRow;
+        });
+    return mappedEntries.filter((row): row is PrintDocumentTotalRow => Boolean(row));
 }
 
 function normalizeLines(lines: unknown): string[] {
