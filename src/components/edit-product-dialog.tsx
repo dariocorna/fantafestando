@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Pencil } from "lucide-react";
 import { useFormStatus } from "react-dom";
 import {
@@ -136,13 +137,13 @@ export function EditProductDialog({
                         </div>
                         <div className="grid gap-2">
                             <Label htmlFor="prod-edit-description">Descrizione Menu (opzionale)</Label>
-                            <textarea
+                            <Textarea
                                 id="prod-edit-description"
                                 name="description"
                                 rows={3}
                                 defaultValue={product.description || ""}
                                 placeholder="Descrizione breve visibile nel menu pubblico..."
-                                className="min-h-[84px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                className="min-h-[84px] bg-background"
                             />
                         </div>
                         <div className="grid gap-2">
