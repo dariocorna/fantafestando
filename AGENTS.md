@@ -57,5 +57,8 @@ Il branch si crea partendo dal branch di sviluppo principale corrente.
   - **Requisito Atomicità e PR**: Un commit successivo NON deve correggere errori macroscopici di un commit appena scritto. Se si verifica, i commit vanno uniti (`git rebase -i` / squash) per mantenere la cronologia 100% pulita prima della PR.
 - **Testing**: Sono obbligatori test unitari per coprire ogni nuova funzione introdotta.
 - **Test E2E**: Utilizzare Playwright per implementare test end-to-end sulle funzionalità dell'interfaccia utente.
+  - **Divieto retry forzati**: non introdurre retry nei test con lo scopo di “forzare” il successo. I retry possono essere usati solo se già previsti dalla strategia CI e mai per mascherare instabilità.
+  - **Divieto aumento timeout come workaround**: non aumentare timeout per far passare test instabili. Quando un test fallisce, analizzare e correggere la causa nel codice o nel test stesso.
+  - **Pulizia post-suite obbligatoria**: al termine di ogni suite E2E, eliminare sempre tutti gli eventi creati dai test durante l'esecuzione.
 - **Documentazione**: Aggiornare la documentazione solo quando le novità della epica non sono già descritte con sufficiente dettaglio nei documenti correnti.
 - **Chiusura Epica**: Un'epica è **completata** solo quando: i test E2E passano ✅, l'utente ha approvato ✅, e la PR è stata mergiata ✅.
