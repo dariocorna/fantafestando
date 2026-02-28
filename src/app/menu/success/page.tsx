@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { motion } from "framer-motion"
+import { BrandFestiveStrip } from "@/components/brand/brand-festive-strip"
 
 function SuccessContent() {
     const searchParams = useSearchParams()
@@ -16,38 +17,36 @@ function SuccessContent() {
     const code = searchParams.get("code")
 
     return (
-        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+        <div className="brand-surface-menu min-h-screen flex flex-col items-center justify-center p-6 text-center">
             <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ type: "spring", damping: 12 }}
-                className="bg-white p-10 rounded-[48px] shadow-xl shadow-slate-200 border border-slate-100 max-w-sm w-full"
+                className="w-full max-w-md rounded-[42px] border border-[#d9e6f8] bg-white p-8 shadow-[var(--brand-shadow-strong)]"
             >
-                <div className="w-24 h-24 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-8">
+                <BrandFestiveStrip compact />
+                <div className="mx-auto mt-5 flex h-24 w-24 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
                     <CheckCircle2 size={48} />
                 </div>
 
-                <h1 className="text-3xl font-black text-slate-800 mb-2">Ordine Inviato!</h1>
-                <p className="text-slate-500 font-medium mb-8">
+                <h1 className="font-brand-display mb-2 mt-6 text-3xl font-black text-[var(--brand-ink)]">Ordine inviato!</h1>
+                <p className="mb-6 font-medium text-slate-600">
                     Mostra questo numero progressivo alla cassa per pagare e ricevere il tuo ordine.
                 </p>
 
-                <div className="bg-slate-50 py-8 rounded-3xl border-2 border-dashed border-slate-200 mb-8">
-                    <span className="text-slate-400 font-black uppercase tracking-widest text-xs block mb-2">Il Tuo Numero Ordine</span>
-                    <span className="text-6xl font-black text-blue-600 tracking-tighter">{code || "---"}</span>
+                <div className="mb-6 rounded-3xl border-2 border-dashed border-[#d9e6f8] bg-[#f7fbff] py-7">
+                    <span className="block text-xs font-black uppercase tracking-widest text-slate-500">Il tuo numero ordine</span>
+                    <span className="font-brand-display text-6xl font-black tracking-tighter text-[var(--brand-blue-700)]">{code || "---"}</span>
                 </div>
 
-                <div className="space-y-4">
-                    <p className="text-xs text-slate-400 font-bold leading-relaxed px-4">
-                        La tua comanda è già stata inoltrata ai reparti: completa il pagamento in cassa mostrando questo codice.
-                    </p>
-                </div>
+                <p className="px-2 text-xs font-bold leading-relaxed text-slate-500">
+                    La tua comanda è già stata inoltrata ai reparti: completa il pagamento in cassa mostrando questo codice.
+                </p>
             </motion.div>
 
-            <div className="mt-12 w-full max-w-sm space-y-4">
+            <div className="mt-10 w-full max-w-md">
                 <Button
-                    variant="outline"
-                    className="w-full h-16 rounded-2xl font-bold bg-white text-slate-600 border-slate-200 flex items-center justify-center gap-2"
+                    className="brand-cta-primary h-14 w-full rounded-2xl text-base font-black hover:brightness-105"
                     onClick={() => router.push('/menu')}
                 >
                     <ShoppingBag size={20} />
