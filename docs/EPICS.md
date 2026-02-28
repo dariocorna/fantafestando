@@ -276,7 +276,7 @@ Allineamento visuale delle superfici `menu`, `admin` e `pos` con priorita' opera
 
 ---
 
-## 🔄 Issue GitHub #22: Descrizione prodotto menu + shortName operativo
+## ✅ Issue GitHub #22: Descrizione prodotto menu + shortName operativo
 
 Estensione del catalogo prodotti con campi testuali dedicati ai diversi canali.
 
@@ -285,4 +285,4 @@ Estensione del catalogo prodotti con campi testuali dedicati ai diversi canali.
 - Vincolo applicativo di unicità `shortName` per evento (case-insensitive).
 - Compatibilità retroattiva con prodotti legacy senza nuovi campi.
 
-**Issue collegata**: `#22` (aperta).
+**Issue collegata**: `#22` (chiusa).
