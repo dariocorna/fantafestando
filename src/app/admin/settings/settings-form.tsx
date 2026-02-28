@@ -1,13 +1,12 @@
 "use client";
 
-import { useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { CardContent, CardFooter } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2, CheckCircle2, Plus, X, Upload, Trash2 } from "lucide-react";
 import { updateEventSettingsAction } from "./actions";
-import { useState } from "react";
 import { MAX_PREDEFINED_TABLES, normalizeTableValue, parsePredefinedTablesInput } from "@/lib/table-presets";
 import {
     MAX_QUICK_DISCOUNT_PRESETS,
@@ -22,6 +21,8 @@ interface ActiveEventSettingsFormProps {
         settings?: {
             askName?: boolean;
             askTable?: boolean;
+            posCatalogLayout?: "COMPACT_COLUMNS" | "MODERN_TABS";
+            menuHeaderLogoUrl?: string;
             quickDiscountPresets?: Array<{
                 label: string;
                 type: "PERCENT" | "FIXED";
@@ -36,6 +37,12 @@ interface ActiveEventSettingsFormProps {
     };
 }
 
+const MENU_HEADER_LOGO_MAX_FILE_BYTES = 2 * 1024 * 1024;
+const MENU_HEADER_LOGO_TARGET_RATIO = 10 / 4;
+const MENU_HEADER_LOGO_RATIO_TOLERANCE = 0.12;
+
+const MENU_HEADER_LOGO_ACCEPTED_TYPES = new Set(["image/png", "image/jpeg"]);
+
 export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps) {
     const [isPending, startTransition] = useTransition();
     const [saved, setSaved] = useState(false);
@@ -44,6 +51,11 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
     const [newTableValue, setNewTableValue] = useState("");
     const [bulkImportValue, setBulkImportValue] = useState("");
     const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
+    const [menuHeaderLogoFileError, setMenuHeaderLogoFileError] = useState<string | null>(null);
+    const [menuHeaderLogoPreviewUrl, setMenuHeaderLogoPreviewUrl] = useState<string | null>(event.settings?.menuHeaderLogoUrl || null);
+    const [removeMenuHeaderLogo, setRemoveMenuHeaderLogo] = useState(false);
+    const previewObjectUrlRef = useRef<string | null>(null);
+    const menuHeaderLogoFileInputRef = useRef<HTMLInputElement | null>(null);
     const [predefinedTables, setPredefinedTables] = useState<string[]>(() =>
         parsePredefinedTablesInput(
             Array.isArray(event.predefinedTables) ? event.predefinedTables.join("\n") : "",
@@ -72,6 +84,62 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
             value: preset.value.trim().replace(",", ".")
         }))
     );
+
+    useEffect(() => {
+        return () => {
+            if (previewObjectUrlRef.current) {
+                URL.revokeObjectURL(previewObjectUrlRef.current);
+            }
+        };
+    }, []);
+
+    const handleMenuHeaderLogoFileChange = async (file: File | null) => {
+        setMenuHeaderLogoFileError(null);
+        if (!file) {
+            setMenuHeaderLogoPreviewUrl(event.settings?.menuHeaderLogoUrl || null);
+            return;
+        }
+
+        if (!MENU_HEADER_LOGO_ACCEPTED_TYPES.has(file.type)) {
+            setMenuHeaderLogoFileError("Formato non supportato: usa PNG o JPEG.");
+            return;
+        }
+
+        if (file.size > MENU_HEADER_LOGO_MAX_FILE_BYTES) {
+            setMenuHeaderLogoFileError("File troppo grande: massimo 2MB.");
+            return;
+        }
+
+        const objectUrl = URL.createObjectURL(file);
+        const image = new window.Image();
+
+        await new Promise<void>((resolve) => {
+            image.onload = () => {
+                const ratio = image.naturalWidth / image.naturalHeight;
+                if (!Number.isFinite(ratio) || Math.abs(ratio - MENU_HEADER_LOGO_TARGET_RATIO) > MENU_HEADER_LOGO_RATIO_TOLERANCE) {
+                    URL.revokeObjectURL(objectUrl);
+                    setMenuHeaderLogoFileError("Rapporto immagine non valido: richiesto 10:4 (tolleranza ±12%).");
+                    resolve();
+                    return;
+                }
+
+                if (previewObjectUrlRef.current) {
+                    URL.revokeObjectURL(previewObjectUrlRef.current);
+                }
+                previewObjectUrlRef.current = objectUrl;
+                setMenuHeaderLogoPreviewUrl(objectUrl);
+                setRemoveMenuHeaderLogo(false);
+                resolve();
+            };
+
+            image.onerror = () => {
+                URL.revokeObjectURL(objectUrl);
+                setMenuHeaderLogoFileError("Impossibile leggere l'immagine selezionata.");
+                resolve();
+            };
+            image.src = objectUrl;
+        });
+    };
 
     const addSingleTable = () => {
         const normalized = normalizeTableValue(newTableValue);
@@ -157,6 +225,10 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
     async function handleSubmit(formData: FormData) {
         setSaved(false);
         setError(null);
+        if (menuHeaderLogoFileError) {
+            setError(menuHeaderLogoFileError);
+            return;
+        }
         startTransition(async () => {
             const result = await updateEventSettingsAction(formData);
             if (result?.error) {
@@ -223,6 +295,88 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                         </div>
                     </div>
 
+                    <div className="space-y-2 rounded-md border p-4 shadow-sm">
+                        <Label htmlFor="posCatalogLayout" className="text-sm font-medium">
+                            Layout Catalogo POS
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                            Scegli la vista operativa del catalogo cassa.
+                        </p>
+                        <select
+                            id="posCatalogLayout"
+                            name="posCatalogLayout"
+                            defaultValue={event.settings?.posCatalogLayout || "COMPACT_COLUMNS"}
+                            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        >
+                            <option value="COMPACT_COLUMNS">Compatto a colonne (attuale)</option>
+                            <option value="MODERN_TABS">Moderno con categorie in alto</option>
+                        </select>
+                    </div>
+
+                    <div className="space-y-3 rounded-md border p-4 shadow-sm sm:col-span-2">
+                        <div className="space-y-1">
+                            <Label htmlFor="menuHeaderLogoFile" className="text-sm font-medium">
+                                Logo Header Menu (rapporto 10:4)
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                                Carica dal tuo PC un logo PNG/JPG (max 2MB). Se valido, verrà salvato e l&apos;URL verrà impostato automaticamente.
+                            </p>
+                        </div>
+                        <input
+                            id="menuHeaderLogoFile"
+                            ref={menuHeaderLogoFileInputRef}
+                            name="menuHeaderLogoFile"
+                            type="file"
+                            accept="image/png,image/jpeg"
+                            data-testid="menu-header-logo-file-input"
+                            className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-semibold"
+                            onChange={(inputEvent) => {
+                                const file = inputEvent.currentTarget.files?.[0] || null;
+                                void handleMenuHeaderLogoFileChange(file);
+                            }}
+                        />
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
+                            <input
+                                type="checkbox"
+                                name="removeMenuHeaderLogo"
+                                checked={removeMenuHeaderLogo}
+                                onChange={(inputEvent) => {
+                                    const checked = inputEvent.currentTarget.checked;
+                                    setRemoveMenuHeaderLogo(checked);
+                                    if (checked) {
+                                        if (menuHeaderLogoFileInputRef.current) {
+                                            menuHeaderLogoFileInputRef.current.value = "";
+                                        }
+                                        setMenuHeaderLogoFileError(null);
+                                        setMenuHeaderLogoPreviewUrl(null);
+                                    } else {
+                                        setMenuHeaderLogoPreviewUrl(event.settings?.menuHeaderLogoUrl || null);
+                                    }
+                                }}
+                            />
+                            Rimuovi logo header personalizzato
+                        </label>
+                        {menuHeaderLogoPreviewUrl ? (
+                            <div className="overflow-hidden rounded-xl border bg-slate-50 p-2">
+                                <div className="mx-auto max-w-md overflow-hidden rounded-lg border bg-white" style={{ aspectRatio: "10 / 4" }}>
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                        src={menuHeaderLogoPreviewUrl}
+                                        alt="Anteprima logo header menu"
+                                        className="h-full w-full object-contain"
+                                    />
+                                </div>
+                            </div>
+                        ) : null}
+                        {event.settings?.menuHeaderLogoUrl ? (
+                            <p className="text-xs text-slate-500">
+                                URL attuale: <code>{event.settings.menuHeaderLogoUrl}</code>
+                            </p>
+                        ) : null}
+                        {menuHeaderLogoFileError ? (
+                            <p className="text-xs font-semibold text-red-600">{menuHeaderLogoFileError}</p>
+                        ) : null}
+                    </div>
                 </div>
 
                 <div className="space-y-4 rounded-md border p-4 shadow-sm">

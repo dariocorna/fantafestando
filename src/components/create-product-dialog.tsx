@@ -30,7 +30,7 @@ export function CreateProductDialog({
 }: {
     eventId: string,
     categories: { id: string, name: string }[],
-    createAction: (formData: FormData) => Promise<void>
+    createAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>
 }) {
     const [open, setOpen] = useState(false);
     const [availableDays, setAvailableDays] = useState<DayCode[]>([]);
@@ -39,7 +39,11 @@ export function CreateProductDialog({
     async function handleSubmit(formData: FormData) {
         setSubmitError(null);
         try {
-            await createAction(formData);
+            const result = await createAction(formData);
+            if (result && typeof result === "object" && "error" in result && result.error) {
+                setSubmitError(result.error);
+                return;
+            }
             setOpen(false);
             setAvailableDays([]);
         } catch (error) {

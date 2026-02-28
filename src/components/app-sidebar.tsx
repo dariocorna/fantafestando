@@ -1,5 +1,7 @@
 "use client"
 import { Home, Settings, UtensilsCrossed, FileText } from "lucide-react"
+import { usePathname } from "next/navigation"
+import { cn } from "@/lib/utils"
 
 import {
     Sidebar,
@@ -36,16 +38,24 @@ const items = [
 ]
 
 export function AppSidebar() {
+    const pathname = usePathname();
+
     return (
-        <Sidebar variant="inset">
-            <SidebarContent>
+        <Sidebar variant="inset" className="border-r border-[#d9e6f8] bg-white/95">
+            <SidebarContent className="bg-transparent">
                 <SidebarGroup>
-                    <SidebarGroupLabel>OSGFest Manager</SidebarGroupLabel>
+                    <SidebarGroupLabel className="text-[var(--brand-blue-700)]">OSGFest Manager</SidebarGroupLabel>
                     <SidebarGroupContent>
                         <SidebarMenu>
                             {items.map((item) => (
                                 <SidebarMenuItem key={item.title}>
-                                    <SidebarMenuButton asChild>
+                                    <SidebarMenuButton
+                                        asChild
+                                        className={cn(
+                                            "text-slate-700 hover:bg-[#eef5ff] hover:text-[var(--brand-blue-700)]",
+                                            pathname === item.url && "bg-[#eef5ff] text-[var(--brand-blue-700)]"
+                                        )}
+                                    >
                                         <a href={item.url}>
                                             <item.icon />
                                             <span>{item.title}</span>

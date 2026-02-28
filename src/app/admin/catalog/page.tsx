@@ -52,6 +52,10 @@ function getReferencedId(value: unknown): string | undefined {
     return String(value);
 }
 
+function escapeRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export default async function AdminCatalog() {
     await dbConnect();
     const currentEventId = await getAdminContextEventId();
@@ -67,36 +71,45 @@ export default async function AdminCatalog() {
     async function createCategory(formData: FormData) {
         "use server"
         const sessionCheck = await ensureAdminSession();
-        if (!sessionCheck.ok) return;
+        if (!sessionCheck.ok) return { error: sessionCheck.error };
 
         const submittedEventId = formData.get("eventId") as string | null;
-        const name = formData.get("name") as string;
+        const name = ((formData.get("name") as string | null) || "").trim();
         const uiColor = normalizeCategoryColor(formData.get("uiColor") as string | null);
         const printerId = formData.get("printerId") as string;
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
 
-        if (!name || !scopedEventId) return;
-        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
+        if (!name || !scopedEventId) return { error: "Nome categoria obbligatorio" };
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return { error: "Festa non valida" };
 
         await dbConnect();
 
         if (printerId) {
             const printer = await Printer.findOne({ _id: printerId, eventId: scopedEventId, type: "KITCHEN" }).select("_id").lean();
-            if (!printer) return;
+            if (!printer) return { error: "Stampante reparto non valida" };
+        }
+
+        const existingCategory = await Category.findOne({
+            eventId: scopedEventId,
+            name: { $regex: new RegExp(`^${escapeRegExp(name)}$`, "i") }
+        }).select("_id").lean();
+        if (existingCategory) {
+            return { error: "Esiste già una categoria con questo nome" };
         }
 
         await Category.create({ name, eventId: scopedEventId, uiColor, printerId: printerId || undefined });
         revalidatePath("/admin/catalog");
+        return { success: true };
     }
 
     async function createProduct(formData: FormData) {
         "use server"
         const sessionCheck = await ensureAdminSession();
-        if (!sessionCheck.ok) return;
+        if (!sessionCheck.ok) return { error: sessionCheck.error };
 
         const submittedEventId = formData.get("eventId") as string | null;
-        const name = formData.get("name") as string;
+        const name = ((formData.get("name") as string | null) || "").trim();
         const categoryId = formData.get("categoryId") as string;
         const basePrice = parseFloat(formData.get("basePrice") as string);
         const stockQuantity = parseStockQuantityInput(formData.get("stockQuantity") as string | null);
@@ -104,12 +117,20 @@ export default async function AdminCatalog() {
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
 
-        if (!name || !categoryId || isNaN(basePrice) || !scopedEventId) return;
-        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
+        if (!name || !categoryId || isNaN(basePrice) || !scopedEventId) return { error: "Dati prodotto non validi" };
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return { error: "Festa non valida" };
 
         await dbConnect();
         const category = await Category.findOne({ _id: categoryId, eventId: scopedEventId }).select("_id").lean();
-        if (!category) return;
+        if (!category) return { error: "Categoria non valida" };
+
+        const existingProduct = await Product.findOne({
+            eventId: scopedEventId,
+            name: { $regex: new RegExp(`^${escapeRegExp(name)}$`, "i") }
+        }).select("_id").lean();
+        if (existingProduct) {
+            return { error: "Esiste già un prodotto con questo nome" };
+        }
 
         await Product.create({
             name,
@@ -122,6 +143,7 @@ export default async function AdminCatalog() {
             variants: []
         });
         revalidatePath("/admin/catalog");
+        return { success: true };
     }
 
     async function deleteCategory(formData: FormData) {
