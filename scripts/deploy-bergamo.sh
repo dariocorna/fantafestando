@@ -142,6 +142,21 @@ else
     echo "APP_BUILD=${BUILD_SHA}" >> .env.production
 fi
 
+BUILD_DATE=$(date '+%Y-%m-%d %H:%M')
+if grep -q '^APP_BUILD_DATE=' .env.production; then
+    sed -i -E "s/^APP_BUILD_DATE=.*/APP_BUILD_DATE=\"${BUILD_DATE}\"/" .env.production
+else
+    echo "APP_BUILD_DATE=\"${BUILD_DATE}\"" >> .env.production
+fi
+
+# Ensure APP_VERSION matches package.json
+VERSION=$(node -p "require('./package.json').version")
+if grep -q '^APP_VERSION=' .env.production; then
+    sed -i -E "s/^APP_VERSION=.*/APP_VERSION=${VERSION}/" .env.production
+else
+    echo "APP_VERSION=${VERSION}" >> .env.production
+fi
+
 if [[ "${USE_CACHE}" == "true" ]]; then
     docker compose --env-file .env.production -f docker-compose.prod.yml build osgfest-backoffice osgfest-menu
 else
