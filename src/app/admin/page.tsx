@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { BrandSectionHeader } from "@/components/brand/brand-section-header";
+import { CashSessionPreviewDialog } from "@/components/cash-session-preview-dialog";
 
 const currencyFormatter = new Intl.NumberFormat("it-IT", {
     style: "currency",
@@ -379,6 +380,10 @@ export default async function AdminDashboard() {
                                             <TableCell className="text-right">
                                                 {isClosed ? (
                                                     <div className="flex justify-end gap-2">
+                                                        <CashSessionPreviewDialog
+                                                            sessionId={sessionId}
+                                                            posName={getPosDeviceName(session.posDeviceId)}
+                                                        />
                                                         <Button asChild variant="outline" size="sm">
                                                             <Link
                                                                 href={`/admin/cash-sessions/export?sessionId=${sessionId}&format=csv`}
