@@ -14,10 +14,11 @@ test.describe("Menu pubblico — carrello", () => {
         const categoryName = `Piatti ${suffix}`;
         const productA = `Piatto A ${suffix}`;
         const productB = `Piatto B ${suffix}`;
+        const productADescription = `Descrizione ${suffix}`;
 
         await createAndActivateEvent(page, eventName);
         await createCategoryAndProducts(page, categoryName, [
-            { name: productA, price: "5.00" },
+            { name: productA, price: "5.00", description: productADescription },
             { name: productB, price: "3.00" },
         ]);
 
@@ -29,6 +30,8 @@ test.describe("Menu pubblico — carrello", () => {
 
         await expect(page.getByRole("heading", { name: productA, level: 3 })).toBeVisible({ timeout: 10000 });
         await expect(page.getByRole("heading", { name: productB, level: 3 })).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText(productADescription)).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText("Delizioso piatto tipico preparato con ingredienti freschi.")).toHaveCount(0);
 
         // Add product A via the add button inside its card (rounded-3xl)
         const cardA = page.locator(".rounded-3xl")

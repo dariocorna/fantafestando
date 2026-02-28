@@ -47,10 +47,13 @@ test.describe("Layout catalogo POS da impostazioni admin", () => {
         const suffix = uniqueSuffix();
         const categoryName = `Layout Cat ${suffix}`;
         const productName = `Layout Product ${suffix}`;
+        const productShortName = `LYT-${suffix}`;
 
         await ensureAdminAuthenticated(page, "/admin");
         await ensureAdminEventContext(page);
-        await createCategoryAndProducts(page, categoryName, [{ name: productName, price: "3.50" }]);
+        await createCategoryAndProducts(page, categoryName, [
+            { name: productName, shortName: productShortName, price: "3.50" }
+        ]);
 
         await savePosCatalogLayout(page, "MODERN_TABS");
 
@@ -61,6 +64,8 @@ test.describe("Layout catalogo POS da impostazioni admin", () => {
 
         await openPos(page);
         await expect(page.getByText(/Categoria attiva/i)).toBeVisible();
+        await page.getByRole("button").filter({ hasText: categoryName }).first().click();
+        await expect(page.getByRole("button").filter({ hasText: productShortName }).first()).toBeVisible();
 
         await page.reload();
         await page.waitForResponse(
@@ -69,6 +74,7 @@ test.describe("Layout catalogo POS da impostazioni admin", () => {
         ).catch(() => null);
         await closePosSelectorIfVisible(page);
         await expect(page.getByText(/Categoria attiva/i)).toBeVisible();
+        await page.getByRole("button").filter({ hasText: categoryName }).first().click();
 
         await savePosCatalogLayout(page, "COMPACT_COLUMNS");
 
@@ -79,6 +85,7 @@ test.describe("Layout catalogo POS da impostazioni admin", () => {
 
         await openPos(page);
         await expect(page.getByText(/Categoria attiva/i)).toHaveCount(0);
+        await expect(page.getByRole("button").filter({ hasText: productShortName }).first()).toBeVisible();
 
         await page.reload();
         await page.waitForResponse(
