@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RefreshCw } from "lucide-react";
+import { buildPreviewLines, normalizeLegacyPrintDocument } from "@/lib/print-report";
 
 type PrintJobStatus = "QUEUED" | "SENT" | "FAILED";
 type PrintJobType = "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "MANUAL_TEST";
@@ -27,6 +28,7 @@ interface PrintJobItem {
     isVirtual: boolean;
     copies: number;
     document: Record<string, unknown>;
+    rawCapturePath?: string;
     errorMessage?: string;
     createdAt: string;
     printer?: {
@@ -67,12 +69,6 @@ function printTypeLabel(type: PrintJobType) {
     return "Test manuale";
 }
 
-function stringifyMaybe(value: unknown): string {
-    if (typeof value === "string") return value;
-    if (typeof value === "number") return String(value);
-    return "";
-}
-
 function escapeXml(value: string): string {
     return value
         .replaceAll("&", "&amp;")
@@ -82,85 +78,36 @@ function escapeXml(value: string): string {
         .replaceAll("'", "&apos;");
 }
 
-function wrapLine(value: string, maxLength: number): string[] {
-    const normalized = value.trim();
-    if (!normalized) return [];
-    if (normalized.length <= maxLength) return [normalized];
-
-    const words = normalized.split(/\s+/);
-    const lines: string[] = [];
-    let current = "";
-
-    words.forEach((word) => {
-        const next = current ? `${current} ${word}` : word;
-        if (next.length <= maxLength) {
-            current = next;
-            return;
-        }
-        if (current) lines.push(current);
-        current = word;
-    });
-
-    if (current) lines.push(current);
-    return lines;
-}
-
-function buildReceiptLines(document: Record<string, unknown>): string[] {
-    const kind = stringifyMaybe(document.kind).toUpperCase();
-    const title = stringifyMaybe(document.title);
-    const shortCode = stringifyMaybe(document.shortCode);
-    const customerName = stringifyMaybe(document.customerName);
-    const tableNumber = stringifyMaybe(document.tableNumber);
-    const items = Array.isArray(document.items)
-        ? document.items as Array<{ name?: string; quantity?: number; notes?: string }>
-        : [];
-    const totals = (document.totals && typeof document.totals === "object")
-        ? document.totals as Record<string, unknown>
-        : undefined;
-
-    const lines: string[] = [];
-
-    if (kind) lines.push(kind);
-    if (title) lines.push(...wrapLine(title.toUpperCase(), 36));
-    lines.push("--------------------------------");
-    if (shortCode) lines.push(`CODICE: ${shortCode}`);
-    if (customerName) lines.push(...wrapLine(`CLIENTE: ${customerName}`, 36));
-    if (tableNumber) lines.push(`TAVOLO: ${tableNumber}`);
-    if (shortCode || customerName || tableNumber) {
-        lines.push("--------------------------------");
-    }
-
-    if (items.length > 0) {
-        items.forEach((item) => {
-            lines.push(...wrapLine(`${item.quantity || 0}x ${item.name || "Voce"}`, 36));
-            if (item.notes) lines.push(...wrapLine(`NOTE: ${item.notes}`, 36));
-        });
-        lines.push("--------------------------------");
-    }
-
-    if (totals) {
-        Object.entries(totals).forEach(([label, value]) => {
-            lines.push(...wrapLine(`${label.toUpperCase()}: ${stringifyMaybe(value)}`, 36));
-        });
-        lines.push("--------------------------------");
-    }
-
-    return lines.slice(0, 80);
-}
-
 function buildReceiptSvgDataUri(lines: string[]): string {
     const width = 384;
-    const lineHeight = 20;
-    const topPadding = 20;
+    const lineHeight = 22;
+    const topPadding = 56;
     const leftPadding = 18;
-    const minHeight = 200;
+    const minHeight = 220;
     const calculatedHeight = topPadding + (lines.length * lineHeight) + 20;
     const height = Math.max(minHeight, calculatedHeight);
 
     const textNodes = lines
         .map((line, index) => {
             const y = topPadding + (index * lineHeight);
-            return `<text x="${leftPadding}" y="${y}" font-family="Courier New, monospace" font-size="14" fill="#111827">${escapeXml(line)}</text>`;
+            const trimmed = line.trim();
+            const isSeparator = /^-+$/.test(trimmed);
+            const isTitle = index === 0;
+            const isCopyLabel = index === 1;
+            const isReference = trimmed.startsWith("ORDINE N°") || trimmed.startsWith("SESSIONE N°");
+            const isSection = trimmed === "DESCRIZIONE";
+            const isStrongTotal = trimmed.startsWith("TOTALE");
+
+            const fontSize = isTitle ? 18 : isCopyLabel || isReference || isSection ? 16 : isStrongTotal ? 15 : 14;
+            const fontWeight = isSeparator ? 500 : isTitle || isCopyLabel || isReference || isSection || isStrongTotal ? 700 : 500;
+            const anchor = isTitle || isCopyLabel || isReference || isSection ? "middle" : "start";
+            const x = anchor === "middle" ? width / 2 : leftPadding;
+
+            if (isSeparator) {
+                return `<line x1="${leftPadding}" y1="${y - 6}" x2="${width - leftPadding}" y2="${y - 6}" stroke="#111827" stroke-width="1.6"/>`;
+            }
+
+            return `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="Courier New, monospace" font-size="${fontSize}" font-weight="${fontWeight}" fill="#111827">${escapeXml(line)}</text>`;
         })
         .join("");
 
@@ -168,21 +115,127 @@ function buildReceiptSvgDataUri(lines: string[]): string {
     return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-function renderDocumentPreview(document: Record<string, unknown>) {
-    const title = stringifyMaybe(document.title);
-    const lines = buildReceiptLines(document);
-    const previewSrc = buildReceiptSvgDataUri(lines);
+function renderDocumentPreview(document: Record<string, unknown>, escposPreviewUrl: string | null, previewError: string | null) {
+    const normalized = normalizeLegacyPrintDocument(document);
+    const lines = buildPreviewLines(document);
+    const fallbackPreviewSrc = buildReceiptSvgDataUri(lines);
+    const previewSrc = escposPreviewUrl || fallbackPreviewSrc;
 
     return (
-        <div className="rounded-xl border bg-slate-50 p-3 shadow-sm">
-            <Image
-                src={previewSrc}
-                alt={title ? `Anteprima ricevuta ${title}` : "Anteprima ricevuta"}
-                width={384}
-                height={640}
-                unoptimized
-                className="mx-auto w-full max-w-[360px] rounded-md border bg-white shadow-sm"
-            />
+        <div className="rounded-xl border bg-slate-50 p-3 shadow-sm" data-testid="print-job-preview">
+            <div className="mx-auto w-full max-w-[360px] rounded-md border bg-white shadow-sm">
+                <Image
+                    src={previewSrc}
+                    alt={normalized.title ? `Anteprima ricevuta ${normalized.title}` : "Anteprima ricevuta"}
+                    width={384}
+                    height={640}
+                    unoptimized
+                    className="w-full rounded-md"
+                />
+            </div>
+            {previewError ? (
+                <p className="mt-2 text-xs text-amber-700">{previewError}</p>
+            ) : null}
+        </div>
+    );
+}
+
+function renderDocumentBreakdown(document: Record<string, unknown>) {
+    const normalized = normalizeLegacyPrintDocument(document);
+    const schemaLabel = Number(document?.schemaVersion) === 2 ? "Schema V2" : "Legacy normalizzato";
+    const logoMode = normalized.branding?.logoMode || "none";
+    const referenceLabel = normalized.printType === "CASH_SESSION_SUMMARY" ? "Sessione N°" : "Ordine N°";
+    const logoLabel = logoMode === "printed"
+        ? "Logo stampato"
+        : logoMode === "attempted"
+            ? "Logo tentato"
+            : "Solo testo";
+    const printableLogoUrl = (typeof normalized.branding?.logoPath === "string" && normalized.branding.logoPath.startsWith("/uploads/"))
+        ? normalized.branding.logoPath
+        : null;
+
+    return (
+        <div className="space-y-3 rounded-xl border bg-white p-3" data-testid="print-job-breakdown">
+            <div className="space-y-1 text-xs text-slate-700">
+                <p><span className="font-semibold">Titolo:</span> {normalized.title}</p>
+                <p><span className="font-semibold">Copia:</span> {normalized.copyLabel}</p>
+                {normalized.eventName ? <p><span className="font-semibold">Festa:</span> {normalized.eventName}</p> : null}
+                {normalized.referenceCode ? <p><span className="font-semibold">{referenceLabel}:</span> {normalized.referenceCode}</p> : null}
+                <p><span className="font-semibold">Generato:</span> {formatDateTime(normalized.createdAt)}</p>
+                <p><span className="font-semibold">Formato:</span> {schemaLabel}</p>
+                <p><span className="font-semibold">Branding:</span> {logoLabel}</p>
+            </div>
+
+            {normalized.headerLines.length > 0 ? (
+                <div>
+                    <p className="text-xs font-semibold text-slate-800">Intestazione</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-slate-700">
+                        {normalized.headerLines.map((line) => (
+                            <li key={line}>{line}</li>
+                        ))}
+                    </ul>
+                </div>
+            ) : null}
+
+            {normalized.items.length > 0 ? (
+                <div>
+                    <p className="text-xs font-semibold text-slate-800">Righe</p>
+                    <div className="mt-1 space-y-1 text-xs text-slate-700">
+                        {normalized.items.map((item, index) => (
+                            <div key={`${item.name}-${index}`} className="rounded-md border bg-slate-50 p-2">
+                                <p className="font-semibold">{item.qty}x {item.name}</p>
+                                {item.notes ? <p className="text-slate-600">Note: {item.notes}</p> : null}
+                                {typeof item.unitPrice === "number" || typeof item.lineTotal === "number" ? (
+                                    <p className="text-slate-600">Prezzo: {item.unitPrice?.toFixed(2) ?? "-"} EUR · Totale: {item.lineTotal?.toFixed(2) ?? "-"} EUR</p>
+                                ) : null}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ) : null}
+
+            {normalized.totals.length > 0 ? (
+                <div>
+                    <p className="text-xs font-semibold text-slate-800">Totali</p>
+                    <div className="mt-1 space-y-1 text-xs text-slate-700" data-testid="print-job-totals">
+                        {normalized.totals.map((total) => (
+                            <p key={`${total.label}-${total.value}`} className={total.emphasis === "strong" ? "font-semibold text-slate-900" : ""}>
+                                {total.label.toUpperCase().includes("TOTALE")
+                                    ? `${total.label.toUpperCase()} --> ${total.value}`
+                                    : `${total.label.toUpperCase()}: ${total.value}`}
+                            </p>
+                        ))}
+                    </div>
+                </div>
+            ) : null}
+
+            {normalized.footerLines.length > 0 ? (
+                <div>
+                    <p className="text-xs font-semibold text-slate-800">Footer</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-slate-700">
+                        {normalized.footerLines.map((line) => (
+                            <li key={line}>{line}</li>
+                        ))}
+                    </ul>
+                </div>
+            ) : null}
+
+            {printableLogoUrl ? (
+                <div>
+                    <p className="text-xs font-semibold text-slate-800">Header logo usato in stampa</p>
+                    <div className="mt-1 overflow-hidden rounded-md border bg-slate-50 p-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                            src={printableLogoUrl}
+                            alt="Header logo stampato via ESC/POS"
+                            className="h-auto w-full rounded-sm object-contain"
+                        />
+                    </div>
+                    <p className="mt-1 break-all text-[11px] text-slate-500">
+                        <code>{printableLogoUrl}</code>
+                    </p>
+                </div>
+            ) : null}
         </div>
     );
 }
@@ -201,6 +254,8 @@ export function PrintJobsMonitor({
     const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
     const [isRetrying, setIsRetrying] = useState(false);
     const [retryMessage, setRetryMessage] = useState<string | null>(null);
+    const [escposPreviewUrl, setEscposPreviewUrl] = useState<string | null>(null);
+    const [escposPreviewError, setEscposPreviewError] = useState<string | null>(null);
 
     const loadJobs = useCallback(async () => {
         setIsLoading(true);
@@ -244,6 +299,37 @@ export function PrintJobsMonitor({
         () => jobs.find((job) => job.id === selectedJobId) || jobs[0] || null,
         [jobs, selectedJobId]
     );
+
+    useEffect(() => {
+        const selectedId = selectedJob?.id;
+        if (!selectedId) {
+            return;
+        }
+
+        let isCancelled = false;
+        const loadPreview = async () => {
+            setEscposPreviewError(null);
+            const response = await fetch(`/api/admin/print-jobs/${selectedId}/preview`, { cache: "no-store" });
+            if (!response.ok) {
+                if (!isCancelled) {
+                    setEscposPreviewUrl(null);
+                    setEscposPreviewError("Anteprima ESC/POS raw non disponibile, visualizzo fallback.");
+                }
+                return;
+            }
+            const payload = await response.json() as { imageDataUrl?: string };
+            if (!isCancelled) {
+                setEscposPreviewUrl(payload.imageDataUrl || null);
+                if (!payload.imageDataUrl) {
+                    setEscposPreviewError("Anteprima ESC/POS raw non disponibile, visualizzo fallback.");
+                }
+            }
+        };
+        void loadPreview();
+        return () => {
+            isCancelled = true;
+        };
+    }, [selectedJob?.id]);
 
     const retrySelectedJob = useCallback(async () => {
         if (!selectedJob || selectedJob.status !== "FAILED") return;
@@ -315,7 +401,7 @@ export function PrintJobsMonitor({
                 </CardContent>
             </Card>
 
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
                 <Card>
                     <CardHeader className="pb-2">
                         <CardTitle className="text-base">Job recenti</CardTitle>
@@ -334,7 +420,7 @@ export function PrintJobsMonitor({
                                         onClick={() => setSelectedJobId(job.id)}
                                         className={`w-full rounded-xl border p-3 text-left transition ${selectedJob?.id === job.id ? "border-blue-500 bg-blue-50" : "hover:bg-slate-50"}`}
                                     >
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex flex-wrap items-center gap-2">
                                             <span className={`rounded-md px-2 py-1 text-xs font-black ${statusBadgeClass(job.status)}`}>
                                                 {job.status}
                                             </span>
@@ -356,7 +442,7 @@ export function PrintJobsMonitor({
 
                 <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-base">Anteprima ricevuta</CardTitle>
+                        <CardTitle className="text-base">Anteprima e dettaglio</CardTitle>
                     </CardHeader>
                     <CardContent>
                         {!selectedJob ? (
@@ -372,6 +458,7 @@ export function PrintJobsMonitor({
                                         <p className="text-rose-700"><span className="font-semibold">Errore:</span> {selectedJob.errorMessage}</p>
                                     ) : null}
                                 </div>
+
                                 {selectedJob.status === "FAILED" ? (
                                     <div className="flex items-center gap-2">
                                         <Button type="button" variant="outline" onClick={() => void retrySelectedJob()} disabled={isRetrying}>
@@ -382,7 +469,9 @@ export function PrintJobsMonitor({
                                         ) : null}
                                     </div>
                                 ) : null}
-                                {renderDocumentPreview(selectedJob.document)}
+
+                                {renderDocumentBreakdown(selectedJob.document)}
+                                {renderDocumentPreview(selectedJob.document, escposPreviewUrl, escposPreviewError)}
                             </div>
                         )}
                     </CardContent>

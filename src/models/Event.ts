@@ -15,6 +15,7 @@ export interface IEvent extends Document {
         askTable: boolean;
         posCatalogLayout?: "COMPACT_COLUMNS" | "MODERN_TABS";
         menuHeaderLogoUrl?: string;
+        receiptHeaderLogoUrl?: string;
         defaultCashierPrinterIp?: string;
         quickDiscountPresets?: Array<{
             label: string;
@@ -38,6 +39,7 @@ const EventSchema = new Schema<IEvent>({
         askTable: { type: Boolean, default: false },
         posCatalogLayout: { type: String, enum: ["COMPACT_COLUMNS", "MODERN_TABS"], default: "COMPACT_COLUMNS" },
         menuHeaderLogoUrl: { type: String, trim: true },
+        receiptHeaderLogoUrl: { type: String, trim: true },
         defaultCashierPrinterIp: { type: String },
         quickDiscountPresets: { type: [QuickDiscountPresetSchema], default: [] },
         quickStaffDiscountEnabled: { type: Boolean, default: false },

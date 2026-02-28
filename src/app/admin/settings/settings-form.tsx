@@ -23,6 +23,7 @@ interface ActiveEventSettingsFormProps {
             askTable?: boolean;
             posCatalogLayout?: "COMPACT_COLUMNS" | "MODERN_TABS";
             menuHeaderLogoUrl?: string;
+            receiptHeaderLogoUrl?: string;
             quickDiscountPresets?: Array<{
                 label: string;
                 type: "PERCENT" | "FIXED";
@@ -42,6 +43,8 @@ const MENU_HEADER_LOGO_TARGET_RATIO = 10 / 4;
 const MENU_HEADER_LOGO_RATIO_TOLERANCE = 0.12;
 
 const MENU_HEADER_LOGO_ACCEPTED_TYPES = new Set(["image/png", "image/jpeg"]);
+const RECEIPT_HEADER_LOGO_MAX_FILE_BYTES = 2 * 1024 * 1024;
+const RECEIPT_HEADER_LOGO_ACCEPTED_TYPES = new Set(["image/png", "image/jpeg"]);
 
 export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps) {
     const [isPending, startTransition] = useTransition();
@@ -54,8 +57,13 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
     const [menuHeaderLogoFileError, setMenuHeaderLogoFileError] = useState<string | null>(null);
     const [menuHeaderLogoPreviewUrl, setMenuHeaderLogoPreviewUrl] = useState<string | null>(event.settings?.menuHeaderLogoUrl || null);
     const [removeMenuHeaderLogo, setRemoveMenuHeaderLogo] = useState(false);
+    const [receiptHeaderLogoFileError, setReceiptHeaderLogoFileError] = useState<string | null>(null);
+    const [receiptHeaderLogoPreviewUrl, setReceiptHeaderLogoPreviewUrl] = useState<string | null>(event.settings?.receiptHeaderLogoUrl || null);
+    const [removeReceiptHeaderLogo, setRemoveReceiptHeaderLogo] = useState(false);
     const previewObjectUrlRef = useRef<string | null>(null);
+    const receiptPreviewObjectUrlRef = useRef<string | null>(null);
     const menuHeaderLogoFileInputRef = useRef<HTMLInputElement | null>(null);
+    const receiptHeaderLogoFileInputRef = useRef<HTMLInputElement | null>(null);
     const [predefinedTables, setPredefinedTables] = useState<string[]>(() =>
         parsePredefinedTablesInput(
             Array.isArray(event.predefinedTables) ? event.predefinedTables.join("\n") : "",
@@ -89,6 +97,9 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
         return () => {
             if (previewObjectUrlRef.current) {
                 URL.revokeObjectURL(previewObjectUrlRef.current);
+            }
+            if (receiptPreviewObjectUrlRef.current) {
+                URL.revokeObjectURL(receiptPreviewObjectUrlRef.current);
             }
         };
     }, []);
@@ -135,6 +146,46 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
             image.onerror = () => {
                 URL.revokeObjectURL(objectUrl);
                 setMenuHeaderLogoFileError("Impossibile leggere l'immagine selezionata.");
+                resolve();
+            };
+            image.src = objectUrl;
+        });
+    };
+
+    const handleReceiptHeaderLogoFileChange = async (file: File | null) => {
+        setReceiptHeaderLogoFileError(null);
+        if (!file) {
+            setReceiptHeaderLogoPreviewUrl(event.settings?.receiptHeaderLogoUrl || null);
+            return;
+        }
+
+        if (!RECEIPT_HEADER_LOGO_ACCEPTED_TYPES.has(file.type)) {
+            setReceiptHeaderLogoFileError("Formato non supportato: usa PNG o JPEG.");
+            return;
+        }
+
+        if (file.size > RECEIPT_HEADER_LOGO_MAX_FILE_BYTES) {
+            setReceiptHeaderLogoFileError("File troppo grande: massimo 2MB.");
+            return;
+        }
+
+        const objectUrl = URL.createObjectURL(file);
+        const image = new window.Image();
+
+        await new Promise<void>((resolve) => {
+            image.onload = () => {
+                if (receiptPreviewObjectUrlRef.current) {
+                    URL.revokeObjectURL(receiptPreviewObjectUrlRef.current);
+                }
+                receiptPreviewObjectUrlRef.current = objectUrl;
+                setReceiptHeaderLogoPreviewUrl(objectUrl);
+                setRemoveReceiptHeaderLogo(false);
+                resolve();
+            };
+
+            image.onerror = () => {
+                URL.revokeObjectURL(objectUrl);
+                setReceiptHeaderLogoFileError("Impossibile leggere l'immagine selezionata.");
                 resolve();
             };
             image.src = objectUrl;
@@ -227,6 +278,10 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
         setError(null);
         if (menuHeaderLogoFileError) {
             setError(menuHeaderLogoFileError);
+            return;
+        }
+        if (receiptHeaderLogoFileError) {
+            setError(receiptHeaderLogoFileError);
             return;
         }
         startTransition(async () => {
@@ -375,6 +430,71 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                         ) : null}
                         {menuHeaderLogoFileError ? (
                             <p className="text-xs font-semibold text-red-600">{menuHeaderLogoFileError}</p>
+                        ) : null}
+                    </div>
+
+                    <div className="space-y-3 rounded-md border p-4 shadow-sm sm:col-span-2">
+                        <div className="space-y-1">
+                            <Label htmlFor="receiptHeaderLogoFile" className="text-sm font-medium">
+                                Header Scontrino Stampa (rapporto 10:3)
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                                Carica dal tuo PC un&apos;immagine PNG/JPG (max 2MB) per la testata degli scontrini. Il server adatta automaticamente il rapporto a 10:3. Se assente, la stampante userà il nome festa in grande.
+                            </p>
+                        </div>
+                        <input
+                            id="receiptHeaderLogoFile"
+                            ref={receiptHeaderLogoFileInputRef}
+                            name="receiptHeaderLogoFile"
+                            type="file"
+                            accept="image/png,image/jpeg"
+                            data-testid="receipt-header-logo-file-input"
+                            className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-semibold"
+                            onChange={(inputEvent) => {
+                                const file = inputEvent.currentTarget.files?.[0] || null;
+                                void handleReceiptHeaderLogoFileChange(file);
+                            }}
+                        />
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
+                            <input
+                                type="checkbox"
+                                name="removeReceiptHeaderLogo"
+                                checked={removeReceiptHeaderLogo}
+                                onChange={(inputEvent) => {
+                                    const checked = inputEvent.currentTarget.checked;
+                                    setRemoveReceiptHeaderLogo(checked);
+                                    if (checked) {
+                                        if (receiptHeaderLogoFileInputRef.current) {
+                                            receiptHeaderLogoFileInputRef.current.value = "";
+                                        }
+                                        setReceiptHeaderLogoFileError(null);
+                                        setReceiptHeaderLogoPreviewUrl(null);
+                                    } else {
+                                        setReceiptHeaderLogoPreviewUrl(event.settings?.receiptHeaderLogoUrl || null);
+                                    }
+                                }}
+                            />
+                            Rimuovi header scontrino personalizzato
+                        </label>
+                        {receiptHeaderLogoPreviewUrl ? (
+                            <div className="overflow-hidden rounded-xl border bg-slate-50 p-2">
+                                <div className="mx-auto max-w-md overflow-hidden rounded-lg border bg-white" style={{ aspectRatio: "10 / 3" }}>
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                        src={receiptHeaderLogoPreviewUrl}
+                                        alt="Anteprima header scontrino"
+                                        className="h-full w-full object-contain"
+                                    />
+                                </div>
+                            </div>
+                        ) : null}
+                        {event.settings?.receiptHeaderLogoUrl ? (
+                            <p className="text-xs text-slate-500">
+                                URL attuale: <code>{event.settings.receiptHeaderLogoUrl}</code>
+                            </p>
+                        ) : null}
+                        {receiptHeaderLogoFileError ? (
+                            <p className="text-xs font-semibold text-red-600">{receiptHeaderLogoFileError}</p>
                         ) : null}
                     </div>
                 </div>
