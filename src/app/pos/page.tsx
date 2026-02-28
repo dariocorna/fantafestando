@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ShoppingCart, User, CreditCard, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X, RefreshCw, Clock3, Wallet, Check } from "lucide-react"
+import { ShoppingCart, User, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X, RefreshCw, Clock3, Wallet, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -859,11 +859,10 @@ export default function PosPage() {
                         <button
                             id="discounts-tab-trigger"
                             onClick={() => setIsDiscountsExpanded((prev) => !prev)}
-                            className={`rounded-md border px-2.5 py-1.5 text-[11px] font-black uppercase tracking-[0.05em] transition-colors ${
-                                isDiscountsExpanded
-                                    ? "border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800"
-                                    : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                            }`}
+                            className={`rounded-md border px-2.5 py-1.5 text-[11px] font-black uppercase tracking-[0.05em] transition-colors ${isDiscountsExpanded
+                                ? "border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800"
+                                : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                }`}
                         >
                             Sconti
                         </button>
@@ -1347,131 +1346,131 @@ export default function PosPage() {
 
                     <div className="space-y-4 p-4 sm:space-y-5 sm:p-5">
                         <>
-                                {activeEvent?.settings?.askName && (
-                                    <div className="space-y-2">
-                                        <Label htmlFor="checkout-customer-name" className="text-base font-bold">Nome Cliente</Label>
-                                        <Input
-                                            id="checkout-customer-name"
-                                            value={customerName}
-                                            onChange={(e) => setCustomerName(e.target.value)}
-                                            placeholder="Inserisci nome cliente"
-                                            className="h-11 rounded-lg text-base font-semibold"
-                                        />
-                                    </div>
-                                )}
-
-                                {activeEvent?.settings?.askTable && (
-                                    <div className="space-y-3">
-                                        <Label className="text-base font-bold">Tavolo</Label>
-                                        <div className="rounded-lg bg-slate-100 py-1.5 text-center dark:bg-slate-800">
-                                            <span className="text-3xl font-black text-blue-600 sm:text-4xl">{normalizedTableValue || "---"}</span>
-                                        </div>
-                                        {predefinedTables.length > 0 ? (
-                                            <div className="flex flex-wrap gap-1.5">
-                                                {predefinedTables.map((table) => {
-                                                    const isActive = normalizeTableValue(table) === normalizedTableValue
-                                                    return (
-                                                        <button
-                                                            key={table}
-                                                            type="button"
-                                                            onClick={() => setTableNumber(table)}
-                                                            className={`rounded-md border-2 px-2.5 py-1.5 text-xs font-black transition-colors ${isActive ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
-                                                        >
-                                                            {table}
-                                                        </button>
-                                                    )
-                                                })}
-                                            </div>
-                                        ) : null}
-                                        <Input
-                                            value={tableNumber}
-                                            onChange={(e) => setTableNumber(e.target.value)}
-                                            placeholder="Es: B02 oppure VIP TERRAZZA"
-                                            className="h-10 rounded-md border-2 font-semibold"
-                                        />
-                                        <div className="flex items-center justify-between">
-                                            <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
-                                                Tavolo selezionato: <span className="text-slate-800">{normalizedTableValue || "---"}</span>
-                                            </p>
-                                            <Button type="button" variant="outline" className="rounded-md px-3 py-1.5 text-sm font-bold" onClick={clearTableSelection}>
-                                                RESET
-                                            </Button>
-                                        </div>
-                                    </div>
-                                )}
-
+                            {activeEvent?.settings?.askName && (
                                 <div className="space-y-2">
-                                    <Label className="text-base font-bold">Metodo di Pagamento</Label>
-                                    {(cashAvailable || cardAvailable) ? (
-                                        <div className="flex gap-2">
-                                            {cashAvailable && (
-                                                <button
-                                                    onClick={() => setPaymentMethod("CASH")}
-                                                    className={`flex flex-1 flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${effectivePaymentMethod === "CASH" ? "border-green-600 bg-green-50 text-green-700" : "border-slate-200"}`}
-                                                >
-                                                    <Banknote size={26} />
-                                                    <span className="text-sm font-bold">CONTANTI</span>
-                                                </button>
-                                            )}
-                                            {cardAvailable && (
-                                                <button
-                                                    onClick={() => setPaymentMethod("CARD")}
-                                                    className={`flex flex-1 flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${effectivePaymentMethod === "CARD" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200"}`}
-                                                >
-                                                    <CreditCard size={26} />
-                                                    <span className="text-sm font-bold">CARTA / POS</span>
-                                                </button>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <p className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-sm font-semibold text-amber-800">
-                                            La postazione selezionata non ha metodi di pagamento configurati. Associa terminale e/o cassetta in impostazioni hardware.
-                                        </p>
-                                    )}
+                                    <Label htmlFor="checkout-customer-name" className="text-base font-bold">Nome Cliente</Label>
+                                    <Input
+                                        id="checkout-customer-name"
+                                        value={customerName}
+                                        onChange={(e) => setCustomerName(e.target.value)}
+                                        placeholder="Inserisci nome cliente"
+                                        className="h-11 rounded-lg text-base font-semibold"
+                                    />
                                 </div>
+                            )}
 
-                                <div className="flex gap-2 pt-2">
-                                    <Button
-                                        variant="outline"
-                                        className="flex-1 rounded-lg py-6 text-xl font-bold"
-                                        onClick={() => handleCheckoutDialogOpenChange(false)}
-                                        disabled={isProcessing}
-                                    >
-                                        ANNULLA
-                                    </Button>
-                                    <Button
-                                        className="flex-1 rounded-lg bg-green-600 py-6 text-xl font-bold hover:bg-green-700"
-                                        onClick={() => void handleCheckout()}
-                                        disabled={checkoutDisabled}
-                                    >
-                                        {isProcessing ? <Loader2 className="animate-spin" /> : "CONFERMA"}
-                                    </Button>
-                                </div>
-                                {stockShortages.length > 0 ? (
-                                    <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3">
-                                        <p className="text-sm font-black text-amber-800">
-                                            Scorte insufficienti rilevate. Conferma per procedere comunque.
-                                        </p>
-                                        <ul className="space-y-1">
-                                            {stockShortages.map((shortage) => (
-                                                <li key={shortage.productId} className="text-xs font-semibold text-amber-700">
-                                                    {shortage.productName}: richiesti {shortage.requestedQuantity}, disponibili {shortage.availableQuantity}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                        <div className="flex justify-end">
-                                            <Button
-                                                type="button"
-                                                className="rounded-xl bg-amber-600 hover:bg-amber-700"
-                                                onClick={() => void handleCheckout(true)}
-                                                disabled={isProcessing}
-                                            >
-                                                Prosegui comunque
-                                            </Button>
-                                        </div>
+                            {activeEvent?.settings?.askTable && (
+                                <div className="space-y-3">
+                                    <Label className="text-base font-bold">Tavolo</Label>
+                                    <div className="rounded-lg bg-slate-100 py-1.5 text-center dark:bg-slate-800">
+                                        <span className="text-3xl font-black text-blue-600 sm:text-4xl">{normalizedTableValue || "---"}</span>
                                     </div>
-                                ) : null}
-                            </>
+                                    {predefinedTables.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {predefinedTables.map((table) => {
+                                                const isActive = normalizeTableValue(table) === normalizedTableValue
+                                                return (
+                                                    <button
+                                                        key={table}
+                                                        type="button"
+                                                        onClick={() => setTableNumber(table)}
+                                                        className={`rounded-md border-2 px-2.5 py-1.5 text-xs font-black transition-colors ${isActive ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
+                                                    >
+                                                        {table}
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    ) : null}
+                                    <Input
+                                        value={tableNumber}
+                                        onChange={(e) => setTableNumber(e.target.value)}
+                                        placeholder="Es: B02 oppure VIP TERRAZZA"
+                                        className="h-10 rounded-md border-2 font-semibold"
+                                    />
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
+                                            Tavolo selezionato: <span className="text-slate-800">{normalizedTableValue || "---"}</span>
+                                        </p>
+                                        <Button type="button" variant="outline" className="rounded-md px-3 py-1.5 text-sm font-bold" onClick={clearTableSelection}>
+                                            RESET
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="space-y-2">
+                                <Label className="text-base font-bold">Metodo di Pagamento</Label>
+                                {(cashAvailable || cardAvailable) ? (
+                                    <div className="flex gap-2">
+                                        {cashAvailable && (
+                                            <button
+                                                onClick={() => setPaymentMethod("CASH")}
+                                                className={`flex flex-1 flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${effectivePaymentMethod === "CASH" ? "border-green-600 bg-green-50 text-green-700" : "border-slate-200"}`}
+                                            >
+                                                <Banknote size={26} />
+                                                <span className="text-sm font-bold">CONTANTI</span>
+                                            </button>
+                                        )}
+                                        {cardAvailable && (
+                                            <button
+                                                onClick={() => setPaymentMethod("CARD")}
+                                                className={`flex flex-1 flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${effectivePaymentMethod === "CARD" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200"}`}
+                                            >
+                                                <Wallet size={26} />
+                                                <span className="text-sm font-bold">ELETTRONICO</span>
+                                            </button>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <p className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-sm font-semibold text-amber-800">
+                                        La postazione selezionata non ha metodi di pagamento configurati. Associa terminale e/o cassetta in impostazioni hardware.
+                                    </p>
+                                )}
+                            </div>
+
+                            <div className="flex gap-2 pt-2">
+                                <Button
+                                    variant="outline"
+                                    className="flex-1 rounded-lg py-6 text-xl font-bold"
+                                    onClick={() => handleCheckoutDialogOpenChange(false)}
+                                    disabled={isProcessing}
+                                >
+                                    ANNULLA
+                                </Button>
+                                <Button
+                                    className="flex-1 rounded-lg bg-green-600 py-6 text-xl font-bold hover:bg-green-700"
+                                    onClick={() => void handleCheckout()}
+                                    disabled={checkoutDisabled}
+                                >
+                                    {isProcessing ? <Loader2 className="animate-spin" /> : "CONFERMA"}
+                                </Button>
+                            </div>
+                            {stockShortages.length > 0 ? (
+                                <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                                    <p className="text-sm font-black text-amber-800">
+                                        Scorte insufficienti rilevate. Conferma per procedere comunque.
+                                    </p>
+                                    <ul className="space-y-1">
+                                        {stockShortages.map((shortage) => (
+                                            <li key={shortage.productId} className="text-xs font-semibold text-amber-700">
+                                                {shortage.productName}: richiesti {shortage.requestedQuantity}, disponibili {shortage.availableQuantity}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    <div className="flex justify-end">
+                                        <Button
+                                            type="button"
+                                            className="rounded-xl bg-amber-600 hover:bg-amber-700"
+                                            onClick={() => void handleCheckout(true)}
+                                            disabled={isProcessing}
+                                        >
+                                            Prosegui comunque
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : null}
+                        </>
                     </div>
                 </DialogContent>
             </Dialog>
@@ -1569,7 +1568,7 @@ export default function PosPage() {
                                     </p>
                                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs font-semibold text-emerald-800">
                                         <p>Incasso contanti: {formatEuro(closeCashSessionPreview.cashSalesAmount)}</p>
-                                        <p>Incasso carta/POS: {formatEuro(closeCashSessionPreview.cardSalesAmount)}</p>
+                                        <p>Incasso elettronico: {formatEuro(closeCashSessionPreview.cardSalesAmount)}</p>
                                         <p>Incasso altro: {formatEuro(closeCashSessionPreview.otherSalesAmount)}</p>
                                         <p>Ordini saldati: {closeCashSessionPreview.paidOrdersCount}</p>
                                     </div>
