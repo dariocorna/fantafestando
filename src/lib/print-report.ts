@@ -100,6 +100,7 @@ export interface BuildCashSessionPrintDocumentInput {
     copyLabel?: string;
     brandingLogoUrl?: string;
     createdAt?: Date | string;
+    items?: PrintDocumentItemRow[];
 }
 
 export interface PrintOrderJobPayload {
@@ -427,7 +428,7 @@ export function buildCashSessionPrintDocumentV2(input: BuildCashSessionPrintDocu
             `APERTURA: ${openedAt}`,
             `CHIUSURA: ${closedAt}`
         ],
-        items: [],
+        items: input.items || [],
         totals,
         footerLines,
         branding: withBranding(asTrimmedString(input.brandingLogoUrl), input.brandingLogoUrl ? "attempted" : "none"),

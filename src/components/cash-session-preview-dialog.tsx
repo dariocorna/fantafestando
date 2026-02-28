@@ -19,7 +19,7 @@ export function CashSessionPreviewDialog({ sessionId, posName }: { sessionId: st
             setIsLoading(true);
             setError(null);
             try {
-                const doc = await getClosedCashSessionPrintDocumentAction(sessionId);
+                const doc = await getClosedCashSessionPrintDocumentAction(sessionId, posName);
                 setDocument(doc);
             } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));

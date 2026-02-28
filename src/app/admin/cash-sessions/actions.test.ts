@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { ensureAdminSessionMock, cashSessionFindByIdMock, buildCashSessionPrintDocumentV2Mock } = vi.hoisted(() => ({
+const { ensureAdminSessionMock, cashSessionFindByIdMock, buildCashSessionPrintDocumentV2Mock, orderFindMock } = vi.hoisted(() => ({
     ensureAdminSessionMock: vi.fn(),
     cashSessionFindByIdMock: vi.fn(),
-    buildCashSessionPrintDocumentV2Mock: vi.fn()
+    buildCashSessionPrintDocumentV2Mock: vi.fn(),
+    orderFindMock: vi.fn()
 }));
 
 vi.mock("@/lib/authz", () => ({
@@ -13,6 +14,12 @@ vi.mock("@/lib/authz", () => ({
 vi.mock("@/models/CashSession", () => ({
     default: {
         findById: cashSessionFindByIdMock
+    }
+}));
+
+vi.mock("@/models/Order", () => ({
+    default: {
+        find: orderFindMock
     }
 }));
 
@@ -60,16 +67,14 @@ describe("getClosedCashSessionPrintDocumentAction", () => {
             openedAt: new Date("2026-02-28T10:00:00Z"),
             closedAt: new Date("2026-02-28T12:00:00Z"),
             eventId: { name: "Test Event", _id: "evt-1" },
-            openingTotals: { expectedFloatAmount: 100 },
-            closingTotals: {
-                cashSalesAmount: 50,
-                cardSalesAmount: 20,
-                otherSalesAmount: 10,
-                expectedCashAmount: 150,
-                countedCashAmount: 150,
-                varianceAmount: 0
-            },
-            ordersCount: 5
+            openingFloatAmount: 100,
+            cashSalesAmount: 50,
+            cardSalesAmount: 20,
+            otherSalesAmount: 10,
+            expectedCashAmount: 150,
+            closingCountedCashAmount: 150,
+            varianceAmount: 0,
+            paidOrdersCount: 5
         };
 
         cashSessionFindByIdMock.mockReturnValue({
@@ -78,16 +83,41 @@ describe("getClosedCashSessionPrintDocumentAction", () => {
             })
         });
 
+        orderFindMock.mockReturnValue({
+            lean: vi.fn().mockResolvedValue([
+                {
+                    cart: [
+                        { productId: "p1", snapshotName: "Birra", quantity: 2, lineTotal: 10 },
+                        { productId: "p2", snapshotName: "Patatine", quantity: 1, lineTotal: 5 }
+                    ]
+                },
+                {
+                    cart: [
+                        { productId: "p1", snapshotName: "Birra", quantity: 1, lineTotal: 5 }
+                    ]
+                }
+            ])
+        });
+
         buildCashSessionPrintDocumentV2Mock.mockReturnValue({ title: "MOCK DOCUMENT" });
 
-        const result = await getClosedCashSessionPrintDocumentAction("session-123");
+        const result = await getClosedCashSessionPrintDocumentAction("session-123", "Cassa Bar");
 
         expect(ensureAdminSessionMock).toHaveBeenCalled();
+        expect(orderFindMock).toHaveBeenCalledWith({
+            cashSessionId: expect.anything(),
+            status: "PAID"
+        });
         expect(buildCashSessionPrintDocumentV2Mock).toHaveBeenCalledWith(expect.objectContaining({
             sessionId: "session-123",
             eventName: "Test Event",
+            posDeviceName: "Cassa Bar",
             openingFloatAmount: 100,
-            cashSalesAmount: 50
+            cashSalesAmount: 50,
+            items: expect.arrayContaining([
+                expect.objectContaining({ name: "Birra", qty: 3, lineTotal: 15 }),
+                expect.objectContaining({ name: "Patatine", qty: 1, lineTotal: 5 })
+            ])
         }));
         expect(result).toEqual({ title: "MOCK DOCUMENT" });
     });
