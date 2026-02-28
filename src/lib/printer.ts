@@ -1,9 +1,13 @@
 import { ThermalPrinter, PrinterTypes, CharacterSet } from "node-thermal-printer";
+import fs from "node:fs/promises";
+import path from "node:path";
 import Order from "@/models/Order";
 import Product from "@/models/Product";
 import Category from "@/models/Category";
 import PosDevice from "@/models/PosDevice";
+import Event from "@/models/Event";
 import PrintJobModel, { type PrintJobSource, type PrintJobType } from "@/models/PrintJob";
+import mongoose from "mongoose";
 import dbConnect from "./mongoose";
 import { getOrderCodeFromOrder } from "./order-code";
 import {
@@ -11,6 +15,18 @@ import {
     resolvePrinterDestination,
     toTcpPrinterInterface
 } from "./printer-config";
+import {
+    buildCashSessionPrintDocumentV2,
+    buildOrderPrintDocumentV2,
+    normalizeLegacyPrintDocument,
+    toOrderJobPayloadFromDocument,
+    type PrintDocumentV2
+} from "./print-report";
+import {
+    resolvePrintableLogoPathFromUrl,
+    sanitizePrintableHeaderLogoUrl,
+    sanitizeReceiptHeaderLogoUrl
+} from "./print-branding";
 
 export interface PrinterCommandJob {
     ip: string;
@@ -22,6 +38,9 @@ export interface PrinterCommandJob {
     printType?: PrintJobType;
     isVirtual?: boolean;
     title: string;
+    eventName?: string;
+    copyLabel?: string;
+    brandingLogoUrl?: string;
     items: Array<{
         name: string;
         quantity: number;
@@ -36,11 +55,13 @@ export interface PrinterCommandJob {
     totals?: Array<{
         label: string;
         value: string;
+        emphasis?: "normal" | "strong";
     }>;
     customerName?: string;
     tableNumber?: string;
     orderId: string;
     shortCode?: string;
+    footerLines?: string[];
 }
 
 export interface CashSessionClosingPrintSummary {
@@ -79,32 +100,6 @@ interface PrinterDestinationRef {
     emulatorSlot?: number;
 }
 
-function asString(value: unknown): string {
-    if (typeof value === "string") return value;
-    if (typeof value === "number") return String(value);
-    return "";
-}
-
-function asNumber(value: unknown): number | undefined {
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    if (typeof value === "string") {
-        const parsed = Number(value);
-        if (Number.isFinite(parsed)) return parsed;
-    }
-    return undefined;
-}
-
-function formatEuro(amount: number): string {
-    return `${amount.toFixed(2)} EUR`;
-}
-
-function formatDateTime(value: Date | string | undefined): string {
-    if (!value) return "-";
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return "-";
-    return parsed.toLocaleString("it-IT");
-}
-
 function formatPaymentMethod(value: string | undefined): string {
     if (value === "CASH") return "Contanti";
     if (value === "CARD") return "Carta / POS";
@@ -114,10 +109,17 @@ function formatPaymentMethod(value: string | undefined): string {
 
 const PRINTER_CONNECT_TIMEOUT_MS = 4000;
 const PRINTER_EXECUTE_TIMEOUT_MS = 7000;
+const RECEIPT_SEPARATOR = "--------------------------------";
+const PRINTER_EMULATOR_OUTPUT_DIR = process.env.PRINTER_EMULATOR_OUTPUT_DIR || "/tmp/osgfest-printer-emulator";
 
 function formatEuroReceipt(amount: number | undefined): string {
     const safeAmount = Number.isFinite(amount) ? Number(amount) : 0;
     return `${safeAmount.toFixed(2)} EUR`;
+}
+
+function formatAmountNoCurrency(amount: number | undefined): string {
+    const safeAmount = Number.isFinite(amount) ? Number(amount) : 0;
+    return safeAmount.toFixed(2);
 }
 
 function padRight(value: string, width: number): string {
@@ -150,33 +152,58 @@ function splitByLength(value: string, max: number): string[] {
     return lines;
 }
 
+function asString(value: unknown): string {
+    if (typeof value === "string") return value;
+    if (typeof value === "number") return String(value);
+    return "";
+}
+
+function formatPrintDateTime(value: string): string {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleString("it-IT");
+}
+
 export class PrinterService {
-    private static buildComandaDocument(job: PrinterCommandJob) {
-        const isCashierSummary = job.printType === "CASHIER_SUMMARY";
-        return {
-            kind: isCashierSummary ? "CASH_RECEIPT" : "COMANDA",
-            title: job.title || "COMANDA",
-            shortCode: job.shortCode,
-            orderId: job.orderId,
-            customerName: job.customerName,
-            tableNumber: job.tableNumber,
-            items: job.items.map((item) => ({
-                name: item.name,
-                quantity: item.quantity,
-                notes: item.notes,
-                unitPrice: item.unitPrice,
-                lineTotal: item.lineTotal,
-                selectedOptions: (item.selectedOptions || []).map((option) => ({
-                    name: option.name,
-                    priceVariation: option.priceVariation
-                }))
-            })),
-            totals: (job.totals || []).map((row) => ({
-                label: row.label,
-                value: row.value
-            })),
-            createdAt: new Date().toISOString()
-        };
+    private static printCashierReceiptNoticeBox(printer: ThermalPrinter, rowWidth: number) {
+        printer.alignCenter();
+        printer.println(RECEIPT_SEPARATOR);
+        printer.setTextDoubleWidth();
+        printer.setTextDoubleHeight();
+        splitByLength("NO ORDINE", rowWidth).forEach((line) => printer.println(line));
+        printer.setTextNormal();
+        splitByLength("Vale solo come ricevuta", rowWidth).forEach((line) => printer.println(line));
+        printer.println(RECEIPT_SEPARATOR);
+    }
+
+    private static async resolveVirtualRawCapturePath(destinationPort: number, startedAt: Date): Promise<string | undefined> {
+        const slot = destinationPort - 19099;
+        if (!Number.isInteger(slot) || slot < 1 || slot > 99) return undefined;
+        const slotDir = path.join(PRINTER_EMULATOR_OUTPUT_DIR, `slot-${String(slot).padStart(2, "0")}`);
+
+        try {
+            const entries = await fs.readdir(slotDir, { withFileTypes: true });
+            const binEntries = entries
+                .filter((entry) => entry.isFile() && entry.name.endsWith(".bin"))
+                .map((entry) => entry.name);
+            if (binEntries.length === 0) return undefined;
+
+            const withStats = await Promise.all(
+                binEntries.map(async (name) => {
+                    const filePath = path.join(slotDir, name);
+                    const stat = await fs.stat(filePath);
+                    return { filePath, mtime: stat.mtime.getTime() };
+                })
+            );
+
+            const floorTime = startedAt.getTime() - 10_000;
+            const sorted = withStats
+                .filter((entry) => entry.mtime >= floorTime)
+                .sort((a, b) => b.mtime - a.mtime);
+            return sorted[0]?.filePath;
+        } catch {
+            return undefined;
+        }
     }
 
     private static withTimeout<T>(
@@ -198,83 +225,286 @@ export class PrinterService {
         });
     }
 
-    private static renderCashierReceipt(printer: ThermalPrinter, job: PrinterCommandJob) {
+    private static supportsLogo(printType: PrintJobType): boolean {
+        return printType === "CUSTOMER_ORDER"
+            || printType === "CASHIER_SUMMARY"
+            || printType === "CASH_SESSION_SUMMARY"
+            || printType === "MANUAL_TEST";
+    }
+
+    private static async tryPrintLogo(
+        printer: ThermalPrinter,
+        document: PrintDocumentV2,
+        printType: PrintJobType
+    ): Promise<boolean> {
+        if (!this.supportsLogo(printType)) return false;
+        const logoPath = resolvePrintableLogoPathFromUrl(document.branding?.logoPath);
+        if (!logoPath) return false;
+
+        try {
+            await printer.printImage(logoPath);
+            printer.println(" ");
+            return true;
+        } catch (error) {
+            console.warn("Unable to print logo, using text fallback only:", error);
+            return false;
+        }
+    }
+
+    private static printHeader(printer: ThermalPrinter, document: PrintDocumentV2, withLargeEventTitle: boolean) {
         const rowWidth = 40;
-        const labelWidth = 26;
-        const amountWidth = rowWidth - labelWidth;
 
         printer.alignCenter();
-        printer.setTextDoubleHeight();
-        printer.println("SCONTRINO CASSA");
-        printer.setTextNormal();
-        printer.println("--------------------------------");
-        if (job.shortCode) printer.println(`ORDINE: ${job.shortCode}`);
-        printer.println(`ID: ${job.orderId.slice(-6)}`);
-        printer.println(new Date().toLocaleString("it-IT"));
-        printer.println("--------------------------------");
-
-        printer.alignLeft();
-        if (job.customerName) printer.println(`CLIENTE: ${job.customerName}`);
-        if (job.tableNumber) printer.println(`TAVOLO: ${job.tableNumber}`);
-        if (job.customerName || job.tableNumber) {
-            printer.println("--------------------------------");
+        if (withLargeEventTitle && document.eventName) {
+            printer.setTextDoubleWidth();
+            printer.setTextDoubleHeight();
+            splitByLength(document.eventName.toUpperCase(), rowWidth).forEach((line) => printer.println(line));
+            printer.setTextNormal();
+            printer.println(RECEIPT_SEPARATOR);
         }
 
-        job.items.forEach((item) => {
-            splitByLength(item.name, rowWidth).forEach((line) => printer.println(line));
+        if (document.printType === "CASHIER_SUMMARY") {
+            this.printCashierReceiptNoticeBox(printer, rowWidth);
+            const tableLabel = (document.tableNumber || "").trim();
+            const customerLabel = (document.customerName || "").trim();
+            if (tableLabel) {
+                // ESC/POS has only integer scale steps; use Font B + double height
+                // to approximate a "1.5x" emphasis without over-expanding width.
+                printer.setTypeFontB();
+                printer.setTextDoubleHeight();
+                printer.bold(true);
+                splitByLength(`TAVOLO N° ${tableLabel}`, rowWidth).forEach((line) => printer.println(line));
+                printer.bold(false);
+                printer.setTypeFontA();
+                printer.setTextNormal();
+                if (customerLabel) {
+                    splitByLength(customerLabel, rowWidth).forEach((line) => printer.println(line));
+                }
+                printer.println(RECEIPT_SEPARATOR);
+            } else if (customerLabel) {
+                splitByLength(customerLabel, rowWidth).forEach((line) => printer.println(line));
+                printer.println(RECEIPT_SEPARATOR);
+            }
+        }
+        printer.setTextDoubleWidth();
+        printer.setTextDoubleHeight();
+        splitByLength(document.title.toUpperCase(), rowWidth).forEach((line) => printer.println(line));
+        printer.setTextNormal();
+        printer.println(document.copyLabel.toUpperCase());
+        printer.println(RECEIPT_SEPARATOR);
+
+        const isOrderComanda = document.printType === "CUSTOMER_ORDER" || document.printType === "KITCHEN_ORDER";
+        if (isOrderComanda) {
+            const tableHighlight = (document.tableNumber || "").trim();
+            const customerHighlight = (document.customerName || "").trim();
+
+            if (tableHighlight) {
+                printer.setTextDoubleWidth();
+                printer.setTextDoubleHeight();
+                printer.println(`TAVOLO N°`);
+                printer.println("");
+                printer.bold(true);
+                splitByLength(`${tableHighlight}`, rowWidth).forEach((line) => printer.println(line));
+                printer.bold(false);
+                printer.println("");
+                printer.setTypeFontA();
+                printer.setTextNormal();
+            }
+            if (customerHighlight) {
+                printer.setTypeFontB();
+                printer.setTextDoubleHeight();
+                splitByLength(customerHighlight, rowWidth).forEach((line) => printer.println(line));
+                printer.setTypeFontA();
+                printer.setTextNormal();
+            }
+            if (document.referenceCode) {
+                printer.bold(true);
+                printer.println(`ORDINE N° ${document.referenceCode}`);
+                printer.bold(false);
+            }
+
+            if (tableHighlight || customerHighlight || document.referenceCode) {
+                printer.println(RECEIPT_SEPARATOR);
+            }
+        }
+        if (!isOrderComanda && document.printType !== "CASHIER_SUMMARY" && document.referenceCode) {
+            const referencePrefix = document.printType === "CASH_SESSION_SUMMARY"
+                ? "SESSIONE N°"
+                : "ORDINE N°";
+            printer.setTextDoubleWidth();
+            printer.setTextDoubleHeight();
+            splitByLength(`${referencePrefix} ${document.referenceCode}`.toUpperCase(), rowWidth).forEach((line) => printer.println(line));
+            printer.setTextNormal();
+            printer.println(RECEIPT_SEPARATOR);
+        }
+
+        printer.alignLeft();
+        let headerLines = withLargeEventTitle && document.eventName
+            ? document.headerLines.filter((line) => !line.startsWith("FESTA:"))
+            : document.headerLines;
+        if (document.printType === "CASHIER_SUMMARY" || isOrderComanda) {
+            headerLines = headerLines.filter((line) => !line.toUpperCase().startsWith("TAVOLO:"));
+            headerLines = headerLines.filter((line) => !line.toUpperCase().startsWith("CLIENTE:"));
+        }
+        headerLines.forEach((line) => {
+            splitByLength(line, rowWidth).forEach((wrappedLine) => printer.println(wrappedLine));
+        });
+        if (headerLines.length > 0) {
+            printer.println(RECEIPT_SEPARATOR);
+        }
+    }
+
+    private static printItems(printer: ThermalPrinter, document: PrintDocumentV2) {
+        const rowWidth = 40;
+        const labelWidth = 24;
+        const amountWidth = rowWidth - labelWidth;
+        const cashierDescriptionWidth = 27;
+        const cashierQtyWidth = 4;
+        const cashierPriceWidth = 8;
+        const cashierSpacerWidth = rowWidth - cashierDescriptionWidth - cashierQtyWidth - cashierPriceWidth;
+        const cashierSpacer = " ".repeat(Math.max(1, cashierSpacerWidth));
+
+        if (document.items.length > 0) {
+            printer.setTextNormal();
+            if (document.printType === "CASHIER_SUMMARY") {
+                printer.println(
+                    `${padRight("DESCRIZIONE", cashierDescriptionWidth)}${cashierSpacer}${padLeft("Q.TA", cashierQtyWidth)}${padLeft("PREZZO", cashierPriceWidth)}`
+                );
+            } else {
+                printer.println("DESCRIZIONE");
+            }
+            printer.println(RECEIPT_SEPARATOR);
+        }
+
+        document.items.forEach((item) => {
+            if (document.printType === "CASHIER_SUMMARY") {
+                const unitPrice = Number.isFinite(item.unitPrice) ? Number(item.unitPrice) : undefined;
+                const lineTotal = Number.isFinite(item.lineTotal)
+                    ? Number(item.lineTotal)
+                    : (Number.isFinite(unitPrice) ? Number(unitPrice) * item.qty : undefined);
+                splitByLength(item.name, cashierDescriptionWidth).forEach((line, index) => {
+                    const qtyCell = index === 0 ? String(item.qty) : "";
+                    const priceCell = index === 0 && lineTotal !== undefined ? formatAmountNoCurrency(lineTotal) : "";
+                    printer.println(
+                        `${padRight(line, cashierDescriptionWidth)}${cashierSpacer}${padLeft(qtyCell, cashierQtyWidth)}${padLeft(priceCell, cashierPriceWidth)}`
+                    );
+                });
+                if (item.notes) {
+                    splitByLength(`NOTE: ${item.notes}`, rowWidth).forEach((line) => printer.println(line));
+                }
+                printer.println(RECEIPT_SEPARATOR);
+                return;
+            }
+
+            const itemTitle = `${item.qty}x ${item.name}`;
+            printer.setTextDoubleWidth();
+            printer.setTextDoubleHeight();
+            splitByLength(itemTitle, rowWidth).forEach((line) => printer.println(line));
+            printer.setTextNormal();
+
             const unitPrice = Number.isFinite(item.unitPrice) ? Number(item.unitPrice) : undefined;
             const lineTotal = Number.isFinite(item.lineTotal)
                 ? Number(item.lineTotal)
-                : (Number.isFinite(unitPrice) ? Number(unitPrice) * item.quantity : undefined);
-            const left = `${item.quantity} x ${formatEuroReceipt(unitPrice)}`;
-            printer.println(`${padRight(left, labelWidth)}${padLeft(formatEuroReceipt(lineTotal), amountWidth)}`);
+                : (Number.isFinite(unitPrice) ? Number(unitPrice) * item.qty : undefined);
+
+            if (unitPrice !== undefined || lineTotal !== undefined) {
+                const left = `${item.qty} x ${formatEuroReceipt(unitPrice)}`;
+                printer.println(`${padRight(left, labelWidth)}${padLeft(formatEuroReceipt(lineTotal), amountWidth)}`);
+            }
 
             (item.selectedOptions || []).forEach((option) => {
                 const optionLabel = `+ ${option.name}`;
                 splitByLength(optionLabel, labelWidth).forEach((line) => {
-                    printer.println(`${padRight(line, labelWidth)}${padLeft(formatEuroReceipt(option.priceVariation), amountWidth)}`);
+                    const optionAmount = Number.isFinite(option.priceVariation)
+                        ? formatEuroReceipt(option.priceVariation)
+                        : "";
+                    printer.println(`${padRight(line, labelWidth)}${padLeft(optionAmount, amountWidth)}`);
                 });
             });
-            printer.println("--------------------------------");
+
+            if (item.notes) {
+                splitByLength(`NOTE: ${item.notes}`, rowWidth).forEach((line) => printer.println(line));
+            }
+
+            printer.println(RECEIPT_SEPARATOR);
+        });
+    }
+
+    private static printTotals(printer: ThermalPrinter, document: PrintDocumentV2) {
+        const rowWidth = 40;
+        const labelWidth = 24;
+        const amountWidth = rowWidth - labelWidth;
+
+        if (document.printType === "CASHIER_SUMMARY") {
+            const totalRow = document.totals.find((row) => row.label.toUpperCase().includes("TOTALE"));
+            if (totalRow) {
+                printer.setTextNormal();
+                printer.println(`${padRight("TOTALE", labelWidth)}${padLeft(totalRow.value, amountWidth)}`);
+                printer.println(RECEIPT_SEPARATOR);
+            }
+            return;
+        }
+
+        document.totals.forEach((row) => {
+            const normalizedLabel = row.label.toUpperCase();
+            const emphasisStrong = row.emphasis === "strong" || normalizedLabel.includes("TOTALE");
+            if (emphasisStrong) {
+                printer.setTextDoubleWidth();
+                printer.setTextDoubleHeight();
+            }
+
+            const label = normalizedLabel.includes("TOTALE")
+                ? `${normalizedLabel} -->`
+                : `${normalizedLabel}:`;
+            const value = row.value;
+            const wrappedLabel = splitByLength(label, labelWidth);
+
+            if (wrappedLabel.length === 0) {
+                printer.println(`${padRight(label, labelWidth)}${padLeft(value, amountWidth)}`);
+            } else {
+                wrappedLabel.forEach((line, index) => {
+                    if (index === wrappedLabel.length - 1) {
+                        printer.println(`${padRight(line, labelWidth)}${padLeft(value, amountWidth)}`);
+                    } else {
+                        printer.println(line);
+                    }
+                });
+            }
+
+            if (emphasisStrong) printer.setTextNormal();
         });
 
-        if (job.totals && job.totals.length > 0) {
-            job.totals.forEach((row, index) => {
-                const isTotalRow = index === 0 || row.label.toUpperCase().includes("TOTALE");
-                if (isTotalRow) printer.setTextDoubleWidth();
-                printer.println(`${padRight(row.label.toUpperCase(), labelWidth)}${padLeft(row.value, amountWidth)}`);
-                if (isTotalRow) printer.setTextNormal();
-            });
-            printer.println("--------------------------------");
+        if (document.totals.length > 0) {
+            printer.println(RECEIPT_SEPARATOR);
+        }
+    }
+
+    private static printFooter(printer: ThermalPrinter, document: PrintDocumentV2) {
+        const rowWidth = 40;
+
+        if (document.printType === "CASHIER_SUMMARY") {
+            printer.alignLeft();
+            printer.println(`DATA/ORA ORDINE: ${formatPrintDateTime(document.createdAt)}`);
+            if (document.referenceCode) {
+                printer.println(`NUMERO ORDINE: ${document.referenceCode}`);
+            }
+            printer.println(RECEIPT_SEPARATOR);
+            printer.cut();
+            return;
         }
 
         printer.alignCenter();
-        printer.println("Grazie e buona festa!");
+        document.footerLines.forEach((line) => {
+            splitByLength(line, rowWidth).forEach((wrappedLine) => printer.println(wrappedLine));
+        });
         printer.cut();
     }
 
-    private static buildCashSessionDocument(summary: CashSessionClosingPrintSummary, posDeviceName: string | undefined) {
-        return {
-            kind: "CASH_SESSION_SUMMARY",
-            title: "CHIUSURA CASSA",
-            sessionId: summary.sessionId,
-            posDeviceName: posDeviceName || "-",
-            openedAt: formatDateTime(summary.openedAt),
-            closedAt: formatDateTime(summary.closedAt),
-            totals: {
-                fondoIniziale: formatEuro(summary.openingFloatAmount),
-                incassoContanti: formatEuro(summary.cashSalesAmount),
-                incassoCarta: formatEuro(summary.cardSalesAmount),
-                incassoAltro: formatEuro(summary.otherSalesAmount),
-                contanteAtteso: formatEuro(summary.expectedCashAmount),
-                contanteContato: formatEuro(summary.closingCountedCashAmount),
-                differenza: formatEuro(summary.varianceAmount),
-                ordiniSaldati: String(summary.paidOrdersCount)
-            },
-            openingNotes: summary.openingNotes?.trim() || undefined,
-            closingNotes: summary.closingNotes?.trim() || undefined,
-            createdAt: new Date().toISOString()
-        };
+    private static renderPrintDocument(printer: ThermalPrinter, document: PrintDocumentV2, withLargeEventTitle: boolean) {
+        this.printHeader(printer, document, withLargeEventTitle);
+        this.printItems(printer, document);
+        this.printTotals(printer, document);
+        this.printFooter(printer, document);
     }
 
     private static async createPrintJobLog(params: {
@@ -295,10 +525,13 @@ export class PrinterService {
 
         try {
             await dbConnect();
+            const normalizedOrderId = (typeof params.orderId === "string" && mongoose.Types.ObjectId.isValid(params.orderId))
+                ? params.orderId
+                : undefined;
             const created = await PrintJobModel.create({
                 eventId: params.eventId,
                 printerId: params.printerId || undefined,
-                orderId: params.orderId || undefined,
+                orderId: normalizedOrderId,
                 source: params.source,
                 printType: params.printType,
                 status: params.status || "QUEUED",
@@ -321,6 +554,7 @@ export class PrinterService {
         updates: {
             status: "SENT" | "FAILED";
             errorMessage?: string;
+            rawCapturePath?: string;
         }
     ) {
         if (!id) return;
@@ -330,7 +564,8 @@ export class PrinterService {
                 {
                     $set: {
                         status: updates.status,
-                        errorMessage: updates.errorMessage || undefined
+                        errorMessage: updates.errorMessage || undefined,
+                        rawCapturePath: updates.rawCapturePath || undefined
                     }
                 }
             );
@@ -340,6 +575,26 @@ export class PrinterService {
     }
 
     static async printComanda(job: PrinterCommandJob, copies: number = 1) {
+        const printType = job.printType || "CUSTOMER_ORDER";
+        const document = buildOrderPrintDocumentV2({
+            printType,
+            title: job.title || "COMANDA",
+            eventName: job.eventName,
+            copyLabel: job.copyLabel,
+            orderId: job.orderId,
+            shortCode: job.shortCode,
+            customerName: job.customerName,
+            tableNumber: job.tableNumber,
+            items: job.items,
+            totals: (job.totals || []).map((row) => ({
+                label: row.label,
+                value: row.value,
+                emphasis: row.emphasis === "strong" ? "strong" : "normal"
+            })),
+            footerLines: job.footerLines || [],
+            brandingLogoUrl: sanitizePrintableHeaderLogoUrl(job.brandingLogoUrl)
+        });
+
         const destination = resolvePrinterDestination({
             ip: job.ip,
             port: job.port,
@@ -355,12 +610,12 @@ export class PrinterService {
             printerId: job.printerId,
             orderId: job.orderId,
             source: job.source || "ORDER",
-            printType: job.printType || "CUSTOMER_ORDER",
+            printType,
             destinationHost: destinationHost || "unknown",
             destinationPort,
             isVirtual: Boolean(job.isVirtual),
             copies,
-            document: this.buildComandaDocument(job)
+            document
         });
 
         if (!destinationHost) {
@@ -405,53 +660,12 @@ export class PrinterService {
             return false;
         }
 
-        if (job.printType === "CASHIER_SUMMARY") {
-            this.renderCashierReceipt(printer, job);
-        } else {
-            printer.alignCenter();
-            printer.setTextDoubleHeight();
-            printer.setTextDoubleWidth();
-            printer.println(job.title || "COMANDA");
-            printer.setTextNormal();
-            printer.println("--------------------------------");
-
-            if (job.shortCode) {
-                printer.setTextDoubleHeight();
-                printer.println(`CODICE: ${job.shortCode}`);
-                printer.setTextNormal();
-            }
-
-            printer.println(`ID: ${job.orderId.slice(-6)}`);
-            printer.println(new Date().toLocaleString("it-IT"));
-            printer.println("--------------------------------");
-
-            printer.alignLeft();
-            if (job.customerName) printer.println(`CLIENTE: ${job.customerName}`);
-            if (job.tableNumber) printer.println(`TAVOLO: ${job.tableNumber}`);
-            printer.println(" ");
-
-            job.items.forEach((item) => {
-                printer.setTextDoubleHeight();
-                printer.println(`${item.quantity}x ${item.name}`);
-                printer.setTextNormal();
-                if (item.notes) {
-                    printer.println(`   * NOTE: ${item.notes}`);
-                }
-                printer.println("--------------------------------");
-            });
-
-            if (job.totals && job.totals.length > 0) {
-                job.totals.forEach((row) => {
-                    printer.setTextNormal();
-                    printer.println(`${row.label}: ${row.value}`);
-                });
-                printer.println("--------------------------------");
-            }
-
-            printer.cut();
-        }
+        const normalizedDocument = normalizeLegacyPrintDocument(document);
+        const hasLogo = await this.tryPrintLogo(printer, normalizedDocument, printType);
+        this.renderPrintDocument(printer, normalizedDocument, !hasLogo);
 
         try {
+            const executeStartedAt = new Date();
             for (let i = 0; i < copies; i += 1) {
                 await this.withTimeout(
                     printer.execute(),
@@ -460,7 +674,10 @@ export class PrinterService {
                 );
             }
             console.log(`Print job sent to ${destinationLabel} (${copies} copies) successfully`);
-            await this.updatePrintJobLog(logId, { status: "SENT" });
+            const rawCapturePath = Boolean(job.isVirtual)
+                ? await this.resolveVirtualRawCapturePath(destinationPort, executeStartedAt)
+                : undefined;
+            await this.updatePrintJobLog(logId, { status: "SENT", rawCapturePath });
             return true;
         } catch (error) {
             console.error(`Printer execution error at ${destinationLabel}:`, error);
@@ -490,6 +707,13 @@ export class PrinterService {
         if (!order) return;
 
         const eventId = order.eventId?.toString();
+
+        const event = eventId
+            ? await Event.findById(eventId).select("name settings.menuHeaderLogoUrl settings.receiptHeaderLogoUrl").lean() as ({ name?: string; settings?: { menuHeaderLogoUrl?: string; receiptHeaderLogoUrl?: string } } | null)
+            : null;
+        const eventName = event?.name?.trim() || undefined;
+        const brandingLogoUrl = sanitizeReceiptHeaderLogoUrl(event?.settings?.receiptHeaderLogoUrl)
+            || sanitizePrintableHeaderLogoUrl(event?.settings?.menuHeaderLogoUrl);
 
         let cashierPrinter: PrinterDestinationRef | undefined;
         if (posDeviceId) {
@@ -533,6 +757,7 @@ export class PrinterService {
             _id: { toString(): string };
             printerId?: {
                 _id?: unknown;
+                name?: string;
                 ip?: string;
                 port?: number;
                 isVirtual?: boolean;
@@ -542,6 +767,7 @@ export class PrinterService {
 
         const kitchenJobsByDestination: Record<string, PrinterCommandJob> = {};
         const customerJobsByGroup: Record<string, PrinterCommandJob> = {};
+        const involvedDepartments = new Set<string>();
         const orderCode = getOrderCodeFromOrder({
             pickupNumber: order.pickupNumber,
             _id: order._id.toString()
@@ -580,6 +806,9 @@ export class PrinterService {
             isVirtual: Boolean(cashierPrinter?.isVirtual),
             emulatorSlot: cashierPrinter?.emulatorSlot,
             title: "COMANDA CLIENTE",
+            eventName,
+            copyLabel: "COPIA CLIENTE",
+            brandingLogoUrl,
             items: allOrderItems,
             customerName: order.customer?.name,
             tableNumber: order.customer?.table,
@@ -606,6 +835,8 @@ export class PrinterService {
             const kitchenPrinter = category?.printerId;
 
             if (kitchenPrinter?.ip) {
+                const departmentName = kitchenPrinter.name?.trim();
+                if (departmentName) involvedDepartments.add(departmentName);
                 const resolvedDestination = resolvePrinterDestination({
                     ip: kitchenPrinter.ip,
                     port: kitchenPrinter.port || DEFAULT_PRINTER_PORT,
@@ -625,6 +856,9 @@ export class PrinterService {
                         printType: "KITCHEN_ORDER",
                         isVirtual: Boolean(kitchenPrinter.isVirtual),
                         title: "COMANDA REPARTO",
+                        eventName,
+                        copyLabel: "COPIA REPARTO",
+                        brandingLogoUrl,
                         items: [],
                         customerName: order.customer?.name,
                         tableNumber: order.customer?.table,
@@ -655,15 +889,29 @@ export class PrinterService {
             });
         });
 
+        const involvedDepartmentsLine = involvedDepartments.size > 0
+            ? `REPARTI COINVOLTI: ${Array.from(involvedDepartments).sort((a, b) => a.localeCompare(b, "it")).join(", ")}`
+            : undefined;
+        if (involvedDepartmentsLine) {
+            cashierJob.footerLines = [involvedDepartmentsLine];
+            Object.values(kitchenJobsByDestination).forEach((job) => {
+                job.footerLines = [involvedDepartmentsLine];
+            });
+            Object.values(customerJobsByGroup).forEach((job) => {
+                job.footerLines = [involvedDepartmentsLine];
+            });
+        }
+
         const printPromises: Promise<boolean>[] = [];
         if (cashierJob.items.length > 0 && cashierJob.ip) {
             const summaryJob: PrinterCommandJob = {
                 ...cashierJob,
                 printType: "CASHIER_SUMMARY",
                 title: "SCONTRINO CASSA",
+                copyLabel: "COPIA CASSA",
                 items: cashierReceiptItems,
                 totals: [
-                    { label: "TOTALE", value: formatEuroReceipt(order.totalAmount || 0) },
+                    { label: "TOTALE", value: formatEuroReceipt(order.totalAmount || 0), emphasis: "strong" },
                     { label: "PAGAMENTO", value: formatPaymentMethod(order.paymentMethod) },
                     { label: "STATO", value: (order.status || "-").toUpperCase() }
                 ]
@@ -688,18 +936,21 @@ export class PrinterService {
         if (!eventId || !posDeviceId) return false;
 
         await dbConnect();
-        const device = await PosDevice.findOne({ _id: posDeviceId, eventId })
-            .populate("printerId")
-            .lean() as ({
-                name?: string;
-                printerId?: {
-                    _id?: unknown;
-                    ip?: string;
-                    port?: number;
-                    isVirtual?: boolean;
-                    emulatorSlot?: number;
-                };
-            } | null);
+        const [device, event] = await Promise.all([
+            PosDevice.findOne({ _id: posDeviceId, eventId })
+                .populate("printerId")
+                .lean() as Promise<{
+                    name?: string;
+                    printerId?: {
+                        _id?: unknown;
+                        ip?: string;
+                        port?: number;
+                        isVirtual?: boolean;
+                        emulatorSlot?: number;
+                    };
+                } | null>,
+            Event.findById(eventId).select("name settings.menuHeaderLogoUrl settings.receiptHeaderLogoUrl").lean() as Promise<{ name?: string; settings?: { menuHeaderLogoUrl?: string; receiptHeaderLogoUrl?: string } } | null>
+        ]);
 
         const resolvedDestination = resolvePrinterDestination({
             ip: device?.printerId?.ip,
@@ -713,6 +964,26 @@ export class PrinterService {
         const printerId = device?.printerId?._id ? String(device.printerId._id) : undefined;
         const isVirtual = Boolean(device?.printerId?.isVirtual);
 
+        const document = buildCashSessionPrintDocumentV2({
+            sessionId: summary.sessionId,
+            eventName: event?.name,
+            posDeviceName: summary.posDeviceName || device?.name,
+            openedAt: summary.openedAt,
+            closedAt: summary.closedAt,
+            openingFloatAmount: summary.openingFloatAmount,
+            cashSalesAmount: summary.cashSalesAmount,
+            cardSalesAmount: summary.cardSalesAmount,
+            otherSalesAmount: summary.otherSalesAmount,
+            expectedCashAmount: summary.expectedCashAmount,
+            closingCountedCashAmount: summary.closingCountedCashAmount,
+            varianceAmount: summary.varianceAmount,
+            paidOrdersCount: summary.paidOrdersCount,
+            openingNotes: summary.openingNotes,
+            closingNotes: summary.closingNotes,
+            brandingLogoUrl: sanitizeReceiptHeaderLogoUrl(event?.settings?.receiptHeaderLogoUrl)
+                || sanitizePrintableHeaderLogoUrl(event?.settings?.menuHeaderLogoUrl)
+        });
+
         const logId = await this.createPrintJobLog({
             eventId,
             printerId,
@@ -723,7 +994,7 @@ export class PrinterService {
             destinationPort: printerPort,
             isVirtual,
             copies: 1,
-            document: this.buildCashSessionDocument(summary, summary.posDeviceName || device?.name)
+            document
         });
 
         if (!printerHost) {
@@ -768,48 +1039,22 @@ export class PrinterService {
             return false;
         }
 
-        const safeOpeningNotes = summary.openingNotes?.trim();
-        const safeClosingNotes = summary.closingNotes?.trim();
-
-        printer.alignCenter();
-        printer.setTextDoubleHeight();
-        printer.println("CHIUSURA CASSA");
-        printer.setTextNormal();
-        printer.println("--------------------------------");
-        printer.alignLeft();
-        printer.println(`SESSIONE: ${summary.sessionId.slice(-8).toUpperCase()}`);
-        printer.println(`POSTAZIONE: ${summary.posDeviceName || device?.name || "-"}`);
-        printer.println(`APERTURA: ${formatDateTime(summary.openedAt)}`);
-        printer.println(`CHIUSURA: ${formatDateTime(summary.closedAt)}`);
-        printer.println("--------------------------------");
-        printer.println(`FONDO INIZIALE: ${formatEuro(summary.openingFloatAmount)}`);
-        printer.println(`INCASSO CONTANTI: ${formatEuro(summary.cashSalesAmount)}`);
-        printer.println(`INCASSO CARTA: ${formatEuro(summary.cardSalesAmount)}`);
-        printer.println(`INCASSO ALTRO: ${formatEuro(summary.otherSalesAmount)}`);
-        printer.println(`CONTANTE ATTESO: ${formatEuro(summary.expectedCashAmount)}`);
-        printer.println(`CONTANTE CONTATO: ${formatEuro(summary.closingCountedCashAmount)}`);
-        printer.println(`DIFFERENZA: ${formatEuro(summary.varianceAmount)}`);
-        printer.println(`ORDINI SALDATI: ${summary.paidOrdersCount}`);
-        if (safeOpeningNotes) {
-            printer.println("--------------------------------");
-            printer.println(`NOTE APERTURA: ${safeOpeningNotes}`);
-        }
-        if (safeClosingNotes) {
-            printer.println("--------------------------------");
-            printer.println(`NOTE CHIUSURA: ${safeClosingNotes}`);
-        }
-        printer.println("--------------------------------");
-        printer.println(new Date().toLocaleString("it-IT"));
-        printer.cut();
+        const normalizedDocument = normalizeLegacyPrintDocument(document);
+        const hasLogo = await this.tryPrintLogo(printer, normalizedDocument, "CASH_SESSION_SUMMARY");
+        this.renderPrintDocument(printer, normalizedDocument, !hasLogo);
 
         try {
+            const executeStartedAt = new Date();
             await this.withTimeout(
                 printer.execute(),
                 PRINTER_EXECUTE_TIMEOUT_MS,
                 "Printer execution timeout"
             );
             console.log(`Cash session summary print sent to ${printerLabel} successfully`);
-            await this.updatePrintJobLog(logId, { status: "SENT" });
+            const rawCapturePath = isVirtual
+                ? await this.resolveVirtualRawCapturePath(printerPort, executeStartedAt)
+                : undefined;
+            await this.updatePrintJobLog(logId, { status: "SENT", rawCapturePath });
             return true;
         } catch (error) {
             console.error(`Cash session summary printer execution error at ${printerLabel}:`, error);
@@ -863,12 +1108,11 @@ export class PrinterService {
         const document = (job.document && typeof job.document === "object")
             ? job.document as Record<string, unknown>
             : {};
-        const documentItems = Array.isArray(document.items)
-            ? document.items as Array<Record<string, unknown>>
-            : [];
-        const documentTotals = Array.isArray(document.totals)
-            ? document.totals as Array<Record<string, unknown>>
-            : [];
+
+        const payload = toOrderJobPayloadFromDocument(
+            document,
+            asString(document.orderId) || job.orderId?.toString() || job._id.toString()
+        );
 
         const printJob: PrinterCommandJob = {
             ip: job.printerId?.ip || asString(job.destinationHost),
@@ -879,28 +1123,16 @@ export class PrinterService {
             source: job.source,
             printType: job.printType,
             isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual),
-            title: asString(document.title) || "RICEVUTA",
-            items: documentItems.map((item) => ({
-                name: asString(item.name) || "Voce",
-                quantity: asNumber(item.quantity) || 1,
-                notes: asString(item.notes) || undefined,
-                unitPrice: asNumber(item.unitPrice),
-                lineTotal: asNumber(item.lineTotal),
-                selectedOptions: Array.isArray(item.selectedOptions)
-                    ? (item.selectedOptions as Array<Record<string, unknown>>).map((opt) => ({
-                        name: asString(opt.name),
-                        priceVariation: asNumber(opt.priceVariation) || 0
-                    }))
-                    : undefined
-            })),
-            totals: documentTotals.map((row) => ({
-                label: asString(row.label),
-                value: asString(row.value)
-            })).filter((row) => row.label),
-            customerName: asString(document.customerName) || undefined,
-            tableNumber: asString(document.tableNumber) || undefined,
-            orderId: asString(document.orderId) || job.orderId?.toString() || job._id.toString(),
-            shortCode: asString(document.shortCode) || undefined
+            title: payload.title,
+            eventName: payload.eventName,
+            copyLabel: payload.copyLabel,
+            brandingLogoUrl: sanitizePrintableHeaderLogoUrl(payload.brandingLogoUrl),
+            items: payload.items,
+            totals: payload.totals,
+            customerName: payload.customerName,
+            tableNumber: payload.tableNumber,
+            orderId: payload.orderId,
+            shortCode: payload.shortCode
         };
 
         const printed = await this.printComanda(printJob, job.copies || 1);

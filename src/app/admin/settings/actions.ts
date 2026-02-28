@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import dbConnect from "@/lib/mongoose";
 import { getAdminContextEventId } from "@/lib/events";
 import { ensureAdminSession } from "@/lib/authz";
@@ -11,7 +12,6 @@ import Event from "@/models/Event";
 import Category from "@/models/Category";
 import Product from "@/models/Product";
 import Printer from "@/models/Printer";
-import PrintJob from "@/models/PrintJob";
 import PosDevice from "@/models/PosDevice";
 import Peripheral from "@/models/Peripheral";
 import { revalidatePath } from "next/cache";
@@ -33,6 +33,8 @@ import {
     MAX_VIRTUAL_PRINTER_SLOTS,
     normalizePrinterConfig
 } from "@/lib/printer-config";
+import { sanitizePrintableHeaderLogoUrl, sanitizeReceiptHeaderLogoUrl } from "@/lib/print-branding";
+import { PrinterService } from "@/lib/printer";
 
 function revalidateHardwareViews() {
     revalidatePath("/admin/settings/hardware");
@@ -74,6 +76,10 @@ const MENU_HEADER_LOGO_URL_PREFIX = "/uploads/menu-headers";
 const MENU_HEADER_LOGO_MAX_BYTES = 2 * 1024 * 1024;
 const MENU_HEADER_LOGO_TARGET_RATIO = 10 / 4;
 const MENU_HEADER_LOGO_RATIO_TOLERANCE = 0.12;
+const RECEIPT_HEADER_LOGO_UPLOAD_DIR = path.join(process.cwd(), "public", "uploads", "receipt-headers");
+const RECEIPT_HEADER_LOGO_URL_PREFIX = "/uploads/receipt-headers";
+const RECEIPT_HEADER_LOGO_MAX_BYTES = 2 * 1024 * 1024;
+const RECEIPT_HEADER_LOGO_TARGET_RATIO = 10 / 3;
 
 const MENU_HEADER_LOGO_ALLOWED_TYPES = new Map<string, string>([
     ["image/png", "png"],
@@ -147,6 +153,10 @@ function buildMenuHeaderLogoFilePath(fileName: string) {
     return path.join(MENU_HEADER_LOGO_UPLOAD_DIR, fileName);
 }
 
+function buildReceiptHeaderLogoFilePath(fileName: string) {
+    return path.join(RECEIPT_HEADER_LOGO_UPLOAD_DIR, fileName);
+}
+
 async function persistMenuHeaderLogo(file: File): Promise<{ url: string } | { error: string }> {
     const extension = MENU_HEADER_LOGO_ALLOWED_TYPES.get(file.type);
     if (!extension) {
@@ -180,8 +190,73 @@ async function persistMenuHeaderLogo(file: File): Promise<{ url: string } | { er
     }
 }
 
+async function persistReceiptHeaderLogo(file: File): Promise<{ url: string } | { error: string }> {
+    if (!MENU_HEADER_LOGO_ALLOWED_TYPES.has(file.type)) {
+        return { error: "Formato header scontrino non supportato: usa PNG o JPEG." };
+    }
+    if (file.size <= 0) {
+        return { error: "File header scontrino vuoto." };
+    }
+    if (file.size > RECEIPT_HEADER_LOGO_MAX_BYTES) {
+        return { error: "Header scontrino troppo grande: massimo 2MB." };
+    }
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    let adaptedPngBuffer: Buffer;
+    try {
+        const image = sharp(buffer, { failOn: "error" }).rotate();
+        const metadata = await image.metadata();
+        const sourceWidth = Number(metadata.width || 0);
+        const sourceHeight = Number(metadata.height || 0);
+        if (sourceWidth <= 0 || sourceHeight <= 0) {
+            return { error: "Immagine header scontrino non valida o corrotta." };
+        }
+
+        const sourceRatio = sourceWidth / sourceHeight;
+        let targetWidth = sourceWidth;
+        let targetHeight = sourceHeight;
+
+        if (sourceRatio > RECEIPT_HEADER_LOGO_TARGET_RATIO) {
+            targetHeight = Math.max(1, Math.round(sourceWidth / RECEIPT_HEADER_LOGO_TARGET_RATIO));
+        } else if (sourceRatio < RECEIPT_HEADER_LOGO_TARGET_RATIO) {
+            targetWidth = Math.max(1, Math.round(sourceHeight * RECEIPT_HEADER_LOGO_TARGET_RATIO));
+        }
+
+        adaptedPngBuffer = await image
+            .resize(targetWidth, targetHeight, {
+                fit: "contain",
+                position: "center",
+                background: { r: 255, g: 255, b: 255, alpha: 1 }
+            })
+            .png()
+            .toBuffer();
+    } catch {
+        return { error: "Impossibile elaborare l'header scontrino caricato." };
+    }
+
+    try {
+        await mkdir(RECEIPT_HEADER_LOGO_UPLOAD_DIR, { recursive: true });
+        const fileName = `receipt-header-${Date.now()}-${randomUUID()}.png`;
+        await writeFile(buildReceiptHeaderLogoFilePath(fileName), adaptedPngBuffer);
+        return { url: `${RECEIPT_HEADER_LOGO_URL_PREFIX}/${fileName}` };
+    } catch {
+        return { error: "Impossibile salvare l'header scontrino sul server. Controlla i permessi o riprova." };
+    }
+}
+
 async function deleteMenuHeaderLogoIfManaged(url: string | null | undefined) {
     if (!url || !url.startsWith(`${MENU_HEADER_LOGO_URL_PREFIX}/`)) return;
+    const filePath = path.join(process.cwd(), "public", url.replace(/^\//, ""));
+    try {
+        await unlink(filePath);
+    } catch {
+        // Ignore remove errors (file may already be absent)
+    }
+}
+
+async function deleteReceiptHeaderLogoIfManaged(url: string | null | undefined) {
+    if (!url || !url.startsWith(`${RECEIPT_HEADER_LOGO_URL_PREFIX}/`)) return;
     const filePath = path.join(process.cwd(), "public", url.replace(/^\//, ""));
     try {
         await unlink(filePath);
@@ -237,6 +312,8 @@ export async function updateEventSettingsAction(formData: FormData) {
     const quickDiscountPresetsRaw = (formData.get("quickDiscountPresets") as string | null)?.trim() || "";
     const menuHeaderLogoFile = formData.get("menuHeaderLogoFile");
     const removeMenuHeaderLogo = formData.get("removeMenuHeaderLogo") === "on";
+    const receiptHeaderLogoFile = formData.get("receiptHeaderLogoFile");
+    const removeReceiptHeaderLogo = formData.get("removeReceiptHeaderLogo") === "on";
     const active = formData.get("active") === "on";
     const predefinedTablesInput = formData.get("predefinedTables") as string | null;
     const normalizedInputTables = parsePredefinedTablesInput(predefinedTablesInput, Number.MAX_SAFE_INTEGER);
@@ -253,8 +330,8 @@ export async function updateEventSettingsAction(formData: FormData) {
 
     await dbConnect();
     const targetEvent = await Event.findOne({ _id: scopedEventId, archived: { $ne: true } })
-        .select("archived predefinedTables settings.menuHeaderLogoUrl")
-        .lean() as ({ archived?: boolean; predefinedTables?: string[]; settings?: { menuHeaderLogoUrl?: string } } | null);
+        .select("archived predefinedTables settings.menuHeaderLogoUrl settings.receiptHeaderLogoUrl")
+        .lean() as ({ archived?: boolean; predefinedTables?: string[]; settings?: { menuHeaderLogoUrl?: string; receiptHeaderLogoUrl?: string } } | null);
 
     if (!targetEvent) return { error: "Festa non trovata" };
     if (targetEvent.archived) return { error: "Le feste archiviate non sono modificabili" };
@@ -308,7 +385,9 @@ export async function updateEventSettingsAction(formData: FormData) {
         ? normalizedInputTables
         : parsePredefinedTablesInput(predefinedTablesInput, MAX_PREDEFINED_TABLES);
     const currentMenuHeaderLogoUrl = targetEvent.settings?.menuHeaderLogoUrl?.trim() || "";
+    const currentReceiptHeaderLogoUrl = targetEvent.settings?.receiptHeaderLogoUrl?.trim() || "";
     let nextMenuHeaderLogoUrl: string | null = null;
+    let nextReceiptHeaderLogoUrl: string | null = null;
 
     if (menuHeaderLogoFile instanceof File && menuHeaderLogoFile.size > 0) {
         const uploadResult = await persistMenuHeaderLogo(menuHeaderLogoFile);
@@ -318,6 +397,16 @@ export async function updateEventSettingsAction(formData: FormData) {
         nextMenuHeaderLogoUrl = uploadResult.url;
     } else if (removeMenuHeaderLogo) {
         nextMenuHeaderLogoUrl = "";
+    }
+
+    if (receiptHeaderLogoFile instanceof File && receiptHeaderLogoFile.size > 0) {
+        const uploadResult = await persistReceiptHeaderLogo(receiptHeaderLogoFile);
+        if ("error" in uploadResult) {
+            return { error: uploadResult.error };
+        }
+        nextReceiptHeaderLogoUrl = uploadResult.url;
+    } else if (removeReceiptHeaderLogo) {
+        nextReceiptHeaderLogoUrl = "";
     }
 
     const settingsSet: Record<string, unknown> = {
@@ -345,6 +434,12 @@ export async function updateEventSettingsAction(formData: FormData) {
     if (nextMenuHeaderLogoUrl === "") {
         settingsUnset["settings.menuHeaderLogoUrl"] = 1;
     }
+    if (nextReceiptHeaderLogoUrl !== null && nextReceiptHeaderLogoUrl) {
+        settingsSet["settings.receiptHeaderLogoUrl"] = nextReceiptHeaderLogoUrl;
+    }
+    if (nextReceiptHeaderLogoUrl === "") {
+        settingsUnset["settings.receiptHeaderLogoUrl"] = 1;
+    }
 
     if (active) {
         // Deactivate all others first
@@ -363,11 +458,17 @@ export async function updateEventSettingsAction(formData: FormData) {
         if (nextMenuHeaderLogoUrl && nextMenuHeaderLogoUrl.startsWith(`${MENU_HEADER_LOGO_URL_PREFIX}/`)) {
             await deleteMenuHeaderLogoIfManaged(nextMenuHeaderLogoUrl);
         }
+        if (nextReceiptHeaderLogoUrl && nextReceiptHeaderLogoUrl.startsWith(`${RECEIPT_HEADER_LOGO_URL_PREFIX}/`)) {
+            await deleteReceiptHeaderLogoIfManaged(nextReceiptHeaderLogoUrl);
+        }
         throw error;
     }
 
     if (nextMenuHeaderLogoUrl !== null && currentMenuHeaderLogoUrl && currentMenuHeaderLogoUrl !== nextMenuHeaderLogoUrl) {
         await deleteMenuHeaderLogoIfManaged(currentMenuHeaderLogoUrl);
+    }
+    if (nextReceiptHeaderLogoUrl !== null && currentReceiptHeaderLogoUrl && currentReceiptHeaderLogoUrl !== nextReceiptHeaderLogoUrl) {
+        await deleteReceiptHeaderLogoIfManaged(currentReceiptHeaderLogoUrl);
     }
 
     revalidatePath("/admin/settings");
@@ -404,6 +505,7 @@ export async function cloneEventAction(formData: FormData) {
             askName: sourceEvent.settings?.askName ?? false,
             askTable: sourceEvent.settings?.askTable ?? false,
             menuHeaderLogoUrl: sourceEvent.settings?.menuHeaderLogoUrl,
+            receiptHeaderLogoUrl: sourceEvent.settings?.receiptHeaderLogoUrl,
             defaultCashierPrinterIp: sourceEvent.settings?.defaultCashierPrinterIp,
             quickDiscountPresets,
             quickStaffDiscountEnabled: legacyQuickDiscount.quickStaffDiscountEnabled,
@@ -698,6 +800,10 @@ export async function createManualPrintJobAction(formData: FormData) {
 
     await dbConnect();
 
+    const eventConfig = await Event.findById(scopedEvent.eventId)
+        .select("name settings.menuHeaderLogoUrl settings.receiptHeaderLogoUrl")
+        .lean() as ({ name?: string; settings?: { menuHeaderLogoUrl?: string; receiptHeaderLogoUrl?: string } } | null);
+
     let printer = null as ({
         _id: unknown;
         ip?: string;
@@ -728,35 +834,37 @@ export async function createManualPrintJobAction(formData: FormData) {
             } | null);
     }
 
-    const destinationHost = printer?.ip || "demo-printer";
-    const destinationPort = printer?.port || DEFAULT_PRINTER_PORT;
-
-    await PrintJob.create({
+    const manualOrderId = `manual-${Date.now().toString().slice(-8)}`;
+    const manualShortCode = `D-${Date.now().toString().slice(-5)}`;
+    const printSuccess = await PrinterService.printComanda({
+        ip: printer?.ip || "",
+        port: printer?.port || DEFAULT_PRINTER_PORT,
+        printerId: printer?._id ? String(printer._id) : undefined,
         eventId: scopedEvent.eventId,
-        printerId: printer?._id || undefined,
         source: "MANUAL_TEST",
         printType: "MANUAL_TEST",
-        status: "SENT",
-        destinationHost,
-        destinationPort,
         isVirtual: Boolean(printer?.isVirtual),
-        copies: 1,
-        document: {
-            kind: "MANUAL_TEST",
-            title: "Ricevuta Demo",
-            shortCode: `D-${Date.now().toString().slice(-5)}`,
-            customerName: "Cliente Demo",
-            tableNumber: "12",
-            items: [
-                { name: "Panino Salsiccia", quantity: 2 },
-                { name: "Birra Media", quantity: 1 }
-            ],
-            totals: {
-                totale: "18.00 EUR"
-            },
-            createdAt: new Date().toISOString()
-        }
-    });
+        title: "Ricevuta Demo",
+        eventName: eventConfig?.name,
+        copyLabel: "COPIA TEST",
+        orderId: manualOrderId,
+        shortCode: manualShortCode,
+        customerName: "Cliente Demo",
+        tableNumber: "12",
+        items: [
+            { name: "Panino Salsiccia", quantity: 2 },
+            { name: "Birra Media", quantity: 1 }
+        ],
+        totals: [
+            { label: "TOTALE", value: "18.00 EUR", emphasis: "strong" }
+        ],
+        brandingLogoUrl: sanitizeReceiptHeaderLogoUrl(eventConfig?.settings?.receiptHeaderLogoUrl)
+            || sanitizePrintableHeaderLogoUrl(eventConfig?.settings?.menuHeaderLogoUrl)
+    }, 1);
+
+    if (!printSuccess) {
+        return { error: "Stampa demo non riuscita: controlla configurazione stampante o monitor stampa." };
+    }
 
     revalidateHardwareViews();
     return { success: true, name: "Job demo creato" };
