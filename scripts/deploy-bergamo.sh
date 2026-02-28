@@ -96,7 +96,12 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
 fi
 
 BUILD_SHA="$(git rev-parse --short HEAD)"
+VERSION=$(node -p "require('./package.json').version")
+BUILD_DATE=$(date '+%Y-%m-%d %H:%M')
+
+echo "[deploy-bergamo] Release version: ${VERSION}"
 echo "[deploy-bergamo] Release build sha: ${BUILD_SHA}"
+echo "[deploy-bergamo] Release build date: ${BUILD_DATE}"
 
 if [[ "${SKIP_BUILD}" == "false" ]]; then
     echo "[deploy-bergamo] Running local production build..."
@@ -118,13 +123,15 @@ if [[ "${SKIP_RSYNC}" == "false" ]]; then
 fi
 
 echo "[deploy-bergamo] Rebuilding and restarting remote stack..."
-ssh "${REMOTE_HOST}" bash -s -- "${REMOTE_PATH}" "${BUILD_SHA}" "${PROFILE}" "${USE_CACHE}" <<'EOS'
+ssh "${REMOTE_HOST}" bash -s -- "${REMOTE_PATH}" "${BUILD_SHA}" "${PROFILE}" "${USE_CACHE}" "${VERSION}" "${BUILD_DATE}" <<'EOS'
 set -euo pipefail
 
 REMOTE_PATH="$1"
 BUILD_SHA="$2"
 PROFILE="$3"
 USE_CACHE="$4"
+VERSION="$5"
+BUILD_DATE="$6"
 
 cd "${REMOTE_PATH}"
 
@@ -142,7 +149,6 @@ else
     echo "APP_BUILD=${BUILD_SHA}" >> .env.production
 fi
 
-BUILD_DATE=$(date '+%Y-%m-%d %H:%M')
 if grep -q '^APP_BUILD_DATE=' .env.production; then
     sed -i -E "s/^APP_BUILD_DATE=.*/APP_BUILD_DATE=\"${BUILD_DATE}\"/" .env.production
 else
@@ -150,7 +156,6 @@ else
 fi
 
 # Ensure APP_VERSION matches package.json
-VERSION=$(node -p "require('./package.json').version")
 if grep -q '^APP_VERSION=' .env.production; then
     sed -i -E "s/^APP_VERSION=.*/APP_VERSION=${VERSION}/" .env.production
 else
