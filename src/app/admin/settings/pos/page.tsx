@@ -81,14 +81,14 @@ export default async function PosDevicesPage() {
                                     <p className="text-xs text-muted-foreground">Verranno mostrate solo le stampanti di tipo &quot;Cassa&quot;.</p>
                                 </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="terminal-select">Terminale Pagamento (Elettronico)</Label>
+                                    <Label htmlFor="terminal-select">Terminale Pagamento (Carta / POS)</Label>
                                     <Select name="paymentTerminalId">
                                         <SelectTrigger id="terminal-select">
                                             <SelectValue placeholder="Nessuno" />
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="none">Nessuno</SelectItem>
-                                            {peripherals.filter((p: IPeripheral) => p.type === 'SUMUP').map((p: IPeripheral) => (
+                                            {peripherals.filter((p: IPeripheral) => p.type === 'SUMUP' || p.type === 'ELECTRONIC_MANUAL').map((p: IPeripheral) => (
                                                 <SelectItem key={String(p._id)} value={String(p._id)}>
                                                     {p.name}
                                                 </SelectItem>

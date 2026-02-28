@@ -1418,7 +1418,7 @@ export default function PosPage() {
                                                 className={`flex flex-1 flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${effectivePaymentMethod === "CARD" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200"}`}
                                             >
                                                 <Wallet size={26} />
-                                                <span className="text-sm font-bold">ELETTRONICO</span>
+                                                <span className="text-sm font-bold">CARTA / POS</span>
                                             </button>
                                         )}
                                     </div>
