@@ -31,10 +31,14 @@ export async function GET(request: NextRequest) {
         }
 
         // 2. Fetch categories for this event
-        const categories = await Category.find({ eventId: event._id }).lean();
+        const categories = await Category.find({ eventId: event._id })
+            .sort({ printOrder: 1, name: 1 })
+            .lean();
 
         // 3. Fetch products for this event
-        const products = await Product.find({ eventId: event._id }).lean();
+        const products = await Product.find({ eventId: event._id })
+            .sort({ name: 1 })
+            .lean();
         const currentDayCode = getCurrentDayCode("Europe/Rome");
         const dayAvailableProducts = products.filter((product) =>
             isProductAvailableToday((product as { availableDays?: string[] }).availableDays || [], currentDayCode)

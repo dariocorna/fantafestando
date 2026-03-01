@@ -1,4 +1,5 @@
 import dbConnect from "@/lib/mongoose";
+import mongoose from "mongoose";
 import { ensureAdminSession } from "@/lib/authz";
 import Category, { ICategory } from "@/models/Category";
 import Product, { IProduct } from "@/models/Product";
@@ -15,6 +16,7 @@ import {
     TableHeader,
     TableRow
 } from "@/components/ui/table";
+import { SortableCategoryTable, SortableCategoryRow, DragHandle } from "./sortable-category-table";
 import { DeleteForm } from "@/components/delete-form";
 import {
     Dialog,
@@ -69,7 +71,7 @@ export default async function AdminCatalog() {
         return <div className="text-center p-10 text-muted-foreground">Nessuna festa attiva o selezionata. Seleziona una festa dalla barra in alto.</div>;
     }
 
-    const categories = await Category.find({ eventId: currentEventId }).populate('printerId').lean();
+    const categories = await Category.find({ eventId: currentEventId }).sort({ printOrder: 1 }).populate('printerId').lean();
     const products = await Product.find({ eventId: currentEventId }).populate('categoryId').lean();
     const printers = await Printer.find({ eventId: currentEventId }).lean();
 
@@ -103,7 +105,11 @@ export default async function AdminCatalog() {
             return { error: "Esiste già una categoria con questo nome" };
         }
 
-        await Category.create({ name, eventId: scopedEventId, uiColor, printerId: printerId || undefined });
+        // Assign printOrder = max+1 so new categories appear at the end
+        const lastCategory = await Category.findOne({ eventId: scopedEventId }).sort({ printOrder: -1 }).select('printOrder').lean();
+        const nextPrintOrder = (lastCategory?.printOrder ?? -1) + 1;
+
+        await Category.create({ name, eventId: scopedEventId, uiColor, printerId: printerId || undefined, printOrder: nextPrintOrder });
         revalidatePath("/admin/catalog");
         return { success: true };
     }
@@ -165,6 +171,31 @@ export default async function AdminCatalog() {
         });
         revalidatePath("/admin/catalog");
         return { success: true };
+    }
+
+    async function reorderCategories(orderedIds: string[]) {
+        "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return;
+
+        const scopedEventId = currentEventId;
+        if (!scopedEventId || !orderedIds || !orderedIds.length) return;
+
+        await dbConnect();
+
+        // Update each category with its new position as printOrder
+        const bulkOps = orderedIds.map((id, index) => ({
+            updateOne: {
+                filter: {
+                    _id: new mongoose.Types.ObjectId(id),
+                    eventId: new mongoose.Types.ObjectId(scopedEventId)
+                },
+                update: { $set: { printOrder: index } }
+            }
+        }));
+
+        await Category.bulkWrite(bulkOps);
+        revalidatePath("/admin/catalog");
     }
 
     async function deleteCategory(formData: FormData) {
@@ -359,57 +390,27 @@ export default async function AdminCatalog() {
                         createAction={createCategory}
                     />
                 </div>
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Nome</TableHead>
-                            <TableHead>Colore</TableHead>
-                            <TableHead>Stampante Comanda</TableHead>
-                            <TableHead className="w-[80px]">Azioni</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {categories.map((cat: ICategory) => (
-                            <TableRow key={String(cat._id)}>
-                                <TableCell className="font-medium">{cat.name}</TableCell>
-                                <TableCell>
-                                    <div
-                                        className="w-4 h-4 rounded-full border border-black/10"
-                                        style={{ backgroundColor: normalizeCategoryColor(cat.uiColor) }}
-                                    />
-                                </TableCell>
-                                <TableCell>{(cat.printerId as unknown as IPrinter)?.name || "Default Cassa"}</TableCell>
-                                <TableCell className="flex gap-2">
-                                    <EditCategoryDialog
-                                        category={{
-                                            id: String(cat._id),
-                                            name: cat.name,
-                                            uiColor: normalizeCategoryColor(cat.uiColor),
-                                            printerId: getReferencedId(cat.printerId)
-                                        }}
-                                        eventId={currentEventId}
-                                        printers={printers.filter((p: IPrinter) => p.type === 'KITCHEN').map((p: IPrinter) => ({
-                                            id: String(p._id),
-                                            name: p.name,
-                                            ip: p.ip,
-                                            port: p.port || 9100
-                                        }))}
-                                        updateAction={updateCategory}
-                                    />
-                                    <DeleteForm
-                                        id={String(cat._id)}
-                                        idName="id"
-                                        hiddenFields={[{ name: "eventId", value: currentEventId }]}
-                                        message="Eliminare la categoria e TUTTI i suoi prodotti?"
-                                        action={deleteCategory}
-                                        buttonSize="xs"
-                                        iconSize={16}
-                                    />
-                                </TableCell>
-                            </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
+                <SortableCategoryTable
+                    categories={categories.map((c: ICategory) => ({
+                        _id: String(c._id),
+                        name: c.name,
+                        uiColor: c.uiColor,
+                        printOrder: c.printOrder,
+                        printerName: (c.printerId as unknown as IPrinter)?.name || undefined,
+                        printerId: getReferencedId(c.printerId),
+                    }))}
+                    onReorder={reorderCategories}
+                    eventId={currentEventId}
+                    printers={printers.filter((p: IPrinter) => p.type === 'KITCHEN').map((p: IPrinter) => ({
+                        id: String(p._id),
+                        name: p.name,
+                        ip: p.ip,
+                        port: p.port || 9100
+                    }))}
+                    updateAction={updateCategory}
+                    deleteAction={deleteCategory}
+                />
+
             </section>
 
             <section>
