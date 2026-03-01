@@ -351,6 +351,9 @@ export async function completeElectronicOrder(
 export async function ensureAdminEventContext(page: Page) {
     const selector = page.getByTestId("admin-event-selector");
 
+    // Wait for hydration so the text is not totally empty
+    await expect(selector).not.toHaveText("", { timeout: 10000 });
+
     if (!(await selector.innerText()).includes("Seleziona Festa")) {
         return;
     }
@@ -360,6 +363,7 @@ export async function ensureAdminEventContext(page: Page) {
     if (await firstOption.isVisible({ timeout: 3000 }).catch(() => false)) {
         await firstOption.click();
         await expect(selector).not.toContainText("Seleziona Festa");
+        await page.waitForTimeout(1000); // 1. Wait for setAdminEventContext Server Action fetch to complete
         return;
     }
 
@@ -375,4 +379,5 @@ export async function ensureAdminEventContext(page: Page) {
     await page.click('[data-testid="admin-event-selector"]');
     await page.getByRole("option", { name: new RegExp(eventName) }).click();
     await expect(selector).not.toContainText("Seleziona Festa");
+    await page.waitForTimeout(1000); // 2. Wait for setAdminEventContext Server Action fetch to complete
 }
