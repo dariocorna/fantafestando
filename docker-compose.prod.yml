@@ -42,6 +42,7 @@ services:
     environment:
       NODE_ENV: production
       APP_SURFACE: backoffice
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
       MONGODB_URI: ${MONGODB_URI:?MONGODB_URI is required}
       PRINTER_EMULATOR_HOST: ${PRINTER_EMULATOR_HOST:-printer-emulator}
       PRINTER_EMULATOR_START_PORT: ${PRINTER_EMULATOR_START_PORT:-19100}
@@ -78,6 +79,7 @@ services:
     environment:
       NODE_ENV: production
       APP_SURFACE: menu
+      NEXTAUTH_URL: ${NEXTAUTH_URL_MENU}
       MONGODB_URI: ${MONGODB_URI:?MONGODB_URI is required}
       PRINTER_EMULATOR_HOST: ${PRINTER_EMULATOR_HOST:-printer-emulator}
       PRINTER_EMULATOR_START_PORT: ${PRINTER_EMULATOR_START_PORT:-19100}
