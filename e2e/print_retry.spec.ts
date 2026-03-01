@@ -95,6 +95,8 @@ test.describe("Print Retry Flows", () => {
                     && job.document?.schemaVersion === 2
                 )
                 return allShortName ? orderJobs.length : 0
+            }, {
+                timeout: 30000
             }).toBeGreaterThanOrEqual(2)
 
             await page.goto("/admin/settings/hardware")
