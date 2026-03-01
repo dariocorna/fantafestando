@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -19,6 +19,11 @@ export function CreateEventDialog() {
     const [open, setOpen] = useState(false);
     const [isPending, startTransition] = useTransition();
     const [submitError, setSubmitError] = useState<string | null>(null);
+    const [isHydrated, setIsHydrated] = useState(false);
+
+    useEffect(() => {
+        setIsHydrated(true);
+    }, []);
 
     async function handleSubmit(formData: FormData) {
         setSubmitError(null);
@@ -45,7 +50,7 @@ export function CreateEventDialog() {
             }}
         >
             <DialogTrigger asChild>
-                <Button id="new-event-btn">+ Nuova Festa</Button>
+                <Button id="new-event-btn" disabled={!isHydrated}>+ Nuova Festa</Button>
             </DialogTrigger>
             <DialogContent>
                 <form action={handleSubmit}>
