@@ -2,8 +2,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMPOSE_FILE="${ROOT_DIR}/docker-compose.prod.yml"
-ENV_FILE="${ROOT_DIR}/.env.production"
+COMPOSE_FILE="${COMPOSE_FILE:-${ROOT_DIR}/docker-compose.prod.yml}"
+ENV_FILE="${ENV_FILE:-${ROOT_DIR}/.env.production}"
+
+compose_cmd=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
+    compose_cmd+=(-p "${COMPOSE_PROJECT_NAME}")
+fi
 
 if [[ ! -f "${ENV_FILE}" ]]; then
     echo "Missing ${ENV_FILE}. Cannot run order index migration." >&2
@@ -20,7 +25,7 @@ if [[ -z "${MONGO_ROOT_USERNAME:-}" || -z "${MONGO_ROOT_PASSWORD:-}" || -z "${MO
 fi
 
 echo "[db-migration] Ensuring partial unique index on orders(eventId, pickupNumber)..."
-docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" exec -T mongo \
+"${compose_cmd[@]}" exec -T mongo \
     mongosh --quiet \
     --username "${MONGO_ROOT_USERNAME}" \
     --password "${MONGO_ROOT_PASSWORD}" \
