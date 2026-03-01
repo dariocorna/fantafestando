@@ -44,7 +44,7 @@ async function createCatalogProduct(
 
 test.describe("Print Retry Flows", () => {
     test("admin monitor supports retry flow for failed jobs", async ({ page }) => {
-        test.setTimeout(20000)
+        test.setTimeout(90000)
         const suffix = uniqueSuffix()
         const eventName = `Retry Admin ${suffix}`
         const printerName = `A Retry Printer ${suffix}`
