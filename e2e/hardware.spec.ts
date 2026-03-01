@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { ensureAdminAuthenticated } from "./utils/auth";
-import { ensureAdminEventContext, uniqueSuffix, randomIp } from "./utils/fixtures";
+import { ensureAdminEventContext, uniqueSuffix, localPrinterIp } from "./utils/fixtures";
 
 test.describe("Gestione Hardware ed Elettronica", () => {
     test.describe.configure({ timeout: 90000 });
@@ -18,7 +18,7 @@ test.describe("Gestione Hardware ed Elettronica", () => {
 
         const suffix = uniqueSuffix();
         const printerName = `Kitchen ${suffix}`;
-        const printerIp = randomIp();
+        const printerIp = localPrinterIp();
 
         await page.getByRole("button", { name: /Nuova Stampante/i }).click();
         const printerDialog = page.getByRole("dialog");

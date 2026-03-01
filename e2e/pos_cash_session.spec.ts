@@ -6,7 +6,7 @@ import {
     openPosAndSelectDevice,
     completeCashOrder,
     uniqueSuffix,
-    randomIp,
+    localPrinterIp,
 } from "./utils/fixtures"
 
 test.describe("POS apertura e chiusura cassa", () => {
@@ -25,7 +25,7 @@ test.describe("POS apertura e chiusura cassa", () => {
         const productName = `Cash Product ${suffix}`
 
         await createAndActivateEvent(page, eventName)
-        await configureCashPos(page, printerName, randomIp(), cashBoxName, posName)
+        await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName)
         await createCategoryAndProducts(page, categoryName, [{ name: productName, price: "5.00" }])
 
         await openPosAndSelectDevice(page, posName)

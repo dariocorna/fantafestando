@@ -9,7 +9,7 @@ import {
     closeCashSession,
     deleteEvent,
     uniqueSuffix,
-    randomIp,
+    localPrinterIp,
 } from "./utils/fixtures"
 
 test.describe("Admin sessioni cassa", () => {
@@ -29,7 +29,7 @@ test.describe("Admin sessioni cassa", () => {
 
         try {
             await createAndActivateEvent(page, eventName)
-            await configureCashPos(page, printerName, randomIp(), cashBoxName, posName)
+            await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName)
             await createCategoryAndProducts(page, categoryName, [{ name: productName, price: "6.00" }])
 
             await openPosAndSelectDevice(page, posName)
