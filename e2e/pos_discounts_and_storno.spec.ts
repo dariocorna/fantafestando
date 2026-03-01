@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { ensureAdminAuthenticated } from "./utils/auth"
 import {
+    createAndActivateEvent,
     configureCashPos,
     createCategoryAndProducts,
     openPosAndSelectDevice,
@@ -16,22 +17,7 @@ import {
  */
 async function createEventWithDiscountPresets(page: Page, eventName: string) {
     await ensureAdminAuthenticated(page, "/admin/settings/events")
-
-    await page.click("#new-event-btn")
-    const dialog = page.getByRole("dialog")
-    await expect(dialog).toBeVisible()
-    await dialog.locator("#name").fill(eventName)
-    await dialog.getByRole("button", { name: "Salva", exact: true }).click()
-    await expect(dialog).toBeHidden()
-    await expect(page.getByText(eventName)).toBeVisible()
-
-    await page.click('[data-testid="admin-event-selector"]')
-    await page.getByRole("option", { name: new RegExp(eventName) }).click()
-    await expect(page.getByTestId("admin-event-selector")).toContainText(eventName)
-
-    await page.goto("/admin/settings")
-    const activeCheckbox = page.locator('input[name="active"]')
-    if (!(await activeCheckbox.isChecked())) await activeCheckbox.check()
+    await createAndActivateEvent(page, eventName)
 
     // Clear existing presets then add new ones
     const quickDiscountSection = page.locator("div").filter({ hasText: /Preset Sconti Rapidi POS/i }).first()
