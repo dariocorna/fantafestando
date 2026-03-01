@@ -50,7 +50,7 @@ export default async function AdminLayout({
                         <SidebarTrigger />
                         <BrandLogoLockup
                             title="OSGFest Manager"
-                            subtitle="Oratorio in Festa"
+                            subtitle={selectableEvents.find(e => String(e._id) === currentEventId)?.name || "Festa"}
                             compact
                             variant="admin"
                             className="ml-3"

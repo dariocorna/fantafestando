@@ -14,7 +14,7 @@ describe("print-report", () => {
         const document = buildOrderPrintDocumentV2({
             printType: "CASHIER_SUMMARY",
             title: "Scontrino Cassa",
-            eventName: "Festa Oratorio",
+            eventName: "Evento Test",
             orderId: "order-abcdef123456",
             shortCode: "321",
             customerName: "Mario",
@@ -32,8 +32,8 @@ describe("print-report", () => {
         expect(document.schemaVersion).toBe(2);
         expect(document.copyLabel).toBe("COPIA CASSA");
         expect(document.referenceCode).toBe("321");
-        expect(document.eventName).toBe("Festa Oratorio");
-        expect(document.headerLines[0]).toBe("FESTA: Festa Oratorio");
+        expect(document.eventName).toBe("Evento Test");
+        expect(document.headerLines[0]).toBe("FESTA: Evento Test");
         expect(document.items[0]).toMatchObject({ qty: 2, quantity: 2, name: "Panino" });
         expect(document.footerLines).toContain("Vale solo per il ritiro");
     });
@@ -157,7 +157,7 @@ describe("print-report", () => {
     it("builds cash session document with totals and notes", () => {
         const document = buildCashSessionPrintDocumentV2({
             sessionId: "session-12345678",
-            eventName: "Festa Oratorio",
+            eventName: "Evento Test",
             posDeviceName: "Cassa 1",
             openedAt: "2026-02-28T10:00:00.000Z",
             closedAt: "2026-02-28T12:00:00.000Z",
@@ -175,7 +175,7 @@ describe("print-report", () => {
 
         expect(document.printType).toBe("CASH_SESSION_SUMMARY");
         expect(document.referenceCode).toBe("12345678");
-        expect(document.headerLines[0]).toContain("FESTA: Festa Oratorio");
+        expect(document.headerLines[0]).toContain("FESTA: Evento Test");
         expect(document.totals.map((row) => row.label)).toContain("TOTALE INCASSI");
         expect(document.footerLines.join(" ")).toContain("NOTE APERTURA");
     });
@@ -371,7 +371,7 @@ describe("print-report", () => {
             copyLabel: "COPIA CLIENTE",
             referenceCode: "123",
             createdAt: "2026-02-28T10:00:00.000Z",
-            headerLines: ["FESTA: Festa Oratorio", "CLIENTE: Mario", "TAVOLO: C1"],
+            headerLines: ["FESTA: Evento Test", "CLIENTE: Mario", "TAVOLO: C1"],
             items: [{ qty: 1, quantity: 1, name: "Panino" }],
             totals: [{ label: "TOTALE", value: "5.00 EUR", emphasis: "strong" }],
             footerLines: ["Vale solo per il ritiro"]

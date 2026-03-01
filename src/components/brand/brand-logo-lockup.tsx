@@ -32,7 +32,7 @@ const variantStyles: Record<BrandVariant, { title: string; subtitle: string; bad
 
 export function BrandLogoLockup({
     title,
-    subtitle = "Oratorio Bonate Sotto",
+    subtitle = "Festa",
     compact = false,
     variant = "menu",
     className,
@@ -44,7 +44,7 @@ export function BrandLogoLockup({
         <div className={cn("flex min-w-0 items-center gap-3", className)} data-testid={dataTestId}>
             <Image
                 src="/icons/icon-96x96.png"
-                alt="Logo Oratorio in Festa"
+                alt="Logo Festa"
                 width={compact ? 44 : 58}
                 height={compact ? 44 : 58}
                 className={cn(
