@@ -27,7 +27,7 @@ export default defineConfig({
         },
     ],
     webServer: {
-        command: `npm run dev -- --port ${playwrightPort}`,
+        command: `npx next dev --webpack --port ${playwrightPort}`,
         url: baseURL,
         reuseExistingServer: !process.env.CI,
     },
