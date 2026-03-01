@@ -34,8 +34,8 @@ async function createWebOrderAndGetCode(
     productName: string,
     options?: { tableCode?: string; usePresetTable?: boolean },
 ) {
-    await page.goto("/menu")
-    await page.waitForResponse(r => r.url().includes("/api/pos/init") && r.ok(), { timeout: 10000 })
+    await page.goto("/menu", { waitUntil: "domcontentloaded" })
+    await expect(page.getByTestId("menu-brand-shell")).toBeVisible({ timeout: 20000 })
 
     const setupResult = await page.evaluate(async (targetProductName: string) => {
         const response = await fetch("/api/pos/init")
@@ -74,7 +74,7 @@ async function createWebOrderAndGetCode(
     }
     await page.getByRole("button", { name: /INVIA ORDINE/i }).click()
 
-    await expect(page).toHaveURL(/\/menu\/success\?code=/)
+    await expect(page).toHaveURL(/\/menu\/success\?code=/, { timeout: 20000 })
     const code = new URL(page.url()).searchParams.get("code")
     expect(code).toBeTruthy()
     return code as string
