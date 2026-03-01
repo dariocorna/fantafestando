@@ -38,16 +38,19 @@ test.describe("Printer Emulation", () => {
         const provisionButton = page.getByRole("button", { name: "Provisiona 10 virtuali" });
         await provisionButton.click();
         await expect(page.getByText("Virtual Printer 10")).toBeVisible({ timeout: 15000 });
-        await expect(page.getByText(/(printer-emulator|127\.0\.0\.1):19109/)).toBeVisible({ timeout: 15000 });
+        await expect(page.locator('[data-slot="card"]', { hasText: "Virtual Printer 10" })).toContainText(/19109/);
 
         await page.getByRole("tab", { name: "Monitor Stampa" }).click();
         await page.getByRole("button", { name: "Genera Ricevuta Demo" }).click();
 
-        await expect(page.getByText("Ricevuta Demo")).toBeVisible({ timeout: 15000 });
-        await expect(page.getByText("SENT")).toBeVisible({ timeout: 15000 });
+        const demoJobBtn = page.getByRole("button").filter({ hasText: "Test manuale" }).first();
+        await expect(demoJobBtn).toBeVisible({ timeout: 15000 });
+        await expect(demoJobBtn).toContainText("SENT", { timeout: 15000 });
+        await demoJobBtn.click();
+
         await expect(page.getByTestId("print-job-breakdown")).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId("print-job-breakdown")).toContainText("Copia:");
-        await expect(page.getByTestId("print-job-breakdown")).toContainText("Riferimento:");
+        await expect(page.getByTestId("print-job-breakdown")).toContainText("Ordine N°:");
         await expect(page.getByTestId("print-job-totals")).toContainText("TOTALE");
         await expect(page.getByTestId("print-job-preview")).toBeVisible();
     });

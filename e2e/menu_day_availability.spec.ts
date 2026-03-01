@@ -38,6 +38,14 @@ async function createProductWithDay(page: Page, options: {
 test.describe("Disponibilità prodotti per giorno", () => {
     test.describe.configure({ mode: "serial" })
 
+    test.beforeEach(async ({ page }) => {
+        page.on('console', msg => {
+            if (msg.text().startsWith('[DEBUG]')) {
+                console.log(msg.text());
+            }
+        });
+    });
+
     test("mostra nel menu solo i prodotti disponibili oggi", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso validato su desktop.")
 
@@ -87,16 +95,16 @@ test.describe("Disponibilità prodotti per giorno", () => {
 
         await page.goto("/menu")
         await page.waitForResponse(r => r.url().includes("/api/pos/init") && r.ok(), { timeout: 10000 })
-        await expect(page.getByText(productName)).toBeVisible()
+        await expect(page.getByText(productName).first()).toBeVisible()
 
         const productCard = page.locator("div.bg-white")
             .filter({ has: page.getByRole("heading", { name: productName, level: 3 }) }).first()
         await productCard.locator("button").first().click()
         await page.getByRole("button", { name: /Vedi Carrello/i }).click()
-        await page.getByRole("button", { name: /PROSEGUI/i }).click()
 
-        await expect(page).toHaveURL(/\/menu\/checkout/)
-        await expect(page.getByText(productName)).toBeVisible()
+        // Wait for overlay to be visible
+        await expect(page.getByRole("heading", { name: "Il tuo ordine" })).toBeVisible()
+        await expect(page.getByText(productName).first()).toBeVisible()
 
         // Change product availability to a different day
         await page.goto("/admin/catalog")
@@ -110,12 +118,13 @@ test.describe("Disponibilità prodotti per giorno", () => {
             { timeout: 10000 },
         ).toBeTruthy()
 
-        await page.goto("/menu/checkout")
-        await expect(page.getByText(productName)).toBeVisible()
+        await page.goto("/menu")
+        await page.getByRole("button", { name: /Vedi Carrello/i }).click()
+        await expect(page.getByRole("heading", { name: "Il tuo ordine" })).toBeVisible()
+        await expect(page.getByText(productName).first()).toBeVisible()
 
-        await page.getByRole("button", { name: /INVIA ORDINE/i }).click()
-        const errorBanner = page.getByRole("alert").filter({ hasText: /non sono più disponibili oggi/i }).first()
-        await expect(errorBanner).toBeVisible()
-        await expect(page).toHaveURL(/\/menu\/checkout/)
+        await page.getByRole("button", { name: /INVIA ORDINE/i }).click();
+        await expect(page.getByText(/alcuni prodotti.*non sono più disponibili/i)).toBeVisible();
+
     })
 })
