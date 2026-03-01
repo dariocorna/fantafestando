@@ -27,6 +27,15 @@ docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" exec -T mongo \
     --authenticationDatabase admin \
     "${MONGODB_URI}" \
     --eval '
+const collectionExists =
+  db.getCollectionNames().includes("orders") ||
+  db.getSiblingDB(db.getName()).getCollectionNames().includes("orders");
+
+if (!collectionExists) {
+  print("[db-migration] orders collection not found yet, skipping index migration.");
+  quit(0);
+}
+
 const idxName = "eventId_1_pickupNumber_1";
 const isTarget = (idx) => idx && idx.name === idxName;
 const isCorrect = (idx) =>
