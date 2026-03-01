@@ -205,7 +205,7 @@ export async function configureElectronicPos(
     await expect(page.getByText(posName)).toBeVisible();
 }
 
-export function randomIp(): string {
+export function localPrinterIp(): string {
     return "127.0.0.1";
 }
 
