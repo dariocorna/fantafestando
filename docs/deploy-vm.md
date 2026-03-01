@@ -260,6 +260,52 @@ Controllare che `release` nei payload `/api/health` corrisponda al commit atteso
   - endpoint health locali (`127.0.0.1:3101/3102`)
   - release pubblicata (`/api/health`).
 
+### 6.4 Deploy rapido su VM Oracle nuova
+
+Per VM Oracle appena create (Ubuntu), usare lo script unificato che:
+- installa e configura dipendenze base (`docker`, `docker compose`, `caddy`, `nginx`, `ufw`, `git`, `rsync`)
+- sincronizza il repository sulla VM
+- aggiorna metadata release (`APP_VERSION`, `APP_BUILD`, `APP_BUILD_DATE`)
+- builda e avvia stack Docker Compose direttamente sulla VM (no dipendenza da `.next` locale)
+- esegue health check locali su VM
+
+Comando:
+
+```bash
+cd /path/to/osgfest
+cp .env.production.example .env.production
+# compilare .env.production con i valori reali prima del primo deploy
+
+npm run deploy:oracle -- \
+  --host 84.8.251.115 \
+  --user ubuntu \
+  --key ~/.ssh/<chiave-oracle>.pem \
+  --profile demo
+```
+
+Note operative:
+- Lo script bootstrap disabilita `nginx` e abilita `caddy` per evitare conflitti su porte `80/443` (entrambi restano installati).
+- Lo script Oracle salta la build locale di default: la compilazione Next.js avviene dentro il Docker build remoto.
+- Se vuoi mantenere un controllo preliminare locale, puoi forzare la build locale:
+
+```bash
+npm run deploy:oracle -- \
+  --host 84.8.251.115 \
+  --user ubuntu \
+  --key ~/.ssh/<chiave-oracle>.pem \
+  --local-build
+```
+
+- Per rieseguire solo deploy applicativo senza reinstallare componenti host:
+
+```bash
+npm run deploy:oracle -- \
+  --host 84.8.251.115 \
+  --user ubuntu \
+  --key ~/.ssh/<chiave-oracle>.pem \
+  --no-bootstrap
+```
+
 ## 7. Rollback
 
 ```bash
