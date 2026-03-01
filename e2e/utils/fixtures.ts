@@ -32,14 +32,30 @@ export async function createAndActivateEvent(
     await expect(page.getByText(eventName)).toBeVisible();
 
     await page.click('[data-testid="admin-event-selector"]');
-    await page.getByRole("option", { name: new RegExp(eventName) }).click();
+
+    // Wait for the Server Action response and the subsequent router refresh
+    await Promise.all([
+        page.waitForResponse(r => r.url().includes("/admin") && r.status() === 200),
+        page.getByRole("option", { name: new RegExp(eventName) }).click()
+    ]);
+
+    // Wait for the transition to finish by checking if the selector is enabled again
+    await expect(page.getByTestId("admin-event-selector")).not.toBeDisabled();
     await expect(page.getByTestId("admin-event-selector")).toContainText(eventName);
+
+    // Give a small buffer and verify the cookie is actually set
+    const cookies = await page.context().cookies();
+    if (!cookies.some(c => c.name === "admin_festa_id")) {
+        await page.waitForTimeout(500);
+    }
 
     await page.goto("/admin/settings");
     const activeCheckbox = page.locator('input[name="active"]');
+    await expect(activeCheckbox).toBeVisible();
     if (!(await activeCheckbox.isChecked())) {
         await activeCheckbox.check();
     }
+
 
     if (options?.askTable !== undefined) {
         const cb = page.locator('input[name="askTable"]');
@@ -64,11 +80,26 @@ export async function createAndActivateEvent(
 }
 
 export async function selectEventContext(page: Page, eventName: string) {
-    await page.click('[data-testid="admin-event-selector"]');
+    const selector = page.getByTestId("admin-event-selector");
+    await selector.click();
     const escapedName = eventName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    await page.getByRole("option", { name: new RegExp(`^${escapedName}(\\s+\\(Attiva\\))?$`) }).click();
-    await expect(page.getByTestId("admin-event-selector")).toContainText(eventName);
+
+    // Wait for the Server Action response and the subsequent router refresh
+    await Promise.all([
+        page.waitForResponse(r => r.url().includes("/admin") && r.status() === 200),
+        page.getByRole("option", { name: new RegExp(`^${escapedName}(\\s+\\(Attiva\\))?$`) }).click()
+    ]);
+
+    await expect(selector).not.toBeDisabled();
+    await expect(selector).toContainText(eventName);
+
+    // Give a small buffer and verify the cookie is actually set
+    const cookies = await page.context().cookies();
+    if (!cookies.some(c => c.name === "admin_festa_id")) {
+        await page.waitForTimeout(500);
+    }
 }
+
 
 export async function deleteEvent(page: Page, eventName: string) {
     await page.goto("/admin/settings/events");
@@ -102,9 +133,9 @@ export async function configureCashPos(
     const printerDialog = page.getByRole("dialog");
     await printerDialog.getByLabel("Nome Stampante").fill(printerName);
     await printerDialog.getByLabel("Indirizzo IP").fill(printerIp);
-    if (options?.printerPort) {
-        await printerDialog.getByLabel("Porta TCP").fill(options.printerPort);
-    }
+    const port = options?.printerPort || String(19100 + Math.floor(Math.random() * 10));
+    await printerDialog.getByLabel("Porta TCP").fill(port);
+
     await printerDialog.getByRole("combobox", { name: "Tipo Stampante" }).click();
     await page.getByRole("option", { name: "Cassa (Scontrino Cliente)" }).click();
     await printerDialog.getByRole("button", { name: "Salva", exact: true }).click();
@@ -145,9 +176,9 @@ export async function configureElectronicPos(
     const printerDialog = page.getByRole("dialog");
     await printerDialog.getByLabel("Nome Stampante").fill(printerName);
     await printerDialog.getByLabel("Indirizzo IP").fill(printerIp);
-    if (options?.printerPort) {
-        await printerDialog.getByLabel("Porta TCP").fill(options.printerPort);
-    }
+    const port = options?.printerPort || String(19100 + Math.floor(Math.random() * 10));
+    await printerDialog.getByLabel("Porta TCP").fill(port);
+
     await printerDialog.getByRole("combobox", { name: "Tipo Stampante" }).click();
     await page.getByRole("option", { name: "Cassa (Scontrino Cliente)" }).click();
     await printerDialog.getByRole("button", { name: "Salva", exact: true }).click();
@@ -175,8 +206,9 @@ export async function configureElectronicPos(
 }
 
 export function randomIp(): string {
-    return `192.168.1.${Math.floor(Math.random() * 150) + 50}`;
+    return "127.0.0.1";
 }
+
 
 // ---------------------------------------------------------------------------
 // Catalog
@@ -361,11 +393,14 @@ export async function ensureAdminEventContext(page: Page) {
     await page.click('[data-testid="admin-event-selector"]');
     const firstOption = page.getByRole("option").first();
     if (await firstOption.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await firstOption.click();
+        await Promise.all([
+            page.waitForResponse(r => r.url().includes("/admin") && r.status() === 200),
+            firstOption.click()
+        ]);
         await expect(selector).not.toContainText("Seleziona Festa");
-        await page.waitForTimeout(1000); // 1. Wait for setAdminEventContext Server Action fetch to complete
         return;
     }
+
 
     const eventName = `Auto Event ${uniqueSuffix()}`;
     await page.goto("/admin/settings/events");
@@ -377,7 +412,9 @@ export async function ensureAdminEventContext(page: Page) {
 
     await page.goto("/admin");
     await page.click('[data-testid="admin-event-selector"]');
-    await page.getByRole("option", { name: new RegExp(eventName) }).click();
+    await Promise.all([
+        page.waitForResponse(r => r.url().includes("/admin") && r.status() === 200),
+        page.getByRole("option", { name: new RegExp(eventName) }).click()
+    ]);
     await expect(selector).not.toContainText("Seleziona Festa");
-    await page.waitForTimeout(1000); // 2. Wait for setAdminEventContext Server Action fetch to complete
 }

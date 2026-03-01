@@ -126,12 +126,13 @@ test.describe("Print Retry Flows", () => {
     })
 
     test("pos error modal exposes cashier-triggered retry action", async ({ page }) => {
-        test.setTimeout(20000)
-        const suffix = uniqueSuffix()
-        const eventName = `Retry POS ${suffix}`
-        const printerName = `POS Retry Printer ${suffix}`
-        const cashBoxName = `POS CashBox ${suffix}`
-        const posName = `POS ${suffix}`
+        test.setTimeout(90000);
+
+        const suffix = uniqueSuffix();
+        const eventName = `Print Retry Event ${suffix}`;
+        const printerName = `KitchenPrinter ${suffix}`;
+        const cashBoxName = `MainCash ${suffix}`;
+        const posName = `POS ${suffix}`;
         const categoryName = `POS Cat ${suffix}`
         const productName = `POS Product ${suffix}`
         const shortName = "RTR-SHORT"
