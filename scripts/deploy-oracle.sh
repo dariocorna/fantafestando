@@ -6,12 +6,20 @@ REMOTE_HOST="${DEPLOY_HOST:-}"
 REMOTE_USER="${DEPLOY_USER:-ubuntu}"
 REMOTE_PATH="${DEPLOY_PATH:-/opt/osgfest}"
 PROFILE="${DEPLOY_PROFILE:-demo}"
+PROJECT_NAME="${DEPLOY_PROJECT_NAME:-osgfest}"
+BACKOFFICE_PORT="${DEPLOY_BACKOFFICE_PORT:-3101}"
+MENU_PORT="${DEPLOY_MENU_PORT:-3102}"
+LOCAL_ENV_FILE="${DEPLOY_ENV_FILE:-.env.production}"
+REMOTE_ENV_FILE_NAME="${DEPLOY_REMOTE_ENV_FILE_NAME:-.env.production}"
+PRINTER_HOST="${DEPLOY_PRINTER_HOST:-}"
+PRINTER_START_PORT="${DEPLOY_PRINTER_START_PORT:-}"
 SSH_KEY="${DEPLOY_SSH_KEY:-}"
 BOOTSTRAP=true
 SKIP_BUILD=true
 SKIP_RSYNC=false
 SKIP_HEALTH_CHECK=false
 USE_CACHE=false
+NO_PROFILE=false
 
 usage() {
   cat <<'USAGE'
@@ -22,7 +30,15 @@ Options:
   --user <ssh-user>          SSH user (default: ubuntu)
   --key <path>               SSH private key path
   --path <remote-path>       Remote app path (default: /opt/osgfest)
+  --project-name <name>      Docker compose project name (default: osgfest)
+  --backoffice-port <port>   Host bind port for backoffice (default: 3101)
+  --menu-port <port>         Host bind port for menu (default: 3102)
+  --env-file <local-path>    Local env file to upload (default: .env.production)
+  --remote-env-file <name>   Remote env file name (default: .env.production)
   --profile <profile>        Docker compose profile (default: demo)
+  --no-profile               Disable compose profile on `up`
+  --printer-host <host>      Override PRINTER_EMULATOR_HOST in remote env file
+  --printer-start-port <n>   Override PRINTER_EMULATOR_START_PORT in remote env file
   --no-bootstrap             Skip remote bootstrap (docker/caddy/nginx)
   --local-build              Run local npm run build before deploy
   --skip-build               Skip local build (backward-compatible alias)
@@ -47,7 +63,15 @@ while [[ $# -gt 0 ]]; do
     --user) REMOTE_USER="${2:-}"; shift 2 ;;
     --key) SSH_KEY="${2:-}"; shift 2 ;;
     --path) REMOTE_PATH="${2:-}"; shift 2 ;;
+    --project-name) PROJECT_NAME="${2:-}"; shift 2 ;;
+    --backoffice-port) BACKOFFICE_PORT="${2:-}"; shift 2 ;;
+    --menu-port) MENU_PORT="${2:-}"; shift 2 ;;
+    --env-file) LOCAL_ENV_FILE="${2:-}"; shift 2 ;;
+    --remote-env-file) REMOTE_ENV_FILE_NAME="${2:-}"; shift 2 ;;
     --profile) PROFILE="${2:-}"; shift 2 ;;
+    --no-profile) NO_PROFILE=true; shift ;;
+    --printer-host) PRINTER_HOST="${2:-}"; shift 2 ;;
+    --printer-start-port) PRINTER_START_PORT="${2:-}"; shift 2 ;;
     --no-bootstrap) BOOTSTRAP=false; shift ;;
     --local-build) SKIP_BUILD=false; shift ;;
     --skip-build) SKIP_BUILD=true; shift ;;
@@ -72,8 +96,8 @@ require_cmd ssh
 
 cd "${ROOT_DIR}"
 
-if [[ ! -f .env.production ]]; then
-  echo "Missing ${ROOT_DIR}/.env.production. Create from .env.production.example first." >&2
+if [[ ! -f "${LOCAL_ENV_FILE}" ]]; then
+  echo "Missing ${ROOT_DIR}/${LOCAL_ENV_FILE}. Create it from .env.production.example first." >&2
   exit 1
 fi
 
@@ -83,10 +107,12 @@ fi
 
 BUILD_SHA="$(git rev-parse --short HEAD)"
 VERSION="$(node -p "require('./package.json').version")"
-BUILD_DATE="$(date '+%Y-%m-%d %H:%M')"
+BUILD_DATE="$(date '+%Y-%m-%dT%H:%M:%S%z')"
 
 echo "[deploy-oracle] Host: ${REMOTE_USER}@${REMOTE_HOST}"
 echo "[deploy-oracle] Path: ${REMOTE_PATH}"
+echo "[deploy-oracle] Project: ${PROJECT_NAME}"
+echo "[deploy-oracle] Ports: backoffice=${BACKOFFICE_PORT}, menu=${MENU_PORT}"
 echo "[deploy-oracle] Profile: ${PROFILE}"
 echo "[deploy-oracle] Version: ${VERSION}"
 echo "[deploy-oracle] Build SHA: ${BUILD_SHA}"
@@ -129,11 +155,12 @@ if [[ "${SKIP_RSYNC}" == "false" ]]; then
 fi
 
 echo "[deploy-oracle] Preparing runtime directories and env file..."
-scp "${SSH_OPTS[@]}" .env.production "${SSH_TARGET}:${REMOTE_PATH}/.env.production"
+REMOTE_ENV_FILE="${REMOTE_PATH}/${REMOTE_ENV_FILE_NAME}"
+scp "${SSH_OPTS[@]}" "${LOCAL_ENV_FILE}" "${SSH_TARGET}:${REMOTE_ENV_FILE}"
 ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "cd '${REMOTE_PATH}' && mkdir -p public/uploads/menu-headers && chmod -R a+rwX public/uploads"
 
 echo "[deploy-oracle] Rebuilding and restarting remote stack..."
-ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" bash -s -- "${REMOTE_PATH}" "${BUILD_SHA}" "${PROFILE}" "${USE_CACHE}" "${VERSION}" "${BUILD_DATE}" <<'EOS'
+ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" bash -s -- "${REMOTE_PATH}" "${BUILD_SHA}" "${PROFILE}" "${USE_CACHE}" "${VERSION}" "${BUILD_DATE}" "${PROJECT_NAME}" "${BACKOFFICE_PORT}" "${MENU_PORT}" "${REMOTE_ENV_FILE_NAME}" "${PRINTER_HOST:-__EMPTY__}" "${PRINTER_START_PORT:-__EMPTY__}" "${NO_PROFILE}" <<'EOS'
 set -euo pipefail
 
 REMOTE_PATH="$1"
@@ -142,41 +169,93 @@ PROFILE="$3"
 USE_CACHE="$4"
 VERSION="$5"
 BUILD_DATE="$6"
+PROJECT_NAME="$7"
+BACKOFFICE_PORT="$8"
+MENU_PORT="$9"
+ENV_FILE_NAME="${10}"
+PRINTER_HOST="${11:-__EMPTY__}"
+PRINTER_START_PORT="${12:-__EMPTY__}"
+NO_PROFILE="${13:-false}"
+ENV_FILE="${REMOTE_PATH}/${ENV_FILE_NAME}"
+COMPOSE_FILE="${REMOTE_PATH}/docker-compose.prod.yml"
 
 cd "${REMOTE_PATH}"
 
-if grep -q '^APP_BUILD=' .env.production; then
-  sed -i -E "s/^APP_BUILD=.*/APP_BUILD=${BUILD_SHA}/" .env.production
+if grep -q '^APP_BUILD=' "${ENV_FILE}"; then
+  sed -i -E "s/^APP_BUILD=.*/APP_BUILD=${BUILD_SHA}/" "${ENV_FILE}"
 else
-  echo "APP_BUILD=${BUILD_SHA}" >> .env.production
+  echo "APP_BUILD=${BUILD_SHA}" >> "${ENV_FILE}"
 fi
 
-if grep -q '^APP_BUILD_DATE=' .env.production; then
-  sed -i -E "s/^APP_BUILD_DATE=.*/APP_BUILD_DATE=\"${BUILD_DATE}\"/" .env.production
+if grep -q '^APP_BUILD_DATE=' "${ENV_FILE}"; then
+  sed -i -E "s/^APP_BUILD_DATE=.*/APP_BUILD_DATE=\"${BUILD_DATE}\"/" "${ENV_FILE}"
 else
-  echo "APP_BUILD_DATE=\"${BUILD_DATE}\"" >> .env.production
+  echo "APP_BUILD_DATE=\"${BUILD_DATE}\"" >> "${ENV_FILE}"
 fi
 
-if grep -q '^APP_VERSION=' .env.production; then
-  sed -i -E "s/^APP_VERSION=.*/APP_VERSION=${VERSION}/" .env.production
+if grep -q '^APP_VERSION=' "${ENV_FILE}"; then
+  sed -i -E "s/^APP_VERSION=.*/APP_VERSION=${VERSION}/" "${ENV_FILE}"
 else
-  echo "APP_VERSION=${VERSION}" >> .env.production
+  echo "APP_VERSION=${VERSION}" >> "${ENV_FILE}"
 fi
+
+if grep -q '^BACKOFFICE_BIND_PORT=' "${ENV_FILE}"; then
+  sed -i -E "s/^BACKOFFICE_BIND_PORT=.*/BACKOFFICE_BIND_PORT=${BACKOFFICE_PORT}/" "${ENV_FILE}"
+else
+  echo "BACKOFFICE_BIND_PORT=${BACKOFFICE_PORT}" >> "${ENV_FILE}"
+fi
+
+if grep -q '^MENU_BIND_PORT=' "${ENV_FILE}"; then
+  sed -i -E "s/^MENU_BIND_PORT=.*/MENU_BIND_PORT=${MENU_PORT}/" "${ENV_FILE}"
+else
+  echo "MENU_BIND_PORT=${MENU_PORT}" >> "${ENV_FILE}"
+fi
+
+if [[ "${PRINTER_HOST}" == "__EMPTY__" ]]; then
+  PRINTER_HOST=""
+fi
+
+if [[ "${PRINTER_START_PORT}" == "__EMPTY__" ]]; then
+  PRINTER_START_PORT=""
+fi
+
+if [[ -n "${PRINTER_HOST}" ]]; then
+  if grep -q '^PRINTER_EMULATOR_HOST=' "${ENV_FILE}"; then
+    sed -i -E "s|^PRINTER_EMULATOR_HOST=.*|PRINTER_EMULATOR_HOST=${PRINTER_HOST}|" "${ENV_FILE}"
+  else
+    echo "PRINTER_EMULATOR_HOST=${PRINTER_HOST}" >> "${ENV_FILE}"
+  fi
+fi
+
+if [[ -n "${PRINTER_START_PORT}" ]]; then
+  if grep -q '^PRINTER_EMULATOR_START_PORT=' "${ENV_FILE}"; then
+    sed -i -E "s|^PRINTER_EMULATOR_START_PORT=.*|PRINTER_EMULATOR_START_PORT=${PRINTER_START_PORT}|" "${ENV_FILE}"
+  else
+    echo "PRINTER_EMULATOR_START_PORT=${PRINTER_START_PORT}" >> "${ENV_FILE}"
+  fi
+fi
+
+compose_base=(sudo docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}")
 
 if [[ "${USE_CACHE}" == "true" ]]; then
-  sudo docker compose --env-file .env.production -f docker-compose.prod.yml build osgfest-backoffice osgfest-menu
+  "${compose_base[@]}" build osgfest-backoffice osgfest-menu
 else
-  sudo docker compose --env-file .env.production -f docker-compose.prod.yml build --no-cache osgfest-backoffice osgfest-menu
+  "${compose_base[@]}" build --no-cache osgfest-backoffice osgfest-menu
 fi
 
-sudo docker compose --env-file .env.production -f docker-compose.prod.yml --profile "${PROFILE}" up -d --remove-orphans
-sudo bash "${REMOTE_PATH}/scripts/migrate-order-pickup-index.sh"
-sudo docker compose --env-file .env.production -f docker-compose.prod.yml ps
+if [[ "${NO_PROFILE}" == "true" ]]; then
+  "${compose_base[@]}" up -d --remove-orphans
+else
+  "${compose_base[@]}" --profile "${PROFILE}" up -d --remove-orphans
+fi
+
+sudo COMPOSE_PROJECT_NAME="${PROJECT_NAME}" ENV_FILE="${ENV_FILE}" COMPOSE_FILE="${COMPOSE_FILE}" bash "${REMOTE_PATH}/scripts/migrate-order-pickup-index.sh"
+"${compose_base[@]}" ps
 EOS
 
 if [[ "${SKIP_HEALTH_CHECK}" == "false" ]]; then
   echo "[deploy-oracle] Running remote health checks..."
-  ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" 'curl -fsS http://127.0.0.1:3101/api/health && echo && curl -fsS http://127.0.0.1:3102/api/health'
+  ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "curl -fsS http://127.0.0.1:${BACKOFFICE_PORT}/api/health && echo && curl -fsS http://127.0.0.1:${MENU_PORT}/api/health"
 fi
 
 echo "[deploy-oracle] Completed."
