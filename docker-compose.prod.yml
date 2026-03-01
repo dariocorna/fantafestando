@@ -1,7 +1,6 @@
 services:
   mongo:
     image: mongo:8
-    container_name: osgfest_mongo
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
@@ -32,7 +31,6 @@ services:
       context: .
       dockerfile: Dockerfile
     image: osgfest-app:latest
-    container_name: osgfest_backoffice
     restart: unless-stopped
     depends_on:
       mongo:
@@ -48,9 +46,11 @@ services:
       PRINTER_EMULATOR_START_PORT: ${PRINTER_EMULATOR_START_PORT:-19100}
       PORT: 3000
     ports:
-      - '127.0.0.1:3101:3000'
+      - '127.0.0.1:${BACKOFFICE_BIND_PORT:-3101}:3000'
     volumes:
       - ./public/uploads:/app/public/uploads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - osgfest_net
     healthcheck:
@@ -67,7 +67,6 @@ services:
 
   osgfest-menu:
     image: osgfest-app:latest
-    container_name: osgfest_menu
     restart: unless-stopped
     depends_on:
       mongo:
@@ -85,9 +84,11 @@ services:
       PRINTER_EMULATOR_START_PORT: ${PRINTER_EMULATOR_START_PORT:-19100}
       PORT: 3000
     ports:
-      - '127.0.0.1:3102:3000'
+      - '127.0.0.1:${MENU_BIND_PORT:-3102}:3000'
     volumes:
       - ./public/uploads:/app/public/uploads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - osgfest_net
     healthcheck:
@@ -104,7 +105,6 @@ services:
 
   printer-emulator:
     image: node:20-alpine
-    container_name: osgfest_printer_emulator
     restart: unless-stopped
     profiles:
       - demo
@@ -122,13 +122,7 @@ services:
 
 volumes:
   mongo_data:
-    name: osgfest_mongo_data
   printer_emulator_data:
-    name: osgfest_printer_emulator_data
 
 networks:
   osgfest_net:
-    name: osgfest_net
-    ipam:
-      config:
-        - subnet: 10.202.0.0/24
