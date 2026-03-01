@@ -53,12 +53,27 @@ interface ActiveEventSummary {
     }
 }
 
+function loadInitialCart(): CartItem[] {
+    if (typeof window === "undefined") return []
+
+    const savedCart = window.localStorage.getItem("osg_cart")
+    if (!savedCart) return []
+
+    try {
+        const parsed = JSON.parse(savedCart)
+        return Array.isArray(parsed) ? parsed : []
+    } catch (error) {
+        console.error("Failed to parse cart from localStorage", error)
+        return []
+    }
+}
+
 export default function CustomerMenu() {
     const [categories, setCategories] = useState<Category[]>([])
     const [products, setProducts] = useState<Product[]>([])
     const [activeEvent, setActiveEvent] = useState<ActiveEventSummary | null>(null)
     const [activeTab, setActiveTab] = useState("")
-    const [cart, setCart] = useState<CartItem[]>([])
+    const [cart, setCart] = useState<CartItem[]>(loadInitialCart)
     const [isCartOpen, setIsCartOpen] = useState(false)
     const router = useRouter()
 
@@ -92,6 +107,10 @@ export default function CustomerMenu() {
         }
         fetchData()
     }, [])
+
+    useEffect(() => {
+        localStorage.setItem("osg_cart", JSON.stringify(cart))
+    }, [cart])
 
     const totalItems = cart.reduce((acc, item) => acc + item.quantity, 0)
     const totalPrice = cart.reduce((acc, item) => acc + (item.basePrice * item.quantity), 0)

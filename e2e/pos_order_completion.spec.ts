@@ -56,7 +56,8 @@ async function createWebOrderAndGetCode(
 
     expect(setupResult.success).toBeTruthy()
 
-    await page.goto("/menu/checkout")
+    await page.reload()
+    await page.getByRole("button", { name: /Vedi Carrello/i }).click()
     await expect(page.getByRole("button", { name: /INVIA ORDINE/i })).toBeVisible()
     if (options?.tableCode) {
         const tableCode = options.tableCode.toUpperCase()
@@ -69,7 +70,7 @@ async function createWebOrderAndGetCode(
             await tableInput.fill(tableCode)
         }
 
-        await expect(page.getByText(new RegExp(`Tavolo selezionato:\\s*${escapeRegExp(tableCode)}`, "i"))).toBeVisible()
+        await expect(tableInput).toHaveValue(tableCode)
     }
     await page.getByRole("button", { name: /INVIA ORDINE/i }).click()
 
@@ -109,8 +110,8 @@ test.describe("POS - Completamento ordine da codice", () => {
 
         await page.getByRole("button", { name: /Carica ordine da codice/i }).click()
         const loadDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i })
-        await loadDialog.getByLabel(/Codice ordine/i).fill(orderCode)
-        await loadDialog.getByRole("button", { name: /Carica Ordine/i }).click()
+        await loadDialog.getByRole("textbox").fill(orderCode)
+        await loadDialog.getByRole("button", { name: /Carica/i, exact: true }).click()
 
         await expect(page.getByText(new RegExp(`Codice ${orderCode}`, "i"))).toBeVisible()
         await expect(page.getByText(new RegExp(`Tavolo ${tableCode}`, "i"))).toBeVisible()

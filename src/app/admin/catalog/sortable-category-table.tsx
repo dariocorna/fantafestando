@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useTransition } from "react";
 import {
     DndContext,
     closestCenter,
@@ -69,6 +69,8 @@ export function SortableCategoryTable({
         setCategories(initialCategories);
     }, [initialCategories]);
 
+    const [isPending, startTransition] = useTransition();
+
     const sensors = useSensors(
         useSensor(PointerSensor, {
             activationConstraint: {
@@ -90,7 +92,15 @@ export function SortableCategoryTable({
             if (oldIndex !== -1 && newIndex !== -1) {
                 const newOrder = arrayMove(categories, oldIndex, newIndex);
                 setCategories(newOrder); // Optimistic UI update
-                onReorder(newOrder.map(c => String(c._id)));
+
+                startTransition(async () => {
+                    try {
+                        await onReorder(newOrder.map(c => String(c._id)));
+                    } catch (error) {
+                        console.error("Reorder failed, reverting:", error);
+                        setCategories(initialCategories);
+                    }
+                });
             }
         }
     }
