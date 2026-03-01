@@ -196,7 +196,7 @@ export default function CustomerMenu() {
                         ) : (
                             <div className="space-y-1">
                                 <p className="brand-chip inline-flex px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em]">
-                                    Oratorio in Festa
+                                    {activeEvent?.name || "Festa"}
                                 </p>
                                 <h1 className="font-brand-display truncate text-2xl font-extrabold tracking-tight text-[var(--brand-blue-700)] md:text-3xl">
                                     {activeEvent?.name || "OSG Fest"}
