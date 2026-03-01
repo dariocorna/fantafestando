@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { ensureAdminAuthenticated } from "./utils/auth";
-import { ensureAdminEventContext, uniqueSuffix, randomIp } from "./utils/fixtures";
+import { ensureAdminEventContext, uniqueSuffix, localPrinterIp } from "./utils/fixtures";
 
 test.describe("Eliminazione entità hardware", () => {
     test.beforeEach(async ({ page }) => {
@@ -18,7 +18,7 @@ test.describe("Eliminazione entità hardware", () => {
 
         const suffix = uniqueSuffix();
         const printerName = `Printer Del ${suffix}`;
-        const printerIp = randomIp();
+        const printerIp = localPrinterIp();
 
         await page.getByRole("button", { name: /Nuova Stampante/i }).click();
         const dialog = page.getByRole("dialog");

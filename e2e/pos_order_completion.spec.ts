@@ -6,7 +6,7 @@ import {
     openCashSessionIfRequired,
     dismissFeedbackModal,
     uniqueSuffix,
-    randomIp,
+    localPrinterIp,
     type CreateEventOptions,
 } from "./utils/fixtures"
 
@@ -100,7 +100,7 @@ test.describe("POS - Completamento ordine da codice", () => {
             askTable: true,
             predefinedTables: [tableCode, overrideTableCode, "A01"],
         })
-        await configureCashPos(page, printerName, randomIp(), cashBoxName, posName)
+        await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName)
         await createCatalogProduct(page, categoryName, productName, "8.00")
 
         const orderCode = await createWebOrderAndGetCode(page, productName, { tableCode, usePresetTable: true })

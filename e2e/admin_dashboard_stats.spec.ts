@@ -7,7 +7,7 @@ import {
     openCashSessionIfRequired,
     completeCashOrder,
     uniqueSuffix,
-    randomIp,
+    localPrinterIp,
 } from "./utils/fixtures"
 
 test.describe("Dashboard statistiche e reportistica", () => {
@@ -28,7 +28,7 @@ test.describe("Dashboard statistiche e reportistica", () => {
         const unsoldName = `Unsold ${suffix}`
 
         await createAndActivateEvent(page, eventName)
-        await configureCashPos(page, printerName, randomIp(), cashBoxName, posName)
+        await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName)
         await createCategoryAndProducts(page, categoryName, [
             { name: bestsellerName, price: "4.00" },
             { name: supportingName, price: "3.00" },

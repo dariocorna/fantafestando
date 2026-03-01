@@ -7,7 +7,7 @@ import {
     openCashSession,
     dismissFeedbackModal,
     uniqueSuffix,
-    randomIp,
+    localPrinterIp,
 } from "./utils/fixtures"
 
 /**
@@ -90,7 +90,7 @@ test.describe("POS sconti e storno ordine", () => {
         const productB = `Discount Product B ${suffix}`
 
         await createEventWithDiscountPresets(page, eventName)
-        await configureCashPos(page, printerName, randomIp(), cashBoxName, posName)
+        await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName)
         await createCategoryAndProducts(page, categoryName, [
             { name: productA, price: "8.00" },
             { name: productB, price: "4.00" },

@@ -8,7 +8,7 @@ import {
     completeElectronicOrder,
     closeCashSession,
     uniqueSuffix,
-    randomIp,
+    localPrinterIp,
 } from "./utils/fixtures"
 
 test.describe("POS - Elaborazione pagamenti manuali elettronici", () => {
@@ -28,7 +28,7 @@ test.describe("POS - Elaborazione pagamenti manuali elettronici", () => {
         await createCategoryAndProducts(page, categoryName, [
             { name: productName, price: "2.00" },
         ])
-        await configureElectronicPos(page, printerName, randomIp(), electronicTerminalName, posName)
+        await configureElectronicPos(page, printerName, localPrinterIp(), electronicTerminalName, posName)
 
         await openPosAndSelectDevice(page, posName)
         await openCashSessionIfRequired(page, "50")

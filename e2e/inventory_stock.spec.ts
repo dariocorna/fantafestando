@@ -8,7 +8,7 @@ import {
     openCashSessionIfRequired,
     dismissFeedbackModal,
     uniqueSuffix,
-    randomIp,
+    localPrinterIp,
 } from "./utils/fixtures"
 
 test.describe("Magazzino e scorte base", () => {
@@ -27,7 +27,7 @@ test.describe("Magazzino e scorte base", () => {
         const posName = `POS ${suffix}`
 
         await createAndActivateEvent(page, eventName)
-        await configureCashPos(page, printerName, randomIp(), cashBoxName, posName)
+        await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName)
 
         // Create product with stock = 1
         await createCategory(page, categoryName)
