@@ -286,6 +286,8 @@ npm run deploy:oracle -- \
 Note operative:
 - Lo script bootstrap disabilita `nginx` e abilita `caddy` per evitare conflitti su porte `80/443` (entrambi restano installati).
 - Lo script Oracle salta la build locale di default: la compilazione Next.js avviene dentro il Docker build remoto.
+- Per deploy multipli sulla stessa VM, imposta almeno `--project-name`, `--backoffice-port`, `--menu-port` e `--remote-env-file` con valori distinti per ogni istanza.
+- Lo script aggiorna automaticamente nel file env remoto `APP_RUNTIME_ENV_FILE`, `APP_IMAGE_NAME` e `APP_IMAGE_TAG`, cosi` ogni progetto usa il proprio file runtime e il proprio tag immagine.
 - Se vuoi mantenere un controllo preliminare locale, puoi forzare la build locale:
 
 ```bash
@@ -304,6 +306,20 @@ npm run deploy:oracle -- \
   --user ubuntu \
   --key ~/.ssh/<chiave-oracle>.pem \
   --no-bootstrap
+```
+
+- Esempio multi-istanza sulla stessa VM:
+
+```bash
+npm run deploy:oracle -- \
+  --host 84.8.251.115 \
+  --user ubuntu \
+  --key ~/.ssh/<chiave-oracle>.pem \
+  --project-name osgfest-sagra \
+  --backoffice-port 3111 \
+  --menu-port 3112 \
+  --remote-env-file .env.sagra \
+  --profile demo
 ```
 
 ## 7. Rollback
