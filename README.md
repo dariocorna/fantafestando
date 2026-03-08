@@ -116,6 +116,18 @@ CI=true npx playwright test --project=chromium
 - Deploy VM produzione: `docs/deploy-vm.md`
 - Emulazione stampanti: `docs/printer-emulation.md`
 
+## Licenza
+
+Questo progetto e` distribuito sotto licenza `GNU AGPL v3.0` (`AGPL-3.0-only`).
+Il testo completo e` disponibile nel file `LICENSE`.
+
+Se redistribuisci una versione modificata del software, devi rendere disponibile
+anche il relativo codice sorgente secondo i termini della AGPL.
+
+Se esegui una versione modificata del software e la rendi disponibile agli utenti
+attraverso una rete, devi offrire anche a quegli utenti l'accesso al sorgente
+corrispondente della versione in esecuzione.
+
 ## Note
 
 - Le integrazioni SumUp e webhook richiedono la configurazione delle relative variabili ambiente.
