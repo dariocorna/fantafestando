@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useSyncExternalStore } from "react"
 import {
     ArrowRight,
     Info,
@@ -20,6 +20,13 @@ import { useRouter } from "next/navigation"
 import { getCategoryTheme } from "@/lib/category-colors"
 import { BrandSectionHeader } from "@/components/brand/brand-section-header"
 import { createPublicOrder } from "./actions"
+import {
+    EMPTY_STORED_MENU_CART_ITEMS,
+    clearStoredMenuCart,
+    readStoredMenuCart,
+    subscribeToStoredMenuCart,
+    writeStoredMenuCart,
+} from "./cart-storage"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
 import { type StockShortage } from "@/lib/inventory"
 
@@ -53,27 +60,11 @@ interface ActiveEventSummary {
     }
 }
 
-function loadInitialCart(): CartItem[] {
-    if (typeof window === "undefined") return []
-
-    const savedCart = window.localStorage.getItem("osg_cart")
-    if (!savedCart) return []
-
-    try {
-        const parsed = JSON.parse(savedCart)
-        return Array.isArray(parsed) ? parsed : []
-    } catch (error) {
-        console.error("Failed to parse cart from localStorage", error)
-        return []
-    }
-}
-
 export default function CustomerMenu() {
     const [categories, setCategories] = useState<Category[]>([])
     const [products, setProducts] = useState<Product[]>([])
     const [activeEvent, setActiveEvent] = useState<ActiveEventSummary | null>(null)
     const [activeTab, setActiveTab] = useState("")
-    const [cart, setCart] = useState<CartItem[]>(loadInitialCart)
     const [isCartOpen, setIsCartOpen] = useState(false)
     const router = useRouter()
 
@@ -87,6 +78,11 @@ export default function CustomerMenu() {
     const normalizedTableValue = normalizeTableValue(tableNumber)
     const tableValueValid = isTableValueValid(tableNumber)
     const predefinedTables = activeEvent?.settings?.predefinedTables || []
+    const cart = useSyncExternalStore(
+        subscribeToStoredMenuCart,
+        () => readStoredMenuCart(activeEvent?._id || null) as CartItem[],
+        () => EMPTY_STORED_MENU_CART_ITEMS as CartItem[],
+    )
 
     useEffect(() => {
         const fetchData = async () => {
@@ -108,35 +104,32 @@ export default function CustomerMenu() {
         fetchData()
     }, [])
 
-    useEffect(() => {
-        localStorage.setItem("osg_cart", JSON.stringify(cart))
-    }, [cart])
-
     const totalItems = cart.reduce((acc, item) => acc + item.quantity, 0)
     const totalPrice = cart.reduce((acc, item) => acc + (item.basePrice * item.quantity), 0)
 
     const addToCart = (product: Product) => {
-        setCart(prev => {
-            const exists = prev.find(i => i._id === product._id)
-            if (exists) {
-                return prev.map(i => i._id === product._id ? { ...i, quantity: i.quantity + 1 } : i)
-            }
-            return [...prev, { ...product, quantity: 1 }]
-        })
+        const exists = cart.find(i => i._id === product._id)
+        const nextCart = exists
+            ? cart.map(i => i._id === product._id ? { ...i, quantity: i.quantity + 1 } : i)
+            : [...cart, { ...product, quantity: 1 }]
+
+        writeStoredMenuCart(nextCart, activeEvent?._id || null)
     }
 
     const removeFromCart = (productId: string) => {
-        setCart(prev => {
-            const exists = prev.find(i => i._id === productId)
-            if (exists && exists.quantity > 1) {
-                return prev.map(i => i._id === productId ? { ...i, quantity: i.quantity - 1 } : i)
-            }
-            return prev.filter(i => i._id !== productId)
-        })
+        const exists = cart.find(i => i._id === productId)
+        const nextCart = exists && exists.quantity > 1
+            ? cart.map(i => i._id === productId ? { ...i, quantity: i.quantity - 1 } : i)
+            : cart.filter(i => i._id !== productId)
+
+        writeStoredMenuCart(nextCart, activeEvent?._id || null)
     }
 
     const deleteFromCart = (productId: string) => {
-        setCart(prev => prev.filter(i => i._id !== productId))
+        writeStoredMenuCart(
+            cart.filter(i => i._id !== productId),
+            activeEvent?._id || null,
+        )
     }
 
     const handleSubmitOrder = async () => {
@@ -169,7 +162,7 @@ export default function CustomerMenu() {
         })
 
         if (result.success) {
-            localStorage.removeItem("osg_cart")
+            clearStoredMenuCart()
             router.push(`/menu/success?code=${result.shortCode}`)
         } else {
             setCheckoutError(result.error || "Non è stato possibile inviare l'ordine. Riprova.")

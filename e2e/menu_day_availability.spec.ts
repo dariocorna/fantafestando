@@ -2,7 +2,6 @@ import { test, expect, type Page } from "@playwright/test"
 import {
     createAndActivateEvent,
     createCategory,
-    createProduct,
     uniqueSuffix,
 } from "./utils/fixtures"
 
@@ -38,14 +37,6 @@ async function createProductWithDay(page: Page, options: {
 test.describe("Disponibilità prodotti per giorno", () => {
     test.describe.configure({ mode: "serial" })
 
-    test.beforeEach(async ({ page }) => {
-        page.on('console', msg => {
-            if (msg.text().startsWith('[DEBUG]')) {
-                console.log(msg.text());
-            }
-        });
-    });
-
     test("mostra nel menu solo i prodotti disponibili oggi", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso validato su desktop.")
 
@@ -74,6 +65,54 @@ test.describe("Disponibilità prodotti per giorno", () => {
 
         await expect(page.getByText(alwaysProductName)).toBeVisible()
         await expect(page.getByText(limitedProductName)).toHaveCount(0)
+    })
+
+    test("mantiene il carrello dopo un refresh senza errori di hydration", async ({ page, isMobile }) => {
+        test.skip(isMobile, "Flusso validato su desktop.")
+
+        const pageErrors: string[] = []
+        const hydrationConsoleErrors: string[] = []
+
+        page.on("pageerror", error => {
+            pageErrors.push(error.message)
+        })
+        page.on("console", msg => {
+            if (msg.type() !== "error") return
+            if (/hydration failed|didn't match/i.test(msg.text())) {
+                hydrationConsoleErrors.push(msg.text())
+            }
+        })
+
+        const suffix = uniqueSuffix()
+        const eventName = `Menu Cart Persist ${suffix}`
+        const categoryName = `Piatti ${suffix}`
+        const productName = `Persisted Product ${suffix}`
+
+        await createAndActivateEvent(page, eventName)
+        await createCategory(page, categoryName)
+        await createProductWithDay(page, { name: productName, categoryName, price: "6.50" })
+
+        await page.goto("/menu", { waitUntil: "domcontentloaded" })
+        await expect(page.getByTestId("menu-brand-shell")).toBeVisible({ timeout: 20000 })
+        await expect(page.getByText(productName).first()).toBeVisible()
+
+        const productCard = page.locator("div.bg-white")
+            .filter({ has: page.getByRole("heading", { name: productName, level: 3 }) }).first()
+        await productCard.locator("button").first().click()
+
+        const cartButton = page.getByRole("button", { name: /Vedi Carrello/i })
+        await expect(cartButton).toContainText("1")
+
+        await page.reload({ waitUntil: "domcontentloaded" })
+        await expect(page.getByTestId("menu-brand-shell")).toBeVisible({ timeout: 20000 })
+        await expect(cartButton).toContainText("1")
+
+        await cartButton.click()
+        await expect(page.getByRole("heading", { name: "Il tuo ordine" })).toBeVisible()
+        await expect(page.getByText(productName).first()).toBeVisible()
+
+        expect(pageErrors.filter(message => /hydration failed|didn't match/i.test(message))).toEqual([])
+        expect(hydrationConsoleErrors).toEqual([])
     })
 
     test("blocca checkout se il carrello contiene prodotti non più disponibili oggi", async ({ page, isMobile }) => {
@@ -123,8 +162,7 @@ test.describe("Disponibilità prodotti per giorno", () => {
         await expect(page.getByRole("heading", { name: "Il tuo ordine" })).toBeVisible()
         await expect(page.getByText(productName).first()).toBeVisible()
 
-        await page.getByRole("button", { name: /INVIA ORDINE/i }).click();
-        await expect(page.getByText(/alcuni prodotti.*non sono più disponibili/i)).toBeVisible();
-
+        await page.getByRole("button", { name: /INVIA ORDINE/i }).click()
+        await expect(page.getByText(/alcuni prodotti.*non sono più disponibili/i)).toBeVisible()
     })
 })

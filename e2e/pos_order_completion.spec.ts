@@ -7,7 +7,6 @@ import {
     dismissFeedbackModal,
     uniqueSuffix,
     localPrinterIp,
-    type CreateEventOptions,
 } from "./utils/fixtures"
 
 function escapeRegExp(value: string): string {
