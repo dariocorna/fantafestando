@@ -69,7 +69,7 @@ export function SortableCategoryTable({
         setCategories(initialCategories);
     }, [initialCategories]);
 
-    const [isPending, startTransition] = useTransition();
+    const [, startTransition] = useTransition();
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -208,7 +208,7 @@ export function SortableCategoryTable({
 }
 
 export function SortableCategoryRow({ id, children }: { id: string; children: React.ReactNode }) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+    const { setNodeRef, transform, transition, isDragging } = useSortable({ id });
 
     const style = {
         transform: CSS.Transform.toString(transform),
