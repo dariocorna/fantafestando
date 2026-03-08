@@ -108,10 +108,17 @@ fi
 BUILD_SHA="$(git rev-parse --short HEAD)"
 VERSION="$(node -p "require('./package.json').version")"
 BUILD_DATE="$(date '+%Y-%m-%dT%H:%M:%S%z')"
+PROJECT_IMAGE_BASENAME="$(printf '%s' "${PROJECT_NAME}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^[._-]+//; s/[._-]+$//')"
+if [[ -z "${PROJECT_IMAGE_BASENAME}" ]]; then
+  echo "[deploy-oracle] Invalid project name: ${PROJECT_NAME}" >&2
+  exit 1
+fi
+PROJECT_IMAGE_NAME="${PROJECT_IMAGE_BASENAME}-app"
 
 echo "[deploy-oracle] Host: ${REMOTE_USER}@${REMOTE_HOST}"
 echo "[deploy-oracle] Path: ${REMOTE_PATH}"
 echo "[deploy-oracle] Project: ${PROJECT_NAME}"
+echo "[deploy-oracle] Image: ${PROJECT_IMAGE_NAME}:${BUILD_SHA}"
 echo "[deploy-oracle] Ports: backoffice=${BACKOFFICE_PORT}, menu=${MENU_PORT}"
 echo "[deploy-oracle] Profile: ${PROFILE}"
 echo "[deploy-oracle] Version: ${VERSION}"
@@ -160,7 +167,7 @@ scp "${SSH_OPTS[@]}" "${LOCAL_ENV_FILE}" "${SSH_TARGET}:${REMOTE_ENV_FILE}"
 ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "cd '${REMOTE_PATH}' && mkdir -p public/uploads/menu-headers && chmod -R a+rwX public/uploads"
 
 echo "[deploy-oracle] Rebuilding and restarting remote stack..."
-ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" bash -s -- "${REMOTE_PATH}" "${BUILD_SHA}" "${PROFILE}" "${USE_CACHE}" "${VERSION}" "${BUILD_DATE}" "${PROJECT_NAME}" "${BACKOFFICE_PORT}" "${MENU_PORT}" "${REMOTE_ENV_FILE_NAME}" "${PRINTER_HOST:-__EMPTY__}" "${PRINTER_START_PORT:-__EMPTY__}" "${NO_PROFILE}" <<'EOS'
+ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" bash -s -- "${REMOTE_PATH}" "${BUILD_SHA}" "${PROFILE}" "${USE_CACHE}" "${VERSION}" "${BUILD_DATE}" "${PROJECT_NAME}" "${PROJECT_IMAGE_NAME}" "${BACKOFFICE_PORT}" "${MENU_PORT}" "${REMOTE_ENV_FILE_NAME}" "${PRINTER_HOST:-__EMPTY__}" "${PRINTER_START_PORT:-__EMPTY__}" "${NO_PROFILE}" <<'EOS'
 set -euo pipefail
 
 REMOTE_PATH="$1"
@@ -170,46 +177,39 @@ USE_CACHE="$4"
 VERSION="$5"
 BUILD_DATE="$6"
 PROJECT_NAME="$7"
-BACKOFFICE_PORT="$8"
-MENU_PORT="$9"
-ENV_FILE_NAME="${10}"
-PRINTER_HOST="${11:-__EMPTY__}"
-PRINTER_START_PORT="${12:-__EMPTY__}"
-NO_PROFILE="${13:-false}"
+PROJECT_IMAGE_NAME="$8"
+BACKOFFICE_PORT="$9"
+MENU_PORT="${10}"
+ENV_FILE_NAME="${11}"
+PRINTER_HOST="${12:-__EMPTY__}"
+PRINTER_START_PORT="${13:-__EMPTY__}"
+NO_PROFILE="${14:-false}"
 ENV_FILE="${REMOTE_PATH}/${ENV_FILE_NAME}"
 COMPOSE_FILE="${REMOTE_PATH}/docker-compose.prod.yml"
 
 cd "${REMOTE_PATH}"
 
-if grep -q '^APP_BUILD=' "${ENV_FILE}"; then
-  sed -i -E "s/^APP_BUILD=.*/APP_BUILD=${BUILD_SHA}/" "${ENV_FILE}"
-else
-  echo "APP_BUILD=${BUILD_SHA}" >> "${ENV_FILE}"
-fi
+upsert_env_var() {
+  local key="$1"
+  local value="$2"
+  local escaped
 
-if grep -q '^APP_BUILD_DATE=' "${ENV_FILE}"; then
-  sed -i -E "s/^APP_BUILD_DATE=.*/APP_BUILD_DATE=\"${BUILD_DATE}\"/" "${ENV_FILE}"
-else
-  echo "APP_BUILD_DATE=\"${BUILD_DATE}\"" >> "${ENV_FILE}"
-fi
+  escaped="$(printf '%s' "${value}" | sed -e 's/[\\&|]/\\&/g')"
+  if grep -q "^${key}=" "${ENV_FILE}"; then
+    sed -i -E "s|^${key}=.*|${key}=${escaped}|" "${ENV_FILE}"
+  else
+    printf '%s=%s\n' "${key}" "${value}" >> "${ENV_FILE}"
+  fi
+}
 
-if grep -q '^APP_VERSION=' "${ENV_FILE}"; then
-  sed -i -E "s/^APP_VERSION=.*/APP_VERSION=${VERSION}/" "${ENV_FILE}"
-else
-  echo "APP_VERSION=${VERSION}" >> "${ENV_FILE}"
-fi
-
-if grep -q '^BACKOFFICE_BIND_PORT=' "${ENV_FILE}"; then
-  sed -i -E "s/^BACKOFFICE_BIND_PORT=.*/BACKOFFICE_BIND_PORT=${BACKOFFICE_PORT}/" "${ENV_FILE}"
-else
-  echo "BACKOFFICE_BIND_PORT=${BACKOFFICE_PORT}" >> "${ENV_FILE}"
-fi
-
-if grep -q '^MENU_BIND_PORT=' "${ENV_FILE}"; then
-  sed -i -E "s/^MENU_BIND_PORT=.*/MENU_BIND_PORT=${MENU_PORT}/" "${ENV_FILE}"
-else
-  echo "MENU_BIND_PORT=${MENU_PORT}" >> "${ENV_FILE}"
-fi
+upsert_env_var "APP_BUILD" "${BUILD_SHA}"
+upsert_env_var "APP_BUILD_DATE" "${BUILD_DATE}"
+upsert_env_var "APP_VERSION" "${VERSION}"
+upsert_env_var "APP_RUNTIME_ENV_FILE" "${ENV_FILE_NAME}"
+upsert_env_var "APP_IMAGE_NAME" "${PROJECT_IMAGE_NAME}"
+upsert_env_var "APP_IMAGE_TAG" "${BUILD_SHA}"
+upsert_env_var "BACKOFFICE_BIND_PORT" "${BACKOFFICE_PORT}"
+upsert_env_var "MENU_BIND_PORT" "${MENU_PORT}"
 
 if [[ "${PRINTER_HOST}" == "__EMPTY__" ]]; then
   PRINTER_HOST=""
@@ -220,19 +220,11 @@ if [[ "${PRINTER_START_PORT}" == "__EMPTY__" ]]; then
 fi
 
 if [[ -n "${PRINTER_HOST}" ]]; then
-  if grep -q '^PRINTER_EMULATOR_HOST=' "${ENV_FILE}"; then
-    sed -i -E "s|^PRINTER_EMULATOR_HOST=.*|PRINTER_EMULATOR_HOST=${PRINTER_HOST}|" "${ENV_FILE}"
-  else
-    echo "PRINTER_EMULATOR_HOST=${PRINTER_HOST}" >> "${ENV_FILE}"
-  fi
+  upsert_env_var "PRINTER_EMULATOR_HOST" "${PRINTER_HOST}"
 fi
 
 if [[ -n "${PRINTER_START_PORT}" ]]; then
-  if grep -q '^PRINTER_EMULATOR_START_PORT=' "${ENV_FILE}"; then
-    sed -i -E "s|^PRINTER_EMULATOR_START_PORT=.*|PRINTER_EMULATOR_START_PORT=${PRINTER_START_PORT}|" "${ENV_FILE}"
-  else
-    echo "PRINTER_EMULATOR_START_PORT=${PRINTER_START_PORT}" >> "${ENV_FILE}"
-  fi
+  upsert_env_var "PRINTER_EMULATOR_START_PORT" "${PRINTER_START_PORT}"
 fi
 
 compose_base=(sudo docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}")
