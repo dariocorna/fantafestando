@@ -172,6 +172,10 @@ interface PrintDispatchSummaryState {
     allSuccessful: boolean
 }
 
+function getCurrentEpochMs() {
+    return Date.now()
+}
+
 function getPeripheralRef(value: IPosDevice["paymentTerminalId"] | IPosDevice["cashBoxId"]) {
     if (!value || typeof value !== "object") return null
     return value
@@ -197,6 +201,7 @@ export default function PosPage() {
     const [loadedPendingOrder, setLoadedPendingOrder] = useState<LoadedPendingOrder | null>(null)
     const [recentPendingOrders, setRecentPendingOrders] = useState<RecentPendingOrder[]>([])
     const [isRecentOrdersLoading, setIsRecentOrdersLoading] = useState(false)
+    const [recentPendingOrdersReferenceTime, setRecentPendingOrdersReferenceTime] = useState<number | null>(null)
     const [stockShortages, setStockShortages] = useState<StockShortage[]>([])
     const [cashSession, setCashSession] = useState<OpenCashSessionState | null>(null)
     const [isCashSessionLoading, setIsCashSessionLoading] = useState(false)
@@ -435,10 +440,13 @@ export default function PosPage() {
 
         setIsRecentOrdersLoading(true)
         const result = await listRecentPendingOrders({ eventId: activeEventId, limit: 10 })
+        const loadedAt = getCurrentEpochMs()
         if (result.success) {
             setRecentPendingOrders(result.orders)
+            setRecentPendingOrdersReferenceTime(loadedAt)
         } else {
             setRecentPendingOrders([])
+            setRecentPendingOrdersReferenceTime(loadedAt)
         }
         setIsRecentOrdersLoading(false)
     }
@@ -1754,7 +1762,7 @@ export default function PosPage() {
                             ) : (
                                 <div className="grid grid-cols-2 gap-2">
                                     {(() => {
-                                        const oneHourAgo = Date.now() - 60 * 60 * 1000
+                                        const oneHourAgo = (recentPendingOrdersReferenceTime ?? 0) - 60 * 60 * 1000
                                         const recentOrders = recentPendingOrders
                                             .filter(o => o.createdAt && new Date(o.createdAt).getTime() >= oneHourAgo)
                                             .sort((a, b) => new Date(a.createdAt!).getTime() - new Date(b.createdAt!).getTime())
