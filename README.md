@@ -1,4 +1,4 @@
-# OSGFest
+# FantaFestando
 
 Gestionale per feste locali (Bonate Sotto) con:
 - pannello admin per catalogo/eventi/hardware
@@ -37,7 +37,7 @@ npm install
 
 2. Configura variabili ambiente in `.env.local`:
 ```bash
-MONGODB_URI=mongodb://root:password@localhost:27017/osgfest?authSource=admin
+MONGODB_URI=mongodb://root:password@localhost:27017/fantafestando?authSource=admin
 AUTH_SECRET=replace-with-a-long-random-secret
 AUTH_ALLOW_DEV_CREDENTIALS=true
 APP_VERSION=0.2.0

@@ -6,7 +6,7 @@ import net from "node:net";
 
 const startPort = Number(process.env.PRINTER_EMULATOR_START_PORT || "19100");
 const slotCount = Number(process.env.PRINTER_EMULATOR_COUNT || "10");
-const outputRoot = process.env.PRINTER_EMULATOR_OUTPUT_DIR || "/tmp/osgfest-printer-emulator";
+const outputRoot = process.env.PRINTER_EMULATOR_OUTPUT_DIR || "/tmp/fantafestando-printer-emulator";
 
 if (!Number.isInteger(startPort) || startPort < 1 || startPort > 65535) {
     console.error(`[printer-emulator] Invalid PRINTER_EMULATOR_START_PORT: ${startPort}`);

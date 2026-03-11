@@ -36,7 +36,7 @@ test.describe("PWA surfaces", () => {
         const manifest = await response.json();
         expect(manifest.start_url).toBe("/menu?source=pwa");
         expect(manifest.scope).toBe("/menu/");
-        expect(manifest.name).toBe("OSG Fest");
+        expect(manifest.name).toBe("FantaFestando");
         expect(manifest.theme_color).toBe("#1e5fb8");
 
         const themeColorMeta = page.locator('meta[name="theme-color"]').first();

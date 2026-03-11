@@ -4,12 +4,12 @@ import { MenuPwaInstallPrompt } from "@/components/menu-pwa-install-prompt";
 import { PwaServiceWorker } from "@/components/pwa-service-worker";
 
 export const metadata: Metadata = {
-    title: "OSG Fest",
-    description: "Menu pubblico OSG Fest",
+    title: "FantaFestando",
+    description: "Menu pubblico FantaFestando",
     manifest: "/manifest-menu.webmanifest",
     appleWebApp: {
         capable: true,
-        title: "OSG Fest",
+        title: "FantaFestando",
         statusBarStyle: "black-translucent",
     },
     icons: {

@@ -7,7 +7,7 @@ import mongoose from "mongoose";
 const dumpPath = process.env.CATALOG_PATH || path.resolve("docs/.tmp/continua-fabula-catalog.ejson.json");
 const mongoUri =
     process.env.MONGODB_URI ||
-    "mongodb://root:password@localhost:27017/osgfest?authSource=admin";
+    "mongodb://root:password@localhost:27017/fantafestando?authSource=admin";
 
 function unwrapEjson(value) {
     if (Array.isArray(value)) return value.map(unwrapEjson);

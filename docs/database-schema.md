@@ -1,6 +1,6 @@
 # Architettura Database & Backend
 
-L'approccio scelto per OSGFest è basato su **MongoDB**, documentale e schema-less.
+L'approccio scelto per FantaFestando è basato su **MongoDB**, documentale e schema-less.
 Questa scelta è ideale per gestire entità flessibili come le *Varianti* (che possono avere opzioni e prezzi molto eterogenei) e per la logica Multi-tenant.
 
 ## I due Database (Cloud vs Local)

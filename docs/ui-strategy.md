@@ -1,4 +1,4 @@
-# UI & UX Strategy per OSGFest
+# UI & UX Strategy per FantaFestando
 
 Il sistema verrà utilizzato principalmente da volontari in un ambiente caotico e spesso poco illuminato (sagre serali all'aperto). Pertanto l'interfaccia deve essere **resistente agli errori umani**, **estremamente chiara** e pensata per un input tattile rapido.
 

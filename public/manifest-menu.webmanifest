@@ -1,8 +1,8 @@
 {
-  "id": "/menu/osg-fest-pwa",
-  "name": "OSG Fest",
-  "short_name": "OSG Fest",
-  "description": "Web app pubblica menu per ordini OSGFest.",
+  "id": "/menu/fantafestando-pwa",
+  "name": "FantaFestando",
+  "short_name": "FantaFestando",
+  "description": "Web app pubblica menu per ordini FantaFestando.",
   "start_url": "/menu?source=pwa",
   "scope": "/menu/",
   "display": "standalone",

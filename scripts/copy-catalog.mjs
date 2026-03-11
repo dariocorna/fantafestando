@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 
 const mongoUri =
     process.env.MONGODB_URI ||
-    "mongodb://root:password@localhost:27017/osgfest?authSource=admin";
+    "mongodb://root:password@localhost:27017/fantafestando?authSource=admin";
 
 const sourceEventName = process.env.SOURCE_EVENT || "Continua Fabula";
 const targetEventName = process.env.TARGET_EVENT || "Festa AGE";

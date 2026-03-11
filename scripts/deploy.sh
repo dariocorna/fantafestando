@@ -10,7 +10,7 @@ if [[ ! -f "${ENV_FILE}" ]]; then
     exit 1
 fi
 
-echo "[deploy] Starting OSGFest production stack..."
+echo "[deploy] Starting FantaFestando production stack..."
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --build --remove-orphans
 
 echo "[deploy] Applying database migrations..."

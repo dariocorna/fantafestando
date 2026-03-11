@@ -1,5 +1,5 @@
 const buildKey = new URL(self.location.href).searchParams.get("v") || "dev";
-const cacheName = `osgfest-menu-static-${buildKey}`;
+const cacheName = `fantafestando-menu-static-${buildKey}`;
 
 function shouldHandleRequest(request, url) {
   if (request.method !== "GET") return false;
@@ -23,7 +23,7 @@ self.addEventListener("activate", (event) => {
       const keys = await caches.keys();
       await Promise.all(
         keys
-          .filter((key) => key.startsWith("osgfest-menu-static-") && key !== cacheName)
+          .filter((key) => key.startsWith("fantafestando-menu-static-") && key !== cacheName)
           .map((key) => caches.delete(key))
       );
       await self.clients.claim();

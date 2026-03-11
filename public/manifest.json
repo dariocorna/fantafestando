@@ -1,6 +1,6 @@
 {
-    "name": "OSGFest - Menu & Ordini",
-    "short_name": "OSGFest",
+    "name": "FantaFestando - Menu & Ordini",
+    "short_name": "FantaFestando",
     "description": "Ordina i tuoi piatti preferiti direttamente dal tavolo.",
     "start_url": "/menu",
     "display": "standalone",

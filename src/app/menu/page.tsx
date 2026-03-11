@@ -211,7 +211,7 @@ export default function CustomerMenu() {
                                     {activeEvent?.name || "Festa"}
                                 </p>
                                 <h1 className="font-brand-display truncate text-2xl font-extrabold tracking-tight text-[var(--brand-blue-700)] md:text-3xl">
-                                    {activeEvent?.name || "OSG Fest"}
+                                    {activeEvent?.name || "FantaFestando"}
                                 </h1>
                                 <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-[var(--brand-blue-700)] md:text-sm">
                                     <Info size={14} /> Tocca i prodotti per aggiungerli
@@ -336,12 +336,12 @@ export default function CustomerMenu() {
 
             <footer className="mt-12 border-t border-[#d9e6f8] bg-white/90 px-4 py-3 text-xs text-slate-600">
                 <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-2">
-                    <span>Copyright 2026 OSGFest</span>
+                    <span>Copyright 2026 FantaFestando</span>
                     <a
-                        href="mailto:osgfest@gmail.com"
+                        href="mailto:fantafestando@gmail.com"
                         className="font-semibold text-[var(--brand-blue-700)] underline-offset-2 hover:underline"
                     >
-                        osgfest@gmail.com
+                        fantafestando@gmail.com
                     </a>
                 </div>
             </footer>

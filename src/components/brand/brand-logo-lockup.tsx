@@ -55,7 +55,7 @@ export function BrandLogoLockup({
             />
             <div className="min-w-0">
                 <div className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.15em]", styles.badge)}>
-                    OSG Fest
+                    FantaFestando
                 </div>
                 <p className={cn("font-brand-display mt-1 truncate font-extrabold tracking-tight", compact ? "text-lg" : "text-xl md:text-2xl", styles.title)}>
                     {title}
@@ -68,4 +68,3 @@ export function BrandLogoLockup({
         </div>
     );
 }
-
