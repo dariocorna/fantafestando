@@ -28,6 +28,7 @@ interface PrintJobItem {
     destinationPort: number;
     isVirtual: boolean;
     copies: number;
+    automaticRetryCount: number;
     document: Record<string, unknown>;
     rawCapturePath?: string;
     errorMessage?: string;
@@ -257,6 +258,11 @@ export function PrintJobsMonitor({
                                             <span className={`rounded-md px-2 py-1 text-xs font-semibold ${printTypeBadgeClass(job.printType)}`}>
                                                 {printTypeLabel(job.printType)}
                                             </span>
+                                            {job.automaticRetryCount > 0 ? (
+                                                <span className="rounded-md bg-orange-100 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                    RETRY x{job.automaticRetryCount}
+                                                </span>
+                                            ) : null}
                                             <span className="text-xs font-semibold text-slate-500">{job.source}</span>
                                         </div>
                                         <p className="mt-1 text-sm font-semibold text-slate-800">
@@ -284,6 +290,9 @@ export function PrintJobsMonitor({
                                     <p><span className="font-semibold">Destinazione:</span> {selectedJob.destinationHost}:{selectedJob.destinationPort}</p>
                                     <p><span className="font-semibold">Copie:</span> {selectedJob.copies}</p>
                                     <p><span className="font-semibold">Modalità:</span> {selectedJob.isVirtual ? "Virtuale" : "Reale"}</p>
+                                    {selectedJob.automaticRetryCount > 0 ? (
+                                        <p><span className="font-semibold">Retry automatici:</span> {selectedJob.automaticRetryCount}</p>
+                                    ) : null}
                                     {selectedJob.errorMessage ? (
                                         <p className="text-rose-700"><span className="font-semibold">Errore:</span> {selectedJob.errorMessage}</p>
                                     ) : null}
