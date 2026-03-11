@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:e2e": "playwright test --project=chromium",
+    "test:e2e:real-print": "playwright test e2e/real-printing.spec.ts --project=chromium",
     "test:e2e:dedicated": "PLAYWRIGHT_PORT=3400 CI=true playwright test --project=chromium",
     "test:e2e:fast": "PLAYWRIGHT_PORT=3400 playwright test --project=chromium --workers=1 --retries=0",
     "test:e2e:headed:debug": "PLAYWRIGHT_PORT=3400 playwright test --project=chromium --headed --workers=1 --retries=0",
