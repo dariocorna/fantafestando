@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    type BuildOrderPrintDocumentInput,
     buildCashSessionPrintDocumentV2,
     buildOrderPrintDocumentV2,
     buildPreviewLines,
@@ -117,14 +118,16 @@ describe("print-report", () => {
     });
 
     it("filters out items with empty or missing name", () => {
+        const invalidItems = [
+            { name: "", quantity: 1 },
+            { name: "Valid", quantity: 1 }
+        ] as unknown as BuildOrderPrintDocumentInput["items"];
+
         const document = buildOrderPrintDocumentV2({
             printType: "CUSTOMER_ORDER",
             title: "Comanda",
             orderId: "order-1",
-            items: [
-                { name: "", quantity: 1 },
-                { name: "Valid", quantity: 1 }
-            ] as any
+            items: invalidItems
         });
 
         expect(document.items).toHaveLength(1);
