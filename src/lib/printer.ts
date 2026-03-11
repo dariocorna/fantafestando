@@ -109,6 +109,8 @@ function formatPaymentMethod(value: string | undefined): string {
 
 const PRINTER_CONNECT_TIMEOUT_MS = 4000;
 const PRINTER_EXECUTE_TIMEOUT_MS = 7000;
+const PRINTER_CONNECTION_RETRY_DELAY_MS = 250;
+const PRINTER_SAME_DESTINATION_COOLDOWN_MS = 1000;
 const RECEIPT_SEPARATOR = "--------------------------------";
 const PRINTER_EMULATOR_OUTPUT_DIR = process.env.PRINTER_EMULATOR_OUTPUT_DIR || "/tmp/osgfest-printer-emulator";
 
@@ -164,7 +166,119 @@ function formatPrintDateTime(value: string): string {
     return parsed.toLocaleString("it-IT");
 }
 
+function wait(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class PrinterService {
+    private static isTimeoutError(error: unknown): boolean {
+        return error instanceof Error && error.message.toLowerCase().includes("timeout");
+    }
+
+    private static isConnectionRefusedError(error: unknown): boolean {
+        if (typeof error !== "object" || error === null) return false;
+
+        const maybeCode = "code" in error ? error.code : undefined;
+        if (maybeCode === "ECONNREFUSED") return true;
+
+        const maybeMessage = "message" in error && typeof error.message === "string"
+            ? error.message.toLowerCase()
+            : "";
+        return maybeMessage.includes("econnrefused") || maybeMessage.includes("connection refused");
+    }
+
+    private static async waitForPrinterReachable(printer: ThermalPrinter, timeoutMs: number): Promise<boolean> {
+        const deadline = Date.now() + timeoutMs;
+
+        while (Date.now() < deadline) {
+            const remaining = deadline - Date.now();
+            const attemptTimeout = Math.max(1, remaining);
+
+            try {
+                const isConnected = await this.withTimeout(
+                    printer.isPrinterConnected(),
+                    attemptTimeout,
+                    "Printer connection timeout"
+                );
+                if (isConnected) return true;
+            } catch (error) {
+                if (!this.isTimeoutError(error) && !this.isConnectionRefusedError(error)) {
+                    throw error;
+                }
+            }
+
+            const afterAttemptRemaining = deadline - Date.now();
+            if (afterAttemptRemaining <= 0) break;
+            await wait(Math.min(PRINTER_CONNECTION_RETRY_DELAY_MS, afterAttemptRemaining));
+        }
+
+        return false;
+    }
+
+    private static async executeWithConnectionRetry(printer: ThermalPrinter, timeoutMs: number): Promise<void> {
+        const deadline = Date.now() + timeoutMs;
+        let lastError: unknown;
+
+        while (Date.now() < deadline) {
+            const remaining = deadline - Date.now();
+            const attemptTimeout = Math.max(1, remaining);
+
+            try {
+                await this.withTimeout(
+                    printer.execute(),
+                    attemptTimeout,
+                    "Printer execution timeout"
+                );
+                return;
+            } catch (error) {
+                lastError = error;
+                const afterAttemptRemaining = deadline - Date.now();
+                if (!this.isConnectionRefusedError(error) || afterAttemptRemaining <= 0) {
+                    throw error;
+                }
+                await wait(Math.min(PRINTER_CONNECTION_RETRY_DELAY_MS, afterAttemptRemaining));
+            }
+        }
+
+        if (lastError) throw lastError;
+        throw new Error("Printer execution timeout");
+    }
+
+    private static async dispatchJobsSequentiallyPerDestination(
+        entries: Array<{ job: PrinterCommandJob; copies: number }>
+    ): Promise<boolean[]> {
+        const results = new Array<boolean>(entries.length);
+        const destinationChains = new Map<string, Promise<void>>();
+
+        await Promise.all(entries.map((entry, index) => {
+            const hasDestination = typeof entry.job.ip === "string" && entry.job.ip.trim().length > 0;
+            const destinationKey = hasDestination
+                ? resolvePrinterDestination({
+                    ip: entry.job.ip,
+                    port: entry.job.port,
+                    isVirtual: entry.job.isVirtual,
+                    emulatorSlot: entry.job.emulatorSlot
+                }).label
+                : `missing-destination-${index}`;
+            const hasPrevious = destinationChains.has(destinationKey);
+
+            const previous = destinationChains.get(destinationKey) || Promise.resolve();
+            const current = previous
+                .catch(() => undefined)
+                .then(async () => {
+                    if (hasPrevious) {
+                        await wait(PRINTER_SAME_DESTINATION_COOLDOWN_MS);
+                    }
+                    results[index] = await this.printComanda(entry.job, entry.copies);
+                });
+
+            destinationChains.set(destinationKey, current);
+            return current;
+        }));
+
+        return results;
+    }
+
     private static printCashierReceiptNoticeBox(printer: ThermalPrinter, rowWidth: number) {
         printer.alignCenter();
         printer.println(RECEIPT_SEPARATOR);
@@ -637,11 +751,7 @@ export class PrinterService {
 
         let isConnected = false;
         try {
-            isConnected = await this.withTimeout(
-                printer.isPrinterConnected(),
-                PRINTER_CONNECT_TIMEOUT_MS,
-                "Printer connection timeout"
-            );
+            isConnected = await this.waitForPrinterReachable(printer, PRINTER_CONNECT_TIMEOUT_MS);
         } catch (error) {
             console.error(`Printer connection check error at ${destinationLabel}:`, error);
             await this.updatePrintJobLog(logId, {
@@ -667,11 +777,7 @@ export class PrinterService {
         try {
             const executeStartedAt = new Date();
             for (let i = 0; i < copies; i += 1) {
-                await this.withTimeout(
-                    printer.execute(),
-                    PRINTER_EXECUTE_TIMEOUT_MS,
-                    "Printer execution timeout"
-                );
+                await this.executeWithConnectionRetry(printer, PRINTER_EXECUTE_TIMEOUT_MS);
             }
             console.log(`Print job sent to ${destinationLabel} (${copies} copies) successfully`);
             const rawCapturePath = Boolean(job.isVirtual)
@@ -681,8 +787,10 @@ export class PrinterService {
             return true;
         } catch (error) {
             console.error(`Printer execution error at ${destinationLabel}:`, error);
-            const message = error instanceof Error && error.message.toLowerCase().includes("timeout")
+            const message = this.isTimeoutError(error)
                 ? "Printer execution timeout"
+                : this.isConnectionRefusedError(error)
+                    ? "Printer not reachable"
                 : "Printer execution error";
             await this.updatePrintJobLog(logId, {
                 status: "FAILED",
@@ -902,7 +1010,7 @@ export class PrinterService {
             });
         }
 
-        const printPromises: Promise<boolean>[] = [];
+        const printJobs: Array<{ job: PrinterCommandJob; copies: number }> = [];
         if (cashierJob.items.length > 0 && cashierJob.ip) {
             const summaryJob: PrinterCommandJob = {
                 ...cashierJob,
@@ -916,20 +1024,20 @@ export class PrinterService {
                     { label: "STATO", value: (order.status || "-").toUpperCase() }
                 ]
             };
-            printPromises.push(this.printComanda(summaryJob, 1));
+            printJobs.push({ job: summaryJob, copies: 1 });
         }
 
         Object.values(kitchenJobsByDestination).forEach((job) => {
-            printPromises.push(this.printComanda(job, 1));
+            printJobs.push({ job, copies: 1 });
         });
 
         Object.values(customerJobsByGroup)
             .filter((job) => job.items.length > 0)
             .forEach((job) => {
-                printPromises.push(this.printComanda(job, 1));
+                printJobs.push({ job, copies: 1 });
             });
 
-        return await Promise.all(printPromises);
+        return await this.dispatchJobsSequentiallyPerDestination(printJobs);
     }
 
     static async printCashSessionSummary(eventId: string, posDeviceId: string, summary: CashSessionClosingPrintSummary) {
@@ -1016,11 +1124,7 @@ export class PrinterService {
 
         let isConnected = false;
         try {
-            isConnected = await this.withTimeout(
-                printer.isPrinterConnected(),
-                PRINTER_CONNECT_TIMEOUT_MS,
-                "Printer connection timeout"
-            );
+            isConnected = await this.waitForPrinterReachable(printer, PRINTER_CONNECT_TIMEOUT_MS);
         } catch (error) {
             console.error(`Cash session printer connection check error at ${printerLabel}:`, error);
             await this.updatePrintJobLog(logId, {
@@ -1045,11 +1149,7 @@ export class PrinterService {
 
         try {
             const executeStartedAt = new Date();
-            await this.withTimeout(
-                printer.execute(),
-                PRINTER_EXECUTE_TIMEOUT_MS,
-                "Printer execution timeout"
-            );
+            await this.executeWithConnectionRetry(printer, PRINTER_EXECUTE_TIMEOUT_MS);
             console.log(`Cash session summary print sent to ${printerLabel} successfully`);
             const rawCapturePath = isVirtual
                 ? await this.resolveVirtualRawCapturePath(printerPort, executeStartedAt)
@@ -1058,8 +1158,10 @@ export class PrinterService {
             return true;
         } catch (error) {
             console.error(`Cash session summary printer execution error at ${printerLabel}:`, error);
-            const message = error instanceof Error && error.message.toLowerCase().includes("timeout")
+            const message = this.isTimeoutError(error)
                 ? "Printer execution timeout"
+                : this.isConnectionRefusedError(error)
+                    ? "Printer not reachable"
                 : "Printer execution error";
             await this.updatePrintJobLog(logId, {
                 status: "FAILED",
