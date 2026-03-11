@@ -119,13 +119,16 @@ export interface ConfigureCashPosOptions {
     printerPort?: string;
 }
 
-export async function configureCashPos(
+export interface CreatePrinterOptions {
+    printerPort?: string;
+    printerType: "CASHIER" | "KITCHEN";
+}
+
+export async function createPrinter(
     page: Page,
     printerName: string,
     printerIp: string,
-    cashBoxName: string,
-    posName: string,
-    options?: ConfigureCashPosOptions,
+    options: CreatePrinterOptions
 ) {
     await page.goto("/admin/settings/hardware");
 
@@ -133,14 +136,21 @@ export async function configureCashPos(
     const printerDialog = page.getByRole("dialog");
     await printerDialog.getByLabel("Nome Stampante").fill(printerName);
     await printerDialog.getByLabel("Indirizzo IP").fill(printerIp);
-    const port = options?.printerPort || String(19100 + Math.floor(Math.random() * 10));
+    const port = options.printerPort || String(19100 + Math.floor(Math.random() * 10));
     await printerDialog.getByLabel("Porta TCP").fill(port);
 
     await printerDialog.getByRole("combobox", { name: "Tipo Stampante" }).click();
-    await page.getByRole("option", { name: "Cassa (Scontrino Cliente)" }).click();
+    await page.getByRole("option", {
+        name: options.printerType === "CASHIER"
+            ? "Cassa (Scontrino Cliente)"
+            : "Reparto (Comanda Piatto)"
+    }).click();
     await printerDialog.getByRole("button", { name: "Salva", exact: true }).click();
     await expect(page.getByText(printerName)).toBeVisible();
+}
 
+export async function createCashBoxPeripheral(page: Page, cashBoxName: string) {
+    await page.goto("/admin/settings/hardware");
     await page.getByRole("tab", { name: "Periferiche" }).click();
     await page.getByRole("button", { name: /Nuova Periferica/i }).click();
     const peripheralDialog = page.getByRole("dialog");
@@ -149,17 +159,68 @@ export async function configureCashPos(
     await page.getByRole("option", { name: "Cassetta Contanti (Manuale)" }).click();
     await peripheralDialog.getByRole("button", { name: "Aggiungi Periferica", exact: true }).click();
     await expect(page.getByText(cashBoxName)).toBeVisible();
+}
 
+export async function createPosDevice(
+    page: Page,
+    posName: string,
+    printerName: string,
+    cashBoxName?: string,
+) {
     await page.goto("/admin/settings/pos");
     await page.getByRole("button", { name: /Nuovo Dispositivo/i }).click();
     const posDialog = page.getByRole("dialog");
     await posDialog.getByLabel("Nome Postazione").fill(posName);
     await posDialog.getByRole("combobox", { name: "Stampante Associata" }).click();
     await page.getByRole("option", { name: new RegExp(printerName) }).click();
-    await posDialog.getByRole("combobox", { name: "Cassetta Contanti (Manuale)" }).click();
-    await page.getByRole("option", { name: new RegExp(cashBoxName) }).click();
+    if (cashBoxName) {
+        await posDialog.getByRole("combobox", { name: "Cassetta Contanti (Manuale)" }).click();
+        await page.getByRole("option", { name: new RegExp(cashBoxName) }).click();
+    }
     await posDialog.getByRole("button", { name: "Salva", exact: true }).click();
     await expect(page.getByText(posName)).toBeVisible();
+}
+
+export async function createCategoryWithPrinter(
+    page: Page,
+    categoryName: string,
+    kitchenPrinterName?: string,
+) {
+    await page.goto("/admin/catalog");
+    await page.click("#new-category-btn");
+    const dialog = page.getByRole("dialog");
+    await dialog.locator("#cat-name").fill(categoryName);
+
+    if (kitchenPrinterName) {
+        const printerSelect = dialog.getByLabel("Stampante Reparto");
+        const printerValue = await printerSelect.evaluate((element, needle) => {
+            const select = element as HTMLSelectElement;
+            const option = Array.from(select.options).find((item) => item.text.includes(needle));
+            return option?.value ?? null;
+        }, kitchenPrinterName);
+        expect(printerValue).toBeTruthy();
+        await printerSelect.selectOption(printerValue!);
+    }
+
+    await dialog.getByRole("button", { name: "Salva Categoria", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText(categoryName)).toBeVisible();
+}
+
+export async function configureCashPos(
+    page: Page,
+    printerName: string,
+    printerIp: string,
+    cashBoxName: string,
+    posName: string,
+    options?: ConfigureCashPosOptions,
+) {
+    await createPrinter(page, printerName, printerIp, {
+        printerType: "CASHIER",
+        printerPort: options?.printerPort
+    });
+    await createCashBoxPeripheral(page, cashBoxName);
+    await createPosDevice(page, posName, printerName, cashBoxName);
 }
 
 export async function configureElectronicPos(
