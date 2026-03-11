@@ -267,7 +267,7 @@ export async function createCategoryAndProducts(
 // ---------------------------------------------------------------------------
 export async function openPosAndSelectDevice(page: Page, posName: string) {
     await page.goto("/pos");
-    await page.evaluate(() => localStorage.removeItem("osgfest_pos_id"));
+    await page.evaluate(() => localStorage.removeItem("fantafestando_pos_id"));
     await page.reload();
 
     await page.waitForResponse(

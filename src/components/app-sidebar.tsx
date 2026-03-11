@@ -44,7 +44,7 @@ export function AppSidebar() {
         <Sidebar variant="inset" className="border-r border-[#d9e6f8] bg-white/95">
             <SidebarContent className="bg-transparent">
                 <SidebarGroup>
-                    <SidebarGroupLabel className="text-[var(--brand-blue-700)]">OSGFest Manager</SidebarGroupLabel>
+                    <SidebarGroupLabel className="text-[var(--brand-blue-700)]">FantaFestando Manager</SidebarGroupLabel>
                     <SidebarGroupContent>
                         <SidebarMenu>
                             {items.map((item) => (

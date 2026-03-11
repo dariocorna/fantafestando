@@ -4,9 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE_HOST="${DEPLOY_HOST:-}"
 REMOTE_USER="${DEPLOY_USER:-ubuntu}"
-REMOTE_PATH="${DEPLOY_PATH:-/opt/osgfest}"
+REMOTE_PATH="${DEPLOY_PATH:-/opt/fantafestando}"
 PROFILE="${DEPLOY_PROFILE:-demo}"
-PROJECT_NAME="${DEPLOY_PROJECT_NAME:-osgfest}"
+PROJECT_NAME="${DEPLOY_PROJECT_NAME:-fantafestando}"
 BACKOFFICE_PORT="${DEPLOY_BACKOFFICE_PORT:-3101}"
 MENU_PORT="${DEPLOY_MENU_PORT:-3102}"
 LOCAL_ENV_FILE="${DEPLOY_ENV_FILE:-.env.production}"
@@ -29,8 +29,8 @@ Options:
   --host <ip-or-alias>       Oracle VM host/IP (required)
   --user <ssh-user>          SSH user (default: ubuntu)
   --key <path>               SSH private key path
-  --path <remote-path>       Remote app path (default: /opt/osgfest)
-  --project-name <name>      Docker compose project name (default: osgfest)
+  --path <remote-path>       Remote app path (default: /opt/fantafestando)
+  --project-name <name>      Docker compose project name (default: fantafestando)
   --backoffice-port <port>   Host bind port for backoffice (default: 3101)
   --menu-port <port>         Host bind port for menu (default: 3102)
   --env-file <local-path>    Local env file to upload (default: .env.production)
@@ -230,9 +230,9 @@ fi
 compose_base=(sudo docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}")
 
 if [[ "${USE_CACHE}" == "true" ]]; then
-  "${compose_base[@]}" build osgfest-backoffice osgfest-menu
+  "${compose_base[@]}" build fantafestando-backoffice fantafestando-menu
 else
-  "${compose_base[@]}" build --no-cache osgfest-backoffice osgfest-menu
+  "${compose_base[@]}" build --no-cache fantafestando-backoffice fantafestando-menu
 fi
 
 if [[ "${NO_PROFILE}" == "true" ]]; then

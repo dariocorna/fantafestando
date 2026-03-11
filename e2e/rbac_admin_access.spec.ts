@@ -13,7 +13,7 @@ test.describe("RBAC accesso admin", () => {
         await page.goto("/admin", { waitUntil: "domcontentloaded" });
 
         await expect(page).toHaveURL(/\/admin(?:$|\/|\?)/);
-        await expect(page.locator("header").getByText("OSGFest Manager")).toBeVisible();
+        await expect(page.locator("header").getByText("FantaFestando Manager")).toBeVisible();
     });
 });
 

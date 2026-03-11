@@ -1,4 +1,4 @@
-# Deploy OSGFest su VM
+# Deploy FantaFestando su VM
 
 Guida operativa per deploy produzione su VM mantenendo Apache come edge reverse proxy TLS e stack applicativo in Docker Compose.
 
@@ -10,16 +10,16 @@ Guida operativa per deploy produzione su VM mantenendo Apache come edge reverse 
   - reverse proxy verso container locali
 - Docker Compose gestisce:
   - `mongo`
-  - `osgfest-backoffice` (admin + pos)
-  - `osgfest-menu` (menu pubblico)
+  - `fantafestando-backoffice` (admin + pos)
+  - `fantafestando-menu` (menu pubblico)
 
 Mappatura porte locali host:
-- `127.0.0.1:3101` -> `osgfest-backoffice:3000`
-- `127.0.0.1:3102` -> `osgfest-menu:3000`
+- `127.0.0.1:3101` -> `fantafestando-backoffice:3000`
+- `127.0.0.1:3102` -> `fantafestando-menu:3000`
 
 Domini previsti:
-- `osgfest-backoffice.ddns.net` -> admin + pos
-- `osgfest.ddns.net` -> portale pubblico menu
+- `fantafestando-backoffice.ddns.net` -> admin + pos
+- `fantafestando.ddns.net` -> portale pubblico menu
 
 ## 2. Prerequisiti VM
 
@@ -41,9 +41,9 @@ Sul server:
 ```bash
 ssh <utente>@<host-vm>
 cd /opt
-sudo git clone git@github.com:dariocorna/osgfest.git
-sudo chown -R $USER:$USER osgfest
-cd osgfest
+sudo git clone git@github.com:dariocorna/fantafestando.git
+sudo chown -R $USER:$USER fantafestando
+cd fantafestando
 cp .env.production.example .env.production
 ```
 
@@ -56,7 +56,7 @@ Compilare `.env.production` con valori reali, in particolare:
 ## 4. Primo deploy
 
 ```bash
-cd /opt/osgfest
+cd /opt/fantafestando
 ./scripts/deploy.sh
 ```
 
@@ -83,22 +83,22 @@ sudo systemctl reload apache2
 
 ### 5.1 VirtualHost Backoffice
 
-Esempio `/etc/apache2/sites-available/osgfest-backoffice.conf`:
+Esempio `/etc/apache2/sites-available/fantafestando-backoffice.conf`:
 
 ```apache
 <VirtualHost *:80>
-    ServerName osgfest-backoffice.ddns.net
+    ServerName fantafestando-backoffice.ddns.net
     RewriteEngine On
     RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
     RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [R=301,L]
 </VirtualHost>
 
 <VirtualHost *:443>
-    ServerName osgfest-backoffice.ddns.net
+    ServerName fantafestando-backoffice.ddns.net
 
     SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/osgfest-backoffice.ddns.net/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/osgfest-backoffice.ddns.net/privkey.pem
+    SSLCertificateFile /etc/letsencrypt/live/fantafestando-backoffice.ddns.net/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/fantafestando-backoffice.ddns.net/privkey.pem
 
     ProxyPreserveHost On
     RequestHeader set X-Forwarded-Proto "https"
@@ -109,22 +109,22 @@ Esempio `/etc/apache2/sites-available/osgfest-backoffice.conf`:
 
 ### 5.2 VirtualHost Portale Pubblico
 
-Esempio `/etc/apache2/sites-available/menu-osgfest.conf`:
+Esempio `/etc/apache2/sites-available/menu-fantafestando.conf`:
 
 ```apache
 <VirtualHost *:80>
-    ServerName osgfest.ddns.net
+    ServerName fantafestando.ddns.net
     RewriteEngine On
     RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
     RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [R=301,L]
 </VirtualHost>
 
 <VirtualHost *:443>
-    ServerName osgfest.ddns.net
+    ServerName fantafestando.ddns.net
 
     SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/osgfest.ddns.net/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/osgfest.ddns.net/privkey.pem
+    SSLCertificateFile /etc/letsencrypt/live/fantafestando.ddns.net/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/fantafestando.ddns.net/privkey.pem
 
     ProxyPreserveHost On
     RequestHeader set X-Forwarded-Proto "https"
@@ -136,15 +136,15 @@ Esempio `/etc/apache2/sites-available/menu-osgfest.conf`:
 Attivazione siti:
 
 ```bash
-sudo a2ensite osgfest-backoffice.conf
-sudo a2ensite menu-osgfest.conf
+sudo a2ensite fantafestando-backoffice.conf
+sudo a2ensite menu-fantafestando.conf
 sudo systemctl reload apache2
 ```
 
 Emettere certificati (se non già emessi):
 
 ```bash
-sudo certbot --apache -d osgfest-backoffice.ddns.net -d osgfest.ddns.net
+sudo certbot --apache -d fantafestando-backoffice.ddns.net -d fantafestando.ddns.net
 ```
 
 ## 6. Aggiornamento applicazione
@@ -152,7 +152,7 @@ sudo certbot --apache -d osgfest-backoffice.ddns.net -d osgfest.ddns.net
 ### 6.1 Flusso standard (server come clone Git)
 
 ```bash
-cd /opt/osgfest
+cd /opt/fantafestando
 git pull
 ./scripts/update.sh
 ```
@@ -162,8 +162,8 @@ Anche `update.sh` riesegue automaticamente la migrazione indice ordini.
 Verifica post update:
 
 ```bash
-curl -fsS https://osgfest-backoffice.ddns.net/api/health
-curl -fsS https://osgfest.ddns.net/api/health
+curl -fsS https://fantafestando-backoffice.ddns.net/api/health
+curl -fsS https://fantafestando.ddns.net/api/health
 ```
 
 ### 6.2 Flusso consigliato per Bergamo (deploy del compilato locale)
@@ -174,7 +174,7 @@ esattamente gli artefatti generati in locale.
 #### Script consigliato (one-command)
 
 ```bash
-cd /path/to/osgfest
+cd /path/to/fantafestando
 ./scripts/deploy-bergamo.sh
 ```
 
@@ -186,7 +186,7 @@ npm run deploy:bergamo
 
 Opzioni principali:
 - `--host <alias-ssh>` (default `bergamo`)
-- `--path <remote-path>` (default `/opt/osgfest`)
+- `--path <remote-path>` (default `/opt/fantafestando`)
 - `--profile <compose-profile>` (default `demo`)
 - `--skip-build` / `--skip-rsync` / `--skip-health-check`
 - `--use-cache` (default build `--no-cache`)
@@ -203,7 +203,7 @@ Lo script esegue automaticamente:
 1. Build locale:
 
 ```bash
-cd /path/to/osgfest
+cd /path/to/fantafestando
 npm ci
 npm run build
 ```
@@ -216,7 +216,7 @@ rsync -az --delete \
   --exclude 'node_modules' \
   --exclude '.next/cache' \
   --exclude '.env*' \
-  ./ bergamo:/opt/osgfest/
+  ./ bergamo:/opt/fantafestando/
 ```
 
 3. Rebuild immagine e restart stack (forzando aggiornamento runtime):
@@ -224,13 +224,13 @@ rsync -az --delete \
 ```bash
 BUILD_SHA=$(git rev-parse --short HEAD)
 ssh bergamo '
-  cd /opt/osgfest &&
+  cd /opt/fantafestando &&
   if grep -q "^APP_BUILD=" .env.production; then
     sed -i -E "s/^APP_BUILD=.*/APP_BUILD='"${BUILD_SHA}"'/" .env.production
   else
     echo "APP_BUILD='"${BUILD_SHA}"'" >> .env.production
   fi &&
-  docker compose --env-file .env.production -f docker-compose.prod.yml build --no-cache osgfest-backoffice osgfest-menu &&
+  docker compose --env-file .env.production -f docker-compose.prod.yml build --no-cache fantafestando-backoffice fantafestando-menu &&
   docker compose --env-file .env.production -f docker-compose.prod.yml --profile demo up -d --remove-orphans
 '
 ```
@@ -253,8 +253,8 @@ Controllare che `release` nei payload `/api/health` corrisponda al commit atteso
 - Aggiorna `APP_BUILD` a ogni deploy (commit short SHA) per avere in admin la release effettiva.
 - Quando vedi codice vecchio dopo un deploy, esegui `build --no-cache` prima di `up -d`.
 - Verifica asset PWA pubblicati:
-  - `https://osgfest.ddns.net/manifest-menu.webmanifest`
-  - `https://osgfest.ddns.net/sw-menu.js`
+  - `https://fantafestando.ddns.net/manifest-menu.webmanifest`
+  - `https://fantafestando.ddns.net/sw-menu.js`
 - Dopo ogni deploy verifica sempre:
   - stato container (`docker compose ... ps`)
   - endpoint health locali (`127.0.0.1:3101/3102`)
@@ -272,7 +272,7 @@ Per VM Oracle appena create (Ubuntu), usare lo script unificato che:
 Comando:
 
 ```bash
-cd /path/to/osgfest
+cd /path/to/fantafestando
 cp .env.production.example .env.production
 # compilare .env.production con i valori reali prima del primo deploy
 
@@ -315,7 +315,7 @@ npm run deploy:oracle -- \
   --host 84.8.251.115 \
   --user ubuntu \
   --key ~/.ssh/<chiave-oracle>.pem \
-  --project-name osgfest-sagra \
+  --project-name fantafestando-sagra \
   --backoffice-port 3111 \
   --menu-port 3112 \
   --remote-env-file .env.sagra \
@@ -325,7 +325,7 @@ npm run deploy:oracle -- \
 ## 7. Rollback
 
 ```bash
-cd /opt/osgfest
+cd /opt/fantafestando
 ./scripts/rollback.sh <git-ref>
 ```
 
@@ -340,7 +340,7 @@ Esempio:
 ### Backup
 
 ```bash
-cd /opt/osgfest
+cd /opt/fantafestando
 ./scripts/backup-mongo.sh
 ls -lh backups/
 ```
@@ -348,7 +348,7 @@ ls -lh backups/
 ### Restore
 
 ```bash
-cd /opt/osgfest
+cd /opt/fantafestando
 ./scripts/restore-mongo.sh backups/mongo-YYYYMMDD-HHMMSS.archive.gz
 ```
 
@@ -372,7 +372,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yml ps
 - Log servizio specifico:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml logs -f osgfest-backoffice
+docker compose --env-file .env.production -f docker-compose.prod.yml logs -f fantafestando-backoffice
 ```
 
 - Verifica proxy Apache:

@@ -251,7 +251,7 @@ export default function PosPage() {
                 setPosDevices(data.posDevices)
 
                 // Check localStorage for POS Device
-                const savedPosId = localStorage.getItem('osgfest_pos_id')
+                const savedPosId = localStorage.getItem('fantafestando_pos_id')
                 const isSavedPosValid = savedPosId && data.posDevices.some((d: IPosDevice) => d._id === savedPosId)
                 if (isSavedPosValid) {
                     setSelectedPosDeviceId(savedPosId)
@@ -267,7 +267,7 @@ export default function PosPage() {
 
     const selectPosDevice = (id: string) => {
         setSelectedPosDeviceId(id)
-        localStorage.setItem('osgfest_pos_id', id)
+        localStorage.setItem('fantafestando_pos_id', id)
         setIsPosSelectorOpen(false)
         setLastClosedSummary(null)
         setCloseCashSessionPreview(null)
@@ -1156,7 +1156,7 @@ export default function PosPage() {
                 {/* Info Intestazione */}
                 <div className="border-b border-[#d9e6f8] bg-white p-4">
                     <h2 className="text-lg font-black uppercase tracking-tight text-[var(--brand-ink)]">
-                        {activeEvent?.name || "Cassa Osgfest"}
+                        {activeEvent?.name || "Cassa FantaFestando"}
                     </h2>
                     <button
                         onClick={() => setIsPosSelectorOpen(true)}

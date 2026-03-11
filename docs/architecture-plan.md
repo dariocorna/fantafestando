@@ -1,6 +1,6 @@
-# Piano di Sviluppo OSGFest
+# Piano di Sviluppo FantaFestando
 
-Questo documento descrive l'architettura tecnica e le fasi di sviluppo proposte per il gestionale OSGFest, formulate tramite supporto della documentazione Context7.
+Questo documento descrive l'architettura tecnica e le fasi di sviluppo proposte per il gestionale FantaFestando, formulate tramite supporto della documentazione Context7.
 
 ## 1. Stack Tecnologico Proposto
 

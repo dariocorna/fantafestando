@@ -112,7 +112,7 @@ const PRINTER_EXECUTE_TIMEOUT_MS = 7000;
 const PRINTER_CONNECTION_RETRY_DELAY_MS = 250;
 const PRINTER_SAME_DESTINATION_COOLDOWN_MS = 1000;
 const RECEIPT_SEPARATOR = "--------------------------------";
-const PRINTER_EMULATOR_OUTPUT_DIR = process.env.PRINTER_EMULATOR_OUTPUT_DIR || "/tmp/osgfest-printer-emulator";
+const PRINTER_EMULATOR_OUTPUT_DIR = process.env.PRINTER_EMULATOR_OUTPUT_DIR || "/tmp/fantafestando-printer-emulator";
 
 function formatEuroReceipt(amount: number | undefined): string {
     const safeAmount = Number.isFinite(amount) ? Number(amount) : 0;

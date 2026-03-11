@@ -1,4 +1,4 @@
-# OSGFest — Stato delle Epiche di Sviluppo
+# FantaFestando — Stato delle Epiche di Sviluppo
 
 Documento di riferimento per agenti AI e sviluppatori. Elenca tutte le epiche di sviluppo del progetto con lo stato attuale (✅ Completata / 🔄 In corso / ⬜ Pianificata).
 
@@ -265,8 +265,8 @@ Allineamento visuale delle superfici `menu`, `admin` e `pos` con priorita' opera
 - Configurazione servizi runtime (app, database, reverse proxy) e persistenza dati.
 - Procedure operative di backup/ripristino e aggiornamento.
 - Deploy attivo su domini DDNS pubblici:
-  - `https://osgfest.ddns.net` (Menu)
-  - `https://osgfest-backoffice.ddns.net` (Admin/POS)
+  - `https://fantafestando.ddns.net` (Menu)
+  - `https://fantafestando-backoffice.ddns.net` (Admin/POS)
 - HTTPS abilitato via Certbot + Apache reverse proxy.
 
 ---

@@ -4,7 +4,7 @@ export const MENU_CART_STORAGE_KEY = "osg_cart"
 export const MENU_CART_EVENT_STORAGE_KEY = "osg_eventId"
 export const EMPTY_STORED_MENU_CART_ITEMS: StoredMenuCartItem[] = []
 
-const MENU_CART_STORAGE_EVENT = "osgfest:menu-cart-change"
+const MENU_CART_STORAGE_EVENT = "fantafestando:menu-cart-change"
 
 export interface StoredMenuCartItem {
     _id: string

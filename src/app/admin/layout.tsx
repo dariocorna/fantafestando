@@ -11,8 +11,8 @@ import { LogOut } from "lucide-react";
 import { BrandLogoLockup } from "@/components/brand/brand-logo-lockup";
 
 export const metadata: Metadata = {
-    title: "Admin Dashboard | OSGFest",
-    description: "OSGFest Management Dashboard",
+    title: "Admin Dashboard | FantaFestando",
+    description: "FantaFestando Management Dashboard",
 };
 
 export const viewport: Viewport = {
@@ -49,7 +49,7 @@ export default async function AdminLayout({
                     <div className="flex min-w-0 items-center">
                         <SidebarTrigger />
                         <BrandLogoLockup
-                            title="OSGFest Manager"
+                            title="FantaFestando Manager"
                             subtitle={selectableEvents.find(e => String(e._id) === currentEventId)?.name || "Festa"}
                             compact
                             variant="admin"
@@ -77,7 +77,7 @@ export default async function AdminLayout({
                 </div>
                 <footer className="border-t border-[#d9e6f8] bg-white/90 px-4 py-3 text-xs text-slate-600">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span>Copyright 2026 OSGFest</span>
+                        <span>Copyright 2026 FantaFestando</span>
                         <span data-testid="admin-app-version">{appVersionLabel}</span>
                     </div>
                 </footer>

@@ -26,7 +26,7 @@ const brandScript = Satisfy({
 });
 
 export const metadata: Metadata = {
-  title: "OSGFest | Cassa e WebApp Ordini",
+  title: "FantaFestando | Cassa e WebApp Ordini",
   description: "Sistema cloud e offline-first per gestire sagre e feste.",
 };
 

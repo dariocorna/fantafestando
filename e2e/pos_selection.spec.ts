@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 
 async function openPosWithCleanSelection(page: Page) {
     await page.goto("/pos");
-    await page.evaluate(() => localStorage.removeItem("osgfest_pos_id"));
+    await page.evaluate(() => localStorage.removeItem("fantafestando_pos_id"));
     await page.reload();
 }
 

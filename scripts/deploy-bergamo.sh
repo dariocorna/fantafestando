@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 REMOTE_HOST="${DEPLOY_HOST:-bergamo}"
-REMOTE_PATH="${DEPLOY_PATH:-/opt/osgfest}"
+REMOTE_PATH="${DEPLOY_PATH:-/opt/fantafestando}"
 PROFILE="${DEPLOY_PROFILE:-demo}"
 
 SKIP_BUILD=false
@@ -18,7 +18,7 @@ Usage: ./scripts/deploy-bergamo.sh [options]
 
 Options:
   --host <ssh-host>          SSH host alias (default: bergamo)
-  --path <remote-path>       Remote app path (default: /opt/osgfest)
+  --path <remote-path>       Remote app path (default: /opt/fantafestando)
   --profile <compose-profile>Docker compose profile (default: demo)
   --skip-build               Skip local `npm run build`
   --skip-rsync               Skip rsync step
@@ -163,9 +163,9 @@ else
 fi
 
 if [[ "${USE_CACHE}" == "true" ]]; then
-    docker compose --env-file .env.production -f docker-compose.prod.yml build osgfest-backoffice osgfest-menu
+    docker compose --env-file .env.production -f docker-compose.prod.yml build fantafestando-backoffice fantafestando-menu
 else
-    docker compose --env-file .env.production -f docker-compose.prod.yml build --no-cache osgfest-backoffice osgfest-menu
+    docker compose --env-file .env.production -f docker-compose.prod.yml build --no-cache fantafestando-backoffice fantafestando-menu
 fi
 
 docker compose --env-file .env.production -f docker-compose.prod.yml --profile "${PROFILE}" up -d --remove-orphans

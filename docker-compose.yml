@@ -1,22 +1,22 @@
 services:
   mongodb:
     image: mongo:latest
-    container_name: osgfest_mongodb
+    container_name: fantafestando_mongodb
     restart: unless-stopped
     ports:
       - "27017:27017"
     environment:
       - MONGO_INITDB_ROOT_USERNAME=root
       - MONGO_INITDB_ROOT_PASSWORD=password
-      - MONGO_INITDB_DATABASE=osgfest
+      - MONGO_INITDB_DATABASE=fantafestando
     volumes:
       - mongodb_data:/data/db
     networks:
-      - osgfest_dev_net
+      - fantafestando_dev_net
 
   printer-emulator:
     image: node:20-alpine
-    container_name: osgfest_printer_emulator
+    container_name: fantafestando_printer_emulator
     restart: unless-stopped
     working_dir: /app
     command: ["node", "scripts/printer-emulator.mjs"]
@@ -30,15 +30,15 @@ services:
     ports:
       - "19100-19109:19100-19109"
     networks:
-      - osgfest_dev_net
+      - fantafestando_dev_net
 
 volumes:
   mongodb_data:
   printer_emulator_data:
 
 networks:
-  osgfest_dev_net:
-    name: osgfest_dev_net
+  fantafestando_dev_net:
+    name: fantafestando_dev_net
     ipam:
       config:
         - subnet: 10.201.0.0/24

@@ -32,7 +32,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
             <Card className="w-full max-w-sm shadow-lg">
                 <CardHeader>
-                    <CardTitle>Login OSGFest</CardTitle>
+                    <CardTitle>Login FantaFestando</CardTitle>
                     <CardDescription>Accedi con un utente autorizzato al backoffice.</CardDescription>
                 </CardHeader>
                 <CardContent>
