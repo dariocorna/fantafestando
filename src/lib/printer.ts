@@ -100,6 +100,18 @@ interface PrinterDestinationRef {
     emulatorSlot?: number;
 }
 
+type PrintDispatchAttemptResult =
+    | {
+        success: true;
+        rawCapturePath?: string;
+        automaticRetryCount: number;
+    }
+    | {
+        success: false;
+        errorMessage: string;
+        automaticRetryCount: number;
+    };
+
 function formatPaymentMethod(value: string | undefined): string {
     if (value === "CASH") return "Contanti";
     if (value === "CARD") return "Carta / POS";
@@ -110,6 +122,7 @@ function formatPaymentMethod(value: string | undefined): string {
 const PRINTER_CONNECT_TIMEOUT_MS = 4000;
 const PRINTER_EXECUTE_TIMEOUT_MS = 7000;
 const PRINTER_CONNECTION_RETRY_DELAY_MS = 250;
+const PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS = [1000, 2000] as const;
 const PRINTER_SAME_DESTINATION_COOLDOWN_MS = 1000;
 const RECEIPT_SEPARATOR = "--------------------------------";
 const PRINTER_EMULATOR_OUTPUT_DIR = process.env.PRINTER_EMULATOR_OUTPUT_DIR || "/tmp/fantafestando-printer-emulator";
@@ -171,6 +184,8 @@ function wait(ms: number): Promise<void> {
 }
 
 export class PrinterService {
+    private static destinationExecutionChains = new Map<string, Promise<void>>();
+
     private static isTimeoutError(error: unknown): boolean {
         return error instanceof Error && error.message.toLowerCase().includes("timeout");
     }
@@ -248,9 +263,7 @@ export class PrinterService {
         entries: Array<{ job: PrinterCommandJob; copies: number }>
     ): Promise<boolean[]> {
         const results = new Array<boolean>(entries.length);
-        const destinationChains = new Map<string, Promise<void>>();
-
-        await Promise.all(entries.map((entry, index) => {
+        await Promise.all(entries.map(async (entry, index) => {
             const hasDestination = typeof entry.job.ip === "string" && entry.job.ip.trim().length > 0;
             const destinationKey = hasDestination
                 ? resolvePrinterDestination({
@@ -260,23 +273,38 @@ export class PrinterService {
                     emulatorSlot: entry.job.emulatorSlot
                 }).label
                 : `missing-destination-${index}`;
-            const hasPrevious = destinationChains.has(destinationKey);
 
-            const previous = destinationChains.get(destinationKey) || Promise.resolve();
-            const current = previous
-                .catch(() => undefined)
-                .then(async () => {
-                    if (hasPrevious) {
-                        await wait(PRINTER_SAME_DESTINATION_COOLDOWN_MS);
-                    }
-                    results[index] = await this.printComanda(entry.job, entry.copies);
-                });
-
-            destinationChains.set(destinationKey, current);
-            return current;
+            results[index] = await this.enqueueJobForDestination(destinationKey, async () => (
+                this.printComanda(entry.job, entry.copies)
+            ));
         }));
 
         return results;
+    }
+
+    private static async enqueueJobForDestination<T>(destinationKey: string, task: () => Promise<T>): Promise<T> {
+        const hasPrevious = this.destinationExecutionChains.has(destinationKey);
+        const previous = this.destinationExecutionChains.get(destinationKey) || Promise.resolve();
+
+        let releaseCurrent: (() => void) | undefined;
+        const current = new Promise<void>((resolve) => {
+            releaseCurrent = resolve;
+        });
+        const chain = previous.catch(() => undefined).then(() => current);
+        this.destinationExecutionChains.set(destinationKey, chain);
+
+        try {
+            await previous.catch(() => undefined);
+            if (hasPrevious) {
+                await wait(PRINTER_SAME_DESTINATION_COOLDOWN_MS);
+            }
+            return await task();
+        } finally {
+            releaseCurrent?.();
+            if (this.destinationExecutionChains.get(destinationKey) === chain) {
+                this.destinationExecutionChains.delete(destinationKey);
+            }
+        }
     }
 
     private static printCashierReceiptNoticeBox(printer: ThermalPrinter, rowWidth: number) {
@@ -669,6 +697,7 @@ export class PrinterService {
             status: "SENT" | "FAILED";
             errorMessage?: string;
             rawCapturePath?: string;
+            automaticRetryCount?: number;
         }
     ) {
         if (!id) return;
@@ -679,13 +708,115 @@ export class PrinterService {
                     $set: {
                         status: updates.status,
                         errorMessage: updates.errorMessage || undefined,
-                        rawCapturePath: updates.rawCapturePath || undefined
+                        rawCapturePath: updates.rawCapturePath || undefined,
+                        automaticRetryCount: updates.automaticRetryCount ?? 0
                     }
                 }
             );
         } catch (error) {
             console.error(`Unable to update print job log ${id}:`, error);
         }
+    }
+
+    private static async dispatchPrintDocument(params: {
+        destinationHost: string;
+        destinationPort: number;
+        destinationLabel: string;
+        printType: PrintJobType;
+        document: PrintDocumentV2;
+        isVirtual: boolean;
+        copies: number;
+    }): Promise<PrintDispatchAttemptResult> {
+        const printer = new ThermalPrinter({
+            type: PrinterTypes.EPSON,
+            interface: toTcpPrinterInterface(params.destinationHost, params.destinationPort),
+            characterSet: CharacterSet.WPC1252,
+            removeSpecialCharacters: false,
+            lineCharacter: "=",
+        });
+
+        let isConnected = false;
+        try {
+            isConnected = await this.waitForPrinterReachable(printer, PRINTER_CONNECT_TIMEOUT_MS);
+        } catch (error) {
+            console.error(`Printer connection check error at ${params.destinationLabel}:`, error);
+            return {
+                success: false,
+                errorMessage: "Printer connection timeout",
+                automaticRetryCount: 0
+            };
+        }
+
+        if (!isConnected) {
+            console.error(`Printer at ${params.destinationLabel} is not reachable`);
+            return {
+                success: false,
+                errorMessage: "Printer not reachable",
+                automaticRetryCount: 0
+            };
+        }
+
+        const hasLogo = await this.tryPrintLogo(printer, params.document, params.printType);
+        this.renderPrintDocument(printer, params.document, !hasLogo);
+
+        try {
+            const executeStartedAt = new Date();
+            for (let i = 0; i < params.copies; i += 1) {
+                await this.executeWithConnectionRetry(printer, PRINTER_EXECUTE_TIMEOUT_MS);
+            }
+            console.log(`Print job sent to ${params.destinationLabel} (${params.copies} copies) successfully`);
+            const rawCapturePath = params.isVirtual
+                ? await this.resolveVirtualRawCapturePath(params.destinationPort, executeStartedAt)
+                : undefined;
+            return { success: true, rawCapturePath, automaticRetryCount: 0 };
+        } catch (error) {
+            console.error(`Printer execution error at ${params.destinationLabel}:`, error);
+            const message = this.isTimeoutError(error)
+                ? "Printer execution timeout"
+                : this.isConnectionRefusedError(error)
+                    ? "Printer not reachable"
+                    : "Printer execution error";
+            return {
+                success: false,
+                errorMessage: message,
+                automaticRetryCount: 0
+            };
+        }
+    }
+
+    private static async dispatchPrintDocumentWithAutomaticRetry(params: {
+        destinationHost: string;
+        destinationPort: number;
+        destinationLabel: string;
+        printType: PrintJobType;
+        document: PrintDocumentV2;
+        isVirtual: boolean;
+        copies: number;
+    }): Promise<PrintDispatchAttemptResult> {
+        let result = await this.dispatchPrintDocument(params);
+        let automaticRetryCount = 0;
+
+        for (
+            let retryIndex = 0;
+            !result.success
+                && result.errorMessage === "Printer not reachable"
+                && retryIndex < PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS.length;
+            retryIndex += 1
+        ) {
+            const delayMs = PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS[retryIndex];
+            console.warn(
+                `Printer at ${params.destinationLabel} is not reachable, retrying in ${delayMs}ms `
+                + `(${retryIndex + 2}/${PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS.length + 1})`
+            );
+            await wait(delayMs);
+            automaticRetryCount += 1;
+            result = await this.dispatchPrintDocument(params);
+        }
+
+        return {
+            ...result,
+            automaticRetryCount
+        };
     }
 
     static async printComanda(job: PrinterCommandJob, copies: number = 1) {
@@ -741,63 +872,32 @@ export class PrinterService {
             return false;
         }
 
-        const printer = new ThermalPrinter({
-            type: PrinterTypes.EPSON,
-            interface: toTcpPrinterInterface(destinationHost, destinationPort),
-            characterSet: CharacterSet.WPC1252,
-            removeSpecialCharacters: false,
-            lineCharacter: "=",
+        const normalizedDocument = normalizeLegacyPrintDocument(document as unknown as Record<string, unknown>);
+        const dispatchResult = await this.dispatchPrintDocumentWithAutomaticRetry({
+            destinationHost,
+            destinationPort,
+            destinationLabel,
+            printType,
+            document: normalizedDocument,
+            isVirtual: Boolean(job.isVirtual),
+            copies
         });
 
-        let isConnected = false;
-        try {
-            isConnected = await this.waitForPrinterReachable(printer, PRINTER_CONNECT_TIMEOUT_MS);
-        } catch (error) {
-            console.error(`Printer connection check error at ${destinationLabel}:`, error);
+        if (!dispatchResult.success) {
             await this.updatePrintJobLog(logId, {
                 status: "FAILED",
-                errorMessage: "Printer connection timeout"
+                errorMessage: dispatchResult.errorMessage,
+                automaticRetryCount: dispatchResult.automaticRetryCount
             });
             return false;
         }
 
-        if (!isConnected) {
-            console.error(`Printer at ${destinationLabel} is not reachable`);
-            await this.updatePrintJobLog(logId, {
-                status: "FAILED",
-                errorMessage: "Printer not reachable"
-            });
-            return false;
-        }
-
-        const normalizedDocument = normalizeLegacyPrintDocument(document as unknown as Record<string, unknown>);
-        const hasLogo = await this.tryPrintLogo(printer, normalizedDocument, printType);
-        this.renderPrintDocument(printer, normalizedDocument, !hasLogo);
-
-        try {
-            const executeStartedAt = new Date();
-            for (let i = 0; i < copies; i += 1) {
-                await this.executeWithConnectionRetry(printer, PRINTER_EXECUTE_TIMEOUT_MS);
-            }
-            console.log(`Print job sent to ${destinationLabel} (${copies} copies) successfully`);
-            const rawCapturePath = Boolean(job.isVirtual)
-                ? await this.resolveVirtualRawCapturePath(destinationPort, executeStartedAt)
-                : undefined;
-            await this.updatePrintJobLog(logId, { status: "SENT", rawCapturePath });
-            return true;
-        } catch (error) {
-            console.error(`Printer execution error at ${destinationLabel}:`, error);
-            const message = this.isTimeoutError(error)
-                ? "Printer execution timeout"
-                : this.isConnectionRefusedError(error)
-                    ? "Printer not reachable"
-                : "Printer execution error";
-            await this.updatePrintJobLog(logId, {
-                status: "FAILED",
-                errorMessage: message
-            });
-            return false;
-        }
+        await this.updatePrintJobLog(logId, {
+            status: "SENT",
+            rawCapturePath: dispatchResult.rawCapturePath,
+            automaticRetryCount: dispatchResult.automaticRetryCount
+        });
+        return true;
     }
 
     static async routeOrderToPrinters(orderId: string, posDeviceId?: string) {

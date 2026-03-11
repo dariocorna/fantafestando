@@ -46,6 +46,7 @@ export async function GET(
                     destinationPort: number;
                     isVirtual: boolean;
                     copies: number;
+                    automaticRetryCount?: number;
                     document: Record<string, unknown>;
                     rawCapturePath?: string;
                     errorMessage?: string;
@@ -69,6 +70,7 @@ export async function GET(
                 destinationPort: job.destinationPort,
                 isVirtual: job.isVirtual,
                 copies: job.copies,
+                automaticRetryCount: Number(job.automaticRetryCount || 0),
                 document: job.document || {},
                 rawCapturePath: job.rawCapturePath,
                 errorMessage: job.errorMessage,

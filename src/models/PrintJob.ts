@@ -20,6 +20,7 @@ export interface IPrintJob extends Document {
     destinationPort: number;
     isVirtual: boolean;
     copies: number;
+    automaticRetryCount: number;
     document: Record<string, unknown>;
     rawCapturePath?: string;
     errorMessage?: string;
@@ -53,6 +54,7 @@ const PrintJobSchema = new Schema<IPrintJob>({
     destinationPort: { type: Number, required: true, min: 1, max: 65535, default: 9100 },
     isVirtual: { type: Boolean, required: true, default: false },
     copies: { type: Number, required: true, default: 1, min: 1, max: 5 },
+    automaticRetryCount: { type: Number, required: true, default: 0, min: 0, max: 10 },
     document: { type: Schema.Types.Mixed, required: true },
     rawCapturePath: { type: String, trim: true },
     errorMessage: { type: String, trim: true }
