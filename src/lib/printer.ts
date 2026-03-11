@@ -119,11 +119,31 @@ function formatPaymentMethod(value: string | undefined): string {
     return "-";
 }
 
-const PRINTER_CONNECT_TIMEOUT_MS = 4000;
-const PRINTER_EXECUTE_TIMEOUT_MS = 7000;
-const PRINTER_CONNECTION_RETRY_DELAY_MS = 250;
-const PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS = [1000, 2000] as const;
-const PRINTER_SAME_DESTINATION_COOLDOWN_MS = 1000;
+function readEnvNumber(name: string, fallback: number): number {
+    const rawValue = process.env[name]?.trim();
+    if (!rawValue) return fallback;
+
+    const parsed = Number(rawValue);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function readEnvDelayList(name: string, fallback: number[]): number[] {
+    const rawValue = process.env[name]?.trim();
+    if (!rawValue) return fallback;
+
+    const parsed = rawValue
+        .split(",")
+        .map((value) => Number(value.trim()))
+        .filter((value) => Number.isFinite(value) && value >= 0);
+
+    return parsed.length > 0 ? parsed : fallback;
+}
+
+const PRINTER_CONNECT_TIMEOUT_MS = readEnvNumber("PRINTER_CONNECT_TIMEOUT_MS", 4000);
+const PRINTER_EXECUTE_TIMEOUT_MS = readEnvNumber("PRINTER_EXECUTE_TIMEOUT_MS", 7000);
+const PRINTER_CONNECTION_RETRY_DELAY_MS = readEnvNumber("PRINTER_CONNECTION_RETRY_DELAY_MS", 250);
+const PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS = readEnvDelayList("PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS", [1000, 2000]);
+const PRINTER_SAME_DESTINATION_COOLDOWN_MS = readEnvNumber("PRINTER_SAME_DESTINATION_COOLDOWN_MS", 1000);
 const RECEIPT_SEPARATOR = "--------------------------------";
 const PRINTER_EMULATOR_OUTPUT_DIR = process.env.PRINTER_EMULATOR_OUTPUT_DIR || "/tmp/fantafestando-printer-emulator";
 
