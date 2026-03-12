@@ -184,7 +184,7 @@ describe("PrinterService.printComanda connection retry", () => {
         );
     });
 
-    test("automatically retries not reachable jobs after 1s and 2s before succeeding", async () => {
+    test("automatically retries not reachable jobs before succeeding", async () => {
         vi.useFakeTimers();
         const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
         const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -225,7 +225,7 @@ describe("PrinterService.printComanda connection retry", () => {
         );
     });
 
-    test("marks the job as failed after exhausting the two automatic not reachable retries", async () => {
+    test("marks the job as failed after exhausting the automatic not reachable retries", async () => {
         vi.useFakeTimers();
         vi.spyOn(console, "error").mockImplementation(() => undefined);
         vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -240,11 +240,11 @@ describe("PrinterService.printComanda connection retry", () => {
 
         const resultPromise = PrinterService.printComanda(baseJob(), 1);
 
-        await vi.advanceTimersByTimeAsync(3000);
+        await vi.advanceTimersByTimeAsync(5000);
         const result = await resultPromise;
 
         expect(result).toBe(false);
-        expect(waitForPrinterReachableSpy).toHaveBeenCalledTimes(3);
+        expect(waitForPrinterReachableSpy).toHaveBeenCalledTimes(6);
         expect(executeMock).not.toHaveBeenCalled();
         expect(printJobUpdateOneMock).toHaveBeenCalledTimes(1);
         expect(printJobUpdateOneMock).toHaveBeenCalledWith(
@@ -254,7 +254,7 @@ describe("PrinterService.printComanda connection retry", () => {
                     status: "FAILED",
                     errorMessage: "Printer not reachable",
                     rawCapturePath: undefined,
-                    automaticRetryCount: 2
+                    automaticRetryCount: 5
                 }
             }
         );
