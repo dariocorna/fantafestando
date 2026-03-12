@@ -11,7 +11,9 @@ function readTrimmedEnv(name: string): string {
 
 export interface RealPrintConfig {
     enabled: boolean;
+    stressEnabled: boolean;
     skipReason?: string;
+    stressSkipReason?: string;
     cashierHost: string;
     cashierPort: number;
     kitchenHost: string;
@@ -21,11 +23,13 @@ export interface RealPrintConfig {
 
 export function getRealPrintConfig(): RealPrintConfig {
     const enabledFlag = readTrimmedEnv("ENABLE_REAL_PRINT_TESTS");
+    const stressEnabledFlag = readTrimmedEnv("ENABLE_REAL_PRINT_STRESS_TESTS");
     const cashierHost = readTrimmedEnv("REAL_PRINT_CASHIER_HOST");
     const kitchenHost = readTrimmedEnv("REAL_PRINT_KITCHEN_HOST");
 
     const hasRequiredHosts = cashierHost.length > 0 && kitchenHost.length > 0;
     const enabled = enabledFlag === "1" && hasRequiredHosts;
+    const stressEnabled = stressEnabledFlag === "1" && enabled;
 
     let skipReason: string | undefined;
     if (enabledFlag !== "1") {
@@ -34,9 +38,18 @@ export function getRealPrintConfig(): RealPrintConfig {
         skipReason = "Suite reale disabilitata: imposta REAL_PRINT_CASHIER_HOST e REAL_PRINT_KITCHEN_HOST.";
     }
 
+    let stressSkipReason: string | undefined;
+    if (stressEnabledFlag !== "1") {
+        stressSkipReason = "Stress test reale disabilitato: imposta ENABLE_REAL_PRINT_STRESS_TESTS=1.";
+    } else if (!enabled) {
+        stressSkipReason = skipReason || "Stress test reale disabilitato: configura prima la suite real print standard.";
+    }
+
     return {
         enabled,
+        stressEnabled,
         skipReason,
+        stressSkipReason,
         cashierHost,
         cashierPort: parsePort(process.env.REAL_PRINT_CASHIER_PORT, 9100),
         kitchenHost,
