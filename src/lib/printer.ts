@@ -79,6 +79,11 @@ export interface CashSessionClosingPrintSummary {
     paidOrdersCount: number;
     openingNotes?: string;
     closingNotes?: string;
+    items?: Array<{
+        name: string;
+        qty: number;
+        lineTotal?: number;
+    }>;
 }
 
 interface CartItem {
@@ -142,7 +147,10 @@ function readEnvDelayList(name: string, fallback: number[]): number[] {
 const PRINTER_CONNECT_TIMEOUT_MS = readEnvNumber("PRINTER_CONNECT_TIMEOUT_MS", 4000);
 const PRINTER_EXECUTE_TIMEOUT_MS = readEnvNumber("PRINTER_EXECUTE_TIMEOUT_MS", 7000);
 const PRINTER_CONNECTION_RETRY_DELAY_MS = readEnvNumber("PRINTER_CONNECTION_RETRY_DELAY_MS", 250);
-const PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS = readEnvDelayList("PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS", [1000, 2000]);
+const PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS = readEnvDelayList(
+    "PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS",
+    [200, 400, 800, 1200, 1600]
+);
 const PRINTER_SAME_DESTINATION_COOLDOWN_MS = readEnvNumber("PRINTER_SAME_DESTINATION_COOLDOWN_MS", 1000);
 const RECEIPT_SEPARATOR = "--------------------------------";
 const PRINTER_EMULATOR_OUTPUT_DIR = process.env.PRINTER_EMULATOR_OUTPUT_DIR || "/tmp/fantafestando-printer-emulator";
@@ -1208,6 +1216,7 @@ export class PrinterService {
             paidOrdersCount: summary.paidOrdersCount,
             openingNotes: summary.openingNotes,
             closingNotes: summary.closingNotes,
+            items: summary.items,
             brandingLogoUrl: sanitizeReceiptHeaderLogoUrl(event?.settings?.receiptHeaderLogoUrl)
                 || sanitizePrintableHeaderLogoUrl(event?.settings?.menuHeaderLogoUrl)
         });

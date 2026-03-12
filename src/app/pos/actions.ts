@@ -562,6 +562,42 @@ export async function closeCashSession(data: {
         openSession.varianceAmount = computed.varianceAmount
         await openSession.save()
 
+        const paidOrdersForSession = await Order.find({
+            cashSessionId: openSession._id,
+            status: "PAID"
+        }).lean() as Array<{
+            cart?: Array<{
+                productId?: { toString(): string } | string
+                snapshotName?: string
+                quantity?: number
+                lineTotal?: number
+            }>
+        }>
+
+        const printItems = Array.from(
+            paidOrdersForSession.reduce((accumulator, order) => {
+                for (const item of order.cart || []) {
+                    const key = item.productId ? item.productId.toString() : item.snapshotName || "unknown";
+                    const current = accumulator.get(key) || {
+                        name: item.snapshotName || "Prodotto",
+                        qty: 0,
+                        lineTotal: 0
+                    };
+                    current.qty += Math.max(0, Math.floor(Number(item.quantity || 0)));
+                    current.lineTotal += Number(item.lineTotal || 0);
+                    accumulator.set(key, current);
+                }
+                return accumulator;
+            }, new Map<string, { name: string; qty: number; lineTotal: number }>())
+                .values()
+        )
+            .sort((left, right) => right.qty - left.qty || left.name.localeCompare(right.name, "it"))
+            .map((item) => ({
+                name: item.name,
+                qty: item.qty,
+                lineTotal: Number(item.lineTotal.toFixed(2))
+            }))
+
         try {
             await PrinterService.printCashSessionSummary(data.eventId, data.posDeviceId, {
                 sessionId: openSession._id.toString(),
@@ -576,7 +612,8 @@ export async function closeCashSession(data: {
                 varianceAmount: computed.varianceAmount,
                 paidOrdersCount: computed.paidOrdersCount,
                 openingNotes: openSession.openingNotes,
-                closingNotes: closingNotes || undefined
+                closingNotes: closingNotes || undefined,
+                items: printItems
             })
         } catch (printError) {
             console.error("Cash session closed but summary print failed:", printError)
