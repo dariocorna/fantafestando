@@ -291,7 +291,9 @@ export class PrinterService {
         entries: Array<{ job: PrinterCommandJob; copies: number }>
     ): Promise<boolean[]> {
         const results = new Array<boolean>(entries.length);
-        await Promise.all(entries.map(async (entry, index) => {
+        const entriesByDestination = new Map<string, Array<{ entry: { job: PrinterCommandJob; copies: number }; index: number }>>();
+
+        entries.forEach((entry, index) => {
             const hasDestination = typeof entry.job.ip === "string" && entry.job.ip.trim().length > 0;
             const destinationKey = hasDestination
                 ? resolvePrinterDestination({
@@ -302,9 +304,28 @@ export class PrinterService {
                 }).label
                 : `missing-destination-${index}`;
 
-            results[index] = await this.enqueueJobForDestination(destinationKey, async () => (
-                this.printComanda(entry.job, entry.copies)
-            ));
+            if (!entriesByDestination.has(destinationKey)) {
+                entriesByDestination.set(destinationKey, []);
+            }
+            entriesByDestination.get(destinationKey)?.push({ entry, index });
+        });
+
+        await Promise.all(Array.from(entriesByDestination.entries()).map(async ([destinationKey, destinationEntries]) => {
+            await this.enqueueJobForDestination(destinationKey, async () => {
+                let destinationFailed = false;
+
+                for (const { entry, index } of destinationEntries) {
+                    results[index] = destinationFailed
+                        ? await this.printComanda(entry.job, entry.copies, {
+                            immediateFailureReason: "Skipped after previous destination failure"
+                        })
+                        : await this.printComanda(entry.job, entry.copies);
+
+                    if (!results[index]) {
+                        destinationFailed = true;
+                    }
+                }
+            });
         }));
 
         return results;
@@ -847,7 +868,11 @@ export class PrinterService {
         };
     }
 
-    static async printComanda(job: PrinterCommandJob, copies: number = 1) {
+    static async printComanda(
+        job: PrinterCommandJob,
+        copies: number = 1,
+        options?: { immediateFailureReason?: string }
+    ) {
         const printType = job.printType || "CUSTOMER_ORDER";
         const document = buildOrderPrintDocumentV2({
             printType,
@@ -890,6 +915,14 @@ export class PrinterService {
             copies,
             document: document as unknown as Record<string, unknown>
         });
+
+        if (options?.immediateFailureReason) {
+            await this.updatePrintJobLog(logId, {
+                status: "FAILED",
+                errorMessage: options.immediateFailureReason
+            });
+            return false;
+        }
 
         if (!destinationHost) {
             console.warn(`No printer destination defined for job ${job.orderId}`);
@@ -991,6 +1024,7 @@ export class PrinterService {
         const categoryIdsFromProducts = Array.from(new Set(products.map((product) => product.categoryId.toString())));
         const categories = await Category.find({ _id: { $in: categoryIdsFromProducts } }).populate("printerId").lean() as Array<{
             _id: { toString(): string };
+            name?: string;
             printerId?: {
                 _id?: unknown;
                 name?: string;
@@ -1001,8 +1035,9 @@ export class PrinterService {
             };
         }>;
 
-        const kitchenJobsByDestination: Record<string, PrinterCommandJob> = {};
-        const customerJobsByGroup: Record<string, PrinterCommandJob> = {};
+        const categoryById = new Map(categories.map((category) => [category._id.toString(), category]));
+        const kitchenJobsByGroup = new Map<string, PrinterCommandJob>();
+        const customerJobsByGroup = new Map<string, PrinterCommandJob>();
         const involvedDepartments = new Set<string>();
         const orderCode = getOrderCodeFromOrder({
             pickupNumber: order.pickupNumber,
@@ -1052,72 +1087,86 @@ export class PrinterService {
             shortCode: orderCode || undefined
         };
 
-        const ensureCustomerJob = (groupKey: string) => {
+        const ensureCustomerJob = (groupKey: string, footerLines?: string[]) => {
             if (!cashierJob.ip) return null;
-            if (!customerJobsByGroup[groupKey]) {
-                customerJobsByGroup[groupKey] = {
+            const existingJob = customerJobsByGroup.get(groupKey);
+            if (!existingJob) {
+                const createdJob: PrinterCommandJob = {
                     ...cashierJob,
-                    items: []
+                    items: [],
+                    footerLines
                 };
+                customerJobsByGroup.set(groupKey, createdJob);
+                return createdJob;
             }
-            return customerJobsByGroup[groupKey];
+            return existingJob;
         };
 
         order.cart.forEach((item) => {
             const product = productById.get(item.productId.toString());
             if (!product) return;
 
-            const category = categories.find((entry) => entry._id.toString() === product.categoryId.toString());
+            const category = categoryById.get(product.categoryId.toString());
             const kitchenPrinter = category?.printerId;
+            const categoryId = category?._id.toString() || product.categoryId.toString();
+            const categoryName = category?.name?.trim();
+            const printerName = kitchenPrinter?.name?.trim();
+            const groupKey = kitchenPrinter?._id
+                ? `printer:${String(kitchenPrinter._id)}`
+                : `category:${categoryId}`;
+            const departmentLabel = printerName || categoryName || resolvePrintName(item.productId, item.snapshotName);
+            if (departmentLabel) involvedDepartments.add(departmentLabel);
 
-            if (kitchenPrinter?.ip) {
-                const departmentName = kitchenPrinter.name?.trim();
-                if (departmentName) involvedDepartments.add(departmentName);
-                const resolvedDestination = resolvePrinterDestination({
+            const destination = kitchenPrinter?.ip
+                ? {
                     ip: kitchenPrinter.ip,
                     port: kitchenPrinter.port || DEFAULT_PRINTER_PORT,
-                    isVirtual: kitchenPrinter.isVirtual,
-                    emulatorSlot: kitchenPrinter.emulatorSlot
-                });
-                const destinationKey = resolvedDestination.label;
-
-                if (!kitchenJobsByDestination[destinationKey]) {
-                    kitchenJobsByDestination[destinationKey] = {
-                        ip: kitchenPrinter.ip,
-                        port: kitchenPrinter.port || DEFAULT_PRINTER_PORT,
-                        emulatorSlot: kitchenPrinter.emulatorSlot,
-                        printerId: kitchenPrinter._id ? String(kitchenPrinter._id) : undefined,
-                        eventId,
-                        source: "ORDER",
-                        printType: "KITCHEN_ORDER",
-                        isVirtual: Boolean(kitchenPrinter.isVirtual),
-                        title: "COMANDA REPARTO",
-                        eventName,
-                        copyLabel: "COPIA REPARTO",
-                        brandingLogoUrl,
-                        items: [],
-                        customerName: order.customer?.name,
-                        tableNumber: order.customer?.table,
-                        orderId: order._id.toString(),
-                        shortCode: cashierJob.shortCode
-                    };
+                    emulatorSlot: kitchenPrinter.emulatorSlot,
+                    printerId: kitchenPrinter._id ? String(kitchenPrinter._id) : undefined,
+                    isVirtual: Boolean(kitchenPrinter.isVirtual)
                 }
+                : {
+                    ip: cashierPrinter?.ip || "",
+                    port: cashierPrinter?.port || DEFAULT_PRINTER_PORT,
+                    emulatorSlot: cashierPrinter?.emulatorSlot,
+                    printerId: cashierPrinter?.id,
+                    isVirtual: Boolean(cashierPrinter?.isVirtual)
+                };
 
-                kitchenJobsByDestination[destinationKey].items.push({
-                    name: resolvePrintName(item.productId, item.snapshotName),
-                    quantity: item.quantity,
-                    notes: item.customKitchenNotes
-                });
-                const customerJob = ensureCustomerJob(destinationKey);
-                customerJob?.items.push({
-                    name: resolvePrintName(item.productId, item.snapshotName),
-                    quantity: item.quantity,
-                    notes: item.customKitchenNotes
-                });
-                return;
+            const departmentFooterLines = departmentLabel ? [`REPARTO: ${departmentLabel}`] : undefined;
+
+            let kitchenJob = kitchenJobsByGroup.get(groupKey);
+            if (!kitchenJob && destination.ip) {
+                kitchenJob = {
+                    ip: destination.ip,
+                    port: destination.port,
+                    emulatorSlot: destination.emulatorSlot,
+                    printerId: destination.printerId,
+                    eventId,
+                    source: "ORDER",
+                    printType: "KITCHEN_ORDER",
+                    isVirtual: destination.isVirtual,
+                    title: "COMANDA REPARTO",
+                    eventName,
+                    copyLabel: "COPIA REPARTO",
+                    brandingLogoUrl,
+                    items: [],
+                    customerName: order.customer?.name,
+                    tableNumber: order.customer?.table,
+                    orderId: order._id.toString(),
+                    shortCode: cashierJob.shortCode,
+                    footerLines: departmentFooterLines
+                };
+                kitchenJobsByGroup.set(groupKey, kitchenJob);
             }
 
-            const customerJob = ensureCustomerJob("UNASSIGNED");
+            kitchenJob?.items.push({
+                name: resolvePrintName(item.productId, item.snapshotName),
+                quantity: item.quantity,
+                notes: item.customKitchenNotes
+            });
+
+            const customerJob = ensureCustomerJob(groupKey, departmentFooterLines);
             customerJob?.items.push({
                 name: resolvePrintName(item.productId, item.snapshotName),
                 quantity: item.quantity,
@@ -1130,11 +1179,11 @@ export class PrinterService {
             : undefined;
         if (involvedDepartmentsLine) {
             cashierJob.footerLines = [involvedDepartmentsLine];
-            Object.values(kitchenJobsByDestination).forEach((job) => {
-                job.footerLines = [involvedDepartmentsLine];
+            kitchenJobsByGroup.forEach((job) => {
+                job.footerLines = [...(job.footerLines || []), involvedDepartmentsLine];
             });
-            Object.values(customerJobsByGroup).forEach((job) => {
-                job.footerLines = [involvedDepartmentsLine];
+            customerJobsByGroup.forEach((job) => {
+                job.footerLines = [...(job.footerLines || []), involvedDepartmentsLine];
             });
         }
 
@@ -1155,11 +1204,11 @@ export class PrinterService {
             printJobs.push({ job: summaryJob, copies: 1 });
         }
 
-        Object.values(kitchenJobsByDestination).forEach((job) => {
+        kitchenJobsByGroup.forEach((job) => {
             printJobs.push({ job, copies: 1 });
         });
 
-        Object.values(customerJobsByGroup)
+        Array.from(customerJobsByGroup.values())
             .filter((job) => job.items.length > 0)
             .forEach((job) => {
                 printJobs.push({ job, copies: 1 });
