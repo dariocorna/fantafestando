@@ -3,25 +3,9 @@
 import { ensureAdminSession } from "@/lib/authz";
 import CashSession from "@/models/CashSession";
 import Order from "@/models/Order";
+import Product from "@/models/Product";
 import { buildCashSessionPrintDocumentV2, PrintDocumentItemRow } from "@/lib/print-report";
-
-function aggregateProductConsumption(orders: Array<{ cart: Array<{ productId: { toString(): string }; snapshotName: string; quantity: number; lineTotal?: number }> }>): PrintDocumentItemRow[] {
-    const productMap = new Map<string, { name: string; quantity: number; total: number }>();
-
-    for (const order of orders) {
-        for (const item of order.cart) {
-            const key = item.productId.toString();
-            const existing = productMap.get(key) || { name: item.snapshotName, quantity: 0, total: 0 };
-            existing.quantity += item.quantity;
-            existing.total += (item.lineTotal || 0);
-            productMap.set(key, existing);
-        }
-    }
-
-    return Array.from(productMap.values())
-        .map(p => ({ name: p.name, qty: p.quantity, lineTotal: p.total }))
-        .sort((a, b) => b.qty - a.qty);
-}
+import { aggregateOrderProductConsumptions } from "@/lib/product-consumption";
 
 export async function getClosedCashSessionPrintDocumentAction(sessionId: string, posDeviceName?: string) {
     await ensureAdminSession();
@@ -40,7 +24,42 @@ export async function getClosedCashSessionPrintDocumentAction(sessionId: string,
         status: "PAID"
     }).lean();
 
-    const items = aggregateProductConsumption(orders);
+    const productIds = Array.from(
+        new Set(
+            orders.flatMap((order) =>
+                (order.cart || [])
+                    .map((item) => item?.productId ? item.productId.toString() : null)
+                    .filter((productId): productId is string => Boolean(productId))
+            )
+        )
+    );
+
+    const eventId = typeof session.eventId === "object" && session.eventId && "_id" in session.eventId
+        ? String((session.eventId as { _id: unknown })._id)
+        : undefined;
+
+    const catalogProducts = productIds.length > 0
+        ? await Product.find({
+            _id: { $in: productIds },
+            ...(eventId ? { eventId } : {})
+        }).select("_id name basePrice").lean() as Array<{ _id: { toString(): string } | string; name?: string; basePrice?: number }>
+        : [];
+
+    const catalogByProductId = new Map(
+        catalogProducts.map((product) => [
+            product._id.toString(),
+            { name: product.name, basePrice: product.basePrice }
+        ])
+    );
+
+    const items: PrintDocumentItemRow[] = aggregateOrderProductConsumptions({
+        orders,
+        catalogByProductId
+    }).map((metric) => ({
+        name: metric.productName,
+        qty: metric.quantityConsumed,
+        lineTotal: metric.revenueAmount
+    }));
 
     const document = buildCashSessionPrintDocumentV2({
         sessionId: session._id.toString(),

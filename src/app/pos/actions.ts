@@ -13,6 +13,7 @@ import { decryptSecret } from "@/lib/secrets"
 import { getOrderCodeFromOrder, parseOrderNumberInput } from "@/lib/order-code"
 import { type StockMode } from "@/lib/inventory"
 import { computeCashSessionSummary } from "@/lib/cash-session"
+import { aggregateOrderProductConsumptions } from "@/lib/product-consumption"
 import {
     computeOrderDiscounts,
     type DiscountInput,
@@ -570,33 +571,44 @@ export async function closeCashSession(data: {
                 productId?: { toString(): string } | string
                 snapshotName?: string
                 quantity?: number
+                selectedOptions?: Array<{ priceVariation?: number }>
+                discountApplied?: number
                 lineTotal?: number
             }>
         }>
 
-        const printItems = Array.from(
-            paidOrdersForSession.reduce((accumulator, order) => {
-                for (const item of order.cart || []) {
-                    const key = item.productId ? item.productId.toString() : item.snapshotName || "unknown";
-                    const current = accumulator.get(key) || {
-                        name: item.snapshotName || "Prodotto",
-                        qty: 0,
-                        lineTotal: 0
-                    };
-                    current.qty += Math.max(0, Math.floor(Number(item.quantity || 0)));
-                    current.lineTotal += Number(item.lineTotal || 0);
-                    accumulator.set(key, current);
-                }
-                return accumulator;
-            }, new Map<string, { name: string; qty: number; lineTotal: number }>())
-                .values()
+        const productIds = Array.from(
+            new Set(
+                paidOrdersForSession.flatMap((order) =>
+                    (order.cart || [])
+                        .map((item) => item.productId ? item.productId.toString() : null)
+                        .filter((productId): productId is string => Boolean(productId))
+                )
+            )
         )
-            .sort((left, right) => right.qty - left.qty || left.name.localeCompare(right.name, "it"))
-            .map((item) => ({
-                name: item.name,
-                qty: item.qty,
-                lineTotal: Number(item.lineTotal.toFixed(2))
-            }))
+
+        const catalogProducts = productIds.length > 0
+            ? await Product.find({
+                eventId: data.eventId,
+                _id: { $in: productIds }
+            }).select("_id name basePrice").lean() as Array<{ _id: string | { toString(): string }; name?: string; basePrice?: number }>
+            : []
+
+        const catalogByProductId = new Map(
+            catalogProducts.map((product) => [
+                product._id.toString(),
+                { name: product.name, basePrice: product.basePrice }
+            ])
+        )
+
+        const printItems = aggregateOrderProductConsumptions({
+            orders: paidOrdersForSession,
+            catalogByProductId
+        }).map((metric) => ({
+            name: metric.productName,
+            qty: metric.quantityConsumed,
+            lineTotal: metric.revenueAmount
+        }))
 
         try {
             await PrinterService.printCashSessionSummary(data.eventId, data.posDeviceId, {
@@ -702,7 +714,6 @@ export async function createOrder(data: {
         }))
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
-        const isCardPayment = data.paymentMethod === "CARD"
         const requiresPendingState = computeRequiresPendingState(data.paymentMethod, capabilitiesResult.capabilities)
 
         if (requiresPendingState) {

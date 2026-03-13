@@ -14,6 +14,7 @@ import {
     type CashSessionOrderInput
 } from "@/lib/cash-session"
 import { getOrderCodeFromOrder } from "@/lib/order-code"
+import { aggregateOrderProductConsumptions } from "@/lib/product-consumption"
 
 export const dynamic = "force-dynamic"
 
@@ -53,6 +54,8 @@ interface OrderProjection {
         productId?: unknown
         snapshotName?: string
         quantity?: number
+        discountApplied?: number
+        lineTotal?: number
         selectedOptions?: Array<{ name?: string, priceVariation?: number }>
     }>
     customer?: {
@@ -191,30 +194,9 @@ export async function GET(request: NextRequest) {
                 basePrice: normalizeAmount(product.basePrice)
             })
         })
-
-        const consumptionByProductId = new Map<string, { productName: string, quantityConsumed: number, revenueAmount: number }>()
-        paidOrders.forEach((order) => {
-            ;(order.cart || []).forEach((item) => {
-                const quantity = Math.max(0, Math.floor(Number(item.quantity ?? 0)))
-                if (quantity <= 0 || !item.productId) return
-
-                const productId = String(item.productId)
-                const catalogProduct = productById.get(productId)
-                const selectedOptions = Array.isArray(item.selectedOptions) ? item.selectedOptions : []
-                const optionAmount = selectedOptions.reduce((sum, option) => sum + normalizeAmount(option.priceVariation), 0)
-                const unitAmount = normalizeAmount((catalogProduct?.basePrice ?? 0) + optionAmount)
-                const lineAmount = Number((unitAmount * quantity).toFixed(2))
-
-                const current = consumptionByProductId.get(productId) || {
-                    productName: catalogProduct?.name || item.snapshotName?.trim() || "Prodotto senza nome",
-                    quantityConsumed: 0,
-                    revenueAmount: 0
-                }
-
-                current.quantityConsumed += quantity
-                current.revenueAmount = Number((current.revenueAmount + lineAmount).toFixed(2))
-                consumptionByProductId.set(productId, current)
-            })
+        const productConsumptions = aggregateOrderProductConsumptions({
+            orders: paidOrders,
+            catalogByProductId: productById
         })
 
         const computedFallback = computeCashSessionSummary({
@@ -244,8 +226,8 @@ export async function GET(request: NextRequest) {
             varianceAmount: session.varianceAmount ?? computedFallback.varianceAmount,
             openingNotes: session.openingNotes || "",
             closingNotes: session.closingNotes || "",
-            productConsumptions: Array.from(consumptionByProductId.entries()).map(([productId, metric]) => ({
-                productId,
+            productConsumptions: productConsumptions.map((metric) => ({
+                productId: metric.productId || metric.productKey,
                 productName: metric.productName,
                 quantityConsumed: metric.quantityConsumed,
                 revenueAmount: metric.revenueAmount
