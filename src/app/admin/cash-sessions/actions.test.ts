@@ -1,10 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { ensureAdminSessionMock, cashSessionFindByIdMock, buildCashSessionPrintDocumentV2Mock, orderFindMock } = vi.hoisted(() => ({
+const {
+    ensureAdminSessionMock,
+    cashSessionFindByIdMock,
+    buildCashSessionPrintDocumentV2Mock,
+    orderFindMock,
+    productFindMock
+} = vi.hoisted(() => ({
     ensureAdminSessionMock: vi.fn(),
     cashSessionFindByIdMock: vi.fn(),
     buildCashSessionPrintDocumentV2Mock: vi.fn(),
-    orderFindMock: vi.fn()
+    orderFindMock: vi.fn(),
+    productFindMock: vi.fn()
 }));
 
 vi.mock("@/lib/authz", () => ({
@@ -20,6 +27,12 @@ vi.mock("@/models/CashSession", () => ({
 vi.mock("@/models/Order", () => ({
     default: {
         find: orderFindMock
+    }
+}));
+
+vi.mock("@/models/Product", () => ({
+    default: {
+        find: productFindMock
     }
 }));
 
@@ -87,16 +100,36 @@ describe("getClosedCashSessionPrintDocumentAction", () => {
             lean: vi.fn().mockResolvedValue([
                 {
                     cart: [
-                        { productId: "p1", snapshotName: "Birra", quantity: 2, lineTotal: 10 },
-                        { productId: "p2", snapshotName: "Patatine", quantity: 1, lineTotal: 5 }
+                        {
+                            productId: "p1",
+                            snapshotName: "Birra",
+                            quantity: 2,
+                            selectedOptions: [{ name: "Media", priceVariation: 1 }],
+                            discountApplied: 1
+                        },
+                        { productId: "p2", snapshotName: "Patatine", quantity: 1, selectedOptions: [] }
                     ]
                 },
                 {
                     cart: [
-                        { productId: "p1", snapshotName: "Birra", quantity: 1, lineTotal: 5 }
+                        {
+                            productId: "p1",
+                            snapshotName: "Birra",
+                            quantity: 1,
+                            selectedOptions: [{ name: "Media", priceVariation: 1 }]
+                        }
                     ]
                 }
             ])
+        });
+
+        productFindMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue([
+                    { _id: "p1", name: "Birra", basePrice: 4 },
+                    { _id: "p2", name: "Patatine", basePrice: 5 }
+                ])
+            })
         });
 
         buildCashSessionPrintDocumentV2Mock.mockReturnValue({ title: "MOCK DOCUMENT" });
@@ -115,7 +148,7 @@ describe("getClosedCashSessionPrintDocumentAction", () => {
             openingFloatAmount: 100,
             cashSalesAmount: 50,
             items: expect.arrayContaining([
-                expect.objectContaining({ name: "Birra", qty: 3, lineTotal: 15 }),
+                expect.objectContaining({ name: "Birra", qty: 3, lineTotal: 14 }),
                 expect.objectContaining({ name: "Patatine", qty: 1, lineTotal: 5 })
             ])
         }));
