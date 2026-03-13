@@ -125,7 +125,7 @@ La suite `e2e/real-printing.spec.ts` crea una festa E2E dedicata, stampa davvero
 - Piano architettura: `docs/architecture-plan.md`
 - Schema database: `docs/database-schema.md`
 - Strategia UI: `docs/ui-strategy.md`
-- Deploy VM produzione: `docs/deploy-vm.md`
+- Deploy VM produzione (`Caddy` raccomandato su Oracle VM): `docs/deploy-vm.md`
 - Emulazione stampanti: `docs/printer-emulation.md`
 
 ## Licenza

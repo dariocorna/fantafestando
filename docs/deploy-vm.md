@@ -1,17 +1,25 @@
 # Deploy FantaFestando su VM
 
-Guida operativa per deploy produzione su VM mantenendo Apache come edge reverse proxy TLS e stack applicativo in Docker Compose.
+Guida operativa per deploy produzione su VM con reverse proxy edge TLS e stack applicativo in Docker Compose.
+
+Su VM Oracle la configurazione raccomandata usa `Caddy` come reverse proxy pubblico.
+`Apache` resta supportato come alternativa legacy/manuale.
 
 ## 1. Architettura
 
-- Apache su host VM gestisce:
-  - virtual host
-  - certificati TLS Let's Encrypt
+- Il reverse proxy sull'host VM gestisce:
+  - terminazione TLS
+  - hostname pubblici
   - reverse proxy verso container locali
+  - inoltro header (`Host`, `X-Forwarded-Proto`)
 - Docker Compose gestisce:
   - `mongo`
   - `fantafestando-backoffice` (admin + pos)
   - `fantafestando-menu` (menu pubblico)
+
+Configurazioni supportate:
+- `Caddy` su host VM: opzione raccomandata per Oracle VM, installata e abilitata automaticamente da `scripts/bootstrap-oracle-vm.sh`
+- `Apache`: opzione legacy/manuale, utile se la VM usa già Apache come edge
 
 Mappatura porte locali host:
 - `127.0.0.1:3101` -> `fantafestando-backoffice:3000`
@@ -25,13 +33,10 @@ Domini previsti:
 
 - Ubuntu/Debian con accesso sudo
 - Docker Engine + Docker Compose plugin (`docker compose`)
-- Apache2 con moduli:
-  - `proxy`
-  - `proxy_http`
-  - `headers`
-  - `ssl`
-  - `rewrite`
-- Certbot + plugin Apache
+- Reverse proxy host:
+  - `Caddy` raccomandato su Oracle VM
+  - oppure `Apache2` con moduli `proxy`, `proxy_http`, `headers`, `ssl`, `rewrite`
+- DNS pubblico che punti alla VM per i domini esposti
 - Porte aperte: `80`, `443`
 
 ## 3. Setup applicazione
@@ -52,6 +57,7 @@ Compilare `.env.production` con valori reali, in particolare:
 - `MONGODB_URI`
 - `AUTH_SECRET`
 - `NEXTAUTH_URL` (dominio backoffice pubblico)
+- `NEXTAUTH_URL_MENU` (dominio pubblico del menu)
 
 ## 4. Primo deploy
 
@@ -72,7 +78,46 @@ curl -fsS http://127.0.0.1:3101/api/health
 curl -fsS http://127.0.0.1:3102/api/health
 ```
 
-## 5. Configurazione Apache (TLS edge)
+## 5. Configurazione Reverse Proxy (TLS edge)
+
+### 5.1 Configurazione raccomandata su Oracle: Caddy
+
+Lo script `scripts/bootstrap-oracle-vm.sh` installa `caddy`, lo abilita come servizio
+di default e disabilita `nginx` per evitare conflitti su `80/443`.
+
+Esempio `/etc/caddy/Caddyfile` con backoffice e menu pubblicati su host distinti:
+
+```caddy
+fantafestando-backoffice.ddns.net {
+    reverse_proxy 127.0.0.1:3101
+}
+
+fantafestando.ddns.net {
+    reverse_proxy 127.0.0.1:3102
+}
+```
+
+Se vuoi esporre in pubblico solo il frontend utente del menu:
+
+```caddy
+fantafestando.ddns.net {
+    reverse_proxy 127.0.0.1:3102
+}
+```
+
+Applicazione configurazione:
+
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+Note operative:
+- `Caddy` gestisce automaticamente TLS se il DNS del dominio punta alla VM e le porte `80/443` sono raggiungibili
+- il backend Docker resta comunque privato, perche' `fantafestando-menu` e` bindato su `127.0.0.1:3102`
+- per il menu pubblico usa `NEXTAUTH_URL_MENU` coerente col dominio esposto
+
+### 5.2 Alternativa legacy/manuale: Apache
 
 Abilitare moduli:
 
@@ -81,7 +126,7 @@ sudo a2enmod proxy proxy_http headers ssl rewrite
 sudo systemctl reload apache2
 ```
 
-### 5.1 VirtualHost Backoffice
+#### 5.2.1 VirtualHost Backoffice
 
 Esempio `/etc/apache2/sites-available/fantafestando-backoffice.conf`:
 
@@ -107,7 +152,7 @@ Esempio `/etc/apache2/sites-available/fantafestando-backoffice.conf`:
 </VirtualHost>
 ```
 
-### 5.2 VirtualHost Portale Pubblico
+#### 5.2.2 VirtualHost Portale Pubblico
 
 Esempio `/etc/apache2/sites-available/menu-fantafestando.conf`:
 
@@ -283,11 +328,33 @@ npm run deploy:oracle -- \
   --profile demo
 ```
 
+Dopo il primo deploy, configura `Caddy` sull'host Oracle per pubblicare i servizi:
+
+```bash
+ssh -i ~/.ssh/<chiave-oracle>.pem ubuntu@84.8.251.115
+sudo tee /etc/caddy/Caddyfile >/dev/null <<'EOF'
+fantafestando-backoffice.ddns.net {
+    reverse_proxy 127.0.0.1:3101
+}
+
+fantafestando.ddns.net {
+    reverse_proxy 127.0.0.1:3102
+}
+EOF
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+Se vuoi esporre solo il `menu`, mantieni nel `Caddyfile` soltanto il blocco
+del dominio pubblico che punta a `127.0.0.1:3102`.
+
 Note operative:
 - Lo script bootstrap disabilita `nginx` e abilita `caddy` per evitare conflitti su porte `80/443` (entrambi restano installati).
+- `Apache` non viene configurato automaticamente nello scenario Oracle: se vuoi usarlo come edge, devi abilitarlo e gestire tu virtual host e certificati.
 - Lo script Oracle salta la build locale di default: la compilazione Next.js avviene dentro il Docker build remoto.
 - Per deploy multipli sulla stessa VM, imposta almeno `--project-name`, `--backoffice-port`, `--menu-port` e `--remote-env-file` con valori distinti per ogni istanza.
 - Lo script aggiorna automaticamente nel file env remoto `APP_RUNTIME_ENV_FILE`, `APP_IMAGE_NAME` e `APP_IMAGE_TAG`, cosi` ogni progetto usa il proprio file runtime e il proprio tag immagine.
+- Se pubblichi solo il menu, mantieni comunque valorizzato `NEXTAUTH_URL_MENU` e puoi lasciare il backoffice non esposto.
 - Se vuoi mantenere un controllo preliminare locale, puoi forzare la build locale:
 
 ```bash
@@ -375,7 +442,15 @@ docker compose --env-file .env.production -f docker-compose.prod.yml ps
 docker compose --env-file .env.production -f docker-compose.prod.yml logs -f fantafestando-backoffice
 ```
 
-- Verifica proxy Apache:
+- Verifica proxy Caddy (configurazione raccomandata Oracle):
+
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl status caddy
+sudo journalctl -u caddy -n 100 --no-pager
+```
+
+- Verifica proxy Apache (solo se usi la configurazione alternativa):
 
 ```bash
 sudo apachectl configtest
