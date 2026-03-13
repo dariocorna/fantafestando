@@ -29,7 +29,7 @@ function loadLocalEnvFile() {
     }
 }
 
-async function ensureDbConnection() {
+export async function ensureDbConnection() {
     if (mongoose.connection.readyState === 1) return;
     if (mongoose.connection.readyState === 2) {
         await mongoose.connection.asPromise();
