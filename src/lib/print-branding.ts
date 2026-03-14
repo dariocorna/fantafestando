@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import sharp from "sharp";
 
 const PUBLIC_ROOT = path.join(process.cwd(), "public");
 const MENU_HEADER_DIR = path.join(PUBLIC_ROOT, "uploads", "menu-headers");
@@ -80,4 +81,34 @@ export function resolvePrintableLogoPathFromUrl(value: unknown): string | undefi
 
 export function resolvePrintableLogoPath(settings?: { menuHeaderLogoUrl?: string } | null): string | undefined {
     return resolvePrintableLogoPathFromUrl(settings?.menuHeaderLogoUrl);
+}
+
+export async function preparePrintableLogoPngBufferFromUrl(value: unknown): Promise<Buffer | undefined> {
+    const absolutePath = resolvePrintableLogoPathFromUrl(value);
+    if (!absolutePath) return undefined;
+
+    try {
+        const image = sharp(absolutePath, { failOn: "error" })
+            .rotate()
+            .flatten({ background: { r: 255, g: 255, b: 255 } });
+        const metadata = await image.metadata();
+        const width = Number(metadata.width || 0);
+        const height = Number(metadata.height || 0);
+        if (width <= 0 || height <= 0) return undefined;
+
+        const paddedWidth = Math.ceil(width / 8) * 8;
+        const normalized = paddedWidth === width
+            ? image
+            : image.extend({
+                top: 0,
+                bottom: 0,
+                left: 0,
+                right: paddedWidth - width,
+                background: { r: 255, g: 255, b: 255, alpha: 1 }
+            });
+
+        return await normalized.png().toBuffer();
+    } catch {
+        return undefined;
+    }
 }
