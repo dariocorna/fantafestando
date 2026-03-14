@@ -35,7 +35,7 @@ Options:
   --menu-port <port>         Host bind port for menu (default: 3102)
   --env-file <local-path>    Local env file to upload (default: .env.production)
   --remote-env-file <name>   Remote env file name (default: .env.production)
-  --profile <profile>        Docker compose profile (default: demo)
+  --profile <profiles>       Docker compose profiles, comma-separated (default: demo)
   --no-profile               Disable compose profile on `up`
   --printer-host <host>      Override PRINTER_EMULATOR_HOST in remote env file
   --printer-start-port <n>   Override PRINTER_EMULATOR_START_PORT in remote env file
@@ -189,6 +189,15 @@ COMPOSE_FILE="${REMOTE_PATH}/docker-compose.prod.yml"
 
 cd "${REMOTE_PATH}"
 
+IFS=',' read -r -a PROFILE_LIST <<< "${PROFILE}"
+COMPOSE_PROFILE_ARGS=()
+for raw_profile in "${PROFILE_LIST[@]}"; do
+  profile_name="$(printf '%s' "${raw_profile}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  if [[ -n "${profile_name}" ]]; then
+    COMPOSE_PROFILE_ARGS+=(--profile "${profile_name}")
+  fi
+done
+
 upsert_env_var() {
   local key="$1"
   local value="$2"
@@ -230,15 +239,15 @@ fi
 compose_base=(sudo docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" -p "${PROJECT_NAME}")
 
 if [[ "${USE_CACHE}" == "true" ]]; then
-  "${compose_base[@]}" build fantafestando-backoffice fantafestando-menu
+  "${compose_base[@]}" build fantafestando-backoffice fantafestando-menu oracle-menu-tunnel
 else
-  "${compose_base[@]}" build --no-cache fantafestando-backoffice fantafestando-menu
+  "${compose_base[@]}" build --no-cache fantafestando-backoffice fantafestando-menu oracle-menu-tunnel
 fi
 
 if [[ "${NO_PROFILE}" == "true" ]]; then
   "${compose_base[@]}" up -d --remove-orphans
 else
-  "${compose_base[@]}" --profile "${PROFILE}" up -d --remove-orphans
+  "${compose_base[@]}" "${COMPOSE_PROFILE_ARGS[@]}" up -d --remove-orphans
 fi
 
 sudo COMPOSE_PROJECT_NAME="${PROJECT_NAME}" ENV_FILE="${ENV_FILE}" COMPOSE_FILE="${COMPOSE_FILE}" bash "${REMOTE_PATH}/scripts/migrate-order-pickup-index.sh"

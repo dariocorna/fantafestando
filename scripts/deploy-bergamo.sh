@@ -19,7 +19,7 @@ Usage: ./scripts/deploy-bergamo.sh [options]
 Options:
   --host <ssh-host>          SSH host alias (default: bergamo)
   --path <remote-path>       Remote app path (default: /opt/fantafestando)
-  --profile <compose-profile>Docker compose profile (default: demo)
+  --profile <profiles>       Docker compose profiles, comma-separated (default: demo)
   --skip-build               Skip local `npm run build`
   --skip-rsync               Skip rsync step
   --skip-health-check        Skip remote /api/health checks
@@ -135,6 +135,15 @@ BUILD_DATE="$6"
 
 cd "${REMOTE_PATH}"
 
+IFS=',' read -r -a PROFILE_LIST <<< "${PROFILE}"
+COMPOSE_PROFILE_ARGS=()
+for raw_profile in "${PROFILE_LIST[@]}"; do
+    profile_name="$(printf '%s' "${raw_profile}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    if [[ -n "${profile_name}" ]]; then
+        COMPOSE_PROFILE_ARGS+=(--profile "${profile_name}")
+    fi
+done
+
 if [[ ! -f .env.production ]]; then
     echo "Missing ${REMOTE_PATH}/.env.production" >&2
     exit 1
@@ -163,12 +172,12 @@ else
 fi
 
 if [[ "${USE_CACHE}" == "true" ]]; then
-    docker compose --env-file .env.production -f docker-compose.prod.yml build fantafestando-backoffice fantafestando-menu
+    docker compose --env-file .env.production -f docker-compose.prod.yml build fantafestando-backoffice fantafestando-menu oracle-menu-tunnel
 else
-    docker compose --env-file .env.production -f docker-compose.prod.yml build --no-cache fantafestando-backoffice fantafestando-menu
+    docker compose --env-file .env.production -f docker-compose.prod.yml build --no-cache fantafestando-backoffice fantafestando-menu oracle-menu-tunnel
 fi
 
-docker compose --env-file .env.production -f docker-compose.prod.yml --profile "${PROFILE}" up -d --remove-orphans
+docker compose --env-file .env.production -f docker-compose.prod.yml "${COMPOSE_PROFILE_ARGS[@]}" up -d --remove-orphans
 docker compose --env-file .env.production -f docker-compose.prod.yml ps
 EOS
 

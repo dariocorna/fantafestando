@@ -129,14 +129,16 @@ Note operative:
 
 #### 5.1.1 Oracle edge + host Docker remoto via reverse SSH tunnel
 
-Usa questo assetto quando `Caddy` resta sulla VM Oracle, ma il runtime Docker del
-menu gira su un altro host Linux (PC di test o board finale).
+Se vuoi mantenere il deploy coerente e tenere anche il tunnel dentro Docker, puoi
+avviare un sidecar `oracle-menu-tunnel` nello stesso `docker-compose.prod.yml`.
+In questo assetto il tunnel non punta piu' a `127.0.0.1:3102` sull'host Linux, ma
+direttamente al servizio Docker `fantafestando-menu:3000` sulla rete Compose.
 
 In questo scenario:
 - `fantafestando.ddns.net` continua a puntare alla VM Oracle
 - `Caddy` termina TLS sulla VM Oracle
-- il container `fantafestando-menu` resta in ascolto solo su `127.0.0.1:3102` sul Docker host remoto
-- un reverse SSH tunnel espone quella porta come `127.0.0.1:3302` sulla VM Oracle
+- il sidecar `oracle-menu-tunnel` apre `ssh -N -R 127.0.0.1:3302:fantafestando-menu:3000`
+- sulla VM Oracle il reverse proxy continua a inoltrare verso `127.0.0.1:3302`
 
 Configurazione `Caddy` sulla VM Oracle:
 
@@ -153,48 +155,70 @@ sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
-Configurazione sul Docker host remoto:
+Variabili runtime aggiuntive in `.env.production`:
 
-```bash
-cd /opt/fantafestando
-sudo mkdir -p /etc/fantafestando
-sudo cp systemd/oracle-menu-reverse-tunnel.env.example /etc/fantafestando/oracle-menu-reverse-tunnel.env
-sudo editor /etc/fantafestando/oracle-menu-reverse-tunnel.env
-sudo install -D -m 0644 systemd/oracle-menu-reverse-tunnel.service /etc/systemd/system/oracle-menu-reverse-tunnel.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now oracle-menu-reverse-tunnel.service
-```
-
-Valori minimi da impostare nel file env del tunnel:
 - `ORACLE_TUNNEL_HOST`
 - `ORACLE_TUNNEL_USER`
-- `ORACLE_TUNNEL_KEY_PATH`
+- `ORACLE_TUNNEL_SSH_DIR_HOST` directory host che contiene la chiave privata SSH
+- `ORACLE_TUNNEL_KEY_FILENAME` nome file chiave dentro `ORACLE_TUNNEL_SSH_DIR_HOST`
+- `ORACLE_TUNNEL_REMOTE_BIND_ADDRESS=127.0.0.1`
 - `ORACLE_TUNNEL_REMOTE_PORT=3302`
-- `ORACLE_TUNNEL_LOCAL_PORT=3102`
+- `ORACLE_TUNNEL_LOCAL_HOST=fantafestando-menu`
+- `ORACLE_TUNNEL_LOCAL_PORT=3000`
 
-Per test manuale senza `systemd`:
+Preparazione chiave sul Docker host remoto:
 
 ```bash
 cd /opt/fantafestando
-set -a
-source /etc/fantafestando/oracle-menu-reverse-tunnel.env
-set +a
-bash scripts/oracle-menu-reverse-tunnel.sh
+mkdir -p .secrets/oracle-menu-tunnel
+chmod 700 .secrets/oracle-menu-tunnel
+cp ~/.ssh/<chiave-oracle> .secrets/oracle-menu-tunnel/id_ed25519
+chmod 600 .secrets/oracle-menu-tunnel/id_ed25519
+```
+
+Esempio env:
+
+```bash
+ORACLE_TUNNEL_HOST=84.8.251.115
+ORACLE_TUNNEL_USER=ubuntu
+ORACLE_TUNNEL_SSH_DIR_HOST=/opt/fantafestando/.secrets/oracle-menu-tunnel
+ORACLE_TUNNEL_KEY_FILENAME=id_ed25519
+ORACLE_TUNNEL_REMOTE_BIND_ADDRESS=127.0.0.1
+ORACLE_TUNNEL_REMOTE_PORT=3302
+ORACLE_TUNNEL_LOCAL_HOST=fantafestando-menu
+ORACLE_TUNNEL_LOCAL_PORT=3000
+```
+
+Avvio stack con sidecar tunnel:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml \
+  --profile oracle-tunnel up -d --build --remove-orphans
+```
+
+Se vuoi attivare anche altri profili nello stesso deploy, usa piu' flag `--profile`
+oppure nei wrapper del progetto passa una lista separata da virgole, ad esempio:
+
+```bash
+DEPLOY_PROFILE=demo,oracle-tunnel ./scripts/deploy-oracle.sh --host <oracle-vm>
 ```
 
 Verifiche consigliate:
 
 ```bash
-curl -fsS http://127.0.0.1:3102/api/health
+docker compose --env-file .env.production -f docker-compose.prod.yml ps
+docker compose --env-file .env.production -f docker-compose.prod.yml logs -f oracle-menu-tunnel
 ssh ubuntu@84.8.251.115 'curl -fsS http://127.0.0.1:3302/api/health'
 curl -I https://fantafestando.ddns.net/api/health
 ```
 
 Note operative:
-- il tunnel usa `ssh -N -R 127.0.0.1:3302:127.0.0.1:3102`
-- il bind remoto su `127.0.0.1` evita di esporre la porta tunnel su Internet
-- la board finale puo' riusare gli stessi file `scripts/` e `systemd/`
-- se il tunnel cade, `Caddy` resta attivo ma l'upstream risulta non raggiungibile finche' il servizio non riparte
+
+- questa variante non richiede `systemd` per il tunnel sul Docker host remoto
+- il servizio `oracle-menu-tunnel` riutilizza `scripts/oracle-menu-reverse-tunnel.sh`
+- la chiave privata resta fuori dall'immagine Docker e viene montata in sola lettura
+- se il profilo `oracle-tunnel` non e' attivo, il sidecar non parte
+- il tunnel effettivo usa `ssh -N -R 127.0.0.1:3302:fantafestando-menu:3000`
 
 ### 5.2 Alternativa legacy/manuale: Apache
 
@@ -534,7 +558,8 @@ sudo journalctl -u caddy -n 100 --no-pager
 - Verifica tunnel menu remoto -> Oracle:
 
 ```bash
-sudo systemctl status oracle-menu-reverse-tunnel.service
+docker compose --env-file .env.production -f docker-compose.prod.yml ps
+docker compose --env-file .env.production -f docker-compose.prod.yml logs -f oracle-menu-tunnel
 curl -fsS http://127.0.0.1:3102/api/health
 ssh ubuntu@84.8.251.115 'curl -fsS http://127.0.0.1:3302/api/health'
 ```

@@ -52,3 +52,6 @@ docs/.tmp/
 
 # runtime uploaded assets
 public/uploads/
+
+# local ssh keys for oracle tunnel sidecar
+.docker/oracle-menu-tunnel/
