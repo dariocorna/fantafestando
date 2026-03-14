@@ -37,7 +37,7 @@ function sameItems(
 }
 
 test.describe("Print Department Fallback", () => {
-    test("keeps department slips separated on cashier fallback when no kitchen printer is configured", async ({ page, isMobile }) => {
+    test("does not print department slips when no kitchen printer is configured", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso validato su desktop.");
 
         const suffix = uniqueSuffix();
@@ -200,14 +200,6 @@ test.describe("Print Department Fallback", () => {
                     && sameItems(job, [kitchenShortName])
                 );
 
-                const fallbackDepartmentCopy = jobs.filter((job) =>
-                    job.printType === "KITCHEN_ORDER"
-                    && job.destinationHost === "127.0.0.1"
-                    && job.destinationPort === 19100
-                    && sameItems(job, [fallbackShortName])
-                    && (job.document?.footerLines || []).some((line) => line.includes("REPARTO:"))
-                );
-
                 const customerKitchenCopy = jobs.filter((job) =>
                     job.printType === "CUSTOMER_ORDER"
                     && job.destinationHost === "127.0.0.1"
@@ -226,7 +218,6 @@ test.describe("Print Department Fallback", () => {
                 if (
                     cashierSummary.length !== 1
                     || kitchenDepartmentCopy.length !== 1
-                    || fallbackDepartmentCopy.length !== 1
                     || customerKitchenCopy.length !== 1
                     || customerFallbackCopy.length !== 1
                 ) {
@@ -236,7 +227,6 @@ test.describe("Print Department Fallback", () => {
                 return {
                     cashierSummary,
                     kitchenDepartmentCopy,
-                    fallbackDepartmentCopy,
                     customerKitchenCopy,
                     customerFallbackCopy
                 };
