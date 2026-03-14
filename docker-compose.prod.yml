@@ -122,6 +122,35 @@ services:
     networks:
       - fantafestando_net
 
+  oracle-menu-tunnel:
+    build:
+      context: .
+      dockerfile: docker/oracle-menu-tunnel/Dockerfile
+    image: ${APP_IMAGE_NAME:-fantafestando-app}-oracle-menu-tunnel:${APP_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    profiles:
+      - oracle-tunnel
+    depends_on:
+      fantafestando-menu:
+        condition: service_healthy
+    env_file:
+      - ${APP_RUNTIME_ENV_FILE:-.env.production}
+    environment:
+      ORACLE_TUNNEL_HOST: ${ORACLE_TUNNEL_HOST:-}
+      ORACLE_TUNNEL_USER: ${ORACLE_TUNNEL_USER:-}
+      ORACLE_TUNNEL_KEY_PATH: /run/oracle-tunnel/${ORACLE_TUNNEL_KEY_FILENAME:-id_ed25519}
+      ORACLE_TUNNEL_REMOTE_BIND_ADDRESS: ${ORACLE_TUNNEL_REMOTE_BIND_ADDRESS:-127.0.0.1}
+      ORACLE_TUNNEL_REMOTE_PORT: ${ORACLE_TUNNEL_REMOTE_PORT:-3302}
+      ORACLE_TUNNEL_LOCAL_HOST: ${ORACLE_TUNNEL_LOCAL_HOST:-fantafestando-menu}
+      ORACLE_TUNNEL_LOCAL_PORT: ${ORACLE_TUNNEL_LOCAL_PORT:-3000}
+      ORACLE_TUNNEL_SERVER_ALIVE_INTERVAL: ${ORACLE_TUNNEL_SERVER_ALIVE_INTERVAL:-30}
+      ORACLE_TUNNEL_SERVER_ALIVE_COUNT_MAX: ${ORACLE_TUNNEL_SERVER_ALIVE_COUNT_MAX:-3}
+      ORACLE_TUNNEL_STRICT_HOST_KEY_CHECKING: ${ORACLE_TUNNEL_STRICT_HOST_KEY_CHECKING:-accept-new}
+    volumes:
+      - ${ORACLE_TUNNEL_SSH_DIR_HOST:-./.docker/oracle-menu-tunnel}:/run/oracle-tunnel:ro
+    networks:
+      - fantafestando_net
+
 volumes:
   mongo_data:
   printer_emulator_data:
