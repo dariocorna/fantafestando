@@ -50,6 +50,9 @@ export async function cleanupEventArtifactsByName(eventName: string) {
 
     await ensureDbConnection();
     const db = mongoose.connection.db;
+    if (!db) {
+        throw new Error("Connessione Mongo non disponibile per il cleanup E2E.");
+    }
     const event = await db.collection("events").findOne({ name: eventName });
     if (!event?._id) return;
 

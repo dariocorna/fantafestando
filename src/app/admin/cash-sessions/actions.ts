@@ -22,7 +22,11 @@ export async function getClosedCashSessionPrintDocumentAction(sessionId: string,
     const orders = await Order.find({
         cashSessionId: session._id,
         status: "PAID"
-    }).lean();
+    }).lean() as Array<{
+        cart?: Array<{
+            productId?: string | { toString(): string }
+        }>
+    }>;
 
     const productIds = Array.from(
         new Set(
