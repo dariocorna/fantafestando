@@ -22,8 +22,12 @@ Configurazioni supportate:
 - `Apache`: opzione legacy/manuale, utile se la VM usa già Apache come edge
 
 Mappatura porte locali host:
-- `127.0.0.1:3101` -> `fantafestando-backoffice:3000`
+- `${BACKOFFICE_BIND_HOST:-127.0.0.1}:3101` -> `fantafestando-backoffice:3000`
 - `127.0.0.1:3102` -> `fantafestando-menu:3000`
+
+Per il backoffice puoi rendere configurabile anche l'host di bind:
+- `BACKOFFICE_BIND_HOST=127.0.0.1` per accesso solo locale/host
+- `BACKOFFICE_BIND_HOST=<ip-lan>` per accesso privato in LAN
 
 Domini previsti:
 - `fantafestando-backoffice.ddns.net` -> admin + pos
@@ -56,8 +60,10 @@ Compilare `.env.production` con valori reali, in particolare:
 - `MONGO_ROOT_PASSWORD`
 - `MONGODB_URI`
 - `AUTH_SECRET`
-- `NEXTAUTH_URL` (dominio backoffice pubblico)
+- `NEXTAUTH_URL` (origine reale del backoffice: LAN privata oppure dominio pubblico solo se esposto intenzionalmente)
 - `NEXTAUTH_URL_MENU` (dominio pubblico del menu)
+- `APP_RUNTIME_UID` / `APP_RUNTIME_GID` (UID/GID dell'utente host che deve poter scrivere su `public/uploads`)
+- `BACKOFFICE_BIND_HOST` (default `127.0.0.1`, oppure IP LAN se il backoffice deve restare privato ma raggiungibile in rete locale)
 
 ## 4. Primo deploy
 
@@ -74,7 +80,8 @@ Verifica:
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml ps
-curl -fsS http://127.0.0.1:3101/api/health
+BACKOFFICE_HOST=$(grep -E '^BACKOFFICE_BIND_HOST=' .env.production | cut -d= -f2)
+curl -fsS "http://${BACKOFFICE_HOST:-127.0.0.1}:3101/api/health"
 curl -fsS http://127.0.0.1:3102/api/health
 ```
 
@@ -116,6 +123,78 @@ Note operative:
 - `Caddy` gestisce automaticamente TLS se il DNS del dominio punta alla VM e le porte `80/443` sono raggiungibili
 - il backend Docker resta comunque privato, perche' `fantafestando-menu` e` bindato su `127.0.0.1:3102`
 - per il menu pubblico usa `NEXTAUTH_URL_MENU` coerente col dominio esposto
+- il backoffice puo' restare privato: in quel caso `NEXTAUTH_URL` deve puntare a IP LAN o hostname interno reale, non a un dominio pubblico
+- se il backoffice deve essere usato da altri device in LAN, imposta anche `BACKOFFICE_BIND_HOST` sullo stesso IP LAN del Docker host
+- se usi bind mount verso `public/uploads`, imposta `APP_RUNTIME_UID` e `APP_RUNTIME_GID` sullo stesso utente del filesystem host oppure gli upload header/logo falliranno per permessi
+
+#### 5.1.1 Oracle edge + host Docker remoto via reverse SSH tunnel
+
+Usa questo assetto quando `Caddy` resta sulla VM Oracle, ma il runtime Docker del
+menu gira su un altro host Linux (PC di test o board finale).
+
+In questo scenario:
+- `fantafestando.ddns.net` continua a puntare alla VM Oracle
+- `Caddy` termina TLS sulla VM Oracle
+- il container `fantafestando-menu` resta in ascolto solo su `127.0.0.1:3102` sul Docker host remoto
+- un reverse SSH tunnel espone quella porta come `127.0.0.1:3302` sulla VM Oracle
+
+Configurazione `Caddy` sulla VM Oracle:
+
+```bash
+ssh -i ~/.ssh/<chiave-oracle>.pem ubuntu@84.8.251.115
+sudo tee -a /etc/caddy/Caddyfile >/dev/null <<'EOF'
+
+fantafestando.ddns.net {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3302
+}
+EOF
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+Configurazione sul Docker host remoto:
+
+```bash
+cd /opt/fantafestando
+sudo mkdir -p /etc/fantafestando
+sudo cp systemd/oracle-menu-reverse-tunnel.env.example /etc/fantafestando/oracle-menu-reverse-tunnel.env
+sudo editor /etc/fantafestando/oracle-menu-reverse-tunnel.env
+sudo install -D -m 0644 systemd/oracle-menu-reverse-tunnel.service /etc/systemd/system/oracle-menu-reverse-tunnel.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now oracle-menu-reverse-tunnel.service
+```
+
+Valori minimi da impostare nel file env del tunnel:
+- `ORACLE_TUNNEL_HOST`
+- `ORACLE_TUNNEL_USER`
+- `ORACLE_TUNNEL_KEY_PATH`
+- `ORACLE_TUNNEL_REMOTE_PORT=3302`
+- `ORACLE_TUNNEL_LOCAL_PORT=3102`
+
+Per test manuale senza `systemd`:
+
+```bash
+cd /opt/fantafestando
+set -a
+source /etc/fantafestando/oracle-menu-reverse-tunnel.env
+set +a
+bash scripts/oracle-menu-reverse-tunnel.sh
+```
+
+Verifiche consigliate:
+
+```bash
+curl -fsS http://127.0.0.1:3102/api/health
+ssh ubuntu@84.8.251.115 'curl -fsS http://127.0.0.1:3302/api/health'
+curl -I https://fantafestando.ddns.net/api/health
+```
+
+Note operative:
+- il tunnel usa `ssh -N -R 127.0.0.1:3302:127.0.0.1:3102`
+- il bind remoto su `127.0.0.1` evita di esporre la porta tunnel su Internet
+- la board finale puo' riusare gli stessi file `scripts/` e `systemd/`
+- se il tunnel cade, `Caddy` resta attivo ma l'upstream risulta non raggiungibile finche' il servizio non riparte
 
 ### 5.2 Alternativa legacy/manuale: Apache
 
@@ -241,7 +320,7 @@ Lo script esegue automaticamente:
 - `rsync` verso `${host}:${path}` con exclude sicuri
 - update di `APP_BUILD` in `.env.production` remoto
 - `docker compose build` + `up -d --remove-orphans`
-- health check `127.0.0.1:3101/3102`
+- health check `${BACKOFFICE_BIND_HOST:-127.0.0.1}:3101` e `127.0.0.1:3102`
 
 #### Flusso manuale equivalente
 
@@ -283,7 +362,7 @@ ssh bergamo '
 4. Verifica release effettiva:
 
 ```bash
-ssh bergamo 'curl -fsS http://127.0.0.1:3101/api/health'
+ssh bergamo 'cd /opt/fantafestando && BACKOFFICE_HOST=$(grep -E "^BACKOFFICE_BIND_HOST=" .env.production | cut -d= -f2) && curl -fsS "http://${BACKOFFICE_HOST:-127.0.0.1}:3101/api/health"'
 ssh bergamo 'curl -fsS http://127.0.0.1:3102/api/health'
 ```
 
@@ -302,7 +381,7 @@ Controllare che `release` nei payload `/api/health` corrisponda al commit atteso
   - `https://fantafestando.ddns.net/sw-menu.js`
 - Dopo ogni deploy verifica sempre:
   - stato container (`docker compose ... ps`)
-  - endpoint health locali (`127.0.0.1:3101/3102`)
+  - endpoint health locali (`${BACKOFFICE_BIND_HOST:-127.0.0.1}:3101` e `127.0.0.1:3102`)
   - release pubblicata (`/api/health`).
 
 ### 6.4 Deploy rapido su VM Oracle nuova
@@ -355,6 +434,8 @@ Note operative:
 - Per deploy multipli sulla stessa VM, imposta almeno `--project-name`, `--backoffice-port`, `--menu-port` e `--remote-env-file` con valori distinti per ogni istanza.
 - Lo script aggiorna automaticamente nel file env remoto `APP_RUNTIME_ENV_FILE`, `APP_IMAGE_NAME` e `APP_IMAGE_TAG`, cosi` ogni progetto usa il proprio file runtime e il proprio tag immagine.
 - Se pubblichi solo il menu, mantieni comunque valorizzato `NEXTAUTH_URL_MENU` e puoi lasciare il backoffice non esposto.
+- Se il backoffice resta privato, imposta `NEXTAUTH_URL` sull'URL LAN/interno reale del backoffice; per un futuro PoC pubblico basta sostituirlo con il dominio pubblico scelto.
+- Se vuoi un PoC futuro con backoffice pubblico, puoi riportare `BACKOFFICE_BIND_HOST=127.0.0.1` e rimettere il reverse proxy davanti al container senza cambiare il menu pubblico.
 - Se vuoi mantenere un controllo preliminare locale, puoi forzare la build locale:
 
 ```bash
@@ -448,6 +529,14 @@ docker compose --env-file .env.production -f docker-compose.prod.yml logs -f fan
 sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl status caddy
 sudo journalctl -u caddy -n 100 --no-pager
+```
+
+- Verifica tunnel menu remoto -> Oracle:
+
+```bash
+sudo systemctl status oracle-menu-reverse-tunnel.service
+curl -fsS http://127.0.0.1:3102/api/health
+ssh ubuntu@84.8.251.115 'curl -fsS http://127.0.0.1:3302/api/health'
 ```
 
 - Verifica proxy Apache (solo se usi la configurazione alternativa):

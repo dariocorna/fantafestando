@@ -51,7 +51,7 @@ interface OrderProjection {
     totalAmount?: number
     discountApplied?: number
     cart?: Array<{
-        productId?: unknown
+        productId?: string | { toString(): string }
         snapshotName?: string
         quantity?: number
         discountApplied?: number
