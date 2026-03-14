@@ -166,13 +166,138 @@ Variabili runtime aggiuntive in `.env.production`:
 - `ORACLE_TUNNEL_LOCAL_HOST=fantafestando-menu`
 - `ORACLE_TUNNEL_LOCAL_PORT=3000`
 
+#### 5.1.1.1 Utente SSH dedicato e chiave limitata per il tunnel
+
+Non riutilizzare la chiave amministrativa/root che usi normalmente per entrare nella
+VM Oracle. Per il sidecar del tunnel e' preferibile creare:
+
+- un utente dedicato, per esempio `oracle-menu-tunnel`
+- una chiave SSH dedicata
+- permessi limitati al solo reverse port forwarding richiesto
+
+Sulla VM Oracle:
+
+```bash
+sudo adduser --disabled-password --gecos "" oracle-menu-tunnel
+sudo usermod -L oracle-menu-tunnel
+sudo mkdir -p /home/oracle-menu-tunnel/.ssh
+sudo chmod 700 /home/oracle-menu-tunnel/.ssh
+sudo chown -R oracle-menu-tunnel:oracle-menu-tunnel /home/oracle-menu-tunnel/.ssh
+```
+
+Genera una nuova chiave sul Docker host remoto o sulla macchina da cui prepari il deploy:
+
+```bash
+mkdir -p .secrets/oracle-menu-tunnel
+chmod 700 .secrets/oracle-menu-tunnel
+ssh-keygen -t ed25519 -f .secrets/oracle-menu-tunnel/id_ed25519 -C "oracle-menu-tunnel"
+chmod 600 .secrets/oracle-menu-tunnel/id_ed25519
+```
+
+Installa **solo la chiave pubblica** sulla VM Oracle con restrizioni per il tunnel:
+
+```bash
+PUBKEY=$(cat .secrets/oracle-menu-tunnel/id_ed25519.pub)
+sudo tee /home/oracle-menu-tunnel/.ssh/authorized_keys >/dev/null <<EOF
+restrict,port-forwarding,permitlisten="127.0.0.1:3302",no-agent-forwarding,no-pty,no-user-rc,no-X11-forwarding ${PUBKEY}
+EOF
+sudo chmod 600 /home/oracle-menu-tunnel/.ssh/authorized_keys
+sudo chown oracle-menu-tunnel:oracle-menu-tunnel /home/oracle-menu-tunnel/.ssh/authorized_keys
+```
+
+Per irrigidire ulteriormente `sshd`, aggiungi una regola dedicata:
+
+```bash
+sudo tee /etc/ssh/sshd_config.d/oracle-menu-tunnel.conf >/dev/null <<'EOF'
+Match User oracle-menu-tunnel
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    PubkeyAuthentication yes
+    AllowTcpForwarding remote
+    X11Forwarding no
+    PermitTTY no
+    AllowAgentForwarding no
+    GatewayPorts no
+EOF
+sudo systemctl reload ssh
+```
+
+Con questa impostazione:
+
+- l'utente non viene usato per shell amministrativa
+- la chiave puo' aprire solo il listener `127.0.0.1:3302` sulla VM Oracle
+- il sidecar non eredita accesso root o privilegi di deploy
+
+#### 5.1.1.2 Pagina pubblica di fallback quando il tunnel e' assente
+
+Se il dominio del menu e' pubblico, conviene evitare un `502` quando il tunnel non e'
+attivo. Lo scenario piu' robusto e' questo:
+
+- il menu reale continua a passare dal tunnel su `127.0.0.1:3302`
+- una pagina statica locale viene servita su `127.0.0.1:3303`
+- `Caddy` prova prima `3302` e, se l'health check fallisce, usa `3303`
+
+Pagina offline locale sulla VM Oracle:
+
+```bash
+sudo mkdir -p /var/www/fantafestando-menu-offline/current/api/health
+sudo cp systemd/oracle-menu-offline/index.html /var/www/fantafestando-menu-offline/current/index.html
+sudo cp systemd/oracle-menu-offline/api/health/index.html /var/www/fantafestando-menu-offline/current/api/health/index.html
+sudo chown -R root:root /var/www/fantafestando-menu-offline
+sudo chmod -R a+rX /var/www/fantafestando-menu-offline
+```
+
+Il template `systemd/oracle-menu-offline/index.html` riprende il linguaggio visivo del
+`menu` pubblico:
+
+- sfondo `brand-surface-menu`
+- palette `brand-blue` / `brand-yellow`
+- card bianca con bordo azzurro e shadow morbida
+- tipografia display coerente con la webapp
+
+Micro-servizio statico locale:
+
+```bash
+sudo cp systemd/oracle-menu-offline/fantafestando-menu-offline.service \
+  /etc/systemd/system/fantafestando-menu-offline.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now fantafestando-menu-offline.service
+```
+
+Blocco `Caddy` per il dominio pubblico del menu:
+
+```caddy
+fantafestando.ddns.net {
+    encode zstd gzip
+
+    reverse_proxy 127.0.0.1:3302 127.0.0.1:3303 {
+        lb_policy first
+        lb_retries 2
+        lb_try_interval 250ms
+        health_uri /api/health
+        health_interval 5s
+        health_timeout 2s
+    }
+}
+```
+
+Verifica:
+
+```bash
+# tunnel down -> pagina offline
+curl -I https://fantafestando.ddns.net/
+
+# tunnel up -> menu reale
+curl https://fantafestando.ddns.net/api/health
+```
+
 Preparazione chiave sul Docker host remoto:
 
 ```bash
 cd /opt/fantafestando
 mkdir -p .secrets/oracle-menu-tunnel
 chmod 700 .secrets/oracle-menu-tunnel
-cp ~/.ssh/<chiave-oracle> .secrets/oracle-menu-tunnel/id_ed25519
+cp <percorso-chiave-dedicata>/id_ed25519 .secrets/oracle-menu-tunnel/id_ed25519
 chmod 600 .secrets/oracle-menu-tunnel/id_ed25519
 ```
 
@@ -180,7 +305,7 @@ Esempio env:
 
 ```bash
 ORACLE_TUNNEL_HOST=84.8.251.115
-ORACLE_TUNNEL_USER=ubuntu
+ORACLE_TUNNEL_USER=oracle-menu-tunnel
 ORACLE_TUNNEL_SSH_DIR_HOST=/opt/fantafestando/.secrets/oracle-menu-tunnel
 ORACLE_TUNNEL_KEY_FILENAME=id_ed25519
 ORACLE_TUNNEL_REMOTE_BIND_ADDRESS=127.0.0.1
