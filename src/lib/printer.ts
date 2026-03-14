@@ -1125,18 +1125,12 @@ export class PrinterService {
                     printerId: kitchenPrinter._id ? String(kitchenPrinter._id) : undefined,
                     isVirtual: Boolean(kitchenPrinter.isVirtual)
                 }
-                : {
-                    ip: cashierPrinter?.ip || "",
-                    port: cashierPrinter?.port || DEFAULT_PRINTER_PORT,
-                    emulatorSlot: cashierPrinter?.emulatorSlot,
-                    printerId: cashierPrinter?.id,
-                    isVirtual: Boolean(cashierPrinter?.isVirtual)
-                };
+                : null;
 
             const departmentFooterLines = departmentLabel ? [`REPARTO: ${departmentLabel}`] : undefined;
 
             let kitchenJob = kitchenJobsByGroup.get(groupKey);
-            if (!kitchenJob && destination.ip) {
+            if (!kitchenJob && destination?.ip) {
                 kitchenJob = {
                     ip: destination.ip,
                     port: destination.port,
