@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+    preparePrintableLogoPngBufferFromUrl,
     resolvePrintableLogoPath,
     resolvePrintableLogoPathFromUrl,
     sanitizeMenuHeaderLogoUrl,
@@ -59,5 +61,29 @@ describe("print-branding", () => {
         const fallbackFromInvalid = resolvePrintableLogoPathFromUrl("https://example.com/logo.png");
         expect(fallbackFromMissing).toBeUndefined();
         expect(fallbackFromInvalid).toBeUndefined();
+    });
+
+    it("pads printable logo png buffers to a width compatible with escpos raster bytes", async () => {
+        const relativeUrl = `/uploads/receipt-headers/test-${Date.now()}.png`;
+        const absolutePath = path.join(process.cwd(), "public", relativeUrl.slice(1));
+        const pngBuffer = await sharp({
+            create: {
+                width: 10,
+                height: 4,
+                channels: 4,
+                background: { r: 0, g: 0, b: 0, alpha: 1 }
+            }
+        }).png().toBuffer();
+
+        await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+        await fs.writeFile(absolutePath, pngBuffer);
+        testFiles.push(absolutePath);
+
+        const normalizedBuffer = await preparePrintableLogoPngBufferFromUrl(relativeUrl);
+        const metadata = await sharp(normalizedBuffer).metadata();
+
+        expect(normalizedBuffer).toBeDefined();
+        expect(metadata.width).toBe(16);
+        expect(metadata.height).toBe(4);
     });
 });

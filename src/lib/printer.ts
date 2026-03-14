@@ -23,7 +23,7 @@ import {
     type PrintDocumentV2
 } from "./print-report";
 import {
-    resolvePrintableLogoPathFromUrl,
+    preparePrintableLogoPngBufferFromUrl,
     sanitizePrintableHeaderLogoUrl,
     sanitizeReceiptHeaderLogoUrl
 } from "./print-branding";
@@ -429,11 +429,11 @@ export class PrinterService {
         printType: PrintJobType
     ): Promise<boolean> {
         if (!this.supportsLogo(printType)) return false;
-        const logoPath = resolvePrintableLogoPathFromUrl(document.branding?.logoPath);
-        if (!logoPath) return false;
+        const logoBuffer = await preparePrintableLogoPngBufferFromUrl(document.branding?.logoPath);
+        if (!logoBuffer) return false;
 
         try {
-            await printer.printImage(logoPath);
+            await printer.printImageBuffer(logoBuffer);
             printer.println(" ");
             return true;
         } catch (error) {
