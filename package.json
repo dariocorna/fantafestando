@@ -20,6 +20,8 @@
     "printer:up": "docker compose up -d printer-emulator",
     "printer:down": "docker compose stop printer-emulator",
     "printer:logs": "docker compose logs -f printer-emulator",
+    "docker:run": "docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build --remove-orphans",
+    "docker:run:tunnel": "docker compose --env-file .env.production -f docker-compose.prod.yml --profile oracle-tunnel up -d --build --remove-orphans",
     "deploy:local": "./scripts/deploy.sh",
     "deploy:bergamo": "./scripts/deploy-bergamo.sh",
     "deploy:oracle": "./scripts/deploy-oracle.sh",

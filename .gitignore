@@ -54,4 +54,5 @@ docs/.tmp/
 public/uploads/
 
 # local ssh keys for oracle tunnel sidecar
+.secrets/
 .docker/oracle-menu-tunnel/
