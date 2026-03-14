@@ -6,11 +6,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { FileSearch } from "lucide-react";
 import { getClosedCashSessionPrintDocumentAction } from "@/app/admin/cash-sessions/actions";
 import { PrintDocumentViewer } from "./print-document-viewer";
+import type { PrintDocumentV2 } from "@/lib/print-report";
 
 export function CashSessionPreviewDialog({ sessionId, posName }: { sessionId: string; posName: string }) {
     const [open, setOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
-    const [document, setDocument] = useState<Record<string, unknown> | null>(null);
+    const [document, setDocument] = useState<PrintDocumentV2 | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     const handleOpenChange = async (newOpen: boolean) => {

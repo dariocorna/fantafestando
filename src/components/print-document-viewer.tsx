@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { buildPreviewLines, normalizeLegacyPrintDocument } from "@/lib/print-report";
+import type { PrintDocumentV2 } from "@/lib/print-report";
 
 function formatDateTime(value: string | Date | undefined | null): string {
     if (!value) return "-";
@@ -62,13 +63,13 @@ export function PrintDocumentViewer({
     escposPreviewError,
     hideLayout = false
 }: {
-    document: Record<string, unknown>;
+    document: Record<string, unknown> | PrintDocumentV2;
     escposPreviewUrl?: string | null;
     escposPreviewError?: string | null;
     hideLayout?: boolean;
 }) {
-    const normalized = normalizeLegacyPrintDocument(document);
-    const schemaLabel = Number(document?.schemaVersion) === 2 ? "Schema V2" : "Legacy normalizzato";
+    const normalized = normalizeLegacyPrintDocument(document as Record<string, unknown>);
+    const schemaLabel = normalized.schemaVersion === 2 ? "Schema V2" : "Legacy normalizzato";
     const logoMode = normalized.branding?.logoMode || "none";
     const referenceLabel = normalized.printType === "CASH_SESSION_SUMMARY" ? "Sessione N°" : "Ordine N°";
     const logoLabel = logoMode === "printed"
