@@ -1,0 +1,15 @@
+[Unit]
+Description=FantaFestando menu offline fallback page
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/fantafestando-menu-offline/current
+ExecStart=/usr/bin/python3 -m http.server 3303 --bind 127.0.0.1 --directory /var/www/fantafestando-menu-offline/current
+Restart=always
+RestartSec=2
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target
