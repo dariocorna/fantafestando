@@ -1,7 +1,6 @@
 services:
   mongodb:
     image: mongo:latest
-    container_name: fantafestando_mongodb
     restart: unless-stopped
     ports:
       - "27017:27017"
@@ -16,7 +15,6 @@ services:
 
   printer-emulator:
     image: node:20-alpine
-    container_name: fantafestando_printer_emulator
     restart: unless-stopped
     working_dir: /app
     command: ["node", "scripts/printer-emulator.mjs"]
@@ -39,6 +37,3 @@ volumes:
 networks:
   fantafestando_dev_net:
     name: fantafestando_dev_net
-    ipam:
-      config:
-        - subnet: 10.201.0.0/24

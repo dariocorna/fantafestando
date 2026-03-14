@@ -20,6 +20,7 @@
     "printer:up": "docker compose up -d printer-emulator",
     "printer:down": "docker compose stop printer-emulator",
     "printer:logs": "docker compose logs -f printer-emulator",
+    "deploy:local": "./scripts/deploy.sh",
     "deploy:bergamo": "./scripts/deploy-bergamo.sh",
     "deploy:oracle": "./scripts/deploy-oracle.sh",
     "db:up": "docker compose up -d mongodb",
