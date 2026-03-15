@@ -1,8 +1,12 @@
+import { CharacterSet } from "node-thermal-printer";
+
 export const DEFAULT_PRINTER_PORT = 9100;
 export const DEFAULT_EMULATOR_START_PORT = 19100;
 export const MIN_PRINTER_PORT = 1;
 export const MAX_PRINTER_PORT = 65535;
 export const MAX_VIRTUAL_PRINTER_SLOTS = 10;
+export type PrinterCharacterSet = (typeof CharacterSet)[keyof typeof CharacterSet];
+export const DEFAULT_PRINTER_CHARACTER_SET: PrinterCharacterSet = CharacterSet.PC858_EURO;
 
 export interface NormalizedPrinterConfig {
     ip: string;
@@ -34,6 +38,16 @@ function stringifyInput(value: unknown): string {
     if (typeof value === "string") return value.trim();
     if (typeof value === "number") return String(value);
     return "";
+}
+
+export function getPrinterCharacterSet(): PrinterCharacterSet {
+    const requested = stringifyInput(process.env.PRINTER_CHARACTER_SET).toUpperCase();
+    const supported = new Set<PrinterCharacterSet>(Object.values(CharacterSet));
+    if (requested && supported.has(requested as PrinterCharacterSet)) {
+        return requested as PrinterCharacterSet;
+    }
+
+    return DEFAULT_PRINTER_CHARACTER_SET;
 }
 
 export function parsePrinterPort(value: unknown): number | null {

@@ -7,7 +7,8 @@ const {
     buildOrderPrintDocumentV2Mock,
     normalizeLegacyPrintDocumentMock,
     isPrinterConnectedMock,
-    executeMock
+    executeMock,
+    thermalPrinterCtorMock
 } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     printJobCreateMock: vi.fn(),
@@ -15,7 +16,8 @@ const {
     buildOrderPrintDocumentV2Mock: vi.fn(),
     normalizeLegacyPrintDocumentMock: vi.fn(),
     isPrinterConnectedMock: vi.fn(),
-    executeMock: vi.fn()
+    executeMock: vi.fn(),
+    thermalPrinterCtorMock: vi.fn()
 }));
 
 vi.mock("@/lib/mongoose", () => ({
@@ -51,6 +53,10 @@ vi.mock("@/lib/print-report", () => ({
 
 vi.mock("node-thermal-printer", () => {
     class ThermalPrinterMock {
+        constructor(config: unknown) {
+            thermalPrinterCtorMock(config);
+        }
+
         isPrinterConnected() {
             return isPrinterConnectedMock();
         }
@@ -77,7 +83,7 @@ vi.mock("node-thermal-printer", () => {
     return {
         ThermalPrinter: ThermalPrinterMock,
         PrinterTypes: { EPSON: "EPSON" },
-        CharacterSet: { WPC1252: "WPC1252" }
+        CharacterSet: { WPC1252: "WPC1252", PC858_EURO: "PC858_EURO" }
     };
 });
 
@@ -170,6 +176,9 @@ describe("PrinterService.printComanda connection retry", () => {
         const result = await resultPromise;
 
         expect(result).toBe(true);
+        expect(thermalPrinterCtorMock).toHaveBeenCalledWith(expect.objectContaining({
+            characterSet: "PC858_EURO"
+        }));
         expect(isPrinterConnectedMock).toHaveBeenCalledTimes(3);
         expect(executeMock).toHaveBeenCalledTimes(1);
         expect(printJobUpdateOneMock).toHaveBeenCalledWith(
