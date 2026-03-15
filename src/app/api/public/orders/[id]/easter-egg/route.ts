@@ -53,8 +53,13 @@ export async function POST(
             return NextResponse.json({ error: "Token upload non valido" }, { status: 403 });
         }
 
-        await Order.updateOne(
-            { _id: id, status: "PENDING" },
+        const updateResult = await Order.updateOne(
+            {
+                _id: id,
+                status: "PENDING",
+                "easterEggAttachment.printedAt": { $exists: false },
+                "easterEggAttachment.uploadTokenHash": expectedHash
+            },
             {
                 $set: {
                     "easterEggAttachment.rasterWidth": parsedRaster.raster.width,
@@ -64,6 +69,10 @@ export async function POST(
                 }
             }
         );
+
+        if (!updateResult.acknowledged || updateResult.matchedCount !== 1) {
+            return NextResponse.json({ error: "Ordine non più modificabile" }, { status: 409 });
+        }
 
         return NextResponse.json({
             success: "Foto allegata all'ordine. Puoi sostituirla finché non paghi in cassa."

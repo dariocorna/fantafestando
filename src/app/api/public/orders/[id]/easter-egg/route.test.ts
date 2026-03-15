@@ -77,7 +77,7 @@ describe("POST /api/public/orders/[id]/easter-egg", () => {
                 })
             })
         });
-        orderUpdateOneMock.mockResolvedValue({ acknowledged: true });
+        orderUpdateOneMock.mockResolvedValue({ acknowledged: true, matchedCount: 1 });
 
         const response = await POST(createRasterRequest("good-token") as never, {
             params: Promise.resolve({ id: "order-1" })
@@ -85,7 +85,12 @@ describe("POST /api/public/orders/[id]/easter-egg", () => {
 
         expect(response.status).toBe(200);
         expect(orderUpdateOneMock).toHaveBeenCalledWith(
-            { _id: "order-1", status: "PENDING" },
+            {
+                _id: "order-1",
+                status: "PENDING",
+                "easterEggAttachment.printedAt": { $exists: false },
+                "easterEggAttachment.uploadTokenHash": hashEasterEggUploadToken("good-token")
+            },
             {
                 $set: expect.objectContaining({
                     "easterEggAttachment.rasterWidth": getThermalContentWidth(),
@@ -95,5 +100,28 @@ describe("POST /api/public/orders/[id]/easter-egg", () => {
                 })
             }
         );
+    });
+
+    test("returns conflict when the pending-order update no longer matches", async () => {
+        orderFindByIdMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue({
+                    status: "PENDING",
+                    easterEggAttachment: {
+                        uploadTokenHash: hashEasterEggUploadToken("good-token")
+                    }
+                })
+            })
+        });
+        orderUpdateOneMock.mockResolvedValue({ acknowledged: true, matchedCount: 0 });
+
+        const response = await POST(createRasterRequest("good-token") as never, {
+            params: Promise.resolve({ id: "order-1" })
+        });
+
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toMatchObject({
+            error: expect.stringMatching(/Ordine non più modificabile/i)
+        });
     });
 });
