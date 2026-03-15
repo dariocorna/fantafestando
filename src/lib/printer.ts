@@ -582,7 +582,9 @@ export class PrinterService {
         if (!logoBuffer) return false;
 
         try {
+            printer.alignLeft();
             await printer.printImageBuffer(logoBuffer);
+            printer.alignLeft();
             printer.println(" ");
             return true;
         } catch (error) {
