@@ -51,6 +51,14 @@ export interface IOrder extends Document {
         refundTransactionId?: string;
         refundError?: string;
     };
+    easterEggAttachment?: {
+        uploadTokenHash?: string;
+        rasterWidth?: number;
+        rasterHeight?: number;
+        rasterData?: Buffer;
+        uploadedAt?: Date;
+        printedAt?: Date;
+    };
     createdAt?: Date;
     updatedAt?: Date;
 }
@@ -120,6 +128,14 @@ const OrderSchema = new Schema<IOrder>({
         },
         refundTransactionId: { type: String },
         refundError: { type: String }
+    },
+    easterEggAttachment: {
+        uploadTokenHash: { type: String, trim: true },
+        rasterWidth: { type: Number, min: 1, max: 576 },
+        rasterHeight: { type: Number, min: 1, max: 4096 },
+        rasterData: { type: Buffer },
+        uploadedAt: { type: Date },
+        printedAt: { type: Date }
     }
 }, {
     timestamps: true

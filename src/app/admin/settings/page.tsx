@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../../../components/ui/card";
-import { Calendar, Settings, Printer, Home } from "lucide-react";
+import { Calendar, Settings, Printer, Home, Smartphone } from "lucide-react";
 import { getAdminContextEvent } from "@/lib/events";
 import { IEvent } from "@/models/Event";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ export default async function AdminSettings() {
             settings: {
                 askName: contextEvent.settings?.askName ?? false,
                 askTable: contextEvent.settings?.askTable ?? false,
+                portalEasterEggEnabled: contextEvent.settings?.portalEasterEggEnabled ?? false,
                 posCatalogLayout: normalizePosCatalogLayout(contextEvent.settings?.posCatalogLayout),
                 menuHeaderLogoUrl: contextEvent.settings?.menuHeaderLogoUrl || "",
                 receiptHeaderLogoUrl: contextEvent.settings?.receiptHeaderLogoUrl || "",
@@ -107,6 +108,20 @@ export default async function AdminSettings() {
                                 <div>
                                     <CardTitle className="text-lg">Punti Cassa</CardTitle>
                                     <CardDescription>Associa i terminali fisici alle stampanti cassa.</CardDescription>
+                                </div>
+                            </CardHeader>
+                        </Card>
+                    </Link>
+
+                    <Link href="/admin/easter-egg">
+                        <Card className="hover:bg-slate-50 dark:hover:bg-slate-900 transition-all border-2 border-transparent hover:border-primary/20 shadow-md h-full">
+                            <CardHeader className="flex flex-row items-center gap-4">
+                                <div className="p-3 bg-amber-100 rounded-full text-amber-700">
+                                    <Smartphone className="h-6 w-6" />
+                                </div>
+                                <div>
+                                    <CardTitle className="text-lg">Easter Egg Mobile</CardTitle>
+                                    <CardDescription>Scatta da telefono, ritaglia il volto e stampa via reverse tunnel.</CardDescription>
                                 </div>
                             </CardHeader>
                         </Card>

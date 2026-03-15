@@ -17,6 +17,15 @@ export interface ResolvedPrinterDestination {
     label: string;
 }
 
+export interface EasterEggPrinterCandidate {
+    _id: unknown;
+    ip?: string;
+    port?: number;
+    isVirtual?: boolean;
+    emulatorSlot?: number;
+    type?: "CASHIER" | "KITCHEN";
+}
+
 type ValidationResult =
     | { success: true; data: NormalizedPrinterConfig }
     | { success: false; error: string };
@@ -101,6 +110,21 @@ export function resolvePrinterDestination(input: {
         port,
         label: host ? formatPrinterDestination(host, port) : "missing-destination"
     };
+}
+
+export function selectBestEasterEggPrinter(
+    printers: EasterEggPrinterCandidate[],
+    preferredIp?: string
+): EasterEggPrinterCandidate | null {
+    const normalizedPreferredIp = stringifyInput(preferredIp);
+    if (normalizedPreferredIp) {
+        const byPreferredIp = printers.find((printer) => stringifyInput(printer.ip) === normalizedPreferredIp);
+        if (byPreferredIp) return byPreferredIp;
+    }
+
+    const cashier = printers.find((printer) => printer.type === "CASHIER");
+    if (cashier) return cashier;
+    return printers[0] || null;
 }
 
 export function normalizePrinterConfig(input: {

@@ -45,11 +45,13 @@ services:
       MONGODB_URI: ${MONGODB_URI:?MONGODB_URI is required}
       PRINTER_EMULATOR_HOST: ${PRINTER_EMULATOR_HOST:-printer-emulator}
       PRINTER_EMULATOR_START_PORT: ${PRINTER_EMULATOR_START_PORT:-19100}
+      PRINTER_EMULATOR_OUTPUT_DIR: /data/printer-emulator
       PORT: 3000
     ports:
       - '${BACKOFFICE_BIND_HOST:-127.0.0.1}:${BACKOFFICE_BIND_PORT:-3101}:3000'
     volumes:
       - ./public/uploads:/app/public/uploads
+      - printer_emulator_data:/data/printer-emulator:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -84,11 +86,13 @@ services:
       MONGODB_URI: ${MONGODB_URI:?MONGODB_URI is required}
       PRINTER_EMULATOR_HOST: ${PRINTER_EMULATOR_HOST:-printer-emulator}
       PRINTER_EMULATOR_START_PORT: ${PRINTER_EMULATOR_START_PORT:-19100}
+      PRINTER_EMULATOR_OUTPUT_DIR: /data/printer-emulator
       PORT: 3000
     ports:
       - '127.0.0.1:${MENU_BIND_PORT:-3102}:3000'
     volumes:
       - ./public/uploads:/app/public/uploads
+      - printer_emulator_data:/data/printer-emulator:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

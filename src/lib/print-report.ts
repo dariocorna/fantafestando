@@ -1,4 +1,4 @@
-export type PrintJobType = "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "MANUAL_TEST";
+export type PrintJobType = "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "EASTER_EGG_IMAGE" | "MANUAL_TEST";
 
 export type PrintLogoMode = "none" | "attempted" | "printed";
 
@@ -178,6 +178,7 @@ function defaultCopyLabel(printType: PrintJobType): string {
     if (printType === "KITCHEN_ORDER") return "COPIA REPARTO";
     if (printType === "CASHIER_SUMMARY") return "COPIA CASSA";
     if (printType === "CASH_SESSION_SUMMARY") return "COPIA CASSA";
+    if (printType === "EASTER_EGG_IMAGE") return "EASTER EGG";
     return "COPIA TEST";
 }
 
@@ -287,6 +288,7 @@ function inferPrintTypeFromLegacy(document: Record<string, unknown>): PrintJobTy
         || explicit === "KITCHEN_ORDER"
         || explicit === "CASHIER_SUMMARY"
         || explicit === "CASH_SESSION_SUMMARY"
+        || explicit === "EASTER_EGG_IMAGE"
         || explicit === "MANUAL_TEST"
     ) {
         return explicit;
@@ -295,6 +297,7 @@ function inferPrintTypeFromLegacy(document: Record<string, unknown>): PrintJobTy
     const kind = asTrimmedString(document.kind)?.toUpperCase();
     if (kind === "CASH_SESSION_SUMMARY") return "CASH_SESSION_SUMMARY";
     if (kind === "CASH_RECEIPT") return "CASHIER_SUMMARY";
+    if (kind === "EASTER_EGG_IMAGE") return "EASTER_EGG_IMAGE";
     if (kind === "MANUAL_TEST") return "MANUAL_TEST";
     return "CUSTOMER_ORDER";
 }

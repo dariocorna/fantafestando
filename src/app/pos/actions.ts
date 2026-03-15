@@ -900,6 +900,7 @@ export async function loadPendingOrderByCode(data: {
             totalAmount: number
             customer?: { name?: string, table?: string }
             cart: Array<{ productId: string | { toString(): string }, snapshotName: string, quantity: number }>
+            easterEggAttachment?: { rasterData?: Buffer | Uint8Array | null }
         }
 
         let foundOrder: PendingOrderResult | null = null
@@ -954,6 +955,7 @@ export async function loadPendingOrderByCode(data: {
                     name: foundOrder.customer?.name,
                     table: foundOrder.customer?.table
                 },
+                easterEggAttached: Boolean(foundOrder.easterEggAttachment?.rasterData),
                 items: foundOrder.cart.map((item) => ({
                     productId: item.productId.toString(),
                     snapshotName: item.snapshotName,
