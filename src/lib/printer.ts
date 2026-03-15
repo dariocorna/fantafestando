@@ -14,6 +14,7 @@ import dbConnect from "./mongoose";
 import { getOrderCodeFromOrder } from "./order-code";
 import {
     DEFAULT_PRINTER_PORT,
+    getPrinterCharacterSet,
     getVirtualPrinterStartPort,
     resolvePrinterDestination,
     toTcpPrinterInterface
@@ -219,18 +220,24 @@ function formatAmountNoCurrency(amount: number | undefined): string {
     return safeAmount.toFixed(2);
 }
 
+function normalizePrintableText(value: string): string {
+    return value.normalize("NFC").replace(/\r\n?/g, "\n");
+}
+
 function padRight(value: string, width: number): string {
-    if (value.length >= width) return value;
-    return `${value}${" ".repeat(width - value.length)}`;
+    const normalized = normalizePrintableText(value);
+    if (normalized.length >= width) return normalized;
+    return `${normalized}${" ".repeat(width - normalized.length)}`;
 }
 
 function padLeft(value: string, width: number): string {
-    if (value.length >= width) return value;
-    return `${" ".repeat(width - value.length)}${value}`;
+    const normalized = normalizePrintableText(value);
+    if (normalized.length >= width) return normalized;
+    return `${" ".repeat(width - normalized.length)}${normalized}`;
 }
 
 function splitByLength(value: string, max: number): string[] {
-    const clean = value.trim();
+    const clean = normalizePrintableText(value).trim();
     if (!clean) return [];
     if (clean.length <= max) return [clean];
     const words = clean.split(/\s+/);
@@ -946,7 +953,7 @@ export class PrinterService {
         const printer = new ThermalPrinter({
             type: PrinterTypes.EPSON,
             interface: toTcpPrinterInterface(params.destinationHost, params.destinationPort),
-            characterSet: CharacterSet.WPC1252,
+            characterSet: getPrinterCharacterSet(),
             removeSpecialCharacters: false,
             lineCharacter: "=",
         });
@@ -1051,7 +1058,7 @@ export class PrinterService {
         const printer = new ThermalPrinter({
             type: PrinterTypes.EPSON,
             interface: toTcpPrinterInterface(params.destinationHost, params.destinationPort),
-            characterSet: CharacterSet.WPC1252,
+            characterSet: getPrinterCharacterSet(),
             removeSpecialCharacters: false,
             lineCharacter: "=",
         });
@@ -1764,7 +1771,7 @@ export class PrinterService {
         const printer = new ThermalPrinter({
             type: PrinterTypes.EPSON,
             interface: toTcpPrinterInterface(printerHost, printerPort),
-            characterSet: CharacterSet.WPC1252,
+            characterSet: getPrinterCharacterSet(),
             removeSpecialCharacters: false,
             lineCharacter: "=",
         });
