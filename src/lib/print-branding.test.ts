@@ -63,7 +63,7 @@ describe("print-branding", () => {
         expect(fallbackFromInvalid).toBeUndefined();
     });
 
-    it("pads printable logo png buffers to a width compatible with escpos raster bytes", async () => {
+    it("pads printable logo png buffers to the full paper width for manual centering", async () => {
         const relativeUrl = `/uploads/receipt-headers/test-${Date.now()}.png`;
         const absolutePath = path.join(process.cwd(), "public", relativeUrl.slice(1));
         const pngBuffer = await sharp({
@@ -83,7 +83,7 @@ describe("print-branding", () => {
         const metadata = await sharp(normalizedBuffer).metadata();
 
         expect(normalizedBuffer).toBeDefined();
-        expect(metadata.width).toBe(16);
+        expect(metadata.width).toBe(576);
         expect(metadata.height).toBe(4);
     });
 });
