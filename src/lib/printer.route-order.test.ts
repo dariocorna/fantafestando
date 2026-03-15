@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { getThermalContentWidth } from "@/lib/easter-egg-config";
 
 const {
     dbConnectMock,
     orderFindByIdMock,
+    orderUpdateOneMock,
     eventFindByIdMock,
     posDeviceFindByIdMock,
     productFindMock,
@@ -10,6 +12,7 @@ const {
 } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     orderFindByIdMock: vi.fn(),
+    orderUpdateOneMock: vi.fn(),
     eventFindByIdMock: vi.fn(),
     posDeviceFindByIdMock: vi.fn(),
     productFindMock: vi.fn(),
@@ -22,7 +25,8 @@ vi.mock("@/lib/mongoose", () => ({
 
 vi.mock("@/models/Order", () => ({
     default: {
-        findById: orderFindByIdMock
+        findById: orderFindByIdMock,
+        updateOne: orderUpdateOneMock
     }
 }));
 
@@ -119,6 +123,7 @@ function mockCategories(categories: unknown[]) {
 describe("PrinterService.routeOrderToPrinters", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        orderUpdateOneMock.mockResolvedValue({ acknowledged: true });
     });
 
     test("keeps only cashier summary and customer copy when no department printer is configured", async () => {
@@ -435,6 +440,76 @@ describe("PrinterService.routeOrderToPrinters", () => {
         expect(printComandaSpy).toHaveBeenCalledTimes(2);
         expect(printComandaSpy.mock.calls[1]?.[2]).toEqual(
             expect.objectContaining({ immediateFailureReason: "Skipped after previous destination failure" })
+        );
+    });
+
+    test("prints the easter egg raster on cashier close and clears the stored binary after success", async () => {
+        const rasterWidth = getThermalContentWidth();
+        const rasterBuffer = Buffer.alloc((rasterWidth / 8) * 12, 0xaa);
+        mockOrder({
+            ...buildOrder("order-raster"),
+            easterEggAttachment: {
+                rasterWidth,
+                rasterHeight: 12,
+                rasterData: {
+                    buffer: rasterBuffer,
+                    sub_type: 0,
+                    position: rasterBuffer.length
+                }
+            }
+        });
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([
+            {
+                _id: { toString: () => "prod-1" },
+                categoryId: { toString: () => "cat-1" },
+                basePrice: 7
+            }
+        ]);
+        mockCategories([
+            {
+                _id: { toString: () => "cat-1" }
+            }
+        ]);
+
+        vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+        const printRasterSpy = vi.spyOn(PrinterService, "printRasterImage").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters("order-raster", "pos-1");
+
+        expect(result).toEqual([true, true, true]);
+        expect(printRasterSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                orderId: "order-raster",
+                printType: "EASTER_EGG_IMAGE",
+                ip: "192.168.178.203"
+            }),
+            expect.objectContaining({
+                width: rasterWidth,
+                height: 12
+            }),
+            1,
+            undefined
+        );
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            { _id: expect.anything() },
+            {
+                $set: {
+                    "easterEggAttachment.printedAt": expect.any(Date)
+                },
+                $unset: {
+                    "easterEggAttachment.rasterData": 1,
+                    "easterEggAttachment.uploadTokenHash": 1
+                }
+            }
         );
     });
 });
