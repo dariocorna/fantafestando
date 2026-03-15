@@ -14,6 +14,7 @@ export interface CreateEventOptions {
     askTable?: boolean;
     askName?: boolean;
     predefinedTables?: string[];
+    portalEasterEggEnabled?: boolean;
 }
 
 export async function createAndActivateEvent(
@@ -67,6 +68,12 @@ export async function createAndActivateEvent(
         const cb = page.locator('input[name="askName"]');
         if (options.askName && !(await cb.isChecked())) await cb.check();
         if (!options.askName && (await cb.isChecked())) await cb.uncheck();
+    }
+
+    if (options?.portalEasterEggEnabled !== undefined) {
+        const cb = page.locator('input[name="portalEasterEggEnabled"]');
+        if (options.portalEasterEggEnabled && !(await cb.isChecked())) await cb.check();
+        if (!options.portalEasterEggEnabled && (await cb.isChecked())) await cb.uncheck();
     }
 
     if (options?.predefinedTables?.length) {

@@ -36,6 +36,7 @@ vi.mock("@/models/PosDevice", () => ({ default: {} }));
 vi.mock("@/models/Event", () => ({ default: {} }));
 
 vi.mock("@/lib/print-branding", () => ({
+    preparePrintableLogoPngBufferFromUrl: vi.fn(),
     resolvePrintableLogoPathFromUrl: vi.fn(() => null),
     sanitizePrintableHeaderLogoUrl: vi.fn((value) => value),
     sanitizeReceiptHeaderLogoUrl: vi.fn((value) => value)

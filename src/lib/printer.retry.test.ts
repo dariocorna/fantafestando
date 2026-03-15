@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { Binary } from "bson";
+import { getThermalContentWidth } from "@/lib/easter-egg-config";
 
-const { dbConnectMock, printJobFindOneMock } = vi.hoisted(() => ({
+const { dbConnectMock, printJobFindOneMock, orderFindOneMock } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
-    printJobFindOneMock: vi.fn()
+    printJobFindOneMock: vi.fn(),
+    orderFindOneMock: vi.fn()
 }));
 
 vi.mock("@/lib/mongoose", () => ({
@@ -15,7 +18,11 @@ vi.mock("@/models/PrintJob", () => ({
     }
 }));
 
-vi.mock("@/models/Order", () => ({ default: {} }));
+vi.mock("@/models/Order", () => ({
+    default: {
+        findOne: orderFindOneMock
+    }
+}));
 vi.mock("@/models/Product", () => ({ default: {} }));
 vi.mock("@/models/Category", () => ({ default: {} }));
 vi.mock("@/models/PosDevice", () => ({ default: {} }));
@@ -33,6 +40,11 @@ function mockFindOneJob(job: unknown) {
 describe("PrinterService.retryPrintJobById", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        orderFindOneMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue(null)
+            })
+        });
     });
 
     test("returns validation error when ids are missing", async () => {
@@ -157,5 +169,54 @@ describe("PrinterService.retryPrintJobById", () => {
         vi.spyOn(PrinterService, "printComanda").mockResolvedValue(false);
         const result = await PrinterService.retryPrintJobById("evt-1", "job-1");
         expect(result).toEqual({ success: false, error: "Invio stampa fallito" });
+    });
+
+    test("retries easter egg jobs using the raster stored on the order before falling back to legacy image URLs", async () => {
+        const rasterWidth = getThermalContentWidth();
+        mockFindOneJob({
+            _id: { toString: () => "job-raster" },
+            eventId: { toString: () => "evt-1" },
+            orderId: { toString: () => "order-1" },
+            source: "ORDER",
+            printType: "EASTER_EGG_IMAGE",
+            destinationHost: "printer-emulator",
+            destinationPort: 19100,
+            printerId: {
+                _id: "printer-1",
+                ip: "printer-emulator",
+                port: 19100,
+                isVirtual: false
+            },
+            document: {
+                title: "Easter Egg Cliente"
+            }
+        });
+        orderFindOneMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue({
+                    easterEggAttachment: {
+                        rasterWidth,
+                        rasterHeight: 20,
+                        rasterData: new Binary(Buffer.alloc((rasterWidth / 8) * 20, 0xaa))
+                    }
+                })
+            })
+        });
+
+        const printRasterSpy = vi.spyOn(PrinterService, "printRasterImage").mockResolvedValue(true);
+        const result = await PrinterService.retryPrintJobById("evt-1", "job-raster");
+
+        expect(result).toEqual({ success: true });
+        expect(printRasterSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                orderId: "order-1",
+                printType: "EASTER_EGG_IMAGE"
+            }),
+            expect.objectContaining({
+                width: rasterWidth,
+                height: 20
+            }),
+            1
+        );
     });
 });
