@@ -1,7 +1,10 @@
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
     DEFAULT_EMULATOR_START_PORT,
+    DEFAULT_PRINTER_CHARACTER_SET,
     DEFAULT_PRINTER_PORT,
     formatPrinterDestination,
+    getPrinterCharacterSet,
     getVirtualPrinterHost,
     getVirtualPrinterStartPort,
     normalizePrinterConfig,
@@ -12,6 +15,11 @@ import {
 } from "@/lib/printer-config";
 
 describe("printer-config", () => {
+    afterEach(() => {
+        delete process.env.PRINTER_CHARACTER_SET;
+        vi.restoreAllMocks();
+    });
+
     test("parsePrinterPort uses default when empty", () => {
         expect(parsePrinterPort("")).toBe(DEFAULT_PRINTER_PORT);
         expect(parsePrinterPort(null)).toBe(DEFAULT_PRINTER_PORT);
@@ -96,5 +104,27 @@ describe("printer-config", () => {
 
     test("emulator start port fallback stays valid", () => {
         expect(getVirtualPrinterStartPort()).toBeGreaterThanOrEqual(DEFAULT_EMULATOR_START_PORT);
+    });
+});
+
+describe("printer-config character set", () => {
+    afterEach(() => {
+        delete process.env.PRINTER_CHARACTER_SET;
+        vi.restoreAllMocks();
+    });
+
+    test("defaults to the western europe esc/pos code page", () => {
+        delete process.env.PRINTER_CHARACTER_SET;
+        expect(getPrinterCharacterSet()).toBe(DEFAULT_PRINTER_CHARACTER_SET);
+    });
+
+    test("accepts a supported override from env", () => {
+        process.env.PRINTER_CHARACTER_SET = "WPC1252";
+        expect(getPrinterCharacterSet()).toBe("WPC1252");
+    });
+
+    test("falls back to default when env contains an unknown code page", () => {
+        process.env.PRINTER_CHARACTER_SET = "NOPE";
+        expect(getPrinterCharacterSet()).toBe(DEFAULT_PRINTER_CHARACTER_SET);
     });
 });

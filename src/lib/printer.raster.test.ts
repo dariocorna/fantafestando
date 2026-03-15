@@ -100,7 +100,7 @@ vi.mock("node-thermal-printer", () => {
     return {
         ThermalPrinter: ThermalPrinterMock,
         PrinterTypes: { EPSON: "EPSON" },
-        CharacterSet: { WPC1252: "WPC1252" }
+        CharacterSet: { WPC1252: "WPC1252", PC858_EURO: "PC858_EURO" }
     };
 });
 
