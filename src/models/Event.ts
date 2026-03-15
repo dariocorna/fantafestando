@@ -16,6 +16,19 @@ export interface IEvent extends Document {
         posCatalogLayout?: "COMPACT_COLUMNS" | "MODERN_TABS";
         menuHeaderLogoUrl?: string;
         receiptHeaderLogoUrl?: string;
+        portalEasterEggEnabled?: boolean;
+        portalEasterEggImageUrl?: string;
+        portalEasterEggCrop?: {
+            centerX: number;
+            centerY: number;
+            zoom: number;
+            aspectRatio: "PORTRAIT_3_4" | "SQUARE_1_1" | "THERMAL_58";
+        };
+        portalEasterEggProcessing?: {
+            autoEnhance: boolean;
+            brightnessBoost: number;
+            thresholdBase: number;
+        };
         defaultCashierPrinterIp?: string;
         quickDiscountPresets?: Array<{
             label: string;
@@ -40,6 +53,23 @@ const EventSchema = new Schema<IEvent>({
         posCatalogLayout: { type: String, enum: ["COMPACT_COLUMNS", "MODERN_TABS"], default: "COMPACT_COLUMNS" },
         menuHeaderLogoUrl: { type: String, trim: true },
         receiptHeaderLogoUrl: { type: String, trim: true },
+        portalEasterEggEnabled: { type: Boolean, default: false },
+        portalEasterEggImageUrl: { type: String, trim: true },
+        portalEasterEggCrop: {
+            centerX: { type: Number, min: 0, max: 100, default: 50 },
+            centerY: { type: Number, min: 0, max: 100, default: 50 },
+            zoom: { type: Number, min: 1, max: 4, default: 1.6 },
+            aspectRatio: {
+                type: String,
+                enum: ["PORTRAIT_3_4", "SQUARE_1_1", "THERMAL_58"],
+                default: "PORTRAIT_3_4"
+            }
+        },
+        portalEasterEggProcessing: {
+            autoEnhance: { type: Boolean, default: true },
+            brightnessBoost: { type: Number, min: 0, max: 80, default: 20 },
+            thresholdBase: { type: Number, min: 80, max: 220, default: 130 }
+        },
         defaultCashierPrinterIp: { type: String },
         quickDiscountPresets: { type: [QuickDiscountPresetSchema], default: [] },
         quickStaffDiscountEnabled: { type: Boolean, default: false },

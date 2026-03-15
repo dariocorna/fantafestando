@@ -10,11 +10,13 @@ import {
 import { Button } from "@/components/ui/button"
 import { motion } from "framer-motion"
 import { BrandFestiveStrip } from "@/components/brand/brand-festive-strip"
+import { MenuOrderEasterEgg } from "@/components/menu-order-easter-egg"
 
 function SuccessContent() {
     const searchParams = useSearchParams()
     const router = useRouter()
     const code = searchParams.get("code")
+    const orderId = searchParams.get("orderId")
 
     return (
         <div className="brand-surface-menu min-h-screen flex flex-col items-center justify-center p-6 text-center">
@@ -53,6 +55,8 @@ function SuccessContent() {
                     FAI UN ALTRO ORDINE
                 </Button>
             </div>
+
+            <MenuOrderEasterEgg orderId={orderId} />
         </div>
     )
 }

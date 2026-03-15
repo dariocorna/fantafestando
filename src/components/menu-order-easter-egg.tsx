@@ -1,0 +1,86 @@
+"use client";
+
+import { useMemo, useSyncExternalStore } from "react";
+import { Sparkles } from "lucide-react";
+import { EasterEggComposer } from "@/components/easter-egg-composer";
+import {
+    readPendingEasterEggUpload,
+    subscribeToPendingEasterEggUpload
+} from "@/app/menu/easter-egg-upload-storage";
+import { type ThermalRasterPayload } from "@/lib/easter-egg-raster";
+
+export function MenuOrderEasterEgg({ orderId }: { orderId: string | null }) {
+    const token = useSyncExternalStore(
+        subscribeToPendingEasterEggUpload,
+        () => (orderId ? readPendingEasterEggUpload(orderId)?.token || null : null),
+        () => null
+    );
+    const isEnabled = useMemo(() => Boolean(orderId && token), [orderId, token]);
+    if (!isEnabled || !orderId || !token) {
+        return null;
+    }
+
+    async function handleSubmitRaster(raster: ThermalRasterPayload) {
+        const uploadToken = token;
+        if (!uploadToken) {
+            return { error: "Token upload non disponibile." };
+        }
+        const formData = new FormData();
+        formData.set("token", uploadToken);
+        formData.set("rasterWidth", String(raster.width));
+        formData.set("rasterHeight", String(raster.height));
+        const rasterBytes = new Uint8Array(raster.data.byteLength);
+        rasterBytes.set(raster.data);
+        formData.set(
+            "rasterBits",
+            new File(
+                [rasterBytes],
+                "order-easter-egg.bin",
+                { type: "application/octet-stream" }
+            )
+        );
+
+        const response = await fetch(`/api/public/orders/${orderId}/easter-egg`, {
+            method: "POST",
+            body: formData
+        });
+        const payload = await response.json().catch(() => ({} as { error?: string; success?: string }));
+        if (!response.ok) {
+            return { error: payload.error || "Impossibile allegare la foto all'ordine." };
+        }
+
+        return {
+            success: typeof payload.success === "string"
+                ? payload.success
+                : "Foto allegata all'ordine. Puoi sostituirla finché non paghi in cassa."
+        };
+    }
+
+    return (
+        <div className="mt-8 w-full max-w-xl">
+            <div className="mb-4 rounded-[30px] border border-[#d9e6f8] bg-white/95 p-5 shadow-[var(--brand-shadow-soft)]">
+                <p className="flex items-center justify-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--brand-blue-700)]">
+                    <Sparkles className="h-4 w-4" />
+                    Funzione speciale opzionale
+                </p>
+                <p className="mt-2 text-center text-sm font-medium text-slate-600">
+                    Scatta una foto, verifica l&apos;anteprima termica e allegala all&apos;ordine. Verrà stampata in cassa con la comanda al momento della chiusura.
+                </p>
+            </div>
+
+            <EasterEggComposer
+                title="Foto termica per la tua comanda"
+                description="La foto viene elaborata direttamente sul tuo telefono e inviata al server solo come raster pronto per la stampa."
+                submitLabel="Allega foto all'ordine"
+                submittingLabel="Invio allegato..."
+                inputLabel="Selfie o foto"
+                helpText="Usa due dita per zoomare e trascina la preview per centrare il soggetto. Puoi inviarne una nuova finché l'ordine è in attesa."
+                emptyStateTitle="Scatta la tua foto"
+                emptyStateDescription="Si aprirà la fotocamera del telefono; vedrai subito l'anteprima termica in bianco e nero."
+                captureMode="user"
+                testIdPrefix="menu-easter-egg"
+                onSubmitRaster={handleSubmitRaster}
+            />
+        </div>
+    );
+}

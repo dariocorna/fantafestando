@@ -5,7 +5,7 @@ import Printer, { IPrinter } from "@/models/Printer";
 import Peripheral, { IPeripheral } from "@/models/Peripheral";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Printer as PrinterIcon, ArrowLeft, Smartphone, Box } from "lucide-react";
+import { Printer as PrinterIcon, ArrowLeft, Smartphone, Box, Camera } from "lucide-react";
 import { DeleteForm } from "@/components/delete-form";
 import {
     deletePrinterAction,
@@ -63,6 +63,12 @@ export default async function HardwarePage() {
                     <h1 className="text-3xl font-bold tracking-tight">Hardware</h1>
                     <p className="text-muted-foreground">Gestisci stampanti e periferiche di pagamento.</p>
                 </div>
+                <Link href="/admin/easter-egg" className="ml-auto">
+                    <Button variant="outline" className="gap-2">
+                        <Camera className="h-4 w-4" />
+                        Easter Egg Mobile
+                    </Button>
+                </Link>
             </div>
 
             <Tabs defaultValue="printers" className="w-full">

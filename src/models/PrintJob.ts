@@ -7,6 +7,7 @@ export type PrintJobType =
     | "KITCHEN_ORDER"
     | "CASHIER_SUMMARY"
     | "CASH_SESSION_SUMMARY"
+    | "EASTER_EGG_IMAGE"
     | "MANUAL_TEST";
 
 export interface IPrintJob extends Document {
@@ -40,7 +41,7 @@ const PrintJobSchema = new Schema<IPrintJob>({
     },
     printType: {
         type: String,
-        enum: ["CUSTOMER_ORDER", "KITCHEN_ORDER", "CASHIER_SUMMARY", "CASH_SESSION_SUMMARY", "MANUAL_TEST"],
+        enum: ["CUSTOMER_ORDER", "KITCHEN_ORDER", "CASHIER_SUMMARY", "CASH_SESSION_SUMMARY", "EASTER_EGG_IMAGE", "MANUAL_TEST"],
         required: true,
         default: "CUSTOMER_ORDER"
     },

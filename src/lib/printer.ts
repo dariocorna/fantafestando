@@ -1,6 +1,8 @@
 import { ThermalPrinter, PrinterTypes, CharacterSet } from "node-thermal-printer";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { Binary } from "bson";
 import Order from "@/models/Order";
 import Product from "@/models/Product";
 import Category from "@/models/Category";
@@ -12,6 +14,7 @@ import dbConnect from "./mongoose";
 import { getOrderCodeFromOrder } from "./order-code";
 import {
     DEFAULT_PRINTER_PORT,
+    getVirtualPrinterStartPort,
     resolvePrinterDestination,
     toTcpPrinterInterface
 } from "./printer-config";
@@ -27,6 +30,16 @@ import {
     sanitizePrintableHeaderLogoUrl,
     sanitizeReceiptHeaderLogoUrl
 } from "./print-branding";
+import {
+    preparePrintableEasterEggRasterFromUrl,
+    renderThermalRasterToStripePngBuffers
+} from "./easter-egg-image";
+import {
+    normalizeEasterEggCrop,
+    normalizeEasterEggProcessingSettings,
+    type EasterEggCrop,
+    type EasterEggProcessingSettings
+} from "./easter-egg-config";
 
 export interface PrinterCommandJob {
     ip: string;
@@ -86,6 +99,26 @@ export interface CashSessionClosingPrintSummary {
     }>;
 }
 
+export interface PrinterRasterImageJob {
+    ip: string;
+    port?: number;
+    emulatorSlot?: number;
+    printerId?: string;
+    eventId?: string;
+    orderId?: string;
+    source?: PrintJobSource;
+    printType?: PrintJobType;
+    isVirtual?: boolean;
+    title: string;
+    eventName?: string;
+    copyLabel?: string;
+    brandingLogoUrl?: string;
+    imageUrl?: string;
+    crop?: EasterEggCrop;
+    processing?: EasterEggProcessingSettings;
+    footerLines?: string[];
+}
+
 interface CartItem {
     productId: string;
     snapshotName: string;
@@ -116,6 +149,17 @@ type PrintDispatchAttemptResult =
         errorMessage: string;
         automaticRetryCount: number;
     };
+
+type BufferJsonLike = {
+    type?: unknown;
+    data?: unknown;
+};
+
+type BsonBinaryLike = {
+    buffer?: unknown;
+    sub_type?: unknown;
+    position?: unknown;
+};
 
 function formatPaymentMethod(value: string | undefined): string {
     if (value === "CASH") return "Contanti";
@@ -152,9 +196,19 @@ const PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS = readEnvDelayList(
     [200, 400, 800, 1200, 1600]
 );
 const PRINTER_SAME_DESTINATION_COOLDOWN_MS = readEnvNumber("PRINTER_SAME_DESTINATION_COOLDOWN_MS", 1000);
+const PRINTER_RASTER_AFTER_ORDER_DELAY_MS = readEnvNumber("PRINTER_RASTER_AFTER_ORDER_DELAY_MS", 1500);
+const PRINTER_EMULATOR_CAPTURE_LOOKUP_TIMEOUT_MS = readEnvNumber("PRINTER_EMULATOR_CAPTURE_LOOKUP_TIMEOUT_MS", 750);
+const PRINTER_LOCAL_CAPTURE_DIR = process.env.PRINTER_LOCAL_CAPTURE_DIR || "/tmp/fantafestando-printer-captures";
+const PRINTER_LOCAL_CAPTURE_MAX_FILES = readEnvNumber("PRINTER_LOCAL_CAPTURE_MAX_FILES", 200);
+const PRINTER_LOCAL_CAPTURE_MAX_AGE_MS = readEnvNumber(
+    "PRINTER_LOCAL_CAPTURE_MAX_AGE_MS",
+    1000 * 60 * 60 * 24 * 3
+);
 const RECEIPT_SEPARATOR = "--------------------------------";
 const PRINTER_EMULATOR_OUTPUT_DIR = process.env.PRINTER_EMULATOR_OUTPUT_DIR || "/tmp/fantafestando-printer-emulator";
-
+// Keep the normal flow as a single image send for typical easter-egg photos.
+// Only exceptionally tall payloads should spill into multiple stripes.
+const RASTER_PNG_STRIPE_HEIGHT = readEnvNumber("RASTER_PNG_STRIPE_HEIGHT", 2048);
 function formatEuroReceipt(amount: number | undefined): string {
     const safeAmount = Number.isFinite(amount) ? Number(amount) : 0;
     return `${safeAmount.toFixed(2)} EUR`;
@@ -356,6 +410,33 @@ export class PrinterService {
         }
     }
 
+    private static normalizeBinaryPayload(value: unknown): Buffer | undefined {
+        if (!value) return undefined;
+        if (Buffer.isBuffer(value)) return Buffer.from(value);
+        if (value instanceof Uint8Array) return Buffer.from(value);
+        if (value instanceof ArrayBuffer) return Buffer.from(value);
+        if (value instanceof Binary) return Buffer.from(value.buffer);
+
+        if (typeof value === "object") {
+            const bsonBinaryLike = value as BsonBinaryLike;
+            if (typeof bsonBinaryLike.position === "number") {
+                if (Buffer.isBuffer(bsonBinaryLike.buffer)) {
+                    return Buffer.from(bsonBinaryLike.buffer);
+                }
+                if (bsonBinaryLike.buffer instanceof Uint8Array) {
+                    return Buffer.from(bsonBinaryLike.buffer);
+                }
+            }
+
+            const bufferJsonLike = value as BufferJsonLike;
+            if (bufferJsonLike.type === "Buffer" && Array.isArray(bufferJsonLike.data)) {
+                return Buffer.from(bufferJsonLike.data);
+            }
+        }
+
+        return undefined;
+    }
+
     private static printCashierReceiptNoticeBox(printer: ThermalPrinter, rowWidth: number) {
         printer.alignCenter();
         printer.println(RECEIPT_SEPARATOR);
@@ -368,32 +449,92 @@ export class PrinterService {
     }
 
     private static async resolveVirtualRawCapturePath(destinationPort: number, startedAt: Date): Promise<string | undefined> {
-        const slot = destinationPort - 19099;
+        const slot = destinationPort - getVirtualPrinterStartPort() + 1;
         if (!Number.isInteger(slot) || slot < 1 || slot > 99) return undefined;
         const slotDir = path.join(PRINTER_EMULATOR_OUTPUT_DIR, `slot-${String(slot).padStart(2, "0")}`);
 
-        try {
-            const entries = await fs.readdir(slotDir, { withFileTypes: true });
-            const binEntries = entries
-                .filter((entry) => entry.isFile() && entry.name.endsWith(".bin"))
-                .map((entry) => entry.name);
-            if (binEntries.length === 0) return undefined;
+        const deadline = Date.now() + PRINTER_EMULATOR_CAPTURE_LOOKUP_TIMEOUT_MS;
+        while (Date.now() <= deadline) {
+            try {
+                const entries = await fs.readdir(slotDir, { withFileTypes: true });
+                const binEntries = entries
+                    .filter((entry) => entry.isFile() && entry.name.endsWith(".bin"))
+                    .map((entry) => entry.name);
+                if (binEntries.length > 0) {
+                    const withStats = await Promise.all(
+                        binEntries.map(async (name) => {
+                            const filePath = path.join(slotDir, name);
+                            const stat = await fs.stat(filePath);
+                            return { filePath, mtime: stat.mtime.getTime() };
+                        })
+                    );
 
-            const withStats = await Promise.all(
-                binEntries.map(async (name) => {
-                    const filePath = path.join(slotDir, name);
-                    const stat = await fs.stat(filePath);
-                    return { filePath, mtime: stat.mtime.getTime() };
-                })
+                    const floorTime = startedAt.getTime() - 10_000;
+                    const sorted = withStats
+                        .filter((entry) => entry.mtime >= floorTime)
+                        .sort((a, b) => b.mtime - a.mtime);
+                    if (sorted[0]?.filePath) {
+                        return sorted[0].filePath;
+                    }
+                }
+            } catch {
+                // ignore and retry until the deadline expires
+            }
+
+            if (Date.now() > deadline) break;
+            await wait(50);
+        }
+
+        return undefined;
+    }
+
+    private static async persistLocalRawCapture(
+        raw: Buffer,
+        startedAt: Date,
+        prefix: string
+    ): Promise<string | undefined> {
+        if (!raw.length) return undefined;
+
+        try {
+            await fs.mkdir(PRINTER_LOCAL_CAPTURE_DIR, { recursive: true });
+            const fileName = `${prefix}-${startedAt.toISOString().replace(/[:.]/g, "-")}-${randomUUID()}.bin`;
+            const filePath = path.join(PRINTER_LOCAL_CAPTURE_DIR, fileName);
+            await fs.writeFile(filePath, raw);
+            await this.pruneLocalRawCaptures();
+            return filePath;
+        } catch (error) {
+            console.error("Unable to persist local raw capture:", error);
+            return undefined;
+        }
+    }
+
+    private static async pruneLocalRawCaptures(): Promise<void> {
+        try {
+            const entries = await fs.readdir(PRINTER_LOCAL_CAPTURE_DIR, { withFileTypes: true });
+            const files = await Promise.all(
+                entries
+                    .filter((entry) => entry.isFile() && entry.name.endsWith(".bin"))
+                    .map(async (entry) => {
+                        const filePath = path.join(PRINTER_LOCAL_CAPTURE_DIR, entry.name);
+                        const stat = await fs.stat(filePath);
+                        return {
+                            filePath,
+                            mtimeMs: stat.mtimeMs
+                        };
+                    })
             );
 
-            const floorTime = startedAt.getTime() - 10_000;
-            const sorted = withStats
-                .filter((entry) => entry.mtime >= floorTime)
-                .sort((a, b) => b.mtime - a.mtime);
-            return sorted[0]?.filePath;
-        } catch {
-            return undefined;
+            const now = Date.now();
+            const expiredFiles = files.filter((file) => now - file.mtimeMs > PRINTER_LOCAL_CAPTURE_MAX_AGE_MS);
+            await Promise.all(expiredFiles.map((file) => fs.unlink(file.filePath).catch(() => undefined)));
+
+            const freshFiles = files
+                .filter((file) => now - file.mtimeMs <= PRINTER_LOCAL_CAPTURE_MAX_AGE_MS)
+                .sort((left, right) => right.mtimeMs - left.mtimeMs);
+            const overflowFiles = freshFiles.slice(PRINTER_LOCAL_CAPTURE_MAX_FILES);
+            await Promise.all(overflowFiles.map((file) => fs.unlink(file.filePath).catch(() => undefined)));
+        } catch (error) {
+            console.warn("Unable to prune local raw captures:", error);
         }
     }
 
@@ -420,6 +561,7 @@ export class PrinterService {
         return printType === "CUSTOMER_ORDER"
             || printType === "CASHIER_SUMMARY"
             || printType === "CASH_SESSION_SUMMARY"
+            || printType === "EASTER_EGG_IMAGE"
             || printType === "MANUAL_TEST";
     }
 
@@ -440,6 +582,31 @@ export class PrinterService {
             console.warn("Unable to print logo, using text fallback only:", error);
             return false;
         }
+    }
+
+    private static async printRasterImageHeader(
+        printer: ThermalPrinter,
+        document: PrintDocumentV2,
+        printType: PrintJobType
+    ) {
+        const hasLogo = await this.tryPrintLogo(printer, document, printType);
+        if (!hasLogo) {
+            const eventName = document.eventName?.trim();
+            if (eventName) {
+                printer.alignCenter();
+                printer.setTextDoubleWidth();
+                printer.setTextDoubleHeight();
+                splitByLength(eventName.toUpperCase(), 40).forEach((line) => printer.println(line));
+                printer.setTextNormal();
+            }
+        }
+
+        if (hasLogo || document.eventName?.trim()) {
+            printer.alignCenter();
+            printer.println(RECEIPT_SEPARATOR);
+        }
+
+        printer.alignLeft();
     }
 
     private static printHeader(printer: ThermalPrinter, document: PrintDocumentV2, withLargeEventTitle: boolean) {
@@ -868,6 +1035,127 @@ export class PrinterService {
         };
     }
 
+    private static async dispatchRasterImage(params: {
+        destinationHost: string;
+        destinationPort: number;
+        destinationLabel: string;
+        document: PrintDocumentV2;
+        raster: {
+            width: number;
+            height: number;
+            data: Buffer;
+        };
+        isVirtual: boolean;
+        copies: number;
+    }): Promise<PrintDispatchAttemptResult> {
+        const printer = new ThermalPrinter({
+            type: PrinterTypes.EPSON,
+            interface: toTcpPrinterInterface(params.destinationHost, params.destinationPort),
+            characterSet: CharacterSet.WPC1252,
+            removeSpecialCharacters: false,
+            lineCharacter: "=",
+        });
+
+        let isConnected = false;
+        try {
+            isConnected = await this.waitForPrinterReachable(printer, PRINTER_CONNECT_TIMEOUT_MS);
+        } catch (error) {
+            console.error(`Printer connection check error at ${params.destinationLabel}:`, error);
+            return {
+                success: false,
+                errorMessage: "Printer connection timeout",
+                automaticRetryCount: 0
+            };
+        }
+
+        if (!isConnected) {
+            console.error(`Printer at ${params.destinationLabel} is not reachable`);
+            return {
+                success: false,
+                errorMessage: "Printer not reachable",
+                automaticRetryCount: 0
+            };
+        }
+
+        try {
+            const executeStartedAt = new Date();
+            const rasterPngStripes = await renderThermalRasterToStripePngBuffers({
+                width: params.raster.width,
+                height: params.raster.height,
+                data: Buffer.from(params.raster.data)
+            }, RASTER_PNG_STRIPE_HEIGHT, { centerOnPaper: true });
+
+            printer.clear();
+            await this.printRasterImageHeader(printer, params.document, "EASTER_EGG_IMAGE");
+            for (const stripePng of rasterPngStripes) {
+                await printer.printImageBuffer(stripePng);
+            }
+            printer.alignLeft();
+            printer.println(" ");
+            printer.cut();
+
+            const bufferedRaw = printer.getBuffer();
+            const localRawCapturePath = !params.isVirtual && Buffer.isBuffer(bufferedRaw)
+                ? await this.persistLocalRawCapture(Buffer.from(bufferedRaw), executeStartedAt, "raster")
+                : undefined;
+
+            for (let i = 0; i < params.copies; i += 1) {
+                await this.executeWithConnectionRetry(printer, PRINTER_EXECUTE_TIMEOUT_MS);
+            }
+            const rawCapturePath = params.isVirtual
+                ? await this.resolveVirtualRawCapturePath(params.destinationPort, executeStartedAt)
+                : localRawCapturePath;
+            return { success: true, rawCapturePath, automaticRetryCount: 0 };
+        } catch (error) {
+            console.error(`Raster print execution error at ${params.destinationLabel}:`, error);
+            const message = this.isTimeoutError(error)
+                ? "Printer execution timeout"
+                : this.isConnectionRefusedError(error)
+                    ? "Printer not reachable"
+                    : "Printer execution error";
+            return {
+                success: false,
+                errorMessage: message,
+                automaticRetryCount: 0
+            };
+        }
+    }
+
+    private static async dispatchRasterImageWithAutomaticRetry(params: {
+        destinationHost: string;
+        destinationPort: number;
+        destinationLabel: string;
+        document: PrintDocumentV2;
+        raster: {
+            width: number;
+            height: number;
+            data: Buffer;
+        };
+        isVirtual: boolean;
+        copies: number;
+    }): Promise<PrintDispatchAttemptResult> {
+        let result = await this.dispatchRasterImage(params);
+        let automaticRetryCount = 0;
+
+        for (
+            let retryIndex = 0;
+            !result.success
+                && result.errorMessage === "Printer not reachable"
+                && retryIndex < PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS.length;
+            retryIndex += 1
+        ) {
+            const delayMs = PRINTER_NOT_REACHABLE_RETRY_DELAYS_MS[retryIndex];
+            await wait(delayMs);
+            automaticRetryCount += 1;
+            result = await this.dispatchRasterImage(params);
+        }
+
+        return {
+            ...result,
+            automaticRetryCount
+        };
+    }
+
     static async printComanda(
         job: PrinterCommandJob,
         copies: number = 1,
@@ -961,6 +1249,112 @@ export class PrinterService {
         return true;
     }
 
+    static async printRasterImage(
+        job: PrinterRasterImageJob,
+        raster: {
+            width: number;
+            height: number;
+            data: Buffer;
+        },
+        copies = 1,
+        options?: { immediateFailureReason?: string }
+    ) {
+        const printType = job.printType || "EASTER_EGG_IMAGE";
+        const brandingLogoUrl = sanitizePrintableHeaderLogoUrl(job.brandingLogoUrl);
+        const document = {
+            schemaVersion: 2,
+            kind: "EASTER_EGG_IMAGE",
+            printType,
+            title: job.title || "EASTER EGG",
+            copyLabel: job.copyLabel || "EASTER EGG",
+            createdAt: new Date().toISOString(),
+            headerLines: job.eventName ? [`FESTA: ${job.eventName}`] : [],
+            items: [],
+            totals: [],
+            footerLines: job.footerLines || [],
+            branding: brandingLogoUrl
+                ? {
+                    logoPath: brandingLogoUrl,
+                    logoMode: "attempted" as const
+                }
+                : {
+                    logoMode: "none" as const
+                },
+            eventName: job.eventName,
+            imageUrl: job.imageUrl,
+            rasterWidth: raster.width,
+            rasterHeight: raster.height,
+            crop: job.crop || {}
+            ,
+            processing: job.processing || {}
+        } satisfies PrintDocumentV2 & Record<string, unknown>;
+
+        const destination = resolvePrinterDestination({
+            ip: job.ip,
+            port: job.port,
+            isVirtual: job.isVirtual,
+            emulatorSlot: job.emulatorSlot
+        });
+        const destinationHost = destination.host;
+        const destinationPort = destination.port;
+        const destinationLabel = destination.label;
+
+        const logId = await this.createPrintJobLog({
+            eventId: job.eventId,
+            printerId: job.printerId,
+            orderId: job.orderId,
+            source: job.source || "MANUAL_TEST",
+            printType,
+            destinationHost: destinationHost || "unknown",
+            destinationPort,
+            isVirtual: Boolean(job.isVirtual),
+            copies,
+            document
+        });
+
+        if (options?.immediateFailureReason) {
+            await this.updatePrintJobLog(logId, {
+                status: "FAILED",
+                errorMessage: options.immediateFailureReason
+            });
+            return false;
+        }
+
+        if (!destinationHost) {
+            await this.updatePrintJobLog(logId, {
+                status: "FAILED",
+                errorMessage: "No printer destination defined"
+            });
+            return false;
+        }
+
+        const dispatchResult = await this.dispatchRasterImageWithAutomaticRetry({
+            destinationHost,
+            destinationPort,
+            destinationLabel,
+            document,
+            raster,
+            isVirtual: Boolean(job.isVirtual),
+            copies
+        });
+
+        if (!dispatchResult.success) {
+            await this.updatePrintJobLog(logId, {
+                status: "FAILED",
+                errorMessage: dispatchResult.errorMessage,
+                automaticRetryCount: dispatchResult.automaticRetryCount
+            });
+            return false;
+        }
+
+        await this.updatePrintJobLog(logId, {
+            status: "SENT",
+            rawCapturePath: dispatchResult.rawCapturePath,
+            automaticRetryCount: dispatchResult.automaticRetryCount
+        });
+        return true;
+    }
+
     static async routeOrderToPrinters(orderId: string, posDeviceId?: string) {
         await dbConnect();
         const order = await Order.findById(orderId).lean() as ({
@@ -972,6 +1366,12 @@ export class PrinterService {
             totalAmount?: number;
             customer?: { name?: string; table?: string };
             cart: CartItem[];
+            easterEggAttachment?: {
+                rasterWidth?: number;
+                rasterHeight?: number;
+                rasterData?: Buffer;
+                printedAt?: Date | string;
+            };
         } | null);
         if (!order) return;
 
@@ -1208,7 +1608,82 @@ export class PrinterService {
                 printJobs.push({ job, copies: 1 });
             });
 
-        return await this.dispatchJobsSequentiallyPerDestination(printJobs);
+        const results = await this.dispatchJobsSequentiallyPerDestination(printJobs);
+
+        const attachment = order.easterEggAttachment;
+        const attachmentRasterData = this.normalizeBinaryPayload(attachment?.rasterData);
+        const attachmentRasterWidth = Number(attachment?.rasterWidth || 0);
+        const attachmentRasterHeight = Number(attachment?.rasterHeight || 0);
+        const shouldPrintEasterEgg = order.status === "PAID"
+            && attachmentRasterData
+            && attachmentRasterWidth > 0
+            && attachmentRasterHeight > 0
+            && !attachment?.printedAt;
+
+        if (!shouldPrintEasterEgg) {
+            return results;
+        }
+
+        const rasterDestinationKey = resolvePrinterDestination({
+            ip: cashierPrinter?.ip,
+            port: cashierPrinter?.port || DEFAULT_PRINTER_PORT,
+            isVirtual: cashierPrinter?.isVirtual,
+            emulatorSlot: cashierPrinter?.emulatorSlot
+        }).label;
+        const cashierHasPriorJobs = printJobs.some(({ job }) => resolvePrinterDestination({
+            ip: job.ip,
+            port: job.port || DEFAULT_PRINTER_PORT,
+            isVirtual: job.isVirtual,
+            emulatorSlot: job.emulatorSlot
+        }).label === rasterDestinationKey);
+
+        const rasterPrinted = await this.enqueueJobForDestination(rasterDestinationKey, async () => {
+            if (cashierHasPriorJobs) {
+                await wait(PRINTER_RASTER_AFTER_ORDER_DELAY_MS);
+            }
+
+            return await this.printRasterImage({
+                ip: cashierPrinter?.ip || "",
+                port: cashierPrinter?.port || DEFAULT_PRINTER_PORT,
+                emulatorSlot: cashierPrinter?.emulatorSlot,
+                printerId: cashierPrinter?.id,
+                eventId,
+                orderId: order._id.toString(),
+                source: "ORDER",
+                printType: "EASTER_EGG_IMAGE",
+                isVirtual: Boolean(cashierPrinter?.isVirtual),
+                title: "Easter Egg Cliente",
+                eventName,
+                brandingLogoUrl,
+                copyLabel: "FOTO CLIENTE",
+                footerLines: [`ORDINE N° ${orderCode}`]
+            }, {
+                width: attachmentRasterWidth,
+                height: attachmentRasterHeight,
+                data: attachmentRasterData
+            }, 1, !cashierPrinter?.ip?.trim()
+                ? { immediateFailureReason: "No cashier printer destination defined" }
+                : undefined);
+        });
+
+        results.push(rasterPrinted);
+
+        if (rasterPrinted) {
+            await Order.updateOne(
+                { _id: order._id },
+                {
+                    $set: {
+                        "easterEggAttachment.printedAt": new Date()
+                    },
+                    $unset: {
+                        "easterEggAttachment.rasterData": 1,
+                        "easterEggAttachment.uploadTokenHash": 1
+                    }
+                }
+            );
+        }
+
+        return results;
     }
 
     static async printCashSessionSummary(eventId: string, posDeviceId: string, summary: CashSessionClosingPrintSummary) {
@@ -1382,6 +1857,79 @@ export class PrinterService {
         const document = (job.document && typeof job.document === "object")
             ? job.document as Record<string, unknown>
             : {};
+
+        if (job.printType === "EASTER_EGG_IMAGE") {
+            const orderAttachment = job.orderId
+                ? await Order.findOne({ _id: job.orderId, eventId })
+                    .select("easterEggAttachment")
+                    .lean() as ({
+                        easterEggAttachment?: {
+                            rasterWidth?: number;
+                            rasterHeight?: number;
+                            rasterData?: Buffer;
+                        };
+                    } | null)
+                : null;
+
+            const orderAttachmentRasterWidth = Number(orderAttachment?.easterEggAttachment?.rasterWidth || 0);
+            const orderAttachmentRasterHeight = Number(orderAttachment?.easterEggAttachment?.rasterHeight || 0);
+            const attachmentRasterBuffer = this.normalizeBinaryPayload(orderAttachment?.easterEggAttachment?.rasterData);
+            const attachmentRaster = attachmentRasterBuffer
+                && orderAttachmentRasterWidth > 0
+                && orderAttachmentRasterHeight > 0
+                ? {
+                    width: orderAttachmentRasterWidth,
+                    height: orderAttachmentRasterHeight,
+                    data: attachmentRasterBuffer
+                }
+                : null;
+            const imageUrl = asString(document.imageUrl);
+            const raster = attachmentRaster || (imageUrl
+                ? await preparePrintableEasterEggRasterFromUrl(
+                    imageUrl,
+                    document.crop as Record<string, unknown> | undefined,
+                    document.processing as Record<string, unknown> | undefined
+                )
+                : undefined);
+
+            if (!raster) {
+                return { success: false, error: "Immagine easter egg non più disponibile" } as const;
+            }
+
+            const printed = await this.printRasterImage({
+                ip: job.printerId?.ip || asString(job.destinationHost),
+                port: job.printerId?.port || job.destinationPort || DEFAULT_PRINTER_PORT,
+                emulatorSlot: job.printerId?.emulatorSlot,
+                printerId: job.printerId?._id ? String(job.printerId._id) : undefined,
+                eventId,
+                orderId: job.orderId?.toString(),
+                source: job.source,
+                printType: "EASTER_EGG_IMAGE",
+                isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual),
+                title: asString(document.title) || "Easter Egg Portale",
+                eventName: asString(document.eventName) || undefined,
+                copyLabel: asString(document.copyLabel) || "EASTER EGG",
+                brandingLogoUrl: sanitizePrintableHeaderLogoUrl(
+                    typeof document.branding === "object" && document.branding
+                        ? (document.branding as Record<string, unknown>).logoPath
+                        : undefined
+                ),
+                imageUrl,
+                crop: normalizeEasterEggCrop(typeof document.crop === "object" && document.crop ? document.crop as Partial<EasterEggCrop> : undefined),
+                processing: normalizeEasterEggProcessingSettings(
+                    typeof document.processing === "object" && document.processing
+                        ? document.processing as Partial<EasterEggProcessingSettings>
+                        : undefined
+                ),
+                footerLines: Array.isArray(document.footerLines) ? document.footerLines as string[] : []
+            }, raster, job.copies || 1);
+
+            if (!printed) {
+                return { success: false, error: "Invio stampa fallito" } as const;
+            }
+
+            return { success: true } as const;
+        }
 
         const payload = toOrderJobPayloadFromDocument(
             document,

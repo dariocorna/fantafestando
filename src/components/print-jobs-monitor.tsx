@@ -10,7 +10,7 @@ import { buildPreviewLines, normalizeLegacyPrintDocument } from "@/lib/print-rep
 import { PrintDocumentViewer } from "./print-document-viewer";
 
 type PrintJobStatus = "QUEUED" | "SENT" | "FAILED";
-type PrintJobType = "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "MANUAL_TEST";
+type PrintJobType = "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "EASTER_EGG_IMAGE" | "MANUAL_TEST";
 
 interface MonitorPrinterOption {
     id: string;
@@ -59,6 +59,7 @@ function statusBadgeClass(status: PrintJobStatus) {
 function printTypeBadgeClass(type: PrintJobType) {
     if (type === "CASHIER_SUMMARY" || type === "CASH_SESSION_SUMMARY") return "bg-sky-100 text-sky-700";
     if (type === "KITCHEN_ORDER") return "bg-fuchsia-100 text-fuchsia-700";
+    if (type === "EASTER_EGG_IMAGE") return "bg-amber-100 text-amber-800";
     if (type === "MANUAL_TEST") return "bg-slate-200 text-slate-700";
     return "bg-indigo-100 text-indigo-700";
 }
@@ -68,6 +69,7 @@ function printTypeLabel(type: PrintJobType) {
     if (type === "KITCHEN_ORDER") return "Comanda reparto";
     if (type === "CASHIER_SUMMARY") return "Riepilogo cassa";
     if (type === "CASH_SESSION_SUMMARY") return "Chiusura cassa";
+    if (type === "EASTER_EGG_IMAGE") return "Easter egg";
     return "Test manuale";
 }
 
