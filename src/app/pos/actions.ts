@@ -882,6 +882,8 @@ export async function loadPendingOrderByCode(data: {
     code: string
 }) {
     try {
+        const pendingOrderLookupProjection =
+            "_id pickupNumber totalAmount customer cart easterEggAttachment.uploadedAt easterEggAttachment.printedAt"
         const normalizedCode = data.code.trim().toUpperCase()
         if (!data.eventId) {
             return { success: false, error: "Evento non valido" }
@@ -900,7 +902,7 @@ export async function loadPendingOrderByCode(data: {
             totalAmount: number
             customer?: { name?: string, table?: string }
             cart: Array<{ productId: string | { toString(): string }, snapshotName: string, quantity: number }>
-            easterEggAttachment?: { rasterData?: Buffer | Uint8Array | null }
+            easterEggAttachment?: { uploadedAt?: Date | string | null, printedAt?: Date | string | null }
         }
 
         let foundOrder: PendingOrderResult | null = null
@@ -910,7 +912,7 @@ export async function loadPendingOrderByCode(data: {
                 eventId: data.eventId,
                 status: "PENDING",
                 pickupNumber: parsedNumber
-            }).lean() as PendingOrderResult | null
+            }).select(pendingOrderLookupProjection).lean() as PendingOrderResult | null
         }
 
         // Legacy fallback: old pending orders used the last 4 chars of _id as code.
@@ -918,6 +920,7 @@ export async function loadPendingOrderByCode(data: {
             const pendingOrders = await Order.find({ eventId: data.eventId, status: "PENDING" })
                 .sort({ createdAt: -1 })
                 .limit(500)
+                .select(pendingOrderLookupProjection)
                 .lean()
             foundOrder = (pendingOrders.find(order =>
                 order._id.toString().slice(-4).toUpperCase() === normalizedCode
@@ -955,7 +958,10 @@ export async function loadPendingOrderByCode(data: {
                     name: foundOrder.customer?.name,
                     table: foundOrder.customer?.table
                 },
-                easterEggAttached: Boolean(foundOrder.easterEggAttachment?.rasterData),
+                easterEggAttached: Boolean(
+                    foundOrder.easterEggAttachment?.uploadedAt
+                    && !foundOrder.easterEggAttachment?.printedAt
+                ),
                 items: foundOrder.cart.map((item) => ({
                     productId: item.productId.toString(),
                     snapshotName: item.snapshotName,
