@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 const playwrightPort = Number(process.env.PLAYWRIGHT_PORT ?? '3000');
 const baseURL = `http://127.0.0.1:${playwrightPort}`;
-const emulatorStartPort = Number(process.env.PRINTER_EMULATOR_START_PORT ?? '19500');
+const emulatorStartPort = Number(process.env.PRINTER_EMULATOR_START_PORT ?? '19100');
 const emulatorOutputDir = process.env.PRINTER_EMULATOR_OUTPUT_DIR ?? '/tmp/fantafestando-printer-emulator';
 const webServerEnv = {
     PRINTER_CONNECT_TIMEOUT_MS: process.env.PRINTER_CONNECT_TIMEOUT_MS ?? "500",
