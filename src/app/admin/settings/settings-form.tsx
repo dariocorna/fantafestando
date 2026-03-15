@@ -21,6 +21,7 @@ interface ActiveEventSettingsFormProps {
         settings?: {
             askName?: boolean;
             askTable?: boolean;
+            portalEasterEggEnabled?: boolean;
             posCatalogLayout?: "COMPACT_COLUMNS" | "MODERN_TABS";
             menuHeaderLogoUrl?: string;
             receiptHeaderLogoUrl?: string;
@@ -347,6 +348,22 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                                 Chiedi Numero Tavolo
                             </Label>
                             <p className="text-xs text-muted-foreground">Abilita il campo tavolo per gli ordini al posto.</p>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-row items-center space-x-3 space-y-0 rounded-md border p-4 shadow-sm hover:bg-slate-50 transition-colors">
+                        <input
+                            type="checkbox"
+                            name="portalEasterEggEnabled"
+                            id="portalEasterEggEnabled"
+                            defaultChecked={event.settings?.portalEasterEggEnabled}
+                            className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
+                        />
+                        <div className="space-y-1 leading-none">
+                            <Label htmlFor="portalEasterEggEnabled" className="text-sm font-medium cursor-pointer">
+                                Abilita Easter Egg foto
+                            </Label>
+                            <p className="text-xs text-muted-foreground">Consente alla WebApp cliente di allegare una foto termica dopo l&apos;invio dell&apos;ordine.</p>
                         </div>
                     </div>
 

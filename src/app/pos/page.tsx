@@ -99,6 +99,7 @@ interface LoadedPendingOrder {
     id: string
     code: string
     totalAmount: number
+    easterEggAttached?: boolean
     customer?: {
         name?: string
         table?: string
@@ -1262,6 +1263,11 @@ export default function PosPage() {
                                     <p className="text-xs font-semibold text-indigo-600 mt-1">
                                         Carrello precompilato: puoi aggiungere/rimuovere prodotti prima della chiusura.
                                     </p>
+                                    {loadedPendingOrder.easterEggAttached ? (
+                                        <p className="mt-2 inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-amber-800">
+                                            Foto allegata
+                                        </p>
+                                    ) : null}
                                 </div>
                                 <button
                                     className="text-indigo-500 hover:text-indigo-700"
@@ -1348,7 +1354,14 @@ export default function PosPage() {
                         <span className="text-xs font-bold uppercase tracking-widest text-blue-200">Importo Dovuto</span>
                         <h2 className="mt-1 text-5xl font-black sm:text-6xl">{effectiveTotal.toFixed(2)} €</h2>
                         {loadedPendingOrder && (
-                            <p className="mt-1 text-xs font-semibold text-blue-100">Codice ordine: {loadedPendingOrder.code}</p>
+                            <div className="mt-1 space-y-1">
+                                <p className="text-xs font-semibold text-blue-100">Codice ordine: {loadedPendingOrder.code}</p>
+                                {loadedPendingOrder.easterEggAttached ? (
+                                    <p className="text-[11px] font-black uppercase tracking-[0.08em] text-amber-100">
+                                        Foto allegata pronta per la stampa cassa
+                                    </p>
+                                ) : null}
+                            </div>
                         )}
                     </div>
 

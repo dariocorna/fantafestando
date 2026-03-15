@@ -27,6 +27,7 @@ import {
     subscribeToStoredMenuCart,
     writeStoredMenuCart,
 } from "./cart-storage"
+import { storePendingEasterEggUpload } from "./easter-egg-upload-storage"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
 import { type StockShortage } from "@/lib/inventory"
 
@@ -162,8 +163,11 @@ export default function CustomerMenu() {
         })
 
         if (result.success) {
+            if (result.easterEggUpload) {
+                storePendingEasterEggUpload(result.easterEggUpload)
+            }
             clearStoredMenuCart()
-            router.push(`/menu/success?code=${result.shortCode}`)
+            router.push(`/menu/success?code=${result.shortCode}&orderId=${result.orderId}`)
         } else {
             setCheckoutError(result.error || "Non è stato possibile inviare l'ordine. Riprova.")
             if ("stockShortages" in result && Array.isArray(result.stockShortages)) {

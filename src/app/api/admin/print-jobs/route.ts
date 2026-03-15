@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/mongoose";
 import { getAdminContextEventId } from "@/lib/events";
 import PrintJob from "@/models/PrintJob";
+import "@/models/Printer"; // Import to register schema for .populate()
 
 const allowedStatuses = new Set(["QUEUED", "SENT", "FAILED"]);
-const allowedPrintTypes = new Set(["CUSTOMER_ORDER", "KITCHEN_ORDER", "CASHIER_SUMMARY", "CASH_SESSION_SUMMARY", "MANUAL_TEST"]);
+const allowedPrintTypes = new Set(["CUSTOMER_ORDER", "KITCHEN_ORDER", "CASHIER_SUMMARY", "CASH_SESSION_SUMMARY", "EASTER_EGG_IMAGE", "MANUAL_TEST"]);
 
 function parseLimit(value: string | null): number {
     const parsed = Number(value);
@@ -15,9 +16,9 @@ function parseLimit(value: string | null): number {
 function resolvePrintType(
     value: unknown,
     source: "ORDER" | "CASH_SESSION" | "MANUAL_TEST"
-): "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "MANUAL_TEST" {
+): "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "EASTER_EGG_IMAGE" | "MANUAL_TEST" {
     if (typeof value === "string" && allowedPrintTypes.has(value)) {
-        return value as "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "MANUAL_TEST";
+        return value as "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "EASTER_EGG_IMAGE" | "MANUAL_TEST";
     }
     if (source === "CASH_SESSION") return "CASH_SESSION_SUMMARY";
     if (source === "MANUAL_TEST") return "MANUAL_TEST";
@@ -60,7 +61,7 @@ export async function GET(request: NextRequest) {
             .lean() as Array<{
                 _id: { toString(): string } | string;
                 source: "ORDER" | "CASH_SESSION" | "MANUAL_TEST";
-                printType?: "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "MANUAL_TEST";
+                printType?: "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "EASTER_EGG_IMAGE" | "MANUAL_TEST";
                 status: "QUEUED" | "SENT" | "FAILED";
                 destinationHost: string;
                 destinationPort: number;

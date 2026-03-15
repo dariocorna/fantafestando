@@ -3,10 +3,12 @@
 import dbConnect from "@/lib/mongoose"
 import Order from "@/models/Order"
 import Product from "@/models/Product"
+import Event from "@/models/Event"
 import { revalidatePath } from "next/cache"
 import { PrinterService } from "@/lib/printer"
 import { getNextPublicOrderNumber, getOrderCodeFromOrder } from "@/lib/order-code"
 import { getCurrentDayCode, isProductAvailableToday } from "@/lib/product-availability"
+import { createEasterEggUploadToken } from "@/lib/easter-egg-order"
 import {
     aggregateCartQuantities,
     collectStockShortages,
@@ -57,6 +59,13 @@ export async function createPublicOrder(data: {
         }
 
         await dbConnect()
+        const event = await Event.findById(data.eventId)
+            .select("settings.portalEasterEggEnabled")
+            .lean() as ({ settings?: { portalEasterEggEnabled?: boolean } } | null)
+        if (!event) {
+            return { success: false, error: "Evento non valido" }
+        }
+
         const productIds = [...new Set(data.cart.map((item) => item.productId))]
         const products = await Product.find({
             eventId: data.eventId,
@@ -116,6 +125,9 @@ export async function createPublicOrder(data: {
         }
 
         const pickupNumber = await getNextPublicOrderNumber(data.eventId)
+        const easterEggUpload = event.settings?.portalEasterEggEnabled
+            ? createEasterEggUploadToken()
+            : null
 
         // Create the order with PENDING status
         const order = await Order.create({
@@ -124,7 +136,12 @@ export async function createPublicOrder(data: {
             status: "PENDING",
             customer: data.customer,
             totalAmount: data.totalAmount,
-            cart: data.cart
+            cart: data.cart,
+            easterEggAttachment: easterEggUpload
+                ? {
+                    uploadTokenHash: easterEggUpload.hash
+                }
+                : undefined
         })
 
         // Per il flusso WebApp la comanda viene inoltrata subito ai reparti.
@@ -141,7 +158,13 @@ export async function createPublicOrder(data: {
         return {
             success: true,
             orderId: order._id.toString(),
-            shortCode: shortCode
+            shortCode: shortCode,
+            easterEggUpload: easterEggUpload
+                ? {
+                    orderId: order._id.toString(),
+                    token: easterEggUpload.token
+                }
+                : undefined
         }
     } catch (error) {
         console.error("Create Public Order Error:", error)
