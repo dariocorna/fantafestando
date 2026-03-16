@@ -47,9 +47,19 @@ function renderComposer() {
     );
 }
 
-async function uploadPhoto(fileName = "photo.jpg") {
+async function uploadPhoto(
+    fileName = "photo.jpg",
+    options?: { content?: string; lastModified?: number }
+) {
     const input = screen.getByTestId("composer-test-file-input");
-    const file = new File(["fake-image"], fileName, { type: "image/jpeg" });
+    const file = new File(
+        [options?.content || "fake-image"],
+        fileName,
+        {
+            type: "image/jpeg",
+            lastModified: options?.lastModified
+        }
+    );
     fireEvent.change(input, {
         target: {
             files: [file]
@@ -159,6 +169,30 @@ describe("EasterEggComposer", () => {
         });
 
         expect(screen.queryByText(/Puoi sostituirla finche'/i)).not.toBeInTheDocument();
+        expect(screen.getByTestId("composer-test-submit-button")).toBeEnabled();
+        expect(screen.getByTestId("composer-test-submit-button")).toHaveTextContent("Conferma nuova versione");
+    });
+
+    test("treats a new upload with the same filename as a new pending version", async () => {
+        onSubmitRasterMock.mockResolvedValue({
+            success: "Foto allegata all'ordine. Puoi sostituirla finche' non paghi in cassa."
+        });
+
+        renderComposer();
+        await uploadPhoto("camera.jpg", { content: "first-image", lastModified: 1000 });
+
+        fireEvent.click(screen.getByTestId("composer-test-submit-button"));
+
+        await waitFor(() => {
+            expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Foto confermata");
+        });
+
+        await uploadPhoto("camera.jpg", { content: "second-image", lastModified: 2000 });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Nuova versione non confermata");
+        });
+
         expect(screen.getByTestId("composer-test-submit-button")).toBeEnabled();
         expect(screen.getByTestId("composer-test-submit-button")).toHaveTextContent("Conferma nuova versione");
     });
