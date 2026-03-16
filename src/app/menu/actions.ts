@@ -9,6 +9,7 @@ import { PrinterService } from "@/lib/printer"
 import { getNextPublicOrderNumber, getOrderCodeFromOrder } from "@/lib/order-code"
 import { getCurrentDayCode, isProductAvailableToday } from "@/lib/product-availability"
 import { createEasterEggUploadToken } from "@/lib/easter-egg-order"
+import { buildPublicOrderSummary } from "@/lib/public-order-summary"
 import {
     aggregateCartQuantities,
     collectStockShortages,
@@ -159,6 +160,13 @@ export async function createPublicOrder(data: {
             success: true,
             orderId: order._id.toString(),
             shortCode: shortCode,
+            orderSummary: buildPublicOrderSummary({
+                _id: order._id,
+                pickupNumber: order.pickupNumber,
+                totalAmount: order.totalAmount,
+                customer: order.customer,
+                cart: order.cart
+            }),
             easterEggUpload: easterEggUpload
                 ? {
                     orderId: order._id.toString(),
