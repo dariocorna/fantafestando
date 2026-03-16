@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import {
     ArrowDownRight,
@@ -27,20 +27,18 @@ function SuccessContent() {
     const [summary, setSummary] = useState<PublicOrderSummary | null>(() => (
         orderId ? readRecentOrderSummary(orderId) : null
     ))
-    const [hasEasterEgg, setHasEasterEgg] = useState(() => (
-        orderId ? Boolean(readPendingEasterEggUpload(orderId)) : false
-    ))
-    const [isLoadingSummary, setIsLoadingSummary] = useState(false)
-
-    useEffect(() => {
-        setHasEasterEgg(orderId ? Boolean(readPendingEasterEggUpload(orderId)) : false)
-    }, [orderId])
+    const [summaryFetchFailed, setSummaryFetchFailed] = useState(false)
+    const hasEasterEgg = useMemo(
+        () => (orderId ? Boolean(readPendingEasterEggUpload(orderId)) : false),
+        [orderId],
+    )
+    const shouldFetchSummary = Boolean(orderId && code && !summary)
+    const isLoadingSummary = shouldFetchSummary && !summaryFetchFailed
 
     useEffect(() => {
         if (!orderId || !code || summary) return
 
         let isCancelled = false
-        setIsLoadingSummary(true)
 
         fetch(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(code)}`, {
             cache: "no-store"
@@ -52,15 +50,13 @@ function SuccessContent() {
             })
             .then((nextSummary) => {
                 if (isCancelled || !nextSummary) return
+                setSummaryFetchFailed(false)
                 setSummary(nextSummary)
             })
             .catch((error) => {
+                if (isCancelled) return
                 console.error("Failed to load public order summary", error)
-            })
-            .finally(() => {
-                if (!isCancelled) {
-                    setIsLoadingSummary(false)
-                }
+                setSummaryFetchFailed(true)
             })
 
         return () => {

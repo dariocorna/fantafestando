@@ -192,7 +192,7 @@ test.describe.serial("Portal Easter Egg", () => {
             await setRangeValue(brightnessSlider, 56);
             await expect(brightnessSlider).toHaveValue("56");
 
-            await page.getByRole("button", { name: "Stampa prova", exact: true }).click();
+            await page.getByTestId("portal-easter-egg-submit-button").click();
             await expect(page.getByText("Stampa easter egg inviata.")).toBeVisible({ timeout: 15000 });
 
             await page.reload();
@@ -257,7 +257,7 @@ test.describe.serial("Portal Easter Egg", () => {
             await expect(page.getByTestId("menu-easter-egg-thermal-preview")).toBeVisible({ timeout: 15000 });
             await dragPreview(page.getByTestId("menu-easter-egg-preview-stage"));
 
-            await page.getByRole("button", { name: "Allega foto all'ordine", exact: true }).click();
+            await page.getByTestId("menu-easter-egg-submit-button").click();
             await expect(page.getByText(/Foto allegata all'ordine/i)).toBeVisible({ timeout: 15000 });
 
             cashierContext = await browser.newContext();
