@@ -57,14 +57,17 @@ export function MenuOrderEasterEgg({ orderId }: { orderId: string | null }) {
     }
 
     return (
-        <div className="mt-8 w-full max-w-xl">
-            <div className="mb-4 rounded-[30px] border border-[#d9e6f8] bg-white/95 p-5 shadow-[var(--brand-shadow-soft)]">
-                <p className="flex items-center justify-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--brand-blue-700)]">
-                    <Sparkles className="h-4 w-4" />
-                    Funzione speciale opzionale
+        <div className="space-y-4">
+            <div className="rounded-[30px] border border-[#d9e6f8] bg-white/95 p-5 shadow-[var(--brand-shadow-soft)]">
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-[#8b6800]">
+                    Funzione opzionale
                 </p>
-                <p className="mt-2 text-center text-sm font-medium text-slate-600">
-                    Scatta una foto, verifica l&apos;anteprima termica e allegala all&apos;ordine. Verrà stampata in cassa con la comanda al momento della chiusura.
+                <h2 className="font-brand-display mt-2 text-3xl font-black tracking-tight text-[var(--brand-ink)]">
+                    Aggiungi una foto alla comanda
+                </h2>
+                <p className="mt-3 flex items-center gap-2 text-sm font-medium leading-relaxed text-slate-600">
+                    <Sparkles className="h-4 w-4" />
+                    Scatta una foto, verifica l&apos;anteprima termica e allegala all&apos;ordine. Verra&apos; stampata in cassa con la comanda al momento della chiusura.
                 </p>
             </div>
 
