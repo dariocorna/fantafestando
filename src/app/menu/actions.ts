@@ -5,7 +5,6 @@ import Order from "@/models/Order"
 import Product from "@/models/Product"
 import Event from "@/models/Event"
 import { revalidatePath } from "next/cache"
-import { PrinterService } from "@/lib/printer"
 import { getNextPublicOrderNumber, getOrderCodeFromOrder } from "@/lib/order-code"
 import { getCurrentDayCode, isProductAvailableToday } from "@/lib/product-availability"
 import { createEasterEggUploadToken } from "@/lib/easter-egg-order"
@@ -144,14 +143,6 @@ export async function createPublicOrder(data: {
                 }
                 : undefined
         })
-
-        // Per il flusso WebApp la comanda viene inoltrata subito ai reparti.
-        // Se la stampa fallisce, l'ordine resta comunque valido e viene creato.
-        try {
-            await PrinterService.routeOrderToPrinters(order._id.toString());
-        } catch (printError) {
-            console.error("Public order created but printer routing failed:", printError);
-        }
 
         const shortCode = getOrderCodeFromOrder({ pickupNumber: order.pickupNumber, _id: order._id })
 
