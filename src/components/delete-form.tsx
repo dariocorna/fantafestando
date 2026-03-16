@@ -35,7 +35,13 @@ export function DeleteForm({
     return (
         <AlertDialog>
             <AlertDialogTrigger asChild>
-                <Button variant="ghost" size={buttonSize} className="text-red-500 hover:text-red-700 hover:bg-red-50">
+                <Button
+                    variant="ghost"
+                    size={buttonSize}
+                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                    aria-label="Elimina"
+                    title="Elimina"
+                >
                     <Trash2 size={iconSize} />
                 </Button>
             </AlertDialogTrigger>

@@ -114,7 +114,7 @@ export async function deleteEvent(page: Page, eventName: string) {
     const eventCard = page.locator("div.p-4.border").filter({ hasText: eventName }).first();
     await expect(eventCard).toBeVisible();
 
-    await eventCard.locator("button.text-red-500").first().click();
+    await eventCard.getByRole("button", { name: "Elimina", exact: true }).click();
     await page.getByRole("button", { name: "Continua", exact: true }).click();
     await expect(eventCard).toBeHidden();
 }
