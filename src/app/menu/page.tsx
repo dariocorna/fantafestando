@@ -28,6 +28,7 @@ import {
     writeStoredMenuCart,
 } from "./cart-storage"
 import { storePendingEasterEggUpload } from "./easter-egg-upload-storage"
+import { storeRecentOrderSummary } from "./recent-order-storage"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
 import { type StockShortage } from "@/lib/inventory"
 
@@ -165,6 +166,9 @@ export default function CustomerMenu() {
         if (result.success) {
             if (result.easterEggUpload) {
                 storePendingEasterEggUpload(result.easterEggUpload)
+            }
+            if (result.orderSummary) {
+                storeRecentOrderSummary(result.orderSummary)
             }
             clearStoredMenuCart()
             router.push(`/menu/success?code=${result.shortCode}&orderId=${result.orderId}`)

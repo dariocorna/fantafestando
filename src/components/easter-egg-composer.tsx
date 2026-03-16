@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, Loader2, Upload, ZoomIn } from "lucide-react";
+import { Camera, CheckCircle2, Loader2, PencilLine, Sparkles, Upload, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -173,12 +173,53 @@ export function EasterEggComposer({
     const [fileError, setFileError] = useState<string | null>(null);
     const [isImageReady, setIsImageReady] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [confirmedRasterSignature, setConfirmedRasterSignature] = useState<string | null>(null);
     const [zoom, setZoom] = useState(1.6);
     const [centerX, setCenterX] = useState(50);
     const [centerY, setCenterY] = useState(50);
     const [processing, setProcessing] = useState<EasterEggProcessingSettings>(
         normalizeEasterEggProcessingSettings(undefined)
     );
+    const currentRasterSignature = isImageReady
+        ? [
+            fileName,
+            centerX.toFixed(3),
+            centerY.toFixed(3),
+            zoom.toFixed(3),
+            processing.autoEnhance ? "1" : "0",
+            processing.brightnessBoost.toFixed(0),
+            processing.thresholdBase.toFixed(0)
+        ].join("|")
+        : null;
+    const isSelectionConfirmed = Boolean(
+        currentRasterSignature
+        && confirmedRasterSignature
+        && currentRasterSignature === confirmedRasterSignature
+    );
+    const hasPendingConfirmation = Boolean(
+        currentRasterSignature
+        && (!confirmedRasterSignature || currentRasterSignature !== confirmedRasterSignature)
+    );
+    const choosePhotoLabel = fileName ? "Sostituisci foto" : "Scatta o scegli una foto";
+    const previewStatusChipLabel = isSelectionConfirmed
+        ? "Confermata"
+        : hasPendingConfirmation
+            ? confirmedRasterSignature
+                ? "Nuova versione"
+                : "Bozza"
+            : null;
+    const submitButtonLabel = isSubmitting
+        ? submittingLabel
+        : isSelectionConfirmed
+            ? "Foto confermata"
+            : confirmedRasterSignature
+                ? "Conferma nuova versione"
+                : submitLabel;
+    const submitButtonHint = isSelectionConfirmed
+        ? "Puoi ancora ritoccarla se vuoi"
+        : confirmedRasterSignature
+            ? "Sostituisce la foto gia' confermata"
+            : "Conferma l'anteprima mostrata sopra";
 
     useEffect(() => {
         return () => {
@@ -203,8 +244,21 @@ export function EasterEggComposer({
         };
     }, [centerX, centerY, isImageReady, processing, zoom]);
 
+    useEffect(() => {
+        if (!status.success || !confirmedRasterSignature || !currentRasterSignature) return;
+        if (currentRasterSignature !== confirmedRasterSignature) {
+            setStatus({});
+        }
+    }, [confirmedRasterSignature, currentRasterSignature, status.success]);
+
     const openFilePicker = () => {
         fileInputRef.current?.click();
+    };
+
+    const handleEmptyStateKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        openFilePicker();
     };
 
     const resetGestureState = () => {
@@ -366,6 +420,9 @@ export function EasterEggComposer({
                 processing
             );
             const result = await onSubmitRaster(raster);
+            if (result.success && currentRasterSignature) {
+                setConfirmedRasterSignature(currentRasterSignature);
+            }
             setStatus(result);
         } catch {
             setStatus({ error: "Impossibile preparare l'immagine per la stampante termica." });
@@ -381,6 +438,77 @@ export function EasterEggComposer({
                 <CardDescription>{description}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5 p-5">
+                <div
+                    className={[
+                        "rounded-[28px] border p-4 shadow-sm transition-colors",
+                        isSelectionConfirmed
+                            ? "border-emerald-200 bg-[linear-gradient(135deg,#f0fdf4_0%,#dcfce7_100%)]"
+                            : hasPendingConfirmation
+                                ? "border-amber-400 bg-[linear-gradient(135deg,#fff1b8_0%,#ffd257_48%,#ffbf47_100%)] shadow-[0_18px_38px_rgba(245,158,11,0.24)]"
+                                : "border-[#d9e6f8] bg-[linear-gradient(135deg,#f8fbff_0%,#eef6ff_100%)]"
+                    ].join(" ")}
+                    data-testid={`${testIdPrefix}-state-banner`}
+                >
+                    <div className="flex items-start gap-3">
+                        <div
+                            className={[
+                                "mt-0.5 rounded-2xl p-2.5",
+                                isSelectionConfirmed
+                                    ? "bg-white/75 text-emerald-600"
+                                    : hasPendingConfirmation
+                                        ? "bg-white/70 text-amber-700"
+                                        : "bg-white/75 text-[var(--brand-blue-700)]"
+                            ].join(" ")}
+                        >
+                            {isSelectionConfirmed ? (
+                                <CheckCircle2 className="h-5 w-5" />
+                            ) : hasPendingConfirmation ? (
+                                <PencilLine className="h-5 w-5" />
+                            ) : (
+                                <Sparkles className="h-5 w-5" />
+                            )}
+                        </div>
+                        <div className="min-w-0">
+                            <p
+                                className={[
+                                    "text-xs font-black uppercase tracking-[0.14em]",
+                                    isSelectionConfirmed
+                                        ? "text-emerald-700"
+                                        : hasPendingConfirmation
+                                            ? "text-amber-700"
+                                            : "text-[var(--brand-blue-700)]"
+                                ].join(" ")}
+                            >
+                                {isSelectionConfirmed
+                                    ? "Foto confermata"
+                                    : hasPendingConfirmation
+                                        ? confirmedRasterSignature
+                                            ? "Nuova versione non confermata"
+                                            : "Bozza non confermata"
+                                        : "Pronta per iniziare"}
+                            </p>
+                            <p className="mt-1 text-base font-black leading-tight text-[var(--brand-ink)]">
+                                {isSelectionConfirmed
+                                    ? "Questa e' la foto attualmente confermata."
+                                    : hasPendingConfirmation
+                                        ? confirmedRasterSignature
+                                            ? "Stai modificando la foto gia' confermata."
+                                            : "Questa foto non e' ancora confermata."
+                                        : "Scatta o scegli una foto per vedere l'anteprima termica."}
+                            </p>
+                            <p className="mt-1 text-sm font-medium leading-relaxed text-slate-600">
+                                {isSelectionConfirmed
+                                    ? "Se vuoi ritoccarla ancora, sposta la preview o carica un'altra foto: il blocco tornera' in modifica finche' non confermi di nuovo."
+                                    : hasPendingConfirmation
+                                        ? confirmedRasterSignature
+                                            ? "La foto attiva resta quella precedente finche' non premi il pulsante qui sotto."
+                                            : "Quando ti convince, premi il pulsante qui sotto per usare questa foto."
+                                        : "Il blocco ti mostrera' chiaramente quando la foto e' solo in bozza e quando invece e' gia' confermata."}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
                 <div className="space-y-2">
                     <Label htmlFor={`${testIdPrefix}-image`}>{inputLabel}</Label>
                     <Input
@@ -394,10 +522,16 @@ export function EasterEggComposer({
                         onChange={(event) => loadFile(event.currentTarget.files?.[0] || null)}
                     />
                     <div className="flex flex-wrap gap-3">
-                        <Button type="button" className="gap-2" onClick={openFilePicker}>
-                            <Camera className="h-4 w-4" />
-                            Scatta o scegli una foto
-                        </Button>
+                        {fileName ? (
+                            <Button
+                                type="button"
+                                className="gap-2 rounded-2xl px-4 py-5 text-sm font-black"
+                                onClick={openFilePicker}
+                            >
+                                <Camera className="h-4 w-4" />
+                                {choosePhotoLabel}
+                            </Button>
+                        ) : null}
                         {fileName ? (
                             <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
                                 <Upload className="mr-1.5 h-3.5 w-3.5" />
@@ -421,28 +555,67 @@ export function EasterEggComposer({
                         </span>
                     </div>
 
-                    <div
-                        className="mx-auto w-full max-w-[340px] touch-none overflow-hidden rounded-[34px] border-[3px] border-[var(--brand-ink)] bg-white shadow-[var(--brand-shadow-soft)]"
-                        style={{ aspectRatio: `${PREVIEW_PAPER_WIDTH} / ${getThermalTargetHeight(PREVIEW_CONTENT_WIDTH)}` }}
-                        onPointerDown={handlePointerDown}
-                        onPointerMove={handlePointerMove}
-                        onPointerUp={handlePointerUp}
-                        onPointerCancel={handlePointerUp}
-                        data-testid={`${testIdPrefix}-preview-stage`}
-                    >
-                        {isImageReady ? (
-                            <canvas
-                                ref={previewCanvasRef}
-                                className="h-full w-full bg-white"
-                                data-testid={`${testIdPrefix}-thermal-preview`}
-                            />
-                        ) : (
-                            <div className="flex h-full flex-col items-center justify-center gap-2 bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] px-6 text-center">
-                                <Camera className="h-10 w-10 text-slate-300" />
-                                <p className="font-black text-slate-500">{emptyStateTitle}</p>
-                                <p className="text-sm text-slate-400">{emptyStateDescription}</p>
+                    <div className="relative mx-auto w-full max-w-[340px]">
+                        {isImageReady && previewStatusChipLabel ? (
+                            <div
+                                className={[
+                                    "pointer-events-none absolute left-3 top-3 z-10 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black uppercase tracking-[0.12em] shadow-sm",
+                                    isSelectionConfirmed
+                                        ? "bg-emerald-600 text-white"
+                                        : "bg-amber-500 text-[#5b3500]"
+                                ].join(" ")}
+                                data-testid={`${testIdPrefix}-preview-status-chip`}
+                            >
+                                {hasPendingConfirmation && !isSelectionConfirmed ? (
+                                    <span className="relative flex h-2.5 w-2.5">
+                                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#7a4b00] opacity-45" />
+                                        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#7a4b00]" />
+                                    </span>
+                                ) : null}
+                                {previewStatusChipLabel}
                             </div>
-                        )}
+                        ) : null}
+
+                        <div
+                            className={[
+                                "w-full touch-none overflow-hidden rounded-[34px] border-[3px] bg-white shadow-[var(--brand-shadow-soft)] transition-colors",
+                                isSelectionConfirmed
+                                    ? "border-emerald-500"
+                                    : hasPendingConfirmation
+                                        ? "border-amber-500 ring-4 ring-amber-200/70"
+                                        : "border-[var(--brand-ink)]"
+                            ].join(" ")}
+                            style={{ aspectRatio: `${PREVIEW_PAPER_WIDTH} / ${getThermalTargetHeight(PREVIEW_CONTENT_WIDTH)}` }}
+                            onPointerDown={handlePointerDown}
+                            onPointerMove={handlePointerMove}
+                            onPointerUp={handlePointerUp}
+                            onPointerCancel={handlePointerUp}
+                            data-testid={`${testIdPrefix}-preview-stage`}
+                        >
+                            {isImageReady ? (
+                                <canvas
+                                    ref={previewCanvasRef}
+                                    className="h-full w-full bg-white"
+                                    data-testid={`${testIdPrefix}-thermal-preview`}
+                                />
+                            ) : (
+                                <div
+                                    className="flex h-full cursor-pointer flex-col items-center justify-center gap-2 bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] px-6 text-center transition-colors hover:bg-[linear-gradient(180deg,#ffffff_0%,#eef6ff_100%)]"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={openFilePicker}
+                                    onKeyDown={handleEmptyStateKeyDown}
+                                    data-testid={`${testIdPrefix}-empty-state-trigger`}
+                                >
+                                    <Camera className="h-10 w-10 text-slate-300" />
+                                    <p className="font-black text-slate-500">{emptyStateTitle}</p>
+                                    <p className="text-sm text-slate-400">{emptyStateDescription}</p>
+                                    <p className="mt-2 text-xs font-black uppercase tracking-[0.14em] text-[var(--brand-blue-700)]">
+                                        Tocca qui per caricare
+                                    </p>
+                                </div>
+                            )}
+                        </div>
                     </div>
                     {helpText ? (
                         <p className="text-xs font-medium leading-relaxed text-slate-500">{helpText}</p>
@@ -504,12 +677,33 @@ export function EasterEggComposer({
 
                 <Button
                     type="button"
-                    className="w-full gap-2"
-                    disabled={!isImageReady || isSubmitting}
+                    className={[
+                        "h-auto w-full gap-3 rounded-[22px] px-4 py-4",
+                        isSelectionConfirmed
+                            ? "bg-emerald-600 text-white hover:bg-emerald-600"
+                            : hasPendingConfirmation
+                                ? "bg-[linear-gradient(135deg,#f59e0b_0%,#f97316_100%)] text-white shadow-[0_18px_32px_rgba(249,115,22,0.28)] hover:brightness-105"
+                                : ""
+                    ].join(" ")}
+                    disabled={!isImageReady || isSubmitting || isSelectionConfirmed}
                     onClick={handleSubmit}
+                    data-testid={`${testIdPrefix}-submit-button`}
                 >
-                    {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                    {isSubmitting ? submittingLabel : submitLabel}
+                    {isSubmitting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : isSelectionConfirmed ? (
+                        <CheckCircle2 className="h-4 w-4" />
+                    ) : (
+                        <Upload className="h-4 w-4" />
+                    )}
+                    <span className="flex min-w-0 flex-1 flex-col items-start text-left">
+                        <span className="text-sm font-black leading-tight">
+                            {submitButtonLabel}
+                        </span>
+                        <span className="mt-1 text-xs font-semibold opacity-90">
+                            {submitButtonHint}
+                        </span>
+                    </span>
                 </Button>
             </CardContent>
         </Card>
