@@ -157,6 +157,7 @@ test.describe.serial("Portal Easter Egg", () => {
             await createMenuOrder(page, productName);
             await expect(page.getByText(/Funzione speciale opzionale/i)).toHaveCount(0);
             await expect(page.getByText(/Foto termica per la tua comanda/i)).toHaveCount(0);
+            await expect(page.getByText(/Vuoi aggiungere una foto\?/i)).toHaveCount(0);
         } finally {
             if (eventCreated) {
                 await deleteEvent(page, eventName);
