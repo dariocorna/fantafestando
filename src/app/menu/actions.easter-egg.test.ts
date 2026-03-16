@@ -67,7 +67,16 @@ describe("createPublicOrder easter egg", () => {
         getOrderCodeFromOrderMock.mockReturnValue("W-0042");
         orderCreateMock.mockResolvedValue({
             _id: { toString: () => "order-1" },
-            pickupNumber: 42
+            pickupNumber: 42,
+            totalAmount: 7,
+            customer: { name: "Mario" },
+            cart: [
+                {
+                    snapshotName: "Panino",
+                    quantity: 1,
+                    selectedOptions: []
+                }
+            ]
         });
         routeOrderToPrintersMock.mockResolvedValue([true]);
     });
