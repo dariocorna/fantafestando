@@ -13,6 +13,15 @@ import {
     uniqueSuffix
 } from "./utils/fixtures";
 
+interface PrintJobListItem {
+    source: string;
+    printType: string;
+    status: string;
+    document?: {
+        title?: string;
+    };
+}
+
 async function setRangeValue(locator: Locator, value: number) {
     await locator.evaluate((element, nextValue) => {
         const input = element as HTMLInputElement;
@@ -31,6 +40,17 @@ async function provisionVirtualPrinters(page: Page) {
 async function openPrintMonitor(page: Page) {
     await page.goto("/admin/settings/hardware");
     await page.getByRole("tab", { name: "Monitor Stampa" }).click();
+}
+
+async function fetchPrintJobs(page: Page): Promise<PrintJobListItem[]> {
+    const response = await page.request.get("/api/admin/print-jobs?limit=100");
+    expect(response.ok()).toBeTruthy();
+
+    const payload = await response.json() as {
+        jobs?: PrintJobListItem[];
+    };
+
+    return payload.jobs || [];
 }
 
 async function buildPortraitPhotoBuffer() {
@@ -246,8 +266,8 @@ test.describe.serial("Portal Easter Egg", () => {
 
             const { code } = await createMenuOrder(page, productName);
 
-            await expect(page.getByText(/Funzione speciale opzionale/i)).toBeVisible({ timeout: 15000 });
-            await expect(page.getByText(/Foto termica per la tua comanda/i)).toBeVisible({ timeout: 15000 });
+            await expect(page.getByText(/Vuoi aggiungere una foto\?/i)).toBeVisible({ timeout: 15000 });
+            await expect(page.getByText(/Aggiungi una foto alla comanda/i)).toBeVisible({ timeout: 15000 });
 
             await page.getByTestId("menu-easter-egg-file-input").setInputFiles({
                 name: "menu-easter-egg.jpg",
@@ -260,6 +280,15 @@ test.describe.serial("Portal Easter Egg", () => {
 
             await page.getByTestId("menu-easter-egg-submit-button").click();
             await expect(page.getByText(/Foto allegata all'ordine/i)).toBeVisible({ timeout: 15000 });
+
+            await ensureAdminAuthenticated(page, "/admin/settings/hardware");
+
+            await expect.poll(async () => {
+                const jobs = await fetchPrintJobs(page);
+                return jobs.filter((job) => job.source === "ORDER").length;
+            }, {
+                timeout: 5000
+            }).toBe(0);
 
             cashierContext = await browser.newContext();
             const cashierPage = await cashierContext.newPage();
@@ -282,29 +311,26 @@ test.describe.serial("Portal Easter Egg", () => {
             await expect(checkoutDialog).toBeHidden({ timeout: 15000 });
             await dismissFeedbackModal(cashierPage);
 
-            await ensureAdminAuthenticated(page, "/admin/settings/hardware");
-
             await expect.poll(async () => {
-                const jobsResponse = await page.request.get("/api/admin/print-jobs?limit=100");
-                if (!jobsResponse.ok()) return false;
-
-                const jobsPayload = await jobsResponse.json() as {
-                    jobs?: Array<{
-                        id: string;
-                        status: string;
-                        printType: string;
-                        document?: { title?: string };
-                    }>;
+                const jobs = await fetchPrintJobs(page);
+                return {
+                    customerOrderPrinted: jobs.some((job) =>
+                        job.source === "ORDER"
+                        && job.printType === "CUSTOMER_ORDER"
+                        && job.status === "SENT"
+                    ),
+                    easterEggPrinted: jobs.some((job) =>
+                        job.printType === "EASTER_EGG_IMAGE"
+                        && job.status === "SENT"
+                        && job.document?.title === "Easter Egg Cliente"
+                    )
                 };
-
-                return jobsPayload.jobs?.some((job) =>
-                    job.printType === "EASTER_EGG_IMAGE"
-                    && job.status === "SENT"
-                    && job.document?.title === "Easter Egg Cliente"
-                ) ?? false;
             }, {
                 timeout: 15000
-            }).toBe(true);
+            }).toEqual({
+                customerOrderPrinted: true,
+                easterEggPrinted: true
+            });
 
             await openPrintMonitor(page);
 

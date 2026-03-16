@@ -60,7 +60,7 @@ function mockProducts() {
     });
 }
 
-describe("createPublicOrder easter egg", () => {
+describe("createPublicOrder menu flow", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         getNextPublicOrderNumberMock.mockResolvedValue(42);
@@ -105,10 +105,12 @@ describe("createPublicOrder easter egg", () => {
             expect(result.easterEggUpload?.token).toBeTruthy();
         }
         expect(orderCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+            status: "PENDING",
             easterEggAttachment: expect.objectContaining({
                 uploadTokenHash: expect.any(String)
             })
         }));
+        expect(routeOrderToPrintersMock).not.toHaveBeenCalled();
     });
 
     test("does not return upload token when the feature is disabled", async () => {
@@ -134,7 +136,9 @@ describe("createPublicOrder easter egg", () => {
             expect(result.easterEggUpload).toBeUndefined();
         }
         expect(orderCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+            status: "PENDING",
             easterEggAttachment: undefined
         }));
+        expect(routeOrderToPrintersMock).not.toHaveBeenCalled();
     });
 });
