@@ -44,12 +44,17 @@ function SuccessContent() {
             cache: "no-store"
         })
             .then(async (response) => {
-                if (!response.ok) return null
+                if (!response.ok) {
+                    throw new Error(`Summary request failed with status ${response.status}`)
+                }
                 const payload = await response.json().catch(() => ({} as { summary?: PublicOrderSummary }))
-                return payload.summary || null
+                if (!payload.summary) {
+                    throw new Error("Summary payload missing")
+                }
+                return payload.summary
             })
             .then((nextSummary) => {
-                if (isCancelled || !nextSummary) return
+                if (isCancelled) return
                 setSummaryFetchFailed(false)
                 setSummary(nextSummary)
             })

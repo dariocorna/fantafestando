@@ -169,6 +169,7 @@ export function EasterEggComposer({
     const dragStartPointRef = useRef<PointerPoint | null>(null);
 
     const [fileName, setFileName] = useState("");
+    const [fileIdentity, setFileIdentity] = useState<string | null>(null);
     const [status, setStatus] = useState<EasterEggComposerResult>({});
     const [fileError, setFileError] = useState<string | null>(null);
     const [isImageReady, setIsImageReady] = useState(false);
@@ -182,7 +183,7 @@ export function EasterEggComposer({
     );
     const currentRasterSignature = isImageReady
         ? [
-            fileName,
+            fileIdentity || fileName,
             centerX.toFixed(3),
             centerY.toFixed(3),
             zoom.toFixed(3),
@@ -289,6 +290,11 @@ export function EasterEggComposer({
         const objectUrl = URL.createObjectURL(file);
         objectUrlRef.current = objectUrl;
         setFileName(file.name);
+        setFileIdentity([
+            file.name,
+            String(file.size),
+            String(file.lastModified)
+        ].join(":"));
         setIsImageReady(false);
         setZoom(1.6);
         setCenterX(50);
