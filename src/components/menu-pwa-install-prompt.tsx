@@ -44,14 +44,14 @@ export function MenuPwaInstallPrompt() {
     }
 
     return (
-        <div className="fixed right-4 top-4 z-[70]">
+        <div className="flex justify-end px-4 pt-4">
             <Button
                 type="button"
                 onClick={installApp}
                 className="h-10 gap-2 rounded-full bg-gradient-to-r from-[#1e5fb8] to-[#249fe8] px-4 text-white shadow-md shadow-blue-200 hover:from-[#1a54a4] hover:to-[#218fce]"
             >
                 <Download className="h-4 w-4" />
-                Installa Menu
+                Installa app
             </Button>
         </div>
     );
