@@ -27,7 +27,7 @@ interface EasterEggComposerResult {
 
 interface EasterEggComposerProps {
     title: string;
-    description: string;
+    description?: string;
     submitLabel: string;
     submittingLabel: string;
     inputLabel: string;
@@ -39,6 +39,8 @@ interface EasterEggComposerProps {
     testIdPrefix: string;
     onSubmitRaster: (raster: ThermalRasterPayload) => Promise<EasterEggComposerResult>;
 }
+
+const AUTO_SAVE_DELAY_MS = 5000;
 
 interface PointerPoint {
     x: number;
@@ -167,6 +169,9 @@ export function EasterEggComposer({
     const gestureCropRectRef = useRef<{ width: number; height: number } | null>(null);
     const pinchStartRef = useRef<{ midpoint: PointerPoint; distance: number } | null>(null);
     const dragStartPointRef = useRef<PointerPoint | null>(null);
+    const autoSaveTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+    const latestSignatureRef = useRef<string | null>(null);
+    const isSubmittingRef = useRef(false);
 
     const [fileName, setFileName] = useState("");
     const [fileIdentity, setFileIdentity] = useState<string | null>(null);
@@ -175,6 +180,7 @@ export function EasterEggComposer({
     const [isImageReady, setIsImageReady] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [confirmedRasterSignature, setConfirmedRasterSignature] = useState<string | null>(null);
+    const [pendingAutoSaveSignature, setPendingAutoSaveSignature] = useState<string | null>(null);
     const [zoom, setZoom] = useState(1.6);
     const [centerX, setCenterX] = useState(50);
     const [centerY, setCenterY] = useState(50);
@@ -201,34 +207,40 @@ export function EasterEggComposer({
         currentRasterSignature
         && (!confirmedRasterSignature || currentRasterSignature !== confirmedRasterSignature)
     );
+    const isQueuedForAutoSave = Boolean(
+        hasPendingConfirmation
+        && pendingAutoSaveSignature
+        && currentRasterSignature === pendingAutoSaveSignature
+    );
     const choosePhotoLabel = fileName ? "Sostituisci foto" : "Scatta o scegli una foto";
     const previewStatusChipLabel = isSelectionConfirmed
         ? "Confermata"
-        : hasPendingConfirmation
+        : isSubmitting
+            ? "Salvataggio"
+            : hasPendingConfirmation
             ? confirmedRasterSignature
-                ? "Nuova versione"
+                ? "In aggiornamento"
                 : "Bozza"
             : null;
-    const submitButtonLabel = isSubmitting
-        ? submittingLabel
-        : isSelectionConfirmed
-            ? "Foto confermata"
-            : confirmedRasterSignature
-                ? "Conferma nuova versione"
-                : submitLabel;
-    const submitButtonHint = isSelectionConfirmed
-        ? "Puoi ancora ritoccarla se vuoi"
-        : confirmedRasterSignature
-            ? "Sostituisce la foto gia' confermata"
-            : "Conferma l'anteprima mostrata sopra";
 
     useEffect(() => {
         return () => {
             if (objectUrlRef.current) {
                 URL.revokeObjectURL(objectUrlRef.current);
             }
+            if (autoSaveTimeoutRef.current) {
+                window.clearTimeout(autoSaveTimeoutRef.current);
+            }
         };
     }, []);
+
+    useEffect(() => {
+        latestSignatureRef.current = currentRasterSignature;
+    }, [currentRasterSignature]);
+
+    useEffect(() => {
+        isSubmittingRef.current = isSubmitting;
+    }, [isSubmitting]);
 
     useEffect(() => {
         const canvas = previewCanvasRef.current;
@@ -251,6 +263,73 @@ export function EasterEggComposer({
             setStatus({});
         }
     }, [confirmedRasterSignature, currentRasterSignature, status.success]);
+
+    const submitRaster = async (signature: string) => {
+        const image = imageRef.current;
+        if (!image || !isImageReady) {
+            setFileError("Carica prima una foto.");
+            return;
+        }
+        if (isSubmittingRef.current) {
+            return;
+        }
+
+        setIsSubmitting(true);
+        setPendingAutoSaveSignature(null);
+        setStatus({});
+        setFileError(null);
+
+        try {
+            const raster = buildRasterFromImage(
+                image,
+                getThermalContentWidth(),
+                { centerX, centerY, zoom },
+                processing
+            );
+            const result = await onSubmitRaster(raster);
+            if (result.success && latestSignatureRef.current === signature) {
+                setConfirmedRasterSignature(signature);
+            }
+            setStatus(result);
+        } catch {
+            setStatus({ error: "Impossibile preparare l'immagine per la stampante termica." });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    useEffect(() => {
+        if (autoSaveTimeoutRef.current) {
+            window.clearTimeout(autoSaveTimeoutRef.current);
+            autoSaveTimeoutRef.current = null;
+        }
+
+        if (!isImageReady || !currentRasterSignature) {
+            setPendingAutoSaveSignature(null);
+            return;
+        }
+        if (currentRasterSignature === confirmedRasterSignature) {
+            setPendingAutoSaveSignature(null);
+            return;
+        }
+        if (isSubmitting) {
+            return;
+        }
+
+        const delay = confirmedRasterSignature ? AUTO_SAVE_DELAY_MS : 0;
+        setPendingAutoSaveSignature(currentRasterSignature);
+
+        autoSaveTimeoutRef.current = window.setTimeout(() => {
+            void submitRaster(currentRasterSignature);
+        }, delay);
+
+        return () => {
+            if (autoSaveTimeoutRef.current) {
+                window.clearTimeout(autoSaveTimeoutRef.current);
+                autoSaveTimeoutRef.current = null;
+            }
+        };
+    }, [confirmedRasterSignature, currentRasterSignature, isImageReady, isSubmitting]);
 
     const openFilePicker = () => {
         fileInputRef.current?.click();
@@ -407,41 +486,11 @@ export function EasterEggComposer({
         }
     };
 
-    const handleSubmit = async () => {
-        const image = imageRef.current;
-        if (!image || !isImageReady) {
-            setFileError("Carica prima una foto.");
-            return;
-        }
-
-        setIsSubmitting(true);
-        setStatus({});
-        setFileError(null);
-
-        try {
-            const raster = buildRasterFromImage(
-                image,
-                getThermalContentWidth(),
-                { centerX, centerY, zoom },
-                processing
-            );
-            const result = await onSubmitRaster(raster);
-            if (result.success && currentRasterSignature) {
-                setConfirmedRasterSignature(currentRasterSignature);
-            }
-            setStatus(result);
-        } catch {
-            setStatus({ error: "Impossibile preparare l'immagine per la stampante termica." });
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
-
     return (
         <Card className="overflow-hidden border-2 border-[#d9e6f8] shadow-[var(--brand-shadow-soft)]">
             <CardHeader className="space-y-2 border-b border-[#d9e6f8] bg-[#f7fbff]">
                 <CardTitle className="text-xl text-[var(--brand-ink)]">{title}</CardTitle>
-                <CardDescription>{description}</CardDescription>
+                {description ? <CardDescription>{description}</CardDescription> : null}
             </CardHeader>
             <CardContent className="space-y-5 p-5">
                 <div
@@ -487,28 +536,36 @@ export function EasterEggComposer({
                             >
                                 {isSelectionConfirmed
                                     ? "Foto confermata"
-                                    : hasPendingConfirmation
-                                        ? confirmedRasterSignature
-                                            ? "Nuova versione non confermata"
-                                            : "Bozza non confermata"
+                                    : isSubmitting
+                                        ? "Salvataggio automatico in corso"
+                                        : hasPendingConfirmation
+                                            ? confirmedRasterSignature
+                                                ? "Nuova versione in attesa"
+                                                : "Prima foto in salvataggio"
                                         : "Pronta per iniziare"}
                             </p>
                             <p className="mt-1 text-base font-black leading-tight text-[var(--brand-ink)]">
                                 {isSelectionConfirmed
                                     ? "Questa e' la foto attualmente confermata."
-                                    : hasPendingConfirmation
-                                        ? confirmedRasterSignature
-                                            ? "Stai modificando la foto gia' confermata."
-                                            : "Questa foto non e' ancora confermata."
+                                    : isSubmitting
+                                        ? "Sto salvando automaticamente l'anteprima mostrata."
+                                        : hasPendingConfirmation
+                                            ? confirmedRasterSignature
+                                                ? "Le modifiche verranno salvate da sole dopo pochi secondi."
+                                                : "La foto viene caricata automaticamente appena pronta."
                                         : "Scatta o scegli una foto per vedere l'anteprima termica."}
                             </p>
                             <p className="mt-1 text-sm font-medium leading-relaxed text-slate-600">
                                 {isSelectionConfirmed
-                                    ? "Se vuoi ritoccarla ancora, sposta la preview o carica un'altra foto: il blocco tornera' in modifica finche' non confermi di nuovo."
-                                    : hasPendingConfirmation
-                                        ? confirmedRasterSignature
-                                            ? "La foto attiva resta quella precedente finche' non premi il pulsante qui sotto."
-                                            : "Quando ti convince, premi il pulsante qui sotto per usare questa foto."
+                                    ? "Se vuoi ritoccarla ancora, sposta la preview o carica un'altra foto: il salvataggio ripartira' in automatico."
+                                    : isSubmitting
+                                        ? "Non serve premere nulla: appena finisco, questa versione diventera' quella attiva."
+                                        : hasPendingConfirmation
+                                            ? confirmedRasterSignature
+                                                ? isQueuedForAutoSave
+                                                    ? "Aspetto 5 secondi dall'ultima modifica prima di aggiornare la foto."
+                                                    : "Preparo il salvataggio automatico della nuova versione."
+                                                : "Non serve confermare: questa prima foto viene inviata appena disponibile."
                                         : "Il blocco ti mostrera' chiaramente quando la foto e' solo in bozza e quando invece e' gia' confermata."}
                             </p>
                         </div>
@@ -568,14 +625,16 @@ export function EasterEggComposer({
                                     "pointer-events-none absolute left-3 top-3 z-10 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black uppercase tracking-[0.12em] shadow-sm",
                                     isSelectionConfirmed
                                         ? "bg-emerald-600 text-white"
-                                        : "bg-amber-500 text-[#5b3500]"
+                                        : isSubmitting
+                                            ? "bg-[var(--brand-blue-700)] text-white"
+                                            : "bg-amber-500 text-[#5b3500]"
                                 ].join(" ")}
                                 data-testid={`${testIdPrefix}-preview-status-chip`}
                             >
-                                {hasPendingConfirmation && !isSelectionConfirmed ? (
+                                {(hasPendingConfirmation || isSubmitting) && !isSelectionConfirmed ? (
                                     <span className="relative flex h-2.5 w-2.5">
-                                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#7a4b00] opacity-45" />
-                                        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#7a4b00]" />
+                                        <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${isSubmitting ? "bg-white opacity-35" : "bg-[#7a4b00] opacity-45"}`} />
+                                        <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${isSubmitting ? "bg-white" : "bg-[#7a4b00]"}`} />
                                     </span>
                                 ) : null}
                                 {previewStatusChipLabel}
@@ -681,36 +740,53 @@ export function EasterEggComposer({
                     </div>
                 ) : null}
 
-                <Button
-                    type="button"
+                <div
                     className={[
-                        "h-auto w-full gap-3 rounded-[22px] px-4 py-4",
+                        "flex items-start gap-3 rounded-[22px] border px-4 py-4",
                         isSelectionConfirmed
-                            ? "bg-emerald-600 text-white hover:bg-emerald-600"
-                            : hasPendingConfirmation
-                                ? "bg-[linear-gradient(135deg,#f59e0b_0%,#f97316_100%)] text-white shadow-[0_18px_32px_rgba(249,115,22,0.28)] hover:brightness-105"
-                                : ""
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : isSubmitting
+                                ? "border-[var(--brand-blue-200)] bg-[#eef6ff] text-[var(--brand-blue-700)]"
+                                : hasPendingConfirmation
+                                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                                    : "border-slate-200 bg-slate-50 text-slate-600"
                     ].join(" ")}
-                    disabled={!isImageReady || isSubmitting || isSelectionConfirmed}
-                    onClick={handleSubmit}
-                    data-testid={`${testIdPrefix}-submit-button`}
+                    data-testid={`${testIdPrefix}-autosave-banner`}
                 >
                     {isSubmitting ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Loader2 className="mt-0.5 h-4 w-4 animate-spin" />
                     ) : isSelectionConfirmed ? (
-                        <CheckCircle2 className="h-4 w-4" />
+                        <CheckCircle2 className="mt-0.5 h-4 w-4" />
+                    ) : hasPendingConfirmation ? (
+                        <Upload className="mt-0.5 h-4 w-4" />
                     ) : (
-                        <Upload className="h-4 w-4" />
+                        <Sparkles className="mt-0.5 h-4 w-4" />
                     )}
-                    <span className="flex min-w-0 flex-1 flex-col items-start text-left">
-                        <span className="text-sm font-black leading-tight">
-                            {submitButtonLabel}
-                        </span>
-                        <span className="mt-1 text-xs font-semibold opacity-90">
-                            {submitButtonHint}
-                        </span>
-                    </span>
-                </Button>
+                    <div className="min-w-0">
+                        <p className="text-sm font-black leading-tight">
+                            {isSelectionConfirmed
+                                ? "Salvata automaticamente"
+                                : isSubmitting
+                                    ? submittingLabel
+                                    : hasPendingConfirmation
+                                        ? confirmedRasterSignature
+                                            ? "Salvataggio automatico tra 5 secondi"
+                                            : submitLabel
+                                        : "Il salvataggio automatico partirà quando carichi una foto"}
+                        </p>
+                        <p className="mt-1 text-xs font-semibold leading-relaxed opacity-90">
+                            {isSelectionConfirmed
+                                ? "Questa è la versione attiva al momento."
+                                : isSubmitting
+                                    ? "Attendi qualche istante mentre aggiorno la foto."
+                                    : hasPendingConfirmation
+                                        ? confirmedRasterSignature
+                                            ? "Ogni nuova modifica fa ripartire il conto dei 5 secondi."
+                                            : "La prima foto viene inviata subito, senza pulsanti."
+                                        : "Non serve più confermare manualmente."}
+                        </p>
+                    </div>
+                </div>
             </CardContent>
         </Card>
     );

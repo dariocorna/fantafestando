@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, afterEach, describe, expect, test, vi } from "vitest";
 
 const onSubmitRasterMock = vi.fn();
@@ -60,20 +60,21 @@ async function uploadPhoto(
             lastModified: options?.lastModified
         }
     );
-    fireEvent.change(input, {
-        target: {
-            files: [file]
-        }
+    await act(async () => {
+        fireEvent.change(input, {
+            target: {
+                files: [file]
+            }
+        });
     });
 
-    await waitFor(() => {
-        expect(screen.getByTestId("composer-test-thermal-preview")).toBeInTheDocument();
-    });
+    expect(screen.getByTestId("composer-test-thermal-preview")).toBeInTheDocument();
 }
 
 describe("EasterEggComposer", () => {
     beforeEach(() => {
         onSubmitRasterMock.mockReset();
+        vi.useFakeTimers();
 
         vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
             callback(0);
@@ -121,11 +122,13 @@ describe("EasterEggComposer", () => {
     });
 
     afterEach(() => {
+        vi.runOnlyPendingTimers();
+        vi.useRealTimers();
         vi.unstubAllGlobals();
         vi.restoreAllMocks();
     });
 
-    test("shows draft state before confirmation and confirmed state after successful submit", async () => {
+    test("uploads the first photo automatically as soon as it is ready", async () => {
         onSubmitRasterMock.mockResolvedValue({
             success: "Foto allegata all'ordine. Puoi sostituirla finche' non paghi in cassa."
         });
@@ -133,68 +136,87 @@ describe("EasterEggComposer", () => {
         renderComposer();
         expect(screen.queryByRole("button", { name: /Scatta o scegli una foto/i })).not.toBeInTheDocument();
         await uploadPhoto();
-
-        expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Bozza non confermata");
-        expect(screen.getByRole("button", { name: /Sostituisci foto/i })).toBeInTheDocument();
-        expect(screen.getByTestId("composer-test-submit-button")).toHaveTextContent("Allega foto all'ordine");
-
-        fireEvent.click(screen.getByTestId("composer-test-submit-button"));
-
-        await waitFor(() => {
-            expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Foto confermata");
+        await act(async () => {
+            await vi.runOnlyPendingTimersAsync();
         });
 
-        expect(screen.getByTestId("composer-test-submit-button")).toBeDisabled();
-        expect(screen.getByTestId("composer-test-submit-button")).toHaveTextContent("Foto confermata");
+        expect(screen.getByRole("button", { name: /Sostituisci foto/i })).toBeInTheDocument();
+        expect(screen.queryByTestId("composer-test-submit-button")).not.toBeInTheDocument();
+
+        expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Foto confermata");
+        expect(onSubmitRasterMock).toHaveBeenCalledTimes(1);
+        expect(screen.getByTestId("composer-test-autosave-banner")).toHaveTextContent("Salvata automaticamente");
     });
 
-    test("returns to pending changes state when the image changes after a confirmation", async () => {
+    test("auto-saves a modified image after 5 seconds from the last change", async () => {
         onSubmitRasterMock.mockResolvedValue({
             success: "Foto allegata all'ordine. Puoi sostituirla finche' non paghi in cassa."
         });
 
         renderComposer();
         await uploadPhoto("first.jpg");
-
-        fireEvent.click(screen.getByTestId("composer-test-submit-button"));
-
-        await waitFor(() => {
-            expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Foto confermata");
+        await act(async () => {
+            await vi.runOnlyPendingTimersAsync();
         });
+
+        expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Foto confermata");
 
         await uploadPhoto("second.jpg");
 
-        await waitFor(() => {
-            expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Nuova versione non confermata");
-        });
+        expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Nuova versione in attesa");
 
         expect(screen.queryByText(/Puoi sostituirla finche'/i)).not.toBeInTheDocument();
-        expect(screen.getByTestId("composer-test-submit-button")).toBeEnabled();
-        expect(screen.getByTestId("composer-test-submit-button")).toHaveTextContent("Conferma nuova versione");
+        expect(screen.getByTestId("composer-test-autosave-banner")).toHaveTextContent("Salvataggio automatico tra 5 secondi");
+        expect(onSubmitRasterMock).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            vi.advanceTimersByTime(4999);
+        });
+        expect(onSubmitRasterMock).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            vi.advanceTimersByTime(1);
+            await Promise.resolve();
+        });
+
+        expect(onSubmitRasterMock).toHaveBeenCalledTimes(2);
     });
 
-    test("treats a new upload with the same filename as a new pending version", async () => {
+    test("restarts the autosave countdown when the image changes again", async () => {
         onSubmitRasterMock.mockResolvedValue({
             success: "Foto allegata all'ordine. Puoi sostituirla finche' non paghi in cassa."
         });
 
         renderComposer();
         await uploadPhoto("camera.jpg", { content: "first-image", lastModified: 1000 });
-
-        fireEvent.click(screen.getByTestId("composer-test-submit-button"));
-
-        await waitFor(() => {
-            expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Foto confermata");
+        await act(async () => {
+            await vi.runOnlyPendingTimersAsync();
         });
+
+        expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Foto confermata");
 
         await uploadPhoto("camera.jpg", { content: "second-image", lastModified: 2000 });
 
-        await waitFor(() => {
-            expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Nuova versione non confermata");
+        expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Nuova versione in attesa");
+
+        await act(async () => {
+            vi.advanceTimersByTime(3000);
         });
 
-        expect(screen.getByTestId("composer-test-submit-button")).toBeEnabled();
-        expect(screen.getByTestId("composer-test-submit-button")).toHaveTextContent("Conferma nuova versione");
+        await uploadPhoto("camera.jpg", { content: "third-image", lastModified: 3000 });
+        expect(onSubmitRasterMock).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            vi.advanceTimersByTime(3000);
+        });
+        expect(onSubmitRasterMock).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            vi.advanceTimersByTime(2000);
+            await Promise.resolve();
+        });
+
+        expect(onSubmitRasterMock).toHaveBeenCalledTimes(2);
     });
 
     test("opens the file picker from the empty preview area before any image is loaded", () => {
