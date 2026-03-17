@@ -73,7 +73,6 @@ export function MenuOrderEasterEgg({ orderId }: { orderId: string | null }) {
 
             <EasterEggComposer
                 title="Foto termica per la tua comanda"
-                description="La foto viene elaborata direttamente sul tuo telefono e inviata al server solo come raster pronto per la stampa."
                 submitLabel="Allega foto all'ordine"
                 submittingLabel="Invio allegato..."
                 inputLabel="Selfie o foto"
