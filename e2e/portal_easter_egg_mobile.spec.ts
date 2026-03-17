@@ -42,15 +42,21 @@ async function openPrintMonitor(page: Page) {
     await page.getByRole("tab", { name: "Monitor Stampa" }).click();
 }
 
-async function fetchPrintJobs(page: Page): Promise<PrintJobListItem[]> {
-    const response = await page.request.get("/api/admin/print-jobs?limit=100");
-    expect(response.ok()).toBeTruthy();
+async function fetchPrintJobs(page: Page): Promise<PrintJobListItem[] | null> {
+    try {
+        const response = await page.request.get("/api/admin/print-jobs?limit=100");
+        if (!response.ok()) {
+            return null;
+        }
 
-    const payload = await response.json() as {
-        jobs?: PrintJobListItem[];
-    };
+        const payload = await response.json() as {
+            jobs?: PrintJobListItem[];
+        };
 
-    return payload.jobs || [];
+        return payload.jobs || [];
+    } catch {
+        return null;
+    }
 }
 
 async function buildPortraitPhotoBuffer() {
@@ -285,6 +291,7 @@ test.describe.serial("Portal Easter Egg", () => {
 
             await expect.poll(async () => {
                 const jobs = await fetchPrintJobs(page);
+                if (!jobs) return -1;
                 return jobs.filter((job) => job.source === "ORDER").length;
             }, {
                 timeout: 5000
@@ -313,6 +320,12 @@ test.describe.serial("Portal Easter Egg", () => {
 
             await expect.poll(async () => {
                 const jobs = await fetchPrintJobs(page);
+                if (!jobs) {
+                    return {
+                        customerOrderPrinted: false,
+                        easterEggPrinted: false
+                    };
+                }
                 return {
                     customerOrderPrinted: jobs.some((job) =>
                         job.source === "ORDER"
