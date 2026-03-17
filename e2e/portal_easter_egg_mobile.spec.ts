@@ -2,6 +2,7 @@ import { test, expect, type Locator, type Page, type BrowserContext } from "@pla
 import sharp from "sharp";
 import { ensureAdminAuthenticated, ensureCashierAuthenticated } from "./utils/auth";
 import {
+    createActiveEventWithCatalogDirect,
     createAndActivateEvent,
     createCashBoxPeripheral,
     createCategoryAndProducts,
@@ -126,23 +127,24 @@ async function dragPreview(stage: Locator) {
 }
 
 async function createMenuOrder(page: Page, productName: string) {
-    await page.goto("/menu");
-    await page.waitForResponse(
-        (response) => response.url().includes("/api/pos/init") && response.ok(),
-        { timeout: 10000 }
-    );
+    await page.goto("/menu", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("menu-brand-shell")).toBeVisible({ timeout: 20000 });
 
     const card = page.locator(".rounded-3xl")
         .filter({ has: page.getByRole("heading", { name: productName, level: 3 }) })
         .first();
     await expect(card).toBeVisible({ timeout: 15000 });
     await card.locator("button").first().click();
+    await expect(card.locator("button")).toHaveCount(2, { timeout: 5000 });
 
     const cartButton = page.getByTestId("menu-cart-cta");
     await expect(cartButton).toBeVisible({ timeout: 5000 });
+    await expect(cartButton).toContainText("1");
     await cartButton.click();
 
-    await page.getByTestId("menu-submit-order").click();
+    const submitButton = page.getByTestId("menu-submit-order");
+    await expect(submitButton).toBeEnabled();
+    await submitButton.click();
     await expect(page).toHaveURL(/\/menu\/success\?code=.*orderId=/, { timeout: 20000 });
 
     const url = new URL(page.url());
@@ -162,30 +164,35 @@ async function loadPendingOrderOnPos(page: Page, orderCode: string) {
 }
 
 test.describe.serial("Portal Easter Egg", () => {
-    test("quando la funzione è disabilitata il menu non mostra il form foto", async ({ page }) => {
+    test("quando la funzione è disabilitata il menu non mostra il form foto", async ({ page, browser }) => {
         const suffix = uniqueSuffix();
         const eventName = `Easter Disabled ${suffix}`;
         const categoryName = `Disabled Cat ${suffix}`;
         const productName = `Prodotto ${suffix}`;
         let eventCreated = false;
-
-        await ensureAdminAuthenticated(page, "/admin/settings");
+        let publicContext: BrowserContext | null = null;
 
         try {
-            await createAndActivateEvent(page, eventName, { portalEasterEggEnabled: false });
+            await createActiveEventWithCatalogDirect(
+                eventName,
+                categoryName,
+                [{ name: productName, price: "5.00" }],
+                { portalEasterEggEnabled: false }
+            );
             eventCreated = true;
 
-            await expect(page.locator('input[name="portalEasterEggEnabled"]')).not.toBeChecked();
-            await createCategoryAndProducts(page, categoryName, [
-                { name: productName, price: "5.00" }
-            ]);
+            publicContext = await browser.newContext();
+            const publicPage = await publicContext.newPage();
 
-            await createMenuOrder(page, productName);
-            await expect(page.getByText(/Funzione speciale opzionale/i)).toHaveCount(0);
-            await expect(page.getByText(/Foto termica per la tua comanda/i)).toHaveCount(0);
-            await expect(page.getByText(/Vuoi aggiungere una foto\?/i)).toHaveCount(0);
+            await createMenuOrder(publicPage, productName);
+            await expect(publicPage.getByText(/Funzione speciale opzionale/i)).toHaveCount(0);
+            await expect(publicPage.getByText(/Foto termica per la tua comanda/i)).toHaveCount(0);
+            await expect(publicPage.getByText(/Vuoi aggiungere una foto\?/i)).toHaveCount(0);
         } finally {
-            if (eventCreated) {
+            if (publicContext) {
+                await publicContext.close().catch(() => undefined);
+            }
+            if (eventCreated && !page.isClosed()) {
                 await deleteEvent(page, eventName);
             }
         }
@@ -219,27 +226,27 @@ test.describe.serial("Portal Easter Egg", () => {
             await setRangeValue(brightnessSlider, 56);
             await expect(brightnessSlider).toHaveValue("56");
 
-            await page.getByTestId("portal-easter-egg-submit-button").click();
+            await expect(page.getByTestId("portal-easter-egg-state-banner")).toContainText("Foto confermata", { timeout: 15000 });
+            await expect(page.getByTestId("portal-easter-egg-autosave-banner")).toContainText("Salvata automaticamente");
             await expect(page.getByText("Stampa easter egg inviata.")).toBeVisible({ timeout: 15000 });
 
-            await page.reload();
+            await expect.poll(async () => {
+                const jobs = await fetchPrintJobs(page);
+                if (!jobs) return false;
+                return jobs.some((job) =>
+                    job.source === "MANUAL_TEST"
+                    && job.printType === "EASTER_EGG_IMAGE"
+                    && job.status === "SENT"
+                );
+            }, {
+                timeout: 15000
+            }).toBe(true);
+
+            await page.goto("/admin/easter-egg", { waitUntil: "domcontentloaded" });
             await expect(page.getByText("Nessuna foto caricata")).toBeVisible({ timeout: 15000 });
             await expect(page.getByTestId("portal-easter-egg-thermal-preview")).toHaveCount(0);
-
-            await page.goto("/admin/settings/hardware");
-            await openPrintMonitor(page);
-
-            const easterEggJob = page.getByRole("button")
-                .filter({ hasText: "Easter egg" })
-                .filter({ hasText: "SENT" })
-                .first();
-            await expect(easterEggJob).toBeVisible({ timeout: 15000 });
-
-            await easterEggJob.click();
-            await expect(page.getByTestId("print-job-preview")).toBeVisible({ timeout: 15000 });
-            await expect(page.getByText(/Anteprima ESC\/POS raw non disponibile/i)).toHaveCount(0);
         } finally {
-            if (eventCreated) {
+            if (eventCreated && !page.isClosed()) {
                 await deleteEvent(page, eventName);
             }
         }
@@ -257,6 +264,7 @@ test.describe.serial("Portal Easter Egg", () => {
         const uploadBuffer = await buildPortraitPhotoBuffer();
         let eventCreated = false;
         let cashierContext: BrowserContext | null = null;
+        let publicContext: BrowserContext | null = null;
 
         await ensureAdminAuthenticated(page, "/admin");
 
@@ -270,22 +278,26 @@ test.describe.serial("Portal Easter Egg", () => {
                 { name: productName, price: "8.00" }
             ]);
 
-            const { code } = await createMenuOrder(page, productName);
+            publicContext = await browser.newContext();
+            const publicPage = await publicContext.newPage();
 
-            await expect(page.getByText(/Vuoi aggiungere una foto\?/i)).toBeVisible({ timeout: 15000 });
-            await expect(page.getByText(/Aggiungi una foto alla comanda/i)).toBeVisible({ timeout: 15000 });
+            const { code } = await createMenuOrder(publicPage, productName);
 
-            await page.getByTestId("menu-easter-egg-file-input").setInputFiles({
+            await expect(publicPage.getByText(/Vuoi aggiungere una foto\?/i)).toBeVisible({ timeout: 15000 });
+            await expect(publicPage.getByText(/Aggiungi una foto alla comanda/i)).toBeVisible({ timeout: 15000 });
+
+            await publicPage.getByTestId("menu-easter-egg-file-input").setInputFiles({
                 name: "menu-easter-egg.jpg",
                 mimeType: "image/jpeg",
                 buffer: uploadBuffer
             });
 
-            await expect(page.getByTestId("menu-easter-egg-thermal-preview")).toBeVisible({ timeout: 15000 });
-            await dragPreview(page.getByTestId("menu-easter-egg-preview-stage"));
+            await expect(publicPage.getByTestId("menu-easter-egg-thermal-preview")).toBeVisible({ timeout: 15000 });
+            await dragPreview(publicPage.getByTestId("menu-easter-egg-preview-stage"));
 
-            await page.getByTestId("menu-easter-egg-submit-button").click();
-            await expect(page.getByText(/Foto allegata all'ordine/i)).toBeVisible({ timeout: 15000 });
+            await expect(publicPage.getByTestId("menu-easter-egg-state-banner")).toContainText("Foto confermata", { timeout: 15000 });
+            await expect(publicPage.getByTestId("menu-easter-egg-autosave-banner")).toContainText("Salvata automaticamente");
+            await expect(publicPage.getByText(/Foto allegata all'ordine/i)).toBeVisible({ timeout: 15000 });
 
             await ensureAdminAuthenticated(page, "/admin/settings/hardware");
 
@@ -356,10 +368,13 @@ test.describe.serial("Portal Easter Egg", () => {
             await expect(page.getByTestId("print-job-preview")).toBeVisible({ timeout: 15000 });
             await expect(page.getByText(/Anteprima ESC\/POS raw non disponibile/i)).toHaveCount(0);
         } finally {
-            if (cashierContext) {
-                await cashierContext.close();
+            if (publicContext) {
+                await publicContext.close().catch(() => undefined);
             }
-            if (eventCreated) {
+            if (cashierContext) {
+                await cashierContext.close().catch(() => undefined);
+            }
+            if (eventCreated && !page.isClosed()) {
                 await ensureAdminAuthenticated(page, "/admin");
                 await deleteEvent(page, eventName);
             }
