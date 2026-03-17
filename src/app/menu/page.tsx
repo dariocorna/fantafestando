@@ -9,8 +9,7 @@ import {
     Minus,
     User,
     Hash,
-    Loader2,
-    Trash2
+    Loader2
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,6 +18,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { getCategoryTheme } from "@/lib/category-colors"
 import { BrandSectionHeader } from "@/components/brand/brand-section-header"
+import { MenuCartDeleteDialog } from "@/components/menu-cart-delete-dialog"
 import { createPublicOrder } from "./actions"
 import {
     EMPTY_STORED_MENU_CART_ITEMS,
@@ -393,6 +393,7 @@ export default function CustomerMenu() {
                             initial={{ y: "100%" }}
                             animate={{ y: 0 }}
                             exit={{ y: "100%" }}
+                            data-testid="menu-cart-overlay"
                             className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[36px] border border-[#d9e6f8] bg-white p-7"
                         >
                             <div className="mb-5 flex items-center justify-between">
@@ -426,12 +427,11 @@ export default function CustomerMenu() {
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <span className="font-black text-slate-800">{(item.basePrice * item.quantity).toFixed(2)} €</span>
-                                            <button
-                                                onClick={() => deleteFromCart(item._id)}
-                                                className="rounded-full p-1 text-red-400 hover:text-red-600"
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
+                                            <MenuCartDeleteDialog
+                                                itemName={item.name}
+                                                quantity={item.quantity}
+                                                onConfirm={() => deleteFromCart(item._id)}
+                                            />
                                         </div>
                                     </div>
                                 ))}
