@@ -2,10 +2,19 @@ import { test, expect } from "@playwright/test";
 import {
     createAndActivateEvent,
     createCategoryAndProducts,
+    deleteEvent,
     uniqueSuffix,
 } from "./utils/fixtures";
 
 test.describe.serial("Menu pubblico — carrello", () => {
+    const createdEvents: string[] = [];
+
+    test.afterEach(async ({ page }) => {
+        const eventName = createdEvents.pop();
+        if (!eventName) return;
+        await deleteEvent(page, eventName);
+    });
+
     test("aggiunta prodotti al carrello e invio ordine dal cart overlay", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso validato su desktop.");
 
@@ -17,6 +26,7 @@ test.describe.serial("Menu pubblico — carrello", () => {
         const productADescription = `Descrizione ${suffix}`;
 
         await createAndActivateEvent(page, eventName);
+        createdEvents.push(eventName);
         await createCategoryAndProducts(page, categoryName, [
             { name: productA, price: "5.00", description: productADescription },
             { name: productB, price: "3.00" },
@@ -75,6 +85,7 @@ test.describe.serial("Menu pubblico — carrello", () => {
         const product = `Prodotto ${suffix}`;
 
         await createAndActivateEvent(page, eventName);
+        createdEvents.push(eventName);
         await createCategoryAndProducts(page, categoryName, [
             { name: product, price: "4.00" },
         ]);
@@ -99,6 +110,7 @@ test.describe.serial("Menu pubblico — carrello", () => {
         const cartButton = page.getByTestId("menu-cart-cta");
         await expect(cartButton).toBeVisible({ timeout: 5000 });
         await cartButton.click();
+        const cartOverlay = page.getByTestId("menu-cart-overlay");
 
         // Verify the order heading is shown
         await expect(page.getByRole("heading", { name: "Il tuo ordine" })).toBeVisible({ timeout: 5000 });
@@ -109,5 +121,25 @@ test.describe.serial("Menu pubblico — carrello", () => {
 
         // Verify the submit button is present
         await expect(page.getByTestId("menu-submit-order")).toBeVisible();
+
+        const deleteButton = page.getByRole("button", { name: new RegExp(`Elimina ${product} dal carrello`) });
+        await deleteButton.click();
+
+        const confirmDialog = page.getByRole("alertdialog").filter({ hasText: /Rimuovere questo prodotto dall'ordine\?/i });
+        await expect(confirmDialog).toBeVisible();
+        await expect(confirmDialog).toContainText(`2 x ${product}`);
+
+        await confirmDialog.getByRole("button", { name: "Annulla", exact: true }).click();
+        await expect(confirmDialog).toBeHidden();
+        await expect(cartOverlay.getByText(product, { exact: true })).toBeVisible();
+        await expect(totalDisplay).toContainText("8.00");
+
+        await deleteButton.click();
+        await expect(confirmDialog).toBeVisible();
+        await confirmDialog.getByRole("button", { name: "Elimina", exact: true }).click();
+
+        await expect(confirmDialog).toBeHidden();
+        await expect(cartOverlay.getByText(product, { exact: true })).toHaveCount(0);
+        await expect(totalDisplay).toContainText("0.00");
     });
 });
