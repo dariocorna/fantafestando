@@ -1,4 +1,12 @@
 import { expect, type Page } from "@playwright/test";
+import dbConnect from "../../src/lib/mongoose";
+import Event from "../../src/models/Event";
+import Category from "../../src/models/Category";
+import Product from "../../src/models/Product";
+import Printer from "../../src/models/Printer";
+import PosDevice from "../../src/models/PosDevice";
+import Peripheral from "../../src/models/Peripheral";
+import Order from "../../src/models/Order";
 
 // ---------------------------------------------------------------------------
 // Unique suffix for test isolation
@@ -108,15 +116,21 @@ export async function selectEventContext(page: Page, eventName: string) {
 }
 
 
-export async function deleteEvent(page: Page, eventName: string) {
-    await page.goto("/admin/settings/events");
+export async function deleteEvent(_page: Page, eventName: string) {
+    await dbConnect();
 
-    const eventCard = page.locator("div.p-4.border").filter({ hasText: eventName }).first();
-    await expect(eventCard).toBeVisible();
+    const event = await Event.findOne({ name: eventName }).select("_id").lean<{ _id: string } | null>();
+    if (!event?._id) return;
 
-    await eventCard.getByRole("button", { name: "Elimina", exact: true }).click();
-    await page.getByRole("button", { name: "Continua", exact: true }).click();
-    await expect(eventCard).toBeHidden();
+    const eventId = String(event._id);
+
+    await Order.deleteMany({ eventId });
+    await PosDevice.deleteMany({ eventId });
+    await Peripheral.deleteMany({ eventId });
+    await Printer.deleteMany({ eventId });
+    await Product.deleteMany({ eventId });
+    await Category.deleteMany({ eventId });
+    await Event.findByIdAndDelete(eventId);
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +311,56 @@ export interface ProductDef {
     stock?: string;
     shortName?: string;
     description?: string;
+}
+
+export async function createActiveEventWithCatalogDirect(
+    eventName: string,
+    categoryName: string,
+    products: ProductDef[],
+    options?: CreateEventOptions,
+) {
+    await dbConnect();
+
+    await Event.updateMany({ active: true }, { $set: { active: false } });
+
+    const event = await Event.create({
+        name: eventName,
+        active: true,
+        archived: false,
+        settings: {
+            askName: options?.askName ?? false,
+            askTable: options?.askTable ?? false,
+            portalEasterEggEnabled: options?.portalEasterEggEnabled ?? false,
+        },
+        predefinedTables: options?.predefinedTables ?? [],
+    });
+
+    const category = await Category.create({
+        eventId: event._id,
+        name: categoryName,
+        uiColor: "#2563eb",
+        printOrder: 0,
+    });
+
+    await Product.insertMany(
+        products.map((product) => ({
+            eventId: event._id,
+            categoryId: category._id,
+            name: product.name,
+            shortName: product.shortName,
+            description: product.description,
+            basePrice: Number(product.price),
+            stockQuantity: product.stock ? Number(product.stock) : null,
+            isSoldOut: false,
+            availableDays: [],
+            variants: [],
+        }))
+    );
+
+    return {
+        eventId: String(event._id),
+        categoryId: String(category._id),
+    };
 }
 
 export async function createProduct(page: Page, categoryName: string, product: ProductDef) {
