@@ -32,8 +32,8 @@ export default function MenuLayout({
     return (
         <>
             <PwaServiceWorker scriptUrl="/sw-menu.js" scope="/menu/" releaseKey={appReleaseKey} />
-            {children}
             <MenuPwaInstallPrompt />
+            {children}
         </>
     );
 }

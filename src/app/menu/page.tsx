@@ -273,7 +273,7 @@ export default function CustomerMenu() {
                     const catTheme = getCategoryTheme(cat.uiColor)
 
                     return (
-                        <section key={cat._id} id={cat._id} className="space-y-4">
+                        <section key={cat._id} id={cat._id} className="scroll-mt-24 space-y-4 md:scroll-mt-28">
                             <BrandSectionHeader title={cat.name} />
                             <div className="grid gap-4">
                                 {products

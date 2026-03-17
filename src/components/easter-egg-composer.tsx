@@ -169,7 +169,7 @@ export function EasterEggComposer({
     const gestureCropRectRef = useRef<{ width: number; height: number } | null>(null);
     const pinchStartRef = useRef<{ midpoint: PointerPoint; distance: number } | null>(null);
     const dragStartPointRef = useRef<PointerPoint | null>(null);
-    const autoSaveTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+    const autoSaveTimeoutRef = useRef<number | null>(null);
     const latestSignatureRef = useRef<string | null>(null);
     const isSubmittingRef = useRef(false);
 
