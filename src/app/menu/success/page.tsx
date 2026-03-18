@@ -2,7 +2,14 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
-import { CheckCircle2, Loader2, ShoppingBag } from "lucide-react"
+import {
+    ArrowDownRight,
+    Camera,
+    CheckCircle2,
+    Loader2,
+    ShoppingBag,
+    Sparkles,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { motion } from "framer-motion"
 import { BrandFestiveStrip } from "@/components/brand/brand-festive-strip"
@@ -87,6 +94,34 @@ function SuccessContent() {
                                     Mostra questo numero alla cassa per pagare e ricevere il tuo ordine. Il riepilogo resta visibile qui sotto, cosi&apos; puoi ricontrollare tutto con calma.
                                 </p>
 
+                                {hasEasterEgg ? (
+                                    <a
+                                        href="#menu-success-photo"
+                                        className="group mt-6 block max-w-xl rounded-[28px] border border-[#f8be2b] bg-[linear-gradient(135deg,#fff1a8_0%,#ffd84c_48%,#ffbe2e_100%)] p-4 text-left shadow-[0_20px_40px_rgba(253,180,24,0.34)] transition-transform duration-200 hover:-translate-y-0.5"
+                                    >
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="min-w-0">
+                                                <p className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-[#7a4d00]">
+                                                    <Sparkles className="h-4 w-4" />
+                                                    Extra opzionale
+                                                </p>
+                                                <p className="mt-2 text-lg font-black leading-tight text-[#5e3900]">
+                                                    Vuoi aggiungere una foto?
+                                                </p>
+                                                <p className="mt-1 text-sm font-semibold leading-relaxed text-[#6e4800]">
+                                                    Tocca qui.
+                                                </p>
+                                            </div>
+                                            <div className="shrink-0 rounded-2xl bg-white/75 p-3 text-[#7a4d00] shadow-sm">
+                                                <div className="flex items-center gap-2">
+                                                    <Camera className="h-5 w-5" />
+                                                    <ArrowDownRight className="h-5 w-5 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:translate-y-0.5" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </a>
+                                ) : null}
+
                             </div>
 
                             <div className="rounded-[34px] border-2 border-dashed border-[#d9e6f8] bg-[#f7fbff] px-6 py-7 text-center">
@@ -103,7 +138,7 @@ function SuccessContent() {
                         </div>
                     </motion.section>
 
-                    <div className="mt-6 space-y-6">
+                    <div className={`mt-6 grid gap-6 ${hasEasterEgg ? "lg:grid-cols-[minmax(0,0.92fr)_minmax(360px,1.08fr)]" : ""}`}>
                         <div>
                             {summary ? (
                                 <MenuOrderSummaryCard summary={summary} />
@@ -121,7 +156,7 @@ function SuccessContent() {
                         </div>
 
                         {hasEasterEgg ? (
-                            <section id="menu-success-photo" className="scroll-mt-6">
+                            <section id="menu-success-photo" className="scroll-mt-6 space-y-4">
                                 <MenuOrderEasterEgg orderId={orderId} />
                             </section>
                         ) : null}

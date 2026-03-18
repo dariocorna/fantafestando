@@ -280,10 +280,15 @@ test.describe.serial("Portal Easter Egg", () => {
             publicContext = await browser.newContext();
             const publicPage = await publicContext.newPage();
 
-            const { code } = await createMenuOrder(publicPage, productName);
-
-            await expect(publicPage.getByText(/Foto facoltativa/i)).toBeVisible({ timeout: 15000 });
-            await expect(publicPage.getByText(/Aggiungi una foto all'ordine/i)).toBeVisible({ timeout: 15000 });
+            const { code, orderId } = await createMenuOrder(publicPage, productName);
+            await expect.poll(async () => (
+                publicPage.evaluate((nextOrderId) => (
+                    window.sessionStorage.getItem(`fantafestando:easter-egg-upload:${nextOrderId}`)
+                ), orderId)
+            ), {
+                timeout: 15000
+            }).toBeTruthy();
+            await publicPage.reload({ waitUntil: "domcontentloaded" });
 
             await publicPage.getByTestId("menu-easter-egg-file-input").setInputFiles({
                 name: "menu-easter-egg.jpg",
