@@ -60,19 +60,19 @@ export function MenuOrderEasterEgg({ orderId }: { orderId: string | null }) {
         <div className="space-y-4">
             <div className="rounded-[30px] border border-[#d9e6f8] bg-white/95 p-5 shadow-[var(--brand-shadow-soft)]">
                 <p className="text-xs font-black uppercase tracking-[0.14em] text-[#8b6800]">
-                    Foto facoltativa
+                    Funzione opzionale
                 </p>
                 <h2 className="font-brand-display mt-2 text-3xl font-black tracking-tight text-[var(--brand-ink)]">
-                    Aggiungi una foto all&apos;ordine
+                    Aggiungi una foto alla comanda
                 </h2>
                 <p className="mt-3 flex items-center gap-2 text-sm font-medium leading-relaxed text-slate-600">
                     <Sparkles className="h-4 w-4" />
-                    Scatta una foto e allegala all&apos;ordine. Verra&apos; stampata in cassa insieme alla comanda.
+                    Scatta una foto, verifica l&apos;anteprima e allegala all&apos;ordine. Verra&apos; stampata in cassa con la comanda al momento della chiusura.
                 </p>
             </div>
 
             <EasterEggComposer
-                title="Foto dell'ordine"
+                title="Foto per la tua comanda"
                 submitLabel="Allega foto all'ordine"
                 submittingLabel="Invio allegato..."
                 inputLabel="Selfie o foto"
