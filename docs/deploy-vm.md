@@ -439,83 +439,43 @@ curl -fsS https://fantafestando-backoffice.ddns.net/api/health
 curl -fsS https://fantafestando.ddns.net/api/health
 ```
 
-### 6.2 Flusso consigliato per Bergamo (deploy del compilato locale)
+### 6.2 Deploy locale LAN
 
-Usare questo flusso quando vuoi evitare build applicativa sulla VM e pubblicare
-esattamente gli artefatti generati in locale.
+Per la macchina locale `fantafestando`, usare il deploy diretto dal repository.
 
 #### Script consigliato (one-command)
 
 ```bash
 cd /path/to/fantafestando
-./scripts/deploy-bergamo.sh
+./scripts/deploy.sh
 ```
 
-Alias equivalente:
-
-```bash
-npm run deploy:bergamo
-```
-
-Opzioni principali:
-- `--host <alias-ssh>` (default `bergamo`)
-- `--path <remote-path>` (default `/opt/fantafestando`)
-- `--profile <compose-profile>` (default `demo`)
-- `--skip-build` / `--skip-rsync` / `--skip-health-check`
-- `--use-cache` (default build `--no-cache`)
-
-Lo script esegue automaticamente:
-- `npm run build` locale
-- `rsync` verso `${host}:${path}` con exclude sicuri
-- update di `APP_BUILD` in `.env.production` remoto
-- `docker compose build` + `up -d --remove-orphans`
-- health check `${BACKOFFICE_BIND_HOST:-127.0.0.1}:3101` e `127.0.0.1:3102`
+Lo script:
+- usa `.env.production` locale
+- avvia o aggiorna lo stack con `docker compose`
+- applica la migrazione dell'indice pickup
+- mostra lo stato dei servizi a fine deploy
 
 #### Flusso manuale equivalente
 
-1. Build locale:
+1. Avvio stack:
 
 ```bash
 cd /path/to/fantafestando
-npm ci
-npm run build
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build --remove-orphans
 ```
 
-2. Sync codice+artefatti su VM:
+2. Migrazione indice:
 
 ```bash
-rsync -az --delete \
-  --exclude '.git' \
-  --exclude 'node_modules' \
-  --exclude '.next/cache' \
-  --exclude '.env*' \
-  ./ bergamo:/opt/fantafestando/
+./scripts/migrate-order-pickup-index.sh
 ```
 
-3. Rebuild immagine e restart stack (forzando aggiornamento runtime):
+3. Verifica stato:
 
 ```bash
-BUILD_SHA=$(git rev-parse --short HEAD)
-ssh bergamo '
-  cd /opt/fantafestando &&
-  if grep -q "^APP_BUILD=" .env.production; then
-    sed -i -E "s/^APP_BUILD=.*/APP_BUILD='"${BUILD_SHA}"'/" .env.production
-  else
-    echo "APP_BUILD='"${BUILD_SHA}"'" >> .env.production
-  fi &&
-  docker compose --env-file .env.production -f docker-compose.prod.yml build --no-cache fantafestando-backoffice fantafestando-menu &&
-  docker compose --env-file .env.production -f docker-compose.prod.yml --profile demo up -d --remove-orphans
-'
+docker compose --env-file .env.production -f docker-compose.prod.yml ps
 ```
-
-4. Verifica release effettiva:
-
-```bash
-ssh bergamo 'cd /opt/fantafestando && BACKOFFICE_HOST=$(grep -E "^BACKOFFICE_BIND_HOST=" .env.production | cut -d= -f2) && curl -fsS "http://${BACKOFFICE_HOST:-127.0.0.1}:3101/api/health"'
-ssh bergamo 'curl -fsS http://127.0.0.1:3102/api/health'
-```
-
-Controllare che `release` nei payload `/api/health` corrisponda al commit atteso.
 
 ### 6.3 Checklist anti-regressioni deploy
 
