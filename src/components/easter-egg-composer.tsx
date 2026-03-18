@@ -493,84 +493,86 @@ export function EasterEggComposer({
                 {description ? <CardDescription>{description}</CardDescription> : null}
             </CardHeader>
             <CardContent className="space-y-5 p-5">
-                <div
-                    className={[
-                        "rounded-[28px] border p-4 shadow-sm transition-colors",
-                        isSelectionConfirmed
-                            ? "border-emerald-200 bg-[linear-gradient(135deg,#f0fdf4_0%,#dcfce7_100%)]"
-                            : hasPendingConfirmation
-                                ? "border-amber-400 bg-[linear-gradient(135deg,#fff1b8_0%,#ffd257_48%,#ffbf47_100%)] shadow-[0_18px_38px_rgba(245,158,11,0.24)]"
-                                : "border-[#d9e6f8] bg-[linear-gradient(135deg,#f8fbff_0%,#eef6ff_100%)]"
-                    ].join(" ")}
-                    data-testid={`${testIdPrefix}-state-banner`}
-                >
-                    <div className="flex items-start gap-3">
-                        <div
-                            className={[
-                                "mt-0.5 rounded-2xl p-2.5",
-                                isSelectionConfirmed
-                                    ? "bg-white/75 text-emerald-600"
-                                    : hasPendingConfirmation
-                                        ? "bg-white/70 text-amber-700"
-                                        : "bg-white/75 text-[var(--brand-blue-700)]"
-                            ].join(" ")}
-                        >
-                            {isSelectionConfirmed ? (
-                                <CheckCircle2 className="h-5 w-5" />
-                            ) : hasPendingConfirmation ? (
-                                <PencilLine className="h-5 w-5" />
-                            ) : (
-                                <Sparkles className="h-5 w-5" />
-                            )}
-                        </div>
-                        <div className="min-w-0">
-                            <p
+                {currentRasterSignature ? (
+                    <div
+                        className={[
+                            "rounded-[28px] border p-4 shadow-sm transition-colors",
+                            isSelectionConfirmed
+                                ? "border-emerald-200 bg-[linear-gradient(135deg,#f0fdf4_0%,#dcfce7_100%)]"
+                                : hasPendingConfirmation
+                                    ? "border-amber-400 bg-[linear-gradient(135deg,#fff1b8_0%,#ffd257_48%,#ffbf47_100%)] shadow-[0_18px_38px_rgba(245,158,11,0.24)]"
+                                    : "border-[#d9e6f8] bg-[linear-gradient(135deg,#f8fbff_0%,#eef6ff_100%)]"
+                        ].join(" ")}
+                        data-testid={`${testIdPrefix}-state-banner`}
+                    >
+                        <div className="flex items-start gap-3">
+                            <div
                                 className={[
-                                    "text-xs font-black uppercase tracking-[0.14em]",
+                                    "mt-0.5 rounded-2xl p-2.5",
                                     isSelectionConfirmed
-                                        ? "text-emerald-700"
+                                        ? "bg-white/75 text-emerald-600"
                                         : hasPendingConfirmation
-                                            ? "text-amber-700"
-                                            : "text-[var(--brand-blue-700)]"
+                                            ? "bg-white/70 text-amber-700"
+                                            : "bg-white/75 text-[var(--brand-blue-700)]"
                                 ].join(" ")}
                             >
-                                {isSelectionConfirmed
-                                    ? "Foto confermata"
-                                    : isSubmitting
-                                        ? "Salvataggio automatico in corso"
-                                        : hasPendingConfirmation
-                                            ? confirmedRasterSignature
-                                                ? "Nuova versione in attesa"
-                                                : "Prima foto in salvataggio"
-                                        : "Pronta per iniziare"}
-                            </p>
-                            <p className="mt-1 text-base font-black leading-tight text-[var(--brand-ink)]">
-                                {isSelectionConfirmed
-                                    ? "Questa e' la foto attualmente confermata."
-                                    : isSubmitting
-                                        ? "Sto salvando automaticamente l'anteprima mostrata."
-                                        : hasPendingConfirmation
-                                            ? confirmedRasterSignature
-                                                ? "Le modifiche verranno salvate da sole dopo pochi secondi."
-                                                : "La foto viene caricata automaticamente appena pronta."
-                                        : "Scatta o scegli una foto per vedere l'anteprima."}
-                            </p>
-                            <p className="mt-1 text-sm font-medium leading-relaxed text-slate-600">
-                                {isSelectionConfirmed
-                                    ? "Se vuoi ritoccarla ancora, sposta la preview o carica un'altra foto: il salvataggio ripartira' in automatico."
-                                    : isSubmitting
-                                        ? "Non serve premere nulla: appena finisco, questa versione diventera' quella attiva."
-                                        : hasPendingConfirmation
-                                            ? confirmedRasterSignature
-                                                ? isQueuedForAutoSave
-                                                    ? "Aspetto 5 secondi dall'ultima modifica prima di aggiornare la foto."
-                                                    : "Preparo il salvataggio automatico della nuova versione."
-                                                : "Non serve confermare: questa prima foto viene inviata appena disponibile."
-                                        : "Il blocco ti mostrera' chiaramente quando la foto e' solo in bozza e quando invece e' gia' confermata."}
-                            </p>
+                                {isSelectionConfirmed ? (
+                                    <CheckCircle2 className="h-5 w-5" />
+                                ) : hasPendingConfirmation ? (
+                                    <PencilLine className="h-5 w-5" />
+                                ) : (
+                                    <Sparkles className="h-5 w-5" />
+                                )}
+                            </div>
+                            <div className="min-w-0">
+                                <p
+                                    className={[
+                                        "text-xs font-black uppercase tracking-[0.14em]",
+                                        isSelectionConfirmed
+                                            ? "text-emerald-700"
+                                            : hasPendingConfirmation
+                                                ? "text-amber-700"
+                                                : "text-[var(--brand-blue-700)]"
+                                    ].join(" ")}
+                                >
+                                    {isSelectionConfirmed
+                                        ? "Foto confermata"
+                                        : isSubmitting
+                                            ? "Salvataggio automatico in corso"
+                                            : hasPendingConfirmation
+                                                ? confirmedRasterSignature
+                                                    ? "Nuova versione in attesa"
+                                                    : "Prima foto in salvataggio"
+                                            : null}
+                                </p>
+                                <p className="mt-1 text-base font-black leading-tight text-[var(--brand-ink)]">
+                                    {isSelectionConfirmed
+                                        ? "Questa e' la foto attualmente confermata."
+                                        : isSubmitting
+                                            ? "Sto salvando automaticamente l'anteprima mostrata."
+                                            : hasPendingConfirmation
+                                                ? confirmedRasterSignature
+                                                    ? "Le modifiche verranno salvate da sole dopo pochi secondi."
+                                                    : "La foto viene caricata automaticamente appena pronta."
+                                        : null}
+                                </p>
+                                <p className="mt-1 text-sm font-medium leading-relaxed text-slate-600">
+                                    {isSelectionConfirmed
+                                        ? "Se vuoi ritoccarla ancora, sposta la preview o carica un'altra foto: il salvataggio ripartira' in automatico."
+                                        : isSubmitting
+                                            ? "Non serve premere nulla: appena finisco, questa versione diventera' quella attiva."
+                                            : hasPendingConfirmation
+                                                ? confirmedRasterSignature
+                                                    ? isQueuedForAutoSave
+                                                        ? "Aspetto 5 secondi dall'ultima modifica prima di aggiornare la foto."
+                                                        : "Preparo il salvataggio automatico della nuova versione."
+                                                    : "Non serve confermare: questa prima foto viene inviata appena disponibile."
+                                        : null}
+                                </p>
+                            </div>
                         </div>
                     </div>
-                </div>
+                ) : null}
 
                 <div className="space-y-2">
                     <Label htmlFor={`${testIdPrefix}-image`}>{inputLabel}</Label>
