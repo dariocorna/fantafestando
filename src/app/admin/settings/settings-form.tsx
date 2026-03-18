@@ -513,7 +513,7 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                             <Label htmlFor="portalEasterEggEnabled" className="text-sm font-medium cursor-pointer">
                                 Abilita Easter Egg foto
                             </Label>
-                            <p className="text-xs text-muted-foreground">Consente alla WebApp cliente di allegare una foto termica dopo l&apos;invio dell&apos;ordine.</p>
+                            <p className="text-xs text-muted-foreground">Consente alla WebApp cliente di allegare una foto dopo l&apos;invio dell&apos;ordine.</p>
                         </div>
                     </div>
 
