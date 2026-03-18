@@ -401,10 +401,10 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                 setError(result.error);
                 return;
             }
-            const nextMenuHeaderLogoUrl = typeof result?.menuHeaderLogoUrl === "string" && result.menuHeaderLogoUrl.trim()
+            const nextMenuHeaderLogoUrl = result && "menuHeaderLogoUrl" in result && typeof result.menuHeaderLogoUrl === "string" && result.menuHeaderLogoUrl.trim()
                 ? result.menuHeaderLogoUrl
                 : null;
-            const nextReceiptHeaderLogoUrl = typeof result?.receiptHeaderLogoUrl === "string" && result.receiptHeaderLogoUrl.trim()
+            const nextReceiptHeaderLogoUrl = result && "receiptHeaderLogoUrl" in result && typeof result.receiptHeaderLogoUrl === "string" && result.receiptHeaderLogoUrl.trim()
                 ? result.receiptHeaderLogoUrl
                 : null;
 
