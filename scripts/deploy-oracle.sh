@@ -251,6 +251,17 @@ else
 fi
 
 sudo COMPOSE_PROJECT_NAME="${PROJECT_NAME}" ENV_FILE="${ENV_FILE}" COMPOSE_FILE="${COMPOSE_FILE}" bash "${REMOTE_PATH}/scripts/migrate-order-pickup-index.sh"
+
+backoffice_container="$("${compose_base[@]}" ps -q fantafestando-backoffice)"
+mongo_container="$("${compose_base[@]}" ps -q mongo)"
+
+if [[ -z "${backoffice_container}" || -z "${mongo_container}" ]]; then
+  echo "[deploy-oracle] Unable to resolve running service containers." >&2
+  exit 1
+fi
+
+bash "${REMOTE_PATH}/scripts/verify-upload-assets.sh" "${backoffice_container}" "${mongo_container}"
+
 "${compose_base[@]}" ps
 EOS
 
