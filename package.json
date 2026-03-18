@@ -24,7 +24,6 @@
     "docker:run:tunnel": "docker compose --env-file .env.production -f docker-compose.prod.yml --profile oracle-tunnel up -d --build --remove-orphans",
     "docker:down": "docker compose --env-file .env.production -f docker-compose.prod.yml --profile oracle-tunnel down --remove-orphans",
     "deploy:local": "./scripts/deploy.sh",
-    "deploy:bergamo": "./scripts/deploy-bergamo.sh",
     "deploy:oracle": "./scripts/deploy-oracle.sh",
     "db:up": "docker compose up -d mongodb",
     "db:down": "docker compose stop mongodb"
