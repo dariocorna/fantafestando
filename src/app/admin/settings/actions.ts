@@ -29,6 +29,10 @@ import {
 } from "@/lib/quick-discount-presets";
 import { normalizePosCatalogLayout } from "@/lib/pos-catalog-layout";
 import {
+    normalizeMenuHeaderLogoUpload,
+    normalizeReceiptHeaderLogoUpload
+} from "@/lib/header-logo";
+import {
     DEFAULT_PRINTER_PORT,
     MAX_VIRTUAL_PRINTER_SLOTS,
     normalizePrinterConfig,
@@ -84,83 +88,17 @@ function escapeRegExp(value: string) {
 const MENU_HEADER_LOGO_UPLOAD_DIR = path.join(process.cwd(), "public", "uploads", "menu-headers");
 const MENU_HEADER_LOGO_URL_PREFIX = "/uploads/menu-headers";
 const MENU_HEADER_LOGO_MAX_BYTES = 2 * 1024 * 1024;
-const MENU_HEADER_LOGO_TARGET_RATIO = 10 / 4;
-const MENU_HEADER_LOGO_RATIO_TOLERANCE = 0.12;
 const RECEIPT_HEADER_LOGO_UPLOAD_DIR = path.join(process.cwd(), "public", "uploads", "receipt-headers");
 const RECEIPT_HEADER_LOGO_URL_PREFIX = "/uploads/receipt-headers";
 const RECEIPT_HEADER_LOGO_MAX_BYTES = 2 * 1024 * 1024;
-const RECEIPT_HEADER_LOGO_TARGET_RATIO = 10 / 3;
 const EASTER_EGG_UPLOAD_DIR = path.join(process.cwd(), "public", "uploads", "easter-eggs");
 const EASTER_EGG_URL_PREFIX = "/uploads/easter-eggs";
 const EASTER_EGG_MAX_BYTES = 12 * 1024 * 1024;
 
-const MENU_HEADER_LOGO_ALLOWED_TYPES = new Map<string, string>([
+const UPLOAD_IMAGE_ALLOWED_TYPES = new Map<string, string>([
     ["image/png", "png"],
     ["image/jpeg", "jpg"],
 ]);
-
-function readPngDimensions(buffer: Buffer): { width: number; height: number } | null {
-    if (buffer.length < 24) return null;
-    const isPngSignature =
-        buffer[0] === 0x89 &&
-        buffer[1] === 0x50 &&
-        buffer[2] === 0x4e &&
-        buffer[3] === 0x47 &&
-        buffer[4] === 0x0d &&
-        buffer[5] === 0x0a &&
-        buffer[6] === 0x1a &&
-        buffer[7] === 0x0a;
-    if (!isPngSignature) return null;
-
-    return {
-        width: buffer.readUInt32BE(16),
-        height: buffer.readUInt32BE(20),
-    };
-}
-
-function readJpegDimensions(buffer: Buffer): { width: number; height: number } | null {
-    if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
-    let offset = 2;
-    const sofMarkers = new Set([
-        0xc0, 0xc1, 0xc2, 0xc3,
-        0xc5, 0xc6, 0xc7, 0xc9,
-        0xca, 0xcb, 0xcd, 0xce, 0xcf,
-    ]);
-
-    while (offset + 8 < buffer.length) {
-        if (buffer[offset] !== 0xff) {
-            offset += 1;
-            continue;
-        }
-
-        const marker = buffer[offset + 1];
-        if (marker === 0xd8 || marker === 0xd9) {
-            offset += 2;
-            continue;
-        }
-
-        if (offset + 3 >= buffer.length) return null;
-        const segmentLength = buffer.readUInt16BE(offset + 2);
-        if (segmentLength < 2 || offset + 2 + segmentLength > buffer.length) return null;
-
-        if (sofMarkers.has(marker)) {
-            if (offset + 8 >= buffer.length) return null;
-            const height = buffer.readUInt16BE(offset + 5);
-            const width = buffer.readUInt16BE(offset + 7);
-            return { width, height };
-        }
-
-        offset += 2 + segmentLength;
-    }
-
-    return null;
-}
-
-function extractMenuHeaderLogoDimensions(buffer: Buffer, mimeType: string): { width: number; height: number } | null {
-    if (mimeType === "image/png") return readPngDimensions(buffer);
-    if (mimeType === "image/jpeg") return readJpegDimensions(buffer);
-    return null;
-}
 
 function buildMenuHeaderLogoFilePath(fileName: string) {
     return path.join(MENU_HEADER_LOGO_UPLOAD_DIR, fileName);
@@ -175,10 +113,6 @@ function buildEasterEggFilePath(fileName: string) {
 }
 
 async function persistMenuHeaderLogo(file: File): Promise<{ url: string } | { error: string }> {
-    const extension = MENU_HEADER_LOGO_ALLOWED_TYPES.get(file.type);
-    if (!extension) {
-        return { error: "Formato logo non supportato: usa PNG o JPEG." };
-    }
     if (file.size <= 0) {
         return { error: "File logo vuoto." };
     }
@@ -187,20 +121,15 @@ async function persistMenuHeaderLogo(file: File): Promise<{ url: string } | { er
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const dimensions = extractMenuHeaderLogoDimensions(buffer, file.type);
-    if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) {
-        return { error: "Immagine logo non valida o corrotta." };
-    }
-
-    const ratio = dimensions.width / dimensions.height;
-    if (Math.abs(ratio - MENU_HEADER_LOGO_TARGET_RATIO) > MENU_HEADER_LOGO_RATIO_TOLERANCE) {
-        return { error: "Rapporto logo non valido: richiesto 10:4 (tolleranza ±12%)." };
+    const normalizedUpload = await normalizeMenuHeaderLogoUpload(buffer, file.type);
+    if (!normalizedUpload.success) {
+        return { error: normalizedUpload.error };
     }
 
     try {
         await mkdir(MENU_HEADER_LOGO_UPLOAD_DIR, { recursive: true });
-        const fileName = `menu-header-${Date.now()}-${randomUUID()}.${extension}`;
-        await writeFile(buildMenuHeaderLogoFilePath(fileName), buffer);
+        const fileName = `menu-header-${Date.now()}-${randomUUID()}.png`;
+        await writeFile(buildMenuHeaderLogoFilePath(fileName), normalizedUpload.pngBuffer);
         return { url: `${MENU_HEADER_LOGO_URL_PREFIX}/${fileName}` };
     } catch {
         return { error: "Impossibile salvare il logo sul server. Controlla i permessi o riprova." };
@@ -208,9 +137,6 @@ async function persistMenuHeaderLogo(file: File): Promise<{ url: string } | { er
 }
 
 async function persistReceiptHeaderLogo(file: File): Promise<{ url: string } | { error: string }> {
-    if (!MENU_HEADER_LOGO_ALLOWED_TYPES.has(file.type)) {
-        return { error: "Formato header scontrino non supportato: usa PNG o JPEG." };
-    }
     if (file.size <= 0) {
         return { error: "File header scontrino vuoto." };
     }
@@ -219,43 +145,15 @@ async function persistReceiptHeaderLogo(file: File): Promise<{ url: string } | {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-
-    let adaptedPngBuffer: Buffer;
-    try {
-        const image = sharp(buffer, { failOn: "error" }).rotate();
-        const metadata = await image.metadata();
-        const sourceWidth = Number(metadata.width || 0);
-        const sourceHeight = Number(metadata.height || 0);
-        if (sourceWidth <= 0 || sourceHeight <= 0) {
-            return { error: "Immagine header scontrino non valida o corrotta." };
-        }
-
-        const sourceRatio = sourceWidth / sourceHeight;
-        let targetWidth = sourceWidth;
-        let targetHeight = sourceHeight;
-
-        if (sourceRatio > RECEIPT_HEADER_LOGO_TARGET_RATIO) {
-            targetHeight = Math.max(1, Math.round(sourceWidth / RECEIPT_HEADER_LOGO_TARGET_RATIO));
-        } else if (sourceRatio < RECEIPT_HEADER_LOGO_TARGET_RATIO) {
-            targetWidth = Math.max(1, Math.round(sourceHeight * RECEIPT_HEADER_LOGO_TARGET_RATIO));
-        }
-
-        adaptedPngBuffer = await image
-            .resize(targetWidth, targetHeight, {
-                fit: "contain",
-                position: "center",
-                background: { r: 255, g: 255, b: 255, alpha: 1 }
-            })
-            .png()
-            .toBuffer();
-    } catch {
-        return { error: "Impossibile elaborare l'header scontrino caricato." };
+    const normalizedUpload = await normalizeReceiptHeaderLogoUpload(buffer, file.type);
+    if (!normalizedUpload.success) {
+        return { error: normalizedUpload.error };
     }
 
     try {
         await mkdir(RECEIPT_HEADER_LOGO_UPLOAD_DIR, { recursive: true });
         const fileName = `receipt-header-${Date.now()}-${randomUUID()}.png`;
-        await writeFile(buildReceiptHeaderLogoFilePath(fileName), adaptedPngBuffer);
+        await writeFile(buildReceiptHeaderLogoFilePath(fileName), normalizedUpload.pngBuffer);
         return { url: `${RECEIPT_HEADER_LOGO_URL_PREFIX}/${fileName}` };
     } catch {
         return { error: "Impossibile salvare l'header scontrino sul server. Controlla i permessi o riprova." };
@@ -283,7 +181,7 @@ async function deleteReceiptHeaderLogoIfManaged(url: string | null | undefined) 
 }
 
 async function persistEasterEggImage(file: File): Promise<{ url: string } | { error: string }> {
-    const extension = MENU_HEADER_LOGO_ALLOWED_TYPES.get(file.type);
+    const extension = UPLOAD_IMAGE_ALLOWED_TYPES.get(file.type);
     if (!extension) {
         return { error: "Formato immagine non supportato: usa JPEG o PNG." };
     }
@@ -738,9 +636,22 @@ export async function updateEventSettingsAction(formData: FormData) {
         await deleteReceiptHeaderLogoIfManaged(currentReceiptHeaderLogoUrl);
     }
 
+    const resolvedMenuHeaderLogoUrl = nextMenuHeaderLogoUrl !== null
+        ? nextMenuHeaderLogoUrl
+        : currentMenuHeaderLogoUrl;
+    const resolvedReceiptHeaderLogoUrl = nextReceiptHeaderLogoUrl !== null
+        ? nextReceiptHeaderLogoUrl
+        : currentReceiptHeaderLogoUrl;
+
+    revalidatePath("/admin", "layout");
     revalidatePath("/admin/settings");
     revalidatePath("/admin/settings/events");
-    return { success: true };
+    revalidatePath("/menu");
+    return {
+        success: true,
+        menuHeaderLogoUrl: resolvedMenuHeaderLogoUrl,
+        receiptHeaderLogoUrl: resolvedReceiptHeaderLogoUrl
+    };
 }
 
 export async function cloneEventAction(formData: FormData) {

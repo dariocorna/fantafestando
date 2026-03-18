@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from "react";
 import { CardContent, CardFooter } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,23 @@ const MENU_HEADER_LOGO_ACCEPTED_TYPES = new Set(["image/png", "image/jpeg"]);
 const RECEIPT_HEADER_LOGO_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const RECEIPT_HEADER_LOGO_ACCEPTED_TYPES = new Set(["image/png", "image/jpeg"]);
 
+type SettingsFormEvent = ActiveEventSettingsFormProps["event"];
+
+function resolveInitialPredefinedTables(event: SettingsFormEvent) {
+    return parsePredefinedTablesInput(
+        Array.isArray(event.predefinedTables) ? event.predefinedTables.join("\n") : "",
+        Number.MAX_SAFE_INTEGER
+    );
+}
+
+function resolveInitialQuickDiscountPresets(event: SettingsFormEvent) {
+    return resolveQuickDiscountPresetsFromSettings(event.settings).map((preset) => ({
+        label: preset.label,
+        type: preset.type,
+        value: String(preset.value)
+    }));
+}
+
 export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps) {
     const [isPending, startTransition] = useTransition();
     const [saved, setSaved] = useState(false);
@@ -56,32 +73,51 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
     const [bulkImportValue, setBulkImportValue] = useState("");
     const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
     const [menuHeaderLogoFileError, setMenuHeaderLogoFileError] = useState<string | null>(null);
+    const [menuHeaderLogoCurrentUrl, setMenuHeaderLogoCurrentUrl] = useState<string | null>(event.settings?.menuHeaderLogoUrl || null);
     const [menuHeaderLogoPreviewUrl, setMenuHeaderLogoPreviewUrl] = useState<string | null>(event.settings?.menuHeaderLogoUrl || null);
+    const [menuHeaderLogoSelectedFile, setMenuHeaderLogoSelectedFile] = useState<File | null>(null);
     const [removeMenuHeaderLogo, setRemoveMenuHeaderLogo] = useState(false);
     const [receiptHeaderLogoFileError, setReceiptHeaderLogoFileError] = useState<string | null>(null);
+    const [receiptHeaderLogoCurrentUrl, setReceiptHeaderLogoCurrentUrl] = useState<string | null>(event.settings?.receiptHeaderLogoUrl || null);
     const [receiptHeaderLogoPreviewUrl, setReceiptHeaderLogoPreviewUrl] = useState<string | null>(event.settings?.receiptHeaderLogoUrl || null);
+    const [receiptHeaderLogoSelectedFile, setReceiptHeaderLogoSelectedFile] = useState<File | null>(null);
     const [removeReceiptHeaderLogo, setRemoveReceiptHeaderLogo] = useState(false);
     const previewObjectUrlRef = useRef<string | null>(null);
     const receiptPreviewObjectUrlRef = useRef<string | null>(null);
     const menuHeaderLogoFileInputRef = useRef<HTMLInputElement | null>(null);
     const receiptHeaderLogoFileInputRef = useRef<HTMLInputElement | null>(null);
-    const [predefinedTables, setPredefinedTables] = useState<string[]>(() =>
-        parsePredefinedTablesInput(
-            Array.isArray(event.predefinedTables) ? event.predefinedTables.join("\n") : "",
-            Number.MAX_SAFE_INTEGER
-        )
-    );
+    const hasMountedEventStateRef = useRef(false);
+    const lastEventIdRef = useRef(event._id);
+    const [active, setActive] = useState(event.active);
+    const [askName, setAskName] = useState(event.settings?.askName ?? false);
+    const [askTable, setAskTable] = useState(event.settings?.askTable ?? false);
+    const [portalEasterEggEnabled, setPortalEasterEggEnabled] = useState(event.settings?.portalEasterEggEnabled ?? false);
+    const [posCatalogLayout, setPosCatalogLayout] = useState<"COMPACT_COLUMNS" | "MODERN_TABS">(event.settings?.posCatalogLayout || "COMPACT_COLUMNS");
+    const [predefinedTables, setPredefinedTables] = useState<string[]>(() => resolveInitialPredefinedTables(event));
     const [quickDiscountPresets, setQuickDiscountPresets] = useState<Array<{
         label: string;
         type: QuickDiscountType;
         value: string;
-    }>>(() =>
-        resolveQuickDiscountPresetsFromSettings(event.settings).map((preset) => ({
-            label: preset.label,
-            type: preset.type,
-            value: String(preset.value)
-        }))
-    );
+    }>>(() => resolveInitialQuickDiscountPresets(event));
+
+    const eventSnapshot = useMemo(() => ({
+        eventId: event._id,
+        active: event.active,
+        askName: event.settings?.askName ?? false,
+        askTable: event.settings?.askTable ?? false,
+        portalEasterEggEnabled: event.settings?.portalEasterEggEnabled ?? false,
+        posCatalogLayout: event.settings?.posCatalogLayout || "COMPACT_COLUMNS",
+        menuHeaderLogoUrl: event.settings?.menuHeaderLogoUrl || "",
+        receiptHeaderLogoUrl: event.settings?.receiptHeaderLogoUrl || "",
+        predefinedTables: resolveInitialPredefinedTables(event),
+        quickDiscountPresets: resolveInitialQuickDiscountPresets(event)
+    }), [
+        event._id,
+        event.active,
+        event.predefinedTables,
+        event.settings
+    ]);
+    const eventResetKey = useMemo(() => JSON.stringify(eventSnapshot), [eventSnapshot]);
 
     const predefinedTablesCount = predefinedTables.length;
     const predefinedTablesOverLimit = predefinedTablesCount > MAX_PREDEFINED_TABLES;
@@ -105,19 +141,76 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
         };
     }, []);
 
+    useEffect(() => {
+        if (!hasMountedEventStateRef.current) {
+            hasMountedEventStateRef.current = true;
+            lastEventIdRef.current = eventSnapshot.eventId;
+            return;
+        }
+
+        const didSwitchEvent = lastEventIdRef.current !== eventSnapshot.eventId;
+        lastEventIdRef.current = eventSnapshot.eventId;
+        if (!didSwitchEvent) {
+            return;
+        }
+
+        if (previewObjectUrlRef.current) {
+            URL.revokeObjectURL(previewObjectUrlRef.current);
+            previewObjectUrlRef.current = null;
+        }
+        if (receiptPreviewObjectUrlRef.current) {
+            URL.revokeObjectURL(receiptPreviewObjectUrlRef.current);
+            receiptPreviewObjectUrlRef.current = null;
+        }
+
+        if (menuHeaderLogoFileInputRef.current) {
+            menuHeaderLogoFileInputRef.current.value = "";
+        }
+        if (receiptHeaderLogoFileInputRef.current) {
+            receiptHeaderLogoFileInputRef.current.value = "";
+        }
+
+        setSaved(false);
+        setError(null);
+        setTablesError(null);
+        setNewTableValue("");
+        setBulkImportValue("");
+        setIsBulkImportOpen(false);
+        setActive(eventSnapshot.active);
+        setAskName(eventSnapshot.askName);
+        setAskTable(eventSnapshot.askTable);
+        setPortalEasterEggEnabled(eventSnapshot.portalEasterEggEnabled);
+        setPosCatalogLayout(eventSnapshot.posCatalogLayout);
+        setMenuHeaderLogoFileError(null);
+        setMenuHeaderLogoCurrentUrl(eventSnapshot.menuHeaderLogoUrl || null);
+        setMenuHeaderLogoPreviewUrl(eventSnapshot.menuHeaderLogoUrl || null);
+        setMenuHeaderLogoSelectedFile(null);
+        setRemoveMenuHeaderLogo(false);
+        setReceiptHeaderLogoFileError(null);
+        setReceiptHeaderLogoCurrentUrl(eventSnapshot.receiptHeaderLogoUrl || null);
+        setReceiptHeaderLogoPreviewUrl(eventSnapshot.receiptHeaderLogoUrl || null);
+        setReceiptHeaderLogoSelectedFile(null);
+        setRemoveReceiptHeaderLogo(false);
+        setPredefinedTables(eventSnapshot.predefinedTables);
+        setQuickDiscountPresets(eventSnapshot.quickDiscountPresets);
+    }, [eventResetKey, eventSnapshot]);
+
     const handleMenuHeaderLogoFileChange = async (file: File | null) => {
         setMenuHeaderLogoFileError(null);
         if (!file) {
-            setMenuHeaderLogoPreviewUrl(event.settings?.menuHeaderLogoUrl || null);
+            setMenuHeaderLogoSelectedFile(null);
+            setMenuHeaderLogoPreviewUrl(menuHeaderLogoCurrentUrl);
             return;
         }
 
         if (!MENU_HEADER_LOGO_ACCEPTED_TYPES.has(file.type)) {
+            setMenuHeaderLogoSelectedFile(null);
             setMenuHeaderLogoFileError("Formato non supportato: usa PNG o JPEG.");
             return;
         }
 
         if (file.size > MENU_HEADER_LOGO_MAX_FILE_BYTES) {
+            setMenuHeaderLogoSelectedFile(null);
             setMenuHeaderLogoFileError("File troppo grande: massimo 2MB.");
             return;
         }
@@ -130,6 +223,7 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                 const ratio = image.naturalWidth / image.naturalHeight;
                 if (!Number.isFinite(ratio) || Math.abs(ratio - MENU_HEADER_LOGO_TARGET_RATIO) > MENU_HEADER_LOGO_RATIO_TOLERANCE) {
                     URL.revokeObjectURL(objectUrl);
+                    setMenuHeaderLogoSelectedFile(null);
                     setMenuHeaderLogoFileError("Rapporto immagine non valido: richiesto 10:4 (tolleranza ±12%).");
                     resolve();
                     return;
@@ -139,6 +233,7 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                     URL.revokeObjectURL(previewObjectUrlRef.current);
                 }
                 previewObjectUrlRef.current = objectUrl;
+                setMenuHeaderLogoSelectedFile(file);
                 setMenuHeaderLogoPreviewUrl(objectUrl);
                 setRemoveMenuHeaderLogo(false);
                 resolve();
@@ -146,6 +241,7 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
 
             image.onerror = () => {
                 URL.revokeObjectURL(objectUrl);
+                setMenuHeaderLogoSelectedFile(null);
                 setMenuHeaderLogoFileError("Impossibile leggere l'immagine selezionata.");
                 resolve();
             };
@@ -156,16 +252,19 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
     const handleReceiptHeaderLogoFileChange = async (file: File | null) => {
         setReceiptHeaderLogoFileError(null);
         if (!file) {
-            setReceiptHeaderLogoPreviewUrl(event.settings?.receiptHeaderLogoUrl || null);
+            setReceiptHeaderLogoSelectedFile(null);
+            setReceiptHeaderLogoPreviewUrl(receiptHeaderLogoCurrentUrl);
             return;
         }
 
         if (!RECEIPT_HEADER_LOGO_ACCEPTED_TYPES.has(file.type)) {
+            setReceiptHeaderLogoSelectedFile(null);
             setReceiptHeaderLogoFileError("Formato non supportato: usa PNG o JPEG.");
             return;
         }
 
         if (file.size > RECEIPT_HEADER_LOGO_MAX_FILE_BYTES) {
+            setReceiptHeaderLogoSelectedFile(null);
             setReceiptHeaderLogoFileError("File troppo grande: massimo 2MB.");
             return;
         }
@@ -179,6 +278,7 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                     URL.revokeObjectURL(receiptPreviewObjectUrlRef.current);
                 }
                 receiptPreviewObjectUrlRef.current = objectUrl;
+                setReceiptHeaderLogoSelectedFile(file);
                 setReceiptHeaderLogoPreviewUrl(objectUrl);
                 setRemoveReceiptHeaderLogo(false);
                 resolve();
@@ -186,6 +286,7 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
 
             image.onerror = () => {
                 URL.revokeObjectURL(objectUrl);
+                setReceiptHeaderLogoSelectedFile(null);
                 setReceiptHeaderLogoFileError("Impossibile leggere l'immagine selezionata.");
                 resolve();
             };
@@ -274,7 +375,8 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
         setError(null);
     };
 
-    async function handleSubmit(formData: FormData) {
+    async function handleSubmit(submitEvent: FormEvent<HTMLFormElement>) {
+        submitEvent.preventDefault();
         setSaved(false);
         setError(null);
         if (menuHeaderLogoFileError) {
@@ -285,19 +387,59 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
             setError(receiptHeaderLogoFileError);
             return;
         }
+
+        const formData = new FormData(submitEvent.currentTarget);
+        if (menuHeaderLogoSelectedFile) {
+            formData.set("menuHeaderLogoFile", menuHeaderLogoSelectedFile);
+        }
+        if (receiptHeaderLogoSelectedFile) {
+            formData.set("receiptHeaderLogoFile", receiptHeaderLogoSelectedFile);
+        }
         startTransition(async () => {
             const result = await updateEventSettingsAction(formData);
             if (result?.error) {
                 setError(result.error);
                 return;
             }
+            const nextMenuHeaderLogoUrl = typeof result?.menuHeaderLogoUrl === "string" && result.menuHeaderLogoUrl.trim()
+                ? result.menuHeaderLogoUrl
+                : null;
+            const nextReceiptHeaderLogoUrl = typeof result?.receiptHeaderLogoUrl === "string" && result.receiptHeaderLogoUrl.trim()
+                ? result.receiptHeaderLogoUrl
+                : null;
+
+            if (menuHeaderLogoFileInputRef.current) {
+                menuHeaderLogoFileInputRef.current.value = "";
+            }
+            if (receiptHeaderLogoFileInputRef.current) {
+                receiptHeaderLogoFileInputRef.current.value = "";
+            }
+            if (previewObjectUrlRef.current) {
+                URL.revokeObjectURL(previewObjectUrlRef.current);
+                previewObjectUrlRef.current = null;
+            }
+            if (receiptPreviewObjectUrlRef.current) {
+                URL.revokeObjectURL(receiptPreviewObjectUrlRef.current);
+                receiptPreviewObjectUrlRef.current = null;
+            }
+
+            setMenuHeaderLogoFileError(null);
+            setReceiptHeaderLogoFileError(null);
+            setRemoveMenuHeaderLogo(false);
+            setRemoveReceiptHeaderLogo(false);
+            setMenuHeaderLogoSelectedFile(null);
+            setReceiptHeaderLogoSelectedFile(null);
+            setMenuHeaderLogoCurrentUrl(nextMenuHeaderLogoUrl);
+            setMenuHeaderLogoPreviewUrl(nextMenuHeaderLogoUrl);
+            setReceiptHeaderLogoCurrentUrl(nextReceiptHeaderLogoUrl);
+            setReceiptHeaderLogoPreviewUrl(nextReceiptHeaderLogoUrl);
             setSaved(true);
             setTimeout(() => setSaved(false), 3000);
         });
     }
 
     return (
-        <form action={handleSubmit}>
+        <form onSubmit={handleSubmit} encType="multipart/form-data">
             <input type="hidden" name="eventId" value={String(event._id)} />
             <input type="hidden" name="predefinedTables" value={predefinedTables.join("\n")} />
             <input type="hidden" name="quickDiscountPresets" value={quickDiscountPresetsPayload} />
@@ -308,7 +450,8 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                             type="checkbox"
                             name="active"
                             id="active"
-                            defaultChecked={event.active}
+                            checked={active}
+                            onChange={(inputEvent) => setActive(inputEvent.currentTarget.checked)}
                             className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
                         />
                         <div className="space-y-1 leading-none">
@@ -324,7 +467,8 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                             type="checkbox"
                             name="askName"
                             id="askName"
-                            defaultChecked={event.settings?.askName}
+                            checked={askName}
+                            onChange={(inputEvent) => setAskName(inputEvent.currentTarget.checked)}
                             className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
                         />
                         <div className="space-y-1 leading-none">
@@ -340,7 +484,8 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                             type="checkbox"
                             name="askTable"
                             id="askTable"
-                            defaultChecked={event.settings?.askTable}
+                            checked={askTable}
+                            onChange={(inputEvent) => setAskTable(inputEvent.currentTarget.checked)}
                             className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
                         />
                         <div className="space-y-1 leading-none">
@@ -356,7 +501,8 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                             type="checkbox"
                             name="portalEasterEggEnabled"
                             id="portalEasterEggEnabled"
-                            defaultChecked={event.settings?.portalEasterEggEnabled}
+                            checked={portalEasterEggEnabled}
+                            onChange={(inputEvent) => setPortalEasterEggEnabled(inputEvent.currentTarget.checked)}
                             className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
                         />
                         <div className="space-y-1 leading-none">
@@ -377,8 +523,9 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                         <select
                             id="posCatalogLayout"
                             name="posCatalogLayout"
-                            defaultValue={event.settings?.posCatalogLayout || "COMPACT_COLUMNS"}
+                            value={posCatalogLayout}
                             className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                            onChange={(inputEvent) => setPosCatalogLayout(inputEvent.currentTarget.value as "COMPACT_COLUMNS" | "MODERN_TABS")}
                         >
                             <option value="COMPACT_COLUMNS">Compatto a colonne (attuale)</option>
                             <option value="MODERN_TABS">Moderno con categorie in alto</option>
@@ -420,9 +567,10 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                                             menuHeaderLogoFileInputRef.current.value = "";
                                         }
                                         setMenuHeaderLogoFileError(null);
+                                        setMenuHeaderLogoSelectedFile(null);
                                         setMenuHeaderLogoPreviewUrl(null);
                                     } else {
-                                        setMenuHeaderLogoPreviewUrl(event.settings?.menuHeaderLogoUrl || null);
+                                        setMenuHeaderLogoPreviewUrl(menuHeaderLogoCurrentUrl);
                                     }
                                 }}
                             />
@@ -440,9 +588,9 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                                 </div>
                             </div>
                         ) : null}
-                        {event.settings?.menuHeaderLogoUrl ? (
+                        {menuHeaderLogoCurrentUrl ? (
                             <p className="text-xs text-slate-500">
-                                URL attuale: <code>{event.settings.menuHeaderLogoUrl}</code>
+                                URL attuale: <code>{menuHeaderLogoCurrentUrl}</code>
                             </p>
                         ) : null}
                         {menuHeaderLogoFileError ? (
@@ -485,9 +633,10 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                                             receiptHeaderLogoFileInputRef.current.value = "";
                                         }
                                         setReceiptHeaderLogoFileError(null);
+                                        setReceiptHeaderLogoSelectedFile(null);
                                         setReceiptHeaderLogoPreviewUrl(null);
                                     } else {
-                                        setReceiptHeaderLogoPreviewUrl(event.settings?.receiptHeaderLogoUrl || null);
+                                        setReceiptHeaderLogoPreviewUrl(receiptHeaderLogoCurrentUrl);
                                     }
                                 }}
                             />
@@ -505,9 +654,9 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
                                 </div>
                             </div>
                         ) : null}
-                        {event.settings?.receiptHeaderLogoUrl ? (
+                        {receiptHeaderLogoCurrentUrl ? (
                             <p className="text-xs text-slate-500">
-                                URL attuale: <code>{event.settings.receiptHeaderLogoUrl}</code>
+                                URL attuale: <code>{receiptHeaderLogoCurrentUrl}</code>
                             </p>
                         ) : null}
                         {receiptHeaderLogoFileError ? (
