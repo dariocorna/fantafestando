@@ -185,8 +185,8 @@ test.describe.serial("Portal Easter Egg", () => {
             const publicPage = await publicContext.newPage();
 
             await createMenuOrder(publicPage, productName);
-            await expect(publicPage.getByText(/Funzione opzionale/i)).toHaveCount(0);
-            await expect(publicPage.getByText(/Vuoi aggiungere una foto\?/i)).toHaveCount(0);
+            await expect(publicPage.getByText(/Foto facoltativa/i)).toHaveCount(0);
+            await expect(publicPage.getByText(/Aggiungi una foto all'ordine/i)).toHaveCount(0);
         } finally {
             if (publicContext) {
                 await publicContext.close().catch(() => undefined);
@@ -282,8 +282,8 @@ test.describe.serial("Portal Easter Egg", () => {
 
             const { code } = await createMenuOrder(publicPage, productName);
 
-            await expect(publicPage.getByText(/Vuoi aggiungere una foto\?/i)).toBeVisible({ timeout: 15000 });
-            await expect(publicPage.getByText(/Aggiungi una foto alla comanda/i)).toBeVisible({ timeout: 15000 });
+            await expect(publicPage.getByText(/Foto facoltativa/i)).toBeVisible({ timeout: 15000 });
+            await expect(publicPage.getByText(/Aggiungi una foto all'ordine/i)).toBeVisible({ timeout: 15000 });
 
             await publicPage.getByTestId("menu-easter-egg-file-input").setInputFiles({
                 name: "menu-easter-egg.jpg",

@@ -86,7 +86,7 @@ export function PortalEasterEggMobile({
                 submitLabel="Stampa prova"
                 submittingLabel="Invio stampa..."
                 inputLabel="Foto di test"
-                helpText="La preview è già termica in bianco e nero. I controlli avanzati restano solo qui in area admin per debug resa."
+                helpText="La preview è già in bianco e nero. I controlli avanzati restano solo qui in area admin per debug resa."
                 emptyStateTitle="Nessuna foto caricata"
                 emptyStateDescription="Scatta o scegli una foto per generare localmente il raster termico."
                 captureMode="user"

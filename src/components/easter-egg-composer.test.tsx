@@ -34,7 +34,7 @@ import { EasterEggComposer } from "@/components/easter-egg-composer";
 function renderComposer() {
     return render(
         <EasterEggComposer
-            title="Foto termica per la tua comanda"
+            title="Foto dell'ordine"
             description="Composer test"
             submitLabel="Allega foto all'ordine"
             submittingLabel="Invio allegato..."

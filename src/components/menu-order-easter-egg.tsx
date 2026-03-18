@@ -60,25 +60,25 @@ export function MenuOrderEasterEgg({ orderId }: { orderId: string | null }) {
         <div className="space-y-4">
             <div className="rounded-[30px] border border-[#d9e6f8] bg-white/95 p-5 shadow-[var(--brand-shadow-soft)]">
                 <p className="text-xs font-black uppercase tracking-[0.14em] text-[#8b6800]">
-                    Funzione opzionale
+                    Foto facoltativa
                 </p>
                 <h2 className="font-brand-display mt-2 text-3xl font-black tracking-tight text-[var(--brand-ink)]">
-                    Aggiungi una foto alla comanda
+                    Aggiungi una foto all&apos;ordine
                 </h2>
                 <p className="mt-3 flex items-center gap-2 text-sm font-medium leading-relaxed text-slate-600">
                     <Sparkles className="h-4 w-4" />
-                    Scatta una foto, verifica l&apos;anteprima termica e allegala all&apos;ordine. Verra&apos; stampata in cassa con la comanda al momento della chiusura.
+                    Scatta una foto e allegala all&apos;ordine. Verra&apos; stampata in cassa insieme alla comanda.
                 </p>
             </div>
 
             <EasterEggComposer
-                title="Foto termica per la tua comanda"
+                title="Foto dell'ordine"
                 submitLabel="Allega foto all'ordine"
                 submittingLabel="Invio allegato..."
                 inputLabel="Selfie o foto"
                 helpText="Usa due dita per zoomare e trascina la preview per centrare il soggetto. Puoi inviarne una nuova finché l'ordine è in attesa."
                 emptyStateTitle="Scatta la tua foto"
-                emptyStateDescription="Si aprirà la fotocamera del telefono; vedrai subito l'anteprima termica in bianco e nero."
+                emptyStateDescription="Si aprirà la fotocamera del telefono; vedrai subito la preview in bianco e nero."
                 captureMode="user"
                 testIdPrefix="menu-easter-egg"
                 onSubmitRaster={handleSubmitRaster}
