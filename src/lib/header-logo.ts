@@ -2,6 +2,7 @@ import sharp from "sharp";
 
 export const MENU_HEADER_LOGO_TARGET_RATIO = 10 / 4;
 export const MENU_HEADER_LOGO_RATIO_TOLERANCE = 0.12;
+export const MENU_HEADER_LOGO_MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 export const RECEIPT_HEADER_LOGO_TARGET_RATIO = 10 / 3;
 export const RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH = 512;
 
@@ -69,9 +70,20 @@ export async function normalizeMenuHeaderLogoUpload(
         return { success: false, error: "Rapporto logo non valido: richiesto 10:4 (tolleranza ±12%)." };
     }
 
+    const pngBuffer = await normalizedSource.image
+        .png({ compressionLevel: 9, adaptiveFiltering: true })
+        .toBuffer();
+
+    if (pngBuffer.length > MENU_HEADER_LOGO_MAX_OUTPUT_BYTES) {
+        return {
+            success: false,
+            error: "Logo troppo pesante dopo la normalizzazione: usa un'immagine più semplice o più piccola."
+        };
+    }
+
     return {
         success: true,
-        pngBuffer: await normalizedSource.image.png().toBuffer(),
+        pngBuffer,
         width: normalizedSource.width,
         height: normalizedSource.height
     };
@@ -106,16 +118,18 @@ export async function normalizeReceiptHeaderLogoUpload(
         background: { r: 255, g: 255, b: 255, alpha: 1 }
     });
 
-    const normalizedUploadMetadata = await image.metadata();
-    const normalizedUploadWidth = Number(normalizedUploadMetadata.width || targetWidth);
-    const normalizedUploadHeight = Number(normalizedUploadMetadata.height || targetHeight);
+    const normalizedUploadWidth = targetWidth;
+    const normalizedUploadHeight = targetHeight;
+    let finalWidth = normalizedUploadWidth;
+    let finalHeight = normalizedUploadHeight;
 
-    if (normalizedUploadWidth > RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH) {
-        const scaledHeight = Math.max(
+    if (targetWidth > RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH) {
+        finalWidth = RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH;
+        finalHeight = Math.max(
             1,
-            Math.round(normalizedUploadHeight * (RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH / normalizedUploadWidth))
+            Math.round(normalizedUploadHeight * (finalWidth / normalizedUploadWidth))
         );
-        image = image.resize(RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH, scaledHeight, {
+        image = image.resize(finalWidth, finalHeight, {
             fit: "inside",
             withoutEnlargement: true,
             position: "center"
@@ -127,12 +141,11 @@ export async function normalizeReceiptHeaderLogoUpload(
         .threshold(180)
         .png()
         .toBuffer();
-    const outputMetadata = await sharp(pngBuffer).metadata();
 
     return {
         success: true,
         pngBuffer,
-        width: Number(outputMetadata.width || normalizedUploadWidth),
-        height: Number(outputMetadata.height || normalizedUploadHeight)
+        width: finalWidth,
+        height: finalHeight
     };
 }

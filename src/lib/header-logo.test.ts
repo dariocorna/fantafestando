@@ -1,7 +1,9 @@
+import path from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import {
     MENU_HEADER_LOGO_TARGET_RATIO,
+    MENU_HEADER_LOGO_MAX_OUTPUT_BYTES,
     RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH,
     normalizeMenuHeaderLogoUpload,
     normalizeReceiptHeaderLogoUpload,
@@ -28,6 +30,20 @@ async function createJpeg(width: number, height: number) {
             background: { r: 240, g: 245, b: 250 }
         }
     }).jpeg().toBuffer();
+}
+
+async function createPhotoLikeMenuJpeg(width: number, height: number) {
+    const source = path.join(
+        process.cwd(),
+        "public",
+        "uploads",
+        "WhatsApp Image 2026-03-15 at 15.56.45.jpeg"
+    );
+
+    return await sharp(source)
+        .resize(width, height, { fit: "cover", position: "attention" })
+        .jpeg({ quality: 100 })
+        .toBuffer();
 }
 
 describe("header-logo", () => {
@@ -64,6 +80,23 @@ describe("header-logo", () => {
         expect(metadata.height).toBe(200);
     });
 
+    it("recompresses large menu logo uploads before storing them", async () => {
+        const source = await createPhotoLikeMenuJpeg(2400, 960);
+
+        const result = await normalizeMenuHeaderLogoUpload(source, "image/jpeg");
+        expect(result.success).toBe(true);
+
+        if (!result.success) {
+            return;
+        }
+
+        const metadata = await sharp(result.pngBuffer).metadata();
+        expect(metadata.format).toBe("png");
+        expect(metadata.width).toBe(2400);
+        expect(metadata.height).toBe(960);
+        expect(result.pngBuffer.length).toBeLessThanOrEqual(MENU_HEADER_LOGO_MAX_OUTPUT_BYTES);
+    });
+
     it("rejects menu logos with an invalid aspect ratio", async () => {
         const source = await createPng(600, 600);
 
@@ -75,7 +108,7 @@ describe("header-logo", () => {
     });
 
     it("adapts a receipt header to the 10:3 printable ratio and outputs png", async () => {
-        const source = await createJpeg(300, 300);
+        const source = await createJpeg(90, 90);
 
         const result = await normalizeReceiptHeaderLogoUpload(source, "image/jpeg");
         expect(result.success).toBe(true);
@@ -86,7 +119,7 @@ describe("header-logo", () => {
 
         const metadata = await sharp(result.pngBuffer).metadata();
         expect(metadata.format).toBe("png");
-        expect((metadata.width || 0) / (metadata.height || 1)).toBeCloseTo(RECEIPT_HEADER_LOGO_TARGET_RATIO, 3);
+        expect(result.width / result.height).toBeCloseTo(RECEIPT_HEADER_LOGO_TARGET_RATIO, 3);
     });
 
     it("scales oversized receipt headers down to the printable width", async () => {
@@ -101,8 +134,24 @@ describe("header-logo", () => {
 
         const metadata = await sharp(result.pngBuffer).metadata();
         expect(metadata.format).toBe("png");
-        expect(metadata.width).toBe(RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH);
-        expect(metadata.height).toBe(154);
+        expect(result.width).toBe(RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH);
+        expect(result.height).toBe(154);
+    });
+
+    it("caps receipt headers after padding expands the printable canvas", async () => {
+        const source = await createPng(300, 300);
+
+        const result = await normalizeReceiptHeaderLogoUpload(source, "image/png");
+        expect(result.success).toBe(true);
+
+        if (!result.success) {
+            return;
+        }
+
+        const metadata = await sharp(result.pngBuffer).metadata();
+        expect(metadata.format).toBe("png");
+        expect(result.width).toBe(RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH);
+        expect(result.height).toBe(154);
     });
 
     it("rejects corrupted receipt header payloads", async () => {
