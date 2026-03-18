@@ -379,6 +379,7 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
         submitEvent.preventDefault();
         setSaved(false);
         setError(null);
+        const submittedEventId = eventSnapshot.eventId;
         if (menuHeaderLogoFileError) {
             setError(menuHeaderLogoFileError);
             return;
@@ -397,6 +398,9 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
         }
         startTransition(async () => {
             const result = await updateEventSettingsAction(formData);
+            if (lastEventIdRef.current !== submittedEventId) {
+                return;
+            }
             if (result?.error) {
                 setError(result.error);
                 return;
