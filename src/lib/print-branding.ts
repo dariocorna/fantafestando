@@ -8,6 +8,7 @@ const MENU_HEADER_DIR = path.join(PUBLIC_ROOT, "uploads", "menu-headers");
 const RECEIPT_HEADER_DIR = path.join(PUBLIC_ROOT, "uploads", "receipt-headers");
 const MENU_HEADER_URL_PREFIX = "/uploads/menu-headers/";
 const RECEIPT_HEADER_URL_PREFIX = "/uploads/receipt-headers/";
+const ALLOWED_PRINTABLE_LOGO_EXTENSIONS = new Set([".png", ".jpg", ".jpeg"]);
 
 function normalizeLogoUrl(value: unknown): string | undefined {
     if (typeof value !== "string") return undefined;
@@ -23,7 +24,8 @@ function normalizeLogoUrl(value: unknown): string | undefined {
 
     const inAllowedDir = decoded.startsWith(MENU_HEADER_URL_PREFIX) || decoded.startsWith(RECEIPT_HEADER_URL_PREFIX);
     if (!inAllowedDir) return undefined;
-    if (!decoded.toLowerCase().endsWith(".png")) return undefined;
+    const extension = path.extname(decoded).toLowerCase();
+    if (!ALLOWED_PRINTABLE_LOGO_EXTENSIONS.has(extension)) return undefined;
     if (decoded.includes("\0")) return undefined;
 
     return decoded;
