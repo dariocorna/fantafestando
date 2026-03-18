@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActiveEventSettingsForm } from "./settings-form";
 
@@ -126,5 +126,73 @@ describe("ActiveEventSettingsForm", () => {
         expect(screen.getByText("VIP")).toBeInTheDocument();
         expect(screen.queryByDisplayValue("Staff")).not.toBeInTheDocument();
         expect(screen.getByDisplayValue("Promo")).toBeInTheDocument();
+    });
+
+    it("ignores a stale save response after switching event context", async () => {
+        let resolveAction: ((value: { success: boolean; menuHeaderLogoUrl: string; receiptHeaderLogoUrl: string }) => void) | null = null;
+
+        updateEventSettingsActionMock.mockImplementation(() => new Promise((resolve) => {
+            resolveAction = resolve;
+        }));
+
+        const firstEvent = {
+            _id: "event-a",
+            active: true,
+            predefinedTables: [],
+            settings: {
+                askName: false,
+                askTable: false,
+                portalEasterEggEnabled: false,
+                posCatalogLayout: "MODERN_TABS" as const,
+                menuHeaderLogoUrl: "/uploads/menu-headers/event-a.png",
+                receiptHeaderLogoUrl: "/uploads/receipt-headers/event-a.png",
+                quickDiscountPresets: []
+            }
+        };
+        const secondEvent = {
+            _id: "event-b",
+            active: false,
+            predefinedTables: [],
+            settings: {
+                askName: true,
+                askTable: true,
+                portalEasterEggEnabled: false,
+                posCatalogLayout: "COMPACT_COLUMNS" as const,
+                menuHeaderLogoUrl: "/uploads/menu-headers/event-b.png",
+                receiptHeaderLogoUrl: "/uploads/receipt-headers/event-b.png",
+                quickDiscountPresets: []
+            }
+        };
+
+        const { rerender } = render(<ActiveEventSettingsForm event={firstEvent} />);
+
+        fireEvent.click(screen.getByRole("button", { name: /Salva Impostazioni/i }));
+
+        await waitFor(() => {
+            expect(updateEventSettingsActionMock).toHaveBeenCalledTimes(1);
+        });
+
+        rerender(<ActiveEventSettingsForm event={secondEvent} />);
+
+        await waitFor(() => {
+            expect(screen.getByLabelText(/Layout Catalogo POS/i)).toHaveValue("COMPACT_COLUMNS");
+            expect(screen.getByText("/uploads/menu-headers/event-b.png")).toBeInTheDocument();
+        });
+
+        expect(resolveAction).not.toBeNull();
+        await act(async () => {
+            resolveAction?.({
+                success: true,
+                menuHeaderLogoUrl: "/uploads/menu-headers/saved-a.png",
+                receiptHeaderLogoUrl: "/uploads/receipt-headers/saved-a.png"
+            });
+        });
+
+        expect(screen.getByLabelText(/Layout Catalogo POS/i)).toHaveValue("COMPACT_COLUMNS");
+        expect(screen.getByText("/uploads/menu-headers/event-b.png")).toBeInTheDocument();
+        expect(screen.getByText("/uploads/receipt-headers/event-b.png")).toBeInTheDocument();
+        expect(screen.queryByText("/uploads/menu-headers/saved-a.png")).not.toBeInTheDocument();
+        expect(screen.queryByText("/uploads/receipt-headers/saved-a.png")).not.toBeInTheDocument();
+        expect(screen.queryByText(/Modifiche salvate/i)).not.toBeInTheDocument();
     });
 });
