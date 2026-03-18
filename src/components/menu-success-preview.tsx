@@ -187,18 +187,6 @@ export function MenuSuccessPreview() {
 
                         {showPhotoOption ? (
                             <section id="menu-success-preview-photo" className="scroll-mt-6 space-y-4">
-                                <div className="rounded-[30px] border border-[#d9e6f8] bg-white/95 p-5 shadow-[var(--brand-shadow-soft)]">
-                                    <p className="text-xs font-black uppercase tracking-[0.14em] text-[#8b6800]">
-                                        Funzione opzionale
-                                    </p>
-                                    <h2 className="font-brand-display mt-2 text-3xl font-black tracking-tight text-[var(--brand-ink)]">
-                                        Aggiungi una foto alla comanda
-                                    </h2>
-                                    <p className="mt-3 text-sm font-medium leading-relaxed text-slate-600">
-                                        Qui sotto trovi il composer reale: serve per valutare come si integra visivamente con la schermata finale, senza toccare ancora il flusso produttivo.
-                                    </p>
-                                </div>
-
                                 <EasterEggComposer
                                     title="Foto per la tua comanda"
                                     submitLabel="Simula allega foto"
@@ -211,6 +199,18 @@ export function MenuSuccessPreview() {
                                     testIdPrefix="menu-success-preview"
                                     onSubmitRaster={simulatePhotoAttach}
                                 />
+
+                                <div className="rounded-[30px] border border-[#d9e6f8] bg-white/95 p-5 shadow-[var(--brand-shadow-soft)]">
+                                    <p className="text-xs font-black uppercase tracking-[0.14em] text-[#8b6800]">
+                                        Funzione opzionale
+                                    </p>
+                                    <h2 className="font-brand-display mt-2 text-3xl font-black tracking-tight text-[var(--brand-ink)]">
+                                        Aggiungi una foto alla comanda
+                                    </h2>
+                                    <p className="mt-3 text-sm font-medium leading-relaxed text-slate-600">
+                                        Qui sotto trovi il composer reale: serve per valutare come si integra visivamente con la schermata finale, senza toccare ancora il flusso produttivo.
+                                    </p>
+                                </div>
                             </section>
                         ) : null}
                     </div>
