@@ -8,6 +8,7 @@ const MENU_HEADER_DIR = path.join(PUBLIC_ROOT, "uploads", "menu-headers");
 const RECEIPT_HEADER_DIR = path.join(PUBLIC_ROOT, "uploads", "receipt-headers");
 const MENU_HEADER_URL_PREFIX = "/uploads/menu-headers/";
 const RECEIPT_HEADER_URL_PREFIX = "/uploads/receipt-headers/";
+const RECEIPT_HEADER_MAX_PRINT_CONTENT_WIDTH = 512;
 const ALLOWED_PRINTABLE_LOGO_EXTENSIONS = new Set([".png", ".jpg", ".jpeg"]);
 
 function normalizeLogoUrl(value: unknown): string | undefined {
@@ -99,18 +100,32 @@ export async function preparePrintableLogoPngBufferFromUrl(value: unknown): Prom
         const height = Number(metadata.height || 0);
         if (width <= 0 || height <= 0) return undefined;
 
-        const targetWidth = Math.max(Math.ceil(width / 8) * 8, getThermalPaperWidth());
-        const extraWidth = targetWidth - width;
+        const maxContentWidth = absolutePath.startsWith(RECEIPT_HEADER_DIR)
+            ? RECEIPT_HEADER_MAX_PRINT_CONTENT_WIDTH
+            : getThermalPaperWidth();
+        const resizedWidth = width > maxContentWidth ? maxContentWidth : width;
+        const resizedHeight = width > maxContentWidth
+            ? Math.max(1, Math.round(height * (maxContentWidth / width)))
+            : height;
+        const printableImage = width > maxContentWidth
+            ? image.resize(maxContentWidth, resizedHeight, {
+                fit: "fill",
+                withoutEnlargement: true
+            })
+            : image;
+
+        const targetWidth = Math.max(Math.ceil(resizedWidth / 8) * 8, getThermalPaperWidth());
+        const extraWidth = targetWidth - resizedWidth;
         const leftPadding = Math.floor(extraWidth / 2);
         const rightPadding = extraWidth - leftPadding;
 
-        const normalized = image.extend({
+        const normalized = printableImage.extend({
             top: 0,
             bottom: 0,
             left: leftPadding,
             right: rightPadding,
             background: { r: 255, g: 255, b: 255, alpha: 1 }
-        });
+        }).greyscale().threshold(180);
 
         return await normalized.png().toBuffer();
     } catch {

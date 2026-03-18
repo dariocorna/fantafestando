@@ -3,6 +3,7 @@ import sharp from "sharp";
 export const MENU_HEADER_LOGO_TARGET_RATIO = 10 / 4;
 export const MENU_HEADER_LOGO_RATIO_TOLERANCE = 0.12;
 export const RECEIPT_HEADER_LOGO_TARGET_RATIO = 10 / 3;
+export const RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH = 512;
 
 const HEADER_LOGO_ALLOWED_TYPES = new Map<string, string>([
     ["image/png", "png"],
@@ -99,19 +100,39 @@ export async function normalizeReceiptHeaderLogoUpload(
         targetWidth = Math.max(1, Math.round(normalizedSource.height * RECEIPT_HEADER_LOGO_TARGET_RATIO));
     }
 
-    const pngBuffer = await normalizedSource.image
-        .resize(targetWidth, targetHeight, {
-            fit: "contain",
-            position: "center",
-            background: { r: 255, g: 255, b: 255, alpha: 1 }
-        })
+    let image = normalizedSource.image.resize(targetWidth, targetHeight, {
+        fit: "contain",
+        position: "center",
+        background: { r: 255, g: 255, b: 255, alpha: 1 }
+    });
+
+    const normalizedUploadMetadata = await image.metadata();
+    const normalizedUploadWidth = Number(normalizedUploadMetadata.width || targetWidth);
+    const normalizedUploadHeight = Number(normalizedUploadMetadata.height || targetHeight);
+
+    if (normalizedUploadWidth > RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH) {
+        const scaledHeight = Math.max(
+            1,
+            Math.round(normalizedUploadHeight * (RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH / normalizedUploadWidth))
+        );
+        image = image.resize(RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH, scaledHeight, {
+            fit: "inside",
+            withoutEnlargement: true,
+            position: "center"
+        });
+    }
+
+    const pngBuffer = await image
+        .greyscale()
+        .threshold(180)
         .png()
         .toBuffer();
+    const outputMetadata = await sharp(pngBuffer).metadata();
 
     return {
         success: true,
         pngBuffer,
-        width: targetWidth,
-        height: targetHeight
+        width: Number(outputMetadata.width || normalizedUploadWidth),
+        height: Number(outputMetadata.height || normalizedUploadHeight)
     };
 }

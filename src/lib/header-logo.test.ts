@@ -2,6 +2,7 @@ import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import {
     MENU_HEADER_LOGO_TARGET_RATIO,
+    RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH,
     normalizeMenuHeaderLogoUpload,
     normalizeReceiptHeaderLogoUpload,
     RECEIPT_HEADER_LOGO_TARGET_RATIO
@@ -86,6 +87,22 @@ describe("header-logo", () => {
         const metadata = await sharp(result.pngBuffer).metadata();
         expect(metadata.format).toBe("png");
         expect((metadata.width || 0) / (metadata.height || 1)).toBeCloseTo(RECEIPT_HEADER_LOGO_TARGET_RATIO, 3);
+    });
+
+    it("scales oversized receipt headers down to the printable width", async () => {
+        const source = await createPng(920, 276);
+
+        const result = await normalizeReceiptHeaderLogoUpload(source, "image/png");
+        expect(result.success).toBe(true);
+
+        if (!result.success) {
+            return;
+        }
+
+        const metadata = await sharp(result.pngBuffer).metadata();
+        expect(metadata.format).toBe("png");
+        expect(metadata.width).toBe(RECEIPT_HEADER_LOGO_MAX_PRINT_CONTENT_WIDTH);
+        expect(metadata.height).toBe(154);
     });
 
     it("rejects corrupted receipt header payloads", async () => {

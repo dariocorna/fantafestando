@@ -86,4 +86,28 @@ describe("print-branding", () => {
         expect(metadata.width).toBe(576);
         expect(metadata.height).toBe(4);
     });
+
+    it("downscales oversized receipt headers before padding them to paper width", async () => {
+        const relativeUrl = `/uploads/receipt-headers/test-${Date.now()}.png`;
+        const absolutePath = path.join(process.cwd(), "public", relativeUrl.slice(1));
+        const pngBuffer = await sharp({
+            create: {
+                width: 920,
+                height: 276,
+                channels: 4,
+                background: { r: 0, g: 0, b: 0, alpha: 1 }
+            }
+        }).png().toBuffer();
+
+        await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+        await fs.writeFile(absolutePath, pngBuffer);
+        testFiles.push(absolutePath);
+
+        const normalizedBuffer = await preparePrintableLogoPngBufferFromUrl(relativeUrl);
+        const metadata = await sharp(normalizedBuffer).metadata();
+
+        expect(normalizedBuffer).toBeDefined();
+        expect(metadata.width).toBe(576);
+        expect(metadata.height).toBe(154);
+    });
 });
