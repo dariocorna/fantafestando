@@ -7,6 +7,8 @@ import Printer from "../../src/models/Printer";
 import PosDevice from "../../src/models/PosDevice";
 import Peripheral from "../../src/models/Peripheral";
 import Order from "../../src/models/Order";
+import mongoose from "mongoose";
+import { ensureDbConnection } from "./db";
 
 // ---------------------------------------------------------------------------
 // Unique suffix for test isolation
@@ -91,7 +93,33 @@ export async function createAndActivateEvent(
     }
 
     await page.getByRole("button", { name: /Salva Impostazioni/i }).click();
-    await expect(page.getByText(/Modifiche salvate/i)).toBeVisible();
+    await expect.poll(async () => {
+        await ensureDbConnection();
+        const db = mongoose.connection.db;
+        if (!db) return false;
+
+        const event = await db.collection("events").findOne({ name: eventName }) as ({
+            active?: boolean;
+            settings?: {
+                askName?: boolean;
+                askTable?: boolean;
+                portalEasterEggEnabled?: boolean;
+            };
+            predefinedTables?: string[];
+        } | null);
+
+        if (!event?.active) return false;
+        if (options?.askName !== undefined && Boolean(event.settings?.askName) !== options.askName) return false;
+        if (options?.askTable !== undefined && Boolean(event.settings?.askTable) !== options.askTable) return false;
+        if (options?.portalEasterEggEnabled !== undefined && Boolean(event.settings?.portalEasterEggEnabled) !== options.portalEasterEggEnabled) return false;
+
+        if (options?.predefinedTables?.length) {
+            const savedTables = Array.isArray(event.predefinedTables) ? event.predefinedTables.map((table) => table.trim()) : [];
+            return options.predefinedTables.every((table) => savedTables.includes(table.trim()));
+        }
+
+        return true;
+    }, { timeout: 15000 }).toBe(true);
 }
 
 export async function selectEventContext(page: Page, eventName: string) {
