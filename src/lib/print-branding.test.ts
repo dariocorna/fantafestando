@@ -22,21 +22,21 @@ afterEach(async () => {
 describe("print-branding", () => {
     it("sanitizes only local png menu header paths", () => {
         expect(sanitizeMenuHeaderLogoUrl("/uploads/menu-headers/header.png")).toBe("/uploads/menu-headers/header.png");
-        expect(sanitizeMenuHeaderLogoUrl("/uploads/menu-headers/header.jpg")).toBeUndefined();
+        expect(sanitizeMenuHeaderLogoUrl("/uploads/menu-headers/header.jpg")).toBe("/uploads/menu-headers/header.jpg");
         expect(sanitizeMenuHeaderLogoUrl("https://example.com/logo.png")).toBeUndefined();
         expect(sanitizeMenuHeaderLogoUrl("/uploads/other/logo.png")).toBeUndefined();
     });
 
-    it("sanitizes only local png receipt header paths", () => {
+    it("sanitizes managed receipt header paths including legacy jpg uploads", () => {
         expect(sanitizeReceiptHeaderLogoUrl("/uploads/receipt-headers/header.png")).toBe("/uploads/receipt-headers/header.png");
-        expect(sanitizeReceiptHeaderLogoUrl("/uploads/receipt-headers/header.jpg")).toBeUndefined();
+        expect(sanitizeReceiptHeaderLogoUrl("/uploads/receipt-headers/header.jpg")).toBe("/uploads/receipt-headers/header.jpg");
         expect(sanitizeReceiptHeaderLogoUrl("/uploads/menu-headers/header.png")).toBeUndefined();
     });
 
     it("sanitizes printable paths for menu and receipt headers", () => {
         expect(sanitizePrintableHeaderLogoUrl("/uploads/menu-headers/header.png")).toBe("/uploads/menu-headers/header.png");
         expect(sanitizePrintableHeaderLogoUrl("/uploads/receipt-headers/header.png")).toBe("/uploads/receipt-headers/header.png");
-        expect(sanitizePrintableHeaderLogoUrl("/uploads/menu-headers/header.jpg")).toBeUndefined();
+        expect(sanitizePrintableHeaderLogoUrl("/uploads/menu-headers/header.jpg")).toBe("/uploads/menu-headers/header.jpg");
     });
 
     it("resolves a printable absolute path for existing local file", async () => {

@@ -1,10 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { ensureAdminAuthenticated } from "./utils/auth";
 import {
-    ensureAdminEventContext,
-    createCategoryAndProducts,
+    seedActiveEventWithCatalog,
     uniqueSuffix,
 } from "./utils/fixtures";
+import { cleanupEventArtifactsByName } from "./utils/db";
 
 async function savePosCatalogLayout(page: Page, layout: "COMPACT_COLUMNS" | "MODERN_TABS") {
     await page.goto("/admin/settings");
@@ -45,54 +45,59 @@ test.describe("Layout catalogo POS da impostazioni admin", () => {
         test.skip(isMobile, "Scenario validato su desktop.");
 
         const suffix = uniqueSuffix();
+        const eventName = `POS Layout ${suffix}`;
         const categoryName = `Layout Cat ${suffix}`;
         const productName = `Layout Product ${suffix}`;
         const productShortName = `LYT-${suffix}`;
 
-        await ensureAdminAuthenticated(page, "/admin");
-        await ensureAdminEventContext(page);
-        await createCategoryAndProducts(page, categoryName, [
-            { name: productName, shortName: productShortName, price: "3.50" }
-        ]);
+        try {
+            await seedActiveEventWithCatalog(eventName, categoryName, [
+                { name: productName, shortName: productShortName, price: "3.50" }
+            ]);
 
-        await savePosCatalogLayout(page, "MODERN_TABS");
+            await ensureAdminAuthenticated(page, "/admin");
 
-        const response = await page.request.get("/api/pos/init?channel=pos");
-        expect(response.ok()).toBeTruthy();
-        const payload = await response.json();
-        expect(payload?.event?.settings?.posCatalogLayout).toBe("MODERN_TABS");
+            await savePosCatalogLayout(page, "MODERN_TABS");
 
-        await openPos(page);
-        await expect(page.getByText(/Categoria attiva/i)).toBeVisible();
-        await page.getByRole("button").filter({ hasText: categoryName }).first().click();
-        await expect(page.getByRole("button").filter({ hasText: productShortName }).first()).toBeVisible();
+            const response = await page.request.get("/api/pos/init?channel=pos");
+            expect(response.ok()).toBeTruthy();
+            const payload = await response.json();
+            expect(payload?.event?.settings?.posCatalogLayout).toBe("MODERN_TABS");
 
-        await page.reload();
-        await page.waitForResponse(
-            (r) => r.url().includes("/api/pos/init?channel=pos") && r.ok(),
-            { timeout: 15000 },
-        ).catch(() => null);
-        await closePosSelectorIfVisible(page);
-        await expect(page.getByText(/Categoria attiva/i)).toBeVisible();
-        await page.getByRole("button").filter({ hasText: categoryName }).first().click();
+            await openPos(page);
+            await expect(page.getByText(/Categoria attiva/i)).toBeVisible();
+            await page.getByRole("button").filter({ hasText: categoryName }).first().click();
+            await expect(page.getByRole("button").filter({ hasText: productShortName }).first()).toBeVisible();
 
-        await savePosCatalogLayout(page, "COMPACT_COLUMNS");
+            await page.reload();
+            await page.waitForResponse(
+                (r) => r.url().includes("/api/pos/init?channel=pos") && r.ok(),
+                { timeout: 15000 },
+            ).catch(() => null);
+            await closePosSelectorIfVisible(page);
+            await expect(page.getByText(/Categoria attiva/i)).toBeVisible();
+            await page.getByRole("button").filter({ hasText: categoryName }).first().click();
 
-        const response2 = await page.request.get("/api/pos/init?channel=pos");
-        expect(response2.ok()).toBeTruthy();
-        const payload2 = await response2.json();
-        expect(payload2?.event?.settings?.posCatalogLayout).toBe("COMPACT_COLUMNS");
+            await savePosCatalogLayout(page, "COMPACT_COLUMNS");
 
-        await openPos(page);
-        await expect(page.getByText(/Categoria attiva/i)).toHaveCount(0);
-        await expect(page.getByRole("button").filter({ hasText: productShortName }).first()).toBeVisible();
+            const response2 = await page.request.get("/api/pos/init?channel=pos");
+            expect(response2.ok()).toBeTruthy();
+            const payload2 = await response2.json();
+            expect(payload2?.event?.settings?.posCatalogLayout).toBe("COMPACT_COLUMNS");
 
-        await page.reload();
-        await page.waitForResponse(
-            (r) => r.url().includes("/api/pos/init?channel=pos") && r.ok(),
-            { timeout: 15000 },
-        ).catch(() => null);
-        await closePosSelectorIfVisible(page);
-        await expect(page.getByText(/Categoria attiva/i)).toHaveCount(0);
+            await openPos(page);
+            await expect(page.getByText(/Categoria attiva/i)).toHaveCount(0);
+            await expect(page.getByRole("button").filter({ hasText: productShortName }).first()).toBeVisible();
+
+            await page.reload();
+            await page.waitForResponse(
+                (r) => r.url().includes("/api/pos/init?channel=pos") && r.ok(),
+                { timeout: 15000 },
+            ).catch(() => null);
+            await closePosSelectorIfVisible(page);
+            await expect(page.getByText(/Categoria attiva/i)).toHaveCount(0);
+        } finally {
+            await cleanupEventArtifactsByName(eventName);
+        }
     });
 });

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { ensureAdminAuthenticated } from './utils/auth';
-import { ensureAdminEventContext, uniqueSuffix } from './utils/fixtures';
+import { ensureAdminEventContext, selectEventContext, uniqueSuffix } from './utils/fixtures';
 
 test.describe('Pannello Amministrazione', () => {
     test.beforeEach(async ({ page }) => {
@@ -54,9 +54,7 @@ test.describe('Pannello Amministrazione', () => {
         await expect(dialog).not.toBeVisible();
         await expect(page.getByText(testEventName)).toBeVisible();
 
-        await page.click('[data-testid="admin-event-selector"]');
-        await page.getByRole('option', { name: new RegExp(testEventName) }).click();
-        await expect(page.getByTestId('admin-event-selector')).toContainText(testEventName);
+        await selectEventContext(page, testEventName);
 
         await page.goto('/admin/settings');
         await expect(page.locator('input[name="active"]')).toBeVisible({ timeout: 10000 });
