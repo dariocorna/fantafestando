@@ -292,7 +292,7 @@ export function EasterEggComposer({
             }
             setStatus(result);
         } catch {
-            setStatus({ error: "Impossibile preparare l'immagine per la stampante termica." });
+            setStatus({ error: "Impossibile preparare l'immagine per la stampa." });
         } finally {
             setIsSubmitting(false);
         }
@@ -553,7 +553,7 @@ export function EasterEggComposer({
                                             ? confirmedRasterSignature
                                                 ? "Le modifiche verranno salvate da sole dopo pochi secondi."
                                                 : "La foto viene caricata automaticamente appena pronta."
-                                        : "Scatta o scegli una foto per vedere l'anteprima termica."}
+                                        : "Scatta o scegli una foto per vedere l'anteprima."}
                             </p>
                             <p className="mt-1 text-sm font-medium leading-relaxed text-slate-600">
                                 {isSelectionConfirmed
@@ -607,7 +607,7 @@ export function EasterEggComposer({
                 <div className="space-y-3">
                     <div className="flex items-center justify-between">
                         <div>
-                            <p className="font-bold text-[var(--brand-ink)]">Anteprima termica</p>
+                            <p className="font-bold text-[var(--brand-ink)]">Anteprima</p>
                             <p className="text-xs text-slate-500">
                                 Muovi e zooma direttamente sulla preview. Il colore non viene mai inviato al server.
                             </p>
@@ -690,7 +690,7 @@ export function EasterEggComposer({
                 {showAdvancedControls ? (
                     <div className="grid gap-4 rounded-3xl border border-[#d9e6f8] bg-[#f8fbff] p-4">
                         <div className="space-y-2">
-                            <Label htmlFor={`${testIdPrefix}-brightness`}>Luminosità termica: +{Math.round(processing.brightnessBoost)}</Label>
+                            <Label htmlFor={`${testIdPrefix}-brightness`}>Luminosità: +{Math.round(processing.brightnessBoost)}</Label>
                             <input
                                 id={`${testIdPrefix}-brightness`}
                                 type="range"

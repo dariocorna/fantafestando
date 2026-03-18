@@ -387,7 +387,7 @@ export async function printPortalEasterEggAction(formData: FormData): Promise<Po
         event.settings?.portalEasterEggProcessing
     );
     if (!raster) {
-        return { error: "Impossibile preparare l'immagine per la stampante termica." };
+        return { error: "Impossibile preparare l'immagine per la stampa." };
     }
 
     const printers = await Printer.find({ eventId: scopedEvent.eventId })
