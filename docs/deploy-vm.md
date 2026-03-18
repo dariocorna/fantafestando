@@ -485,6 +485,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yml ps
   - `PRINTER_EMULATOR_START_PORT=19100`
 - Aggiorna `APP_BUILD` a ogni deploy (commit short SHA) per avere in admin la release effettiva.
 - Quando vedi codice vecchio dopo un deploy, esegui `build --no-cache` prima di `up -d`.
+- Il deploy fallisce se le route upload attese non compaiono nel manifest o se gli `URL` attivi per menu/scontrino tornano `404`.
 - Verifica asset PWA pubblicati:
   - `https://fantafestando.ddns.net/manifest-menu.webmanifest`
   - `https://fantafestando.ddns.net/sw-menu.js`
