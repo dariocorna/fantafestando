@@ -66,6 +66,47 @@ function mockProducts() {
     });
 }
 
+function mockProductsWithFixedMenuCollision() {
+    productFindMock
+        .mockReturnValueOnce({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue([
+                    {
+                        _id: "prod-main",
+                        name: "Panino",
+                        basePrice: 7,
+                        kind: "STANDARD",
+                        salesChannels: ["POS", "MENU"],
+                        availableDays: [],
+                        stockQuantity: 0,
+                        isSoldOut: true,
+                    },
+                    {
+                        _id: "menu-1",
+                        name: "Menu panino",
+                        basePrice: 12,
+                        kind: "FIXED_MENU",
+                        salesChannels: ["POS", "MENU"],
+                        availableDays: [],
+                        stockQuantity: null,
+                        isSoldOut: false,
+                        menuComponents: [{ productId: "prod-main", quantity: 1 }]
+                    }
+                ])
+            })
+        })
+        .mockReturnValueOnce({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue([
+                    {
+                        _id: "prod-main",
+                        name: "Panino"
+                    }
+                ])
+            })
+        });
+}
+
 describe("createPublicOrder menu flow", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -145,6 +186,39 @@ describe("createPublicOrder menu flow", () => {
             status: "PENDING",
             easterEggAttachment: undefined
         }));
+        expect(routeOrderToPrintersMock).not.toHaveBeenCalled();
+    });
+
+    test("keeps direct product stock data when the same product is also referenced by a menu", async () => {
+        mockEvent(false);
+        mockProductsWithFixedMenuCollision();
+
+        const result = await createPublicOrder({
+            eventId: "event-1",
+            customer: { name: "Mario" },
+            totalAmount: 19,
+            cart: [
+                {
+                    productId: "prod-main",
+                    snapshotName: "Panino",
+                    quantity: 1,
+                    selectedOptions: []
+                },
+                {
+                    productId: "menu-1",
+                    snapshotName: "Menu panino",
+                    quantity: 1,
+                    selectedOptions: [],
+                    menuSelections: []
+                }
+            ]
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.error).toContain("Scorte insufficienti");
+        }
+        expect(orderCreateMock).not.toHaveBeenCalled();
         expect(routeOrderToPrintersMock).not.toHaveBeenCalled();
     });
 });
