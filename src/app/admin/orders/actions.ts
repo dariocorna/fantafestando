@@ -3,7 +3,11 @@
 import dbConnect from "@/lib/mongoose";
 import { getAdminContextEventId } from "@/lib/events";
 import { ensureAdminSession } from "@/lib/authz";
+import { validateOrderResetConfirmationToken } from "@/lib/order-reset";
 import Order from "@/models/Order";
+import OrderCounter from "@/models/OrderCounter";
+import PrintJob from "@/models/PrintJob";
+import CashSession from "@/models/CashSession";
 import PosDevice from "@/models/PosDevice";
 import "@/models/Peripheral";
 import { PrinterService } from "@/lib/printer";
@@ -93,6 +97,71 @@ export async function reprintOrder(formData: FormData) {
     if (!orderId) return { success: false, error: "Ordine non valido" };
 
     return await reprintOrderById(orderId);
+}
+
+export async function resetEventOrdersAction(formData: FormData): Promise<
+    { success: true; summary: { deletedOrders: number, deletedOrderCounters: number, deletedPrintJobs: number, deletedCashSessions: number } }
+    | { success: false; error: string }
+> {
+    const sessionCheck = await ensureAdminSession()
+    if (!sessionCheck.ok) {
+        return { success: false, error: sessionCheck.error }
+    }
+
+    const rawConfirmationToken = formData.get("confirmationToken")
+    const tokenValidation = validateOrderResetConfirmationToken(
+        typeof rawConfirmationToken === "string" ? rawConfirmationToken : null
+    )
+    if (!tokenValidation.ok) {
+        return { success: false, error: tokenValidation.error }
+    }
+
+    const eventId = await getAdminContextEventId()
+    if (!eventId) {
+        return { success: false, error: "Nessuna festa selezionata nel contesto admin" }
+    }
+
+    try {
+        await dbConnect()
+
+        const orderIds = (await Order.find({ eventId }).select("_id").lean() as Array<{ _id: { toString(): string } | string }>)
+            .map((order) => order._id.toString())
+
+        const printJobClauses: Array<Record<string, unknown>> = [
+            { source: { $in: ["ORDER", "CASH_SESSION"] } }
+        ]
+        if (orderIds.length > 0) {
+            printJobClauses.push({ orderId: { $in: orderIds } })
+        }
+
+        const [
+            deletedOrdersResult,
+            deletedOrderCountersResult,
+            deletedPrintJobsResult,
+            deletedCashSessionsResult
+        ] = await Promise.all([
+            Order.deleteMany({ eventId }),
+            OrderCounter.deleteMany({ eventId, scope: "PUBLIC_ORDER" }),
+            PrintJob.deleteMany({ eventId, $or: printJobClauses }),
+            CashSession.deleteMany({ eventId })
+        ])
+
+        revalidatePath("/admin/orders")
+        revalidatePath("/admin")
+
+        return {
+            success: true,
+            summary: {
+                deletedOrders: deletedOrdersResult.deletedCount || 0,
+                deletedOrderCounters: deletedOrderCountersResult.deletedCount || 0,
+                deletedPrintJobs: deletedPrintJobsResult.deletedCount || 0,
+                deletedCashSessions: deletedCashSessionsResult.deletedCount || 0
+            }
+        }
+    } catch (error) {
+        console.error("Reset ordini festa error:", error)
+        return { success: false, error: "Errore interno durante il reset ordini della festa" }
+    }
 }
 
 export async function stornoPaidOrderById(orderId: string, reason?: string) {
