@@ -16,7 +16,7 @@ import {
     TableHeader,
     TableRow
 } from "@/components/ui/table";
-import { SortableCategoryTable, SortableCategoryRow, DragHandle } from "./sortable-category-table";
+import { SortableCategoryTable } from "./sortable-category-table";
 import { DeleteForm } from "@/components/delete-form";
 import {
     Dialog,
@@ -28,7 +28,6 @@ import {
     DialogFooter
 } from "@/components/ui/dialog";
 import { revalidatePath } from "next/cache";
-import { EditCategoryDialog } from "@/components/edit-category-dialog";
 import { EditProductDialog } from "@/components/edit-product-dialog";
 import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { CreateProductDialog } from "@/components/create-product-dialog";
@@ -49,6 +48,16 @@ import {
     normalizeProductShortName,
     validateProductShortName
 } from "@/lib/product-fields";
+import {
+    normalizeMenuChoiceGroups,
+    normalizeMenuComponents,
+    normalizeProductKind,
+    normalizeSalesChannels,
+    parseJsonArrayInput,
+    parseSalesChannelsInput,
+    type MenuChoiceGroupInput,
+    type MenuComponentInput,
+} from "@/lib/fixed-menu";
 
 function getReferencedId(value: unknown): string | undefined {
     if (!value) return undefined;
@@ -61,6 +70,186 @@ function getReferencedId(value: unknown): string | undefined {
 
 function escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseBasePriceInput(rawValue: FormDataEntryValue | null) {
+    if (typeof rawValue !== "string") return null;
+    const trimmed = rawValue.trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed.replace(/,/g, "."));
+    return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : null;
+}
+
+function formatDirectPrice(product: Pick<IProduct, "kind" | "availableOnlyInMenus" | "basePrice">) {
+    const kind = normalizeProductKind(product.kind);
+    if (kind === "STANDARD" && product.availableOnlyInMenus) {
+        return "Solo menu";
+    }
+    return `${Number(product.basePrice || 0).toFixed(2)} €`;
+}
+
+function formatSalesChannelsLabel(product: Pick<IProduct, "salesChannels">) {
+    const channels = normalizeSalesChannels(product.salesChannels);
+    if (channels.length === 2) return "POS + App";
+    if (channels.includes("POS")) return "Solo POS";
+    if (channels.includes("MENU")) return "Solo App";
+    return "Nascosto";
+}
+
+function formatMenuSummary(product: Pick<IProduct, "kind" | "menuComponents" | "menuChoiceGroups">) {
+    if (normalizeProductKind(product.kind) !== "FIXED_MENU") return "-";
+    const fixedComponents = normalizeMenuComponents(product.menuComponents);
+    const choiceGroups = normalizeMenuChoiceGroups(product.menuChoiceGroups);
+    const parts: string[] = [];
+    if (fixedComponents.length > 0) {
+        parts.push(`${fixedComponents.length} fissi`);
+    }
+    if (choiceGroups.length > 0) {
+        parts.push(`${choiceGroups.length} scelte`);
+    }
+    return parts.length > 0 ? parts.join(" · ") : "Menu vuoto";
+}
+
+async function parseProductPayload(
+    formData: FormData,
+    currentEventId: string | null,
+    options?: { existingProductId?: string }
+) {
+    const submittedEventId = formData.get("eventId") as string | null;
+    const name = ((formData.get("name") as string | null) || "").trim();
+    const shortName = normalizeProductShortName(formData.get("shortName"));
+    const description = normalizeProductDescription(formData.get("description"));
+    const categoryId = (formData.get("categoryId") as string | null)?.trim() || "";
+    const stockQuantity = parseStockQuantityInput(formData.get("stockQuantity") as string | null);
+    const availableDays = parseAvailableDaysInput(formData.get("availableDays") as string | null);
+    const normalizedSubmittedEventId = submittedEventId?.trim();
+    const scopedEventId = currentEventId;
+    const kind = normalizeProductKind(formData.get("kind"));
+    const availableOnlyInMenus = formData.get("availableOnlyInMenus") === "on";
+    const salesChannels = parseSalesChannelsInput(formData.getAll("salesChannels"));
+    const fixedComponents = normalizeMenuComponents(
+        parseJsonArrayInput<MenuComponentInput>(formData.get("menuComponentsJson"))
+    );
+    const choiceGroups = normalizeMenuChoiceGroups(
+        parseJsonArrayInput<MenuChoiceGroupInput>(formData.get("menuChoiceGroupsJson"))
+    );
+    const parsedBasePrice = parseBasePriceInput(formData.get("basePrice"));
+    const shortNameValidationError = validateProductShortName(shortName);
+
+    if (shortNameValidationError) return { error: shortNameValidationError };
+    if (!name || !categoryId || !scopedEventId) return { error: "Dati prodotto non validi" };
+    if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return { error: "Festa non valida" };
+
+    const category = await Category.findOne({ _id: categoryId, eventId: scopedEventId }).select("_id").lean();
+    if (!category) return { error: "Categoria non valida" };
+
+    const existingProduct = await Product.findOne({
+        eventId: scopedEventId,
+        _id: options?.existingProductId ? { $ne: options.existingProductId } : { $exists: true },
+        name: { $regex: new RegExp(`^${escapeRegExp(name)}$`, "i") }
+    }).select("_id").lean();
+    if (existingProduct) {
+        return { error: "Esiste già un prodotto con questo nome" };
+    }
+
+    if (shortName) {
+        const existingShortName = await Product.findOne({
+            eventId: scopedEventId,
+            _id: options?.existingProductId ? { $ne: options.existingProductId } : { $exists: true },
+            shortName: { $regex: new RegExp(`^${escapeRegExp(shortName)}$`, "i") }
+        }).select("_id").lean();
+        if (existingShortName) {
+            return { error: "Esiste già un prodotto con questo nome breve" };
+        }
+    }
+
+    if (kind === "FIXED_MENU" && availableOnlyInMenus) {
+        return { error: "Un menu fisso non può essere marcato come solo menu" };
+    }
+
+    if (!salesChannels.includes("POS") && !salesChannels.includes("MENU")) {
+        return { error: "Seleziona almeno un canale di vendita" };
+    }
+
+    if (kind === "STANDARD" && (fixedComponents.length > 0 || choiceGroups.length > 0)) {
+        return { error: "Un prodotto standard non può contenere componenti o gruppi di scelta" };
+    }
+
+    if (kind === "FIXED_MENU" && fixedComponents.length === 0 && choiceGroups.length === 0) {
+        return { error: "Configura almeno un componente o un gruppo di scelta per il menu" };
+    }
+
+    if (kind === "FIXED_MENU" && parsedBasePrice === null) {
+        return { error: "Il prezzo fisso del menu è obbligatorio" };
+    }
+
+    if (kind === "STANDARD" && !availableOnlyInMenus && parsedBasePrice === null) {
+        return { error: "Prezzo base obbligatorio" };
+    }
+
+    if (kind === "STANDARD" && availableOnlyInMenus && choiceGroups.length > 0) {
+        return { error: "I prodotti solo menu non possono definire gruppi di scelta" };
+    }
+
+    const referencedProductIds = [
+        ...fixedComponents.map((entry) => entry.productId),
+        ...choiceGroups.flatMap((group) => group.options.map((option) => option.productId))
+    ];
+
+    if (kind === "FIXED_MENU" && referencedProductIds.length > 0) {
+        const uniqueReferencedProductIds = [...new Set(referencedProductIds)];
+        const referencedProducts = await Product.find({
+            eventId: scopedEventId,
+            _id: { $in: uniqueReferencedProductIds }
+        }).select("_id kind").lean() as Array<{ _id: string | { toString(): string }, kind?: string }>;
+
+        if (referencedProducts.length !== uniqueReferencedProductIds.length) {
+            return { error: "Alcuni prodotti del menu non sono validi per l'evento corrente" };
+        }
+
+        const referencedKindById = new Map(
+            referencedProducts.map((product) => [product._id.toString(), normalizeProductKind(product.kind)])
+        );
+
+        for (const referencedProductId of uniqueReferencedProductIds) {
+            if (options?.existingProductId && referencedProductId === options.existingProductId) {
+                return { error: "Un menu non può includere se stesso" };
+            }
+            if (referencedKindById.get(referencedProductId) === "FIXED_MENU") {
+                return { error: "In questa versione un menu non può includere un altro menu" };
+            }
+        }
+    }
+
+    for (const group of choiceGroups) {
+        if (group.options.length === 0) {
+            return { error: `Il gruppo ${group.name} non contiene opzioni` };
+        }
+        if (group.maxSelections < 1 || group.minSelections < 0 || group.minSelections > group.maxSelections) {
+            return { error: `Il gruppo ${group.name} ha vincoli di scelta non validi` };
+        }
+    }
+
+    return {
+        success: true as const,
+        payload: {
+            name,
+            shortName,
+            description,
+            categoryId,
+            kind,
+            basePrice: kind === "FIXED_MENU"
+                ? parsedBasePrice || 0
+                : (availableOnlyInMenus ? (parsedBasePrice || 0) : (parsedBasePrice || 0)),
+            availableOnlyInMenus: kind === "STANDARD" ? availableOnlyInMenus : false,
+            salesChannels,
+            stockQuantity,
+            availableDays,
+            menuComponents: kind === "FIXED_MENU" ? fixedComponents : [],
+            menuChoiceGroups: kind === "FIXED_MENU" ? choiceGroups : [],
+            isSoldOut: stockQuantity !== null ? stockQuantity <= 0 : false,
+        }
+    };
 }
 
 export default async function AdminCatalog() {
@@ -127,54 +316,15 @@ export default async function AdminCatalog() {
         const sessionCheck = await ensureAdminSession();
         if (!sessionCheck.ok) return { error: sessionCheck.error };
 
-        const submittedEventId = formData.get("eventId") as string | null;
-        const name = ((formData.get("name") as string | null) || "").trim();
-        const shortName = normalizeProductShortName(formData.get("shortName"));
-        const description = normalizeProductDescription(formData.get("description"));
-        const categoryId = formData.get("categoryId") as string;
-        const basePrice = parseFloat(formData.get("basePrice") as string);
-        const stockQuantity = parseStockQuantityInput(formData.get("stockQuantity") as string | null);
-        const availableDays = parseAvailableDaysInput(formData.get("availableDays") as string | null);
-        const normalizedSubmittedEventId = submittedEventId?.trim();
-        const scopedEventId = currentEventId;
-
-        const shortNameValidationError = validateProductShortName(shortName);
-        if (shortNameValidationError) return { error: shortNameValidationError };
-        if (!name || !categoryId || isNaN(basePrice) || !scopedEventId) return { error: "Dati prodotto non validi" };
-        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return { error: "Festa non valida" };
-
         await dbConnect();
-        const category = await Category.findOne({ _id: categoryId, eventId: scopedEventId }).select("_id").lean();
-        if (!category) return { error: "Categoria non valida" };
-
-        const existingProduct = await Product.findOne({
-            eventId: scopedEventId,
-            name: { $regex: new RegExp(`^${escapeRegExp(name)}$`, "i") }
-        }).select("_id").lean();
-        if (existingProduct) {
-            return { error: "Esiste già un prodotto con questo nome" };
-        }
-
-        if (shortName) {
-            const existingShortName = await Product.findOne({
-                eventId: scopedEventId,
-                shortName: { $regex: new RegExp(`^${escapeRegExp(shortName)}$`, "i") }
-            }).select("_id").lean();
-            if (existingShortName) {
-                return { error: "Esiste già un prodotto con questo nome breve" };
-            }
+        const parsed = await parseProductPayload(formData, currentEventId);
+        if (!parsed.success) {
+            return { error: parsed.error };
         }
 
         await Product.create({
-            name,
-            shortName,
-            description,
-            categoryId,
-            basePrice,
-            eventId: scopedEventId,
-            isSoldOut: stockQuantity !== null ? stockQuantity <= 0 : false,
-            stockQuantity,
-            availableDays,
+            ...parsed.payload,
+            eventId: currentEventId,
             variants: []
         });
         revalidatePath("/admin/catalog");
@@ -275,61 +425,47 @@ export default async function AdminCatalog() {
         const sessionCheck = await ensureAdminSession();
         if (!sessionCheck.ok) return { error: sessionCheck.error };
 
-        const submittedEventId = formData.get("eventId") as string | null;
         const id = formData.get("id") as string;
-        const name = ((formData.get("name") as string | null) || "").trim();
-        const shortName = normalizeProductShortName(formData.get("shortName"));
-        const description = normalizeProductDescription(formData.get("description"));
-        const categoryId = formData.get("categoryId") as string;
-        const basePrice = parseFloat(formData.get("basePrice") as string);
-        const stockQuantity = parseStockQuantityInput(formData.get("stockQuantity") as string | null);
-        const availableDays = parseAvailableDaysInput(formData.get("availableDays") as string | null);
-        const normalizedSubmittedEventId = submittedEventId?.trim();
-        const scopedEventId = currentEventId;
-        const shortNameValidationError = validateProductShortName(shortName);
-        if (shortNameValidationError) return { error: shortNameValidationError };
-        if (!id || !name || !categoryId || isNaN(basePrice) || !scopedEventId) return { error: "Dati prodotto non validi" };
-        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return { error: "Festa non valida" };
+        if (!id || !currentEventId) return { error: "Dati prodotto non validi" };
 
         await dbConnect();
-        const category = await Category.findOne({ _id: categoryId, eventId: scopedEventId }).select("_id").lean();
-        if (!category) return { error: "Categoria non valida" };
-
-        if (shortName) {
-            const existingShortName = await Product.findOne({
-                eventId: scopedEventId,
-                _id: { $ne: id },
-                shortName: { $regex: new RegExp(`^${escapeRegExp(shortName)}$`, "i") }
-            }).select("_id").lean();
-            if (existingShortName) {
-                return { error: "Esiste già un prodotto con questo nome breve" };
-            }
+        const existingProduct = await Product.findOne({ _id: id, eventId: currentEventId }).select("kind").lean() as ({ kind?: string } | null);
+        if (!existingProduct) {
+            return { error: "Prodotto non trovato" };
+        }
+        const parsed = await parseProductPayload(formData, currentEventId, { existingProductId: id });
+        if (!parsed.success) {
+            return { error: parsed.error };
         }
 
         const updateSet: Record<string, unknown> = {
-            name,
-            categoryId,
-            basePrice,
-            stockQuantity,
-            isSoldOut: stockQuantity !== null ? stockQuantity <= 0 : false,
-            availableDays
+            name: parsed.payload.name,
+            categoryId: parsed.payload.categoryId,
+            basePrice: parsed.payload.basePrice,
+            kind: parsed.payload.kind,
+            availableOnlyInMenus: parsed.payload.availableOnlyInMenus,
+            salesChannels: parsed.payload.salesChannels,
+            stockQuantity: parsed.payload.stockQuantity,
+            isSoldOut: parsed.payload.isSoldOut,
+            availableDays: parsed.payload.availableDays,
+            menuComponents: parsed.payload.menuComponents,
+            menuChoiceGroups: parsed.payload.menuChoiceGroups,
+            ...(parsed.payload.shortName ? { shortName: parsed.payload.shortName } : {}),
+            ...(parsed.payload.description ? { description: parsed.payload.description } : {})
         };
-        const updateUnset: Record<string, 1> = {};
+        const updateUnset: Record<string, 1> = {
+            ...(parsed.payload.shortName ? {} : { shortName: 1 }),
+            ...(parsed.payload.description ? {} : { description: 1 }),
+        };
 
-        if (shortName) {
-            updateSet.shortName = shortName;
-        } else {
-            updateUnset.shortName = 1;
-        }
-
-        if (description) {
-            updateSet.description = description;
-        } else {
-            updateUnset.description = 1;
+        if (parsed.payload.kind === "FIXED_MENU" || parsed.payload.availableOnlyInMenus) {
+            updateSet.variants = [];
+        } else if (normalizeProductKind(existingProduct.kind) === "FIXED_MENU") {
+            updateSet.variants = [];
         }
 
         await Product.findOneAndUpdate(
-            { _id: id, eventId: scopedEventId },
+            { _id: id, eventId: currentEventId },
             {
                 $set: updateSet,
                 ...(Object.keys(updateUnset).length > 0 ? { $unset: updateUnset } : {})
@@ -356,6 +492,9 @@ export default async function AdminCatalog() {
         if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
 
         await dbConnect();
+        const product = await Product.findOne({ _id: productId, eventId: scopedEventId }).select("kind availableOnlyInMenus").lean() as ({ kind?: string, availableOnlyInMenus?: boolean } | null);
+        if (!product) return;
+        if (normalizeProductKind(product.kind) !== "STANDARD" || Boolean(product.availableOnlyInMenus)) return;
         await Product.findOneAndUpdate({ _id: productId, eventId: scopedEventId }, {
             $push: { variants: { optionName, priceVariation, stockQuantity } }
         });
@@ -429,6 +568,11 @@ export default async function AdminCatalog() {
                     <CreateProductDialog
                         eventId={currentEventId}
                         categories={categories.map((c: ICategory) => ({ id: String(c._id), name: c.name }))}
+                        products={products.map((p: IProduct) => ({
+                            id: String(p._id),
+                            name: p.name,
+                            kind: normalizeProductKind(p.kind)
+                        }))}
                         createAction={createProduct}
                     />
                 </div>
@@ -438,9 +582,12 @@ export default async function AdminCatalog() {
                             <TableHead>Nome</TableHead>
                             <TableHead>Nome breve</TableHead>
                             <TableHead>Categoria</TableHead>
+                            <TableHead>Tipo</TableHead>
+                            <TableHead>Canali</TableHead>
                             <TableHead>Prezzo</TableHead>
                             <TableHead>Scorte</TableHead>
                             <TableHead>Disponibilità</TableHead>
+                            <TableHead>Menu</TableHead>
                             <TableHead>Varianti</TableHead>
                             <TableHead className="w-[120px]">Azioni</TableHead>
                         </TableRow>
@@ -451,7 +598,17 @@ export default async function AdminCatalog() {
                                 <TableCell className="font-medium">{p.name}</TableCell>
                                 <TableCell className="font-medium text-slate-600">{p.shortName || "-"}</TableCell>
                                 <TableCell>{(p.categoryId as unknown as ICategory)?.name || "N/A"}</TableCell>
-                                <TableCell>{p.basePrice.toFixed(2)} €</TableCell>
+                                <TableCell>
+                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
+                                        {normalizeProductKind(p.kind) === "FIXED_MENU" ? "Menu fisso" : "Standard"}
+                                    </span>
+                                </TableCell>
+                                <TableCell>
+                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
+                                        {formatSalesChannelsLabel(p)}
+                                    </span>
+                                </TableCell>
+                                <TableCell>{formatDirectPrice(p)}</TableCell>
                                 <TableCell>
                                     <span
                                         className={`rounded-full px-2 py-1 text-xs font-bold ${getStockStatus(p.stockQuantity, p.isSoldOut) === "OUT"
@@ -471,24 +628,44 @@ export default async function AdminCatalog() {
                                 </TableCell>
                                 <TableCell>
                                     <div className="flex flex-wrap gap-1">
-                                        {p.variants?.map((v, idx) => (
-                                            <span key={idx} className="text-[10px] bg-slate-100 dark:bg-slate-800 px-1 rounded flex items-center gap-1 group">
-                                                <span>
-                                                    {v.optionName} ({v.priceVariation >= 0 ? '+' : ''}{v.priceVariation}€)
-                                                    {" · "}
-                                                    {getStockLabel(v.stockQuantity, false)}
-                                                </span>
-                                                <form action={removeVariant} className="flex items-center">
-                                                    <input type="hidden" name="productId" value={String(p._id)} />
-                                                    <input type="hidden" name="eventId" value={currentEventId} />
-                                                    <input type="hidden" name="optionName" value={v.optionName} />
-                                                    <button type="submit" className="text-red-500 hover:bg-red-200 rounded-full cursor-pointer ml-1 p-0.5 opacity-50 group-hover:opacity-100 transition-opacity">
-                                                        <X className="h-3 w-3" />
-                                                    </button>
-                                                </form>
+                                        {Boolean(p.availableOnlyInMenus) ? (
+                                            <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-700">
+                                                Solo menu
                                             </span>
-                                        ))}
+                                        ) : null}
+                                        {normalizeProductKind(p.kind) === "FIXED_MENU" ? (
+                                            <span className="rounded-full bg-sky-100 px-2 py-1 text-[10px] font-bold text-sky-700">
+                                                {formatMenuSummary(p)}
+                                            </span>
+                                        ) : (
+                                            <span className="text-xs text-slate-400">-</span>
+                                        )}
                                     </div>
+                                </TableCell>
+                                <TableCell>
+                                    {normalizeProductKind(p.kind) === "STANDARD" && !Boolean(p.availableOnlyInMenus) ? (
+                                        <div className="flex flex-wrap gap-1">
+                                            {p.variants?.map((v, idx) => (
+                                                <span key={idx} className="text-[10px] bg-slate-100 dark:bg-slate-800 px-1 rounded flex items-center gap-1 group">
+                                                    <span>
+                                                        {v.optionName} ({v.priceVariation >= 0 ? '+' : ''}{v.priceVariation}€)
+                                                        {" · "}
+                                                        {getStockLabel(v.stockQuantity, false)}
+                                                    </span>
+                                                    <form action={removeVariant} className="flex items-center">
+                                                        <input type="hidden" name="productId" value={String(p._id)} />
+                                                        <input type="hidden" name="eventId" value={currentEventId} />
+                                                        <input type="hidden" name="optionName" value={v.optionName} />
+                                                        <button type="submit" className="text-red-500 hover:bg-red-200 rounded-full cursor-pointer ml-1 p-0.5 opacity-50 group-hover:opacity-100 transition-opacity">
+                                                            <X className="h-3 w-3" />
+                                                        </button>
+                                                    </form>
+                                                </span>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <span className="text-xs text-slate-400">Non applicabili</span>
+                                    )}
                                 </TableCell>
                                 <TableCell className="flex gap-2">
                                     <EditProductDialog
@@ -500,55 +677,67 @@ export default async function AdminCatalog() {
                                             categoryId: getReferencedId(p.categoryId) || "",
                                             basePrice: p.basePrice,
                                             stockQuantity: p.stockQuantity ?? null,
-                                            availableDays: normalizeAvailableDays(p.availableDays)
+                                            availableDays: normalizeAvailableDays(p.availableDays),
+                                            kind: normalizeProductKind(p.kind),
+                                            availableOnlyInMenus: Boolean(p.availableOnlyInMenus),
+                                            salesChannels: normalizeSalesChannels(p.salesChannels),
+                                            menuComponents: normalizeMenuComponents(p.menuComponents),
+                                            menuChoiceGroups: normalizeMenuChoiceGroups(p.menuChoiceGroups),
                                         }}
                                         eventId={currentEventId}
                                         categories={categories.map((c: ICategory) => ({ id: String(c._id), name: c.name }))}
+                                        products={products.map((entry: IProduct) => ({
+                                            id: String(entry._id),
+                                            name: entry.name,
+                                            kind: normalizeProductKind(entry.kind)
+                                        }))}
                                         updateAction={updateProduct}
                                     />
-                                    <Dialog>
-                                        <DialogTrigger asChild>
-                                            <Button variant="outline" size="icon" className="h-7 w-7" title="Aggiungi Variante">
-                                                <span className="font-bold">+</span>
-                                            </Button>
-                                        </DialogTrigger>
-                                        <DialogContent>
-                                            <form action={addVariant}>
-                                                <input type="hidden" name="productId" value={String(p._id)} />
-                                                <input type="hidden" name="eventId" value={currentEventId} />
-                                                <DialogHeader>
-                                                    <DialogTitle>Gestisci Varianti per {p.name}</DialogTitle>
-                                                    <DialogDescription>
-                                                        Aggiungi una nuova opzione variante con prezzo e scorte dedicate.
-                                                    </DialogDescription>
-                                                </DialogHeader>
-                                                <div className="grid gap-4 py-4">
-                                                    <div className="grid gap-2">
-                                                        <Label htmlFor="optionName">Nome Opzione</Label>
-                                                        <Input name="optionName" placeholder="Extra Formaggio..." required />
+                                    {normalizeProductKind(p.kind) === "STANDARD" && !Boolean(p.availableOnlyInMenus) ? (
+                                        <Dialog>
+                                            <DialogTrigger asChild>
+                                                <Button variant="outline" size="icon" className="h-7 w-7" title="Aggiungi Variante">
+                                                    <span className="font-bold">+</span>
+                                                </Button>
+                                            </DialogTrigger>
+                                            <DialogContent>
+                                                <form action={addVariant}>
+                                                    <input type="hidden" name="productId" value={String(p._id)} />
+                                                    <input type="hidden" name="eventId" value={currentEventId} />
+                                                    <DialogHeader>
+                                                        <DialogTitle>Gestisci Varianti per {p.name}</DialogTitle>
+                                                        <DialogDescription>
+                                                            Aggiungi una nuova opzione variante con prezzo e scorte dedicate.
+                                                        </DialogDescription>
+                                                    </DialogHeader>
+                                                    <div className="grid gap-4 py-4">
+                                                        <div className="grid gap-2">
+                                                            <Label htmlFor="optionName">Nome Opzione</Label>
+                                                            <Input name="optionName" placeholder="Extra Formaggio..." required />
+                                                        </div>
+                                                        <div className="grid gap-2">
+                                                            <Label htmlFor="priceVariation">Varianza Prezzo (€)</Label>
+                                                            <Input name="priceVariation" type="number" step="0.01" placeholder="1.00" required />
+                                                        </div>
+                                                        <div className="grid gap-2">
+                                                            <Label htmlFor="stockQuantity">Scorte Variante</Label>
+                                                            <Input
+                                                                name="stockQuantity"
+                                                                type="number"
+                                                                min="0"
+                                                                step="1"
+                                                                inputMode="numeric"
+                                                                placeholder="Illimitato"
+                                                            />
+                                                        </div>
                                                     </div>
-                                                    <div className="grid gap-2">
-                                                        <Label htmlFor="priceVariation">Varianza Prezzo (€)</Label>
-                                                        <Input name="priceVariation" type="number" step="0.01" placeholder="1.00" required />
-                                                    </div>
-                                                    <div className="grid gap-2">
-                                                        <Label htmlFor="stockQuantity">Scorte Variante</Label>
-                                                        <Input
-                                                            name="stockQuantity"
-                                                            type="number"
-                                                            min="0"
-                                                            step="1"
-                                                            inputMode="numeric"
-                                                            placeholder="Illimitato"
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <DialogFooter>
-                                                    <Button type="submit">Aggiungi Variante</Button>
-                                                </DialogFooter>
-                                            </form>
-                                        </DialogContent>
-                                    </Dialog>
+                                                    <DialogFooter>
+                                                        <Button type="submit">Aggiungi Variante</Button>
+                                                    </DialogFooter>
+                                                </form>
+                                            </DialogContent>
+                                        </Dialog>
+                                    ) : null}
 
                                     <DeleteForm
                                         id={String(p._id)}

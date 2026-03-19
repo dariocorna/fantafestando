@@ -1,5 +1,8 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 
+export type ProductKind = "STANDARD" | "FIXED_MENU";
+export type SalesChannel = "POS" | "MENU";
+
 export interface IProduct extends Document {
     eventId: Types.ObjectId;
     categoryId: Types.ObjectId;
@@ -7,9 +10,26 @@ export interface IProduct extends Document {
     shortName?: string;
     description?: string;
     basePrice: number;
+    kind: ProductKind;
+    availableOnlyInMenus: boolean;
+    salesChannels: SalesChannel[];
     isSoldOut: boolean;
     stockQuantity: number | null;
     availableDays: string[];
+    menuComponents: Array<{
+        productId: Types.ObjectId;
+        quantity: number;
+    }>;
+    menuChoiceGroups: Array<{
+        id: string;
+        name: string;
+        minSelections: number;
+        maxSelections: number;
+        options: Array<{
+            productId: Types.ObjectId;
+            quantity: number;
+        }>;
+    }>;
     variants: Array<{
         optionName: string;
         priceVariation: number;
@@ -24,9 +44,30 @@ const ProductSchema = new Schema<IProduct>({
     shortName: { type: String, trim: true, maxlength: 24 },
     description: { type: String, trim: true },
     basePrice: { type: Number, required: true },
+    kind: { type: String, enum: ["STANDARD", "FIXED_MENU"], default: "STANDARD" },
+    availableOnlyInMenus: { type: Boolean, default: false },
+    salesChannels: {
+        type: [String],
+        enum: ["POS", "MENU"],
+        default: ["POS", "MENU"]
+    },
     isSoldOut: { type: Boolean, default: false },
     stockQuantity: { type: Number, default: null, min: 0 },
     availableDays: { type: [String], default: [] },
+    menuComponents: [{
+        productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
+        quantity: { type: Number, required: true, min: 1, default: 1 }
+    }],
+    menuChoiceGroups: [{
+        id: { type: String, required: true, trim: true },
+        name: { type: String, required: true, trim: true },
+        minSelections: { type: Number, required: true, min: 0, default: 1 },
+        maxSelections: { type: Number, required: true, min: 1, default: 1 },
+        options: [{
+            productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
+            quantity: { type: Number, required: true, min: 1, default: 1 }
+        }]
+    }],
     variants: [{
         optionName: { type: String, required: true },
         priceVariation: { type: Number, required: true },

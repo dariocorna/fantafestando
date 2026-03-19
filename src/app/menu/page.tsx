@@ -31,6 +31,9 @@ import { storePendingEasterEggUpload } from "./easter-egg-upload-storage"
 import { storeRecentOrderSummary } from "./recent-order-storage"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
 import { type StockShortage } from "@/lib/inventory"
+import { FixedMenuConfigDialog, type FixedMenuChoiceGroupDto, type FixedMenuComponentDto } from "@/components/fixed-menu-config-dialog"
+import { buildMenuConfigurationKey, type MenuSelectionInput } from "@/lib/fixed-menu"
+import { type StoredMenuCartItem } from "./cart-storage"
 
 interface Product {
     _id: string
@@ -38,6 +41,10 @@ interface Product {
     description?: string
     basePrice: number
     categoryId: string
+    kind?: "STANDARD" | "FIXED_MENU"
+    requiresConfiguration?: boolean
+    menuComponents?: FixedMenuComponentDto[]
+    menuChoiceGroups?: FixedMenuChoiceGroupDto[]
     variants?: { optionName: string; priceVariation: number }[]
 }
 
@@ -47,9 +54,7 @@ interface Category {
     uiColor?: string
 }
 
-interface CartItem extends Product {
-    quantity: number
-}
+type CartItem = StoredMenuCartItem
 
 interface ActiveEventSummary {
     _id: string
@@ -76,6 +81,7 @@ export default function CustomerMenu() {
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [checkoutError, setCheckoutError] = useState<string | null>(null)
     const [checkoutShortages, setCheckoutShortages] = useState<StockShortage[]>([])
+    const [configuringProduct, setConfiguringProduct] = useState<Product | null>(null)
 
     const normalizedTableValue = normalizeTableValue(tableNumber)
     const tableValueValid = isTableValueValid(tableNumber)
@@ -88,7 +94,7 @@ export default function CustomerMenu() {
 
     useEffect(() => {
         const fetchData = async () => {
-            const res = await fetch('/api/pos/init', { cache: "no-store" })
+            const res = await fetch('/api/pos/init?channel=menu', { cache: "no-store" })
             const data = await res.json()
             if (data.event) {
                 setActiveEvent({
@@ -109,27 +115,54 @@ export default function CustomerMenu() {
     const totalItems = cart.reduce((acc, item) => acc + item.quantity, 0)
     const totalPrice = cart.reduce((acc, item) => acc + (item.basePrice * item.quantity), 0)
 
-    const addToCart = (product: Product) => {
-        const exists = cart.find(i => i._id === product._id)
+    const addConfiguredToCart = (
+        product: Product,
+        options?: {
+            menuSelections?: MenuSelectionInput[]
+            selectedOptionLabels?: string[]
+        }
+    ) => {
+        const configurationKey = buildMenuConfigurationKey(options?.menuSelections || [])
+        const lineId = configurationKey ? `${product._id}:${configurationKey}` : product._id
+        const exists = cart.find((item) => item.lineId === lineId)
         const nextCart = exists
-            ? cart.map(i => i._id === product._id ? { ...i, quantity: i.quantity + 1 } : i)
-            : [...cart, { ...product, quantity: 1 }]
+            ? cart.map((item) => item.lineId === lineId ? { ...item, quantity: item.quantity + 1 } : item)
+            : [...cart, {
+                lineId,
+                _id: product._id,
+                name: product.name,
+                description: product.description,
+                categoryId: product.categoryId,
+                basePrice: product.basePrice,
+                quantity: 1,
+                kind: product.kind || "STANDARD",
+                selectedOptions: options?.selectedOptionLabels || [],
+                menuSelections: options?.menuSelections || [],
+            }]
 
         writeStoredMenuCart(nextCart, activeEvent?._id || null)
     }
 
-    const removeFromCart = (productId: string) => {
-        const exists = cart.find(i => i._id === productId)
+    const addToCart = (product: Product) => {
+        if (product.requiresConfiguration) {
+            setConfiguringProduct(product)
+            return
+        }
+        addConfiguredToCart(product)
+    }
+
+    const removeFromCart = (lineId: string) => {
+        const exists = cart.find((item) => item.lineId === lineId)
         const nextCart = exists && exists.quantity > 1
-            ? cart.map(i => i._id === productId ? { ...i, quantity: i.quantity - 1 } : i)
-            : cart.filter(i => i._id !== productId)
+            ? cart.map((item) => item.lineId === lineId ? { ...item, quantity: item.quantity - 1 } : item)
+            : cart.filter((item) => item.lineId !== lineId)
 
         writeStoredMenuCart(nextCart, activeEvent?._id || null)
     }
 
-    const deleteFromCart = (productId: string) => {
+    const deleteFromCart = (lineId: string) => {
         writeStoredMenuCart(
-            cart.filter(i => i._id !== productId),
+            cart.filter((item) => item.lineId !== lineId),
             activeEvent?._id || null,
         )
     }
@@ -159,7 +192,11 @@ export default function CustomerMenu() {
                 productId: item._id,
                 snapshotName: item.name,
                 quantity: item.quantity,
-                selectedOptions: []
+                selectedOptions: (item.selectedOptions || []).map((option) => ({
+                    name: option,
+                    priceVariation: 0
+                })),
+                menuSelections: item.menuSelections || []
             }))
         })
 
@@ -279,7 +316,10 @@ export default function CustomerMenu() {
                                 {products
                                     .filter(p => p.categoryId === cat._id)
                                     .map(product => {
-                                        const cartQuantity = cart.find(i => i._id === product._id)?.quantity || 0
+                                        const cartQuantity = cart
+                                            .filter((item) => item._id === product._id)
+                                            .reduce((sum, item) => sum + item.quantity, 0)
+                                        const requiresConfiguration = Boolean(product.requiresConfiguration)
                                         return (
                                             <div
                                                 key={product._id}
@@ -292,16 +332,53 @@ export default function CustomerMenu() {
                                                             {product.description}
                                                         </p>
                                                     ) : null}
+                                                    {Array.isArray(product.menuComponents) && product.menuComponents.length > 0 ? (
+                                                        <p className="mt-2 text-xs font-semibold text-slate-500">
+                                                            Include: {product.menuComponents.map((component) => `${component.quantity > 1 ? `${component.quantity}x ` : ""}${component.name}`).join(" • ")}
+                                                        </p>
+                                                    ) : null}
+                                                    {Array.isArray(product.menuChoiceGroups) && product.menuChoiceGroups.length > 0 ? (
+                                                        <div className="mt-2 flex flex-wrap gap-2">
+                                                            {product.menuChoiceGroups.map((group) => (
+                                                                <span key={group.id} className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">
+                                                                    {group.name}: scegli {group.minSelections === group.maxSelections ? group.minSelections : `${group.minSelections}-${group.maxSelections}`}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    ) : null}
                                                     <div className="mt-3 text-lg font-black" style={{ color: catTheme.base }}>
                                                         {product.basePrice.toFixed(2)} €
                                                     </div>
                                                 </div>
 
                                                 <div className="ml-3 flex flex-col items-center gap-2">
-                                                    {cartQuantity > 0 ? (
+                                                    {requiresConfiguration ? (
+                                                        <>
+                                                            <button
+                                                                onClick={() => setConfiguringProduct(product)}
+                                                                className="rounded-2xl border px-4 py-2 text-sm font-black transition-colors"
+                                                                style={{
+                                                                    backgroundColor: catTheme.softBg,
+                                                                    color: catTheme.base,
+                                                                    borderColor: catTheme.border
+                                                                }}
+                                                            >
+                                                                Configura
+                                                            </button>
+                                                            {cartQuantity > 0 ? (
+                                                                <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-black text-slate-700">
+                                                                    {cartQuantity} nel carrello
+                                                                </span>
+                                                            ) : null}
+                                                        </>
+                                                    ) : cartQuantity > 0 ? (
                                                         <div className="flex items-center gap-2 rounded-full bg-slate-100 p-1">
                                                             <button
-                                                                onClick={(e) => { e.stopPropagation(); removeFromCart(product._id); }}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    const firstLine = cart.find((item) => item._id === product._id);
+                                                                    if (firstLine) removeFromCart(firstLine.lineId);
+                                                                }}
                                                                 className="flex h-8 w-8 items-center justify-center rounded-full bg-white"
                                                                 style={{ color: catTheme.base }}
                                                             >
@@ -353,6 +430,29 @@ export default function CustomerMenu() {
                     </a>
                 </div>
             </footer>
+
+            {configuringProduct ? (
+                <FixedMenuConfigDialog
+                    open
+                    onOpenChange={(nextOpen) => {
+                        if (!nextOpen) setConfiguringProduct(null)
+                    }}
+                    product={{
+                        _id: configuringProduct._id,
+                        name: configuringProduct.name,
+                        basePrice: configuringProduct.basePrice,
+                        menuComponents: configuringProduct.menuComponents || [],
+                        menuChoiceGroups: configuringProduct.menuChoiceGroups || []
+                    }}
+                    onConfirm={(result) => {
+                        addConfiguredToCart(configuringProduct, {
+                            menuSelections: result.menuSelections,
+                            selectedOptionLabels: result.selectedOptionLabels
+                        })
+                        setConfiguringProduct(null)
+                    }}
+                />
+            ) : null}
 
             {/* Floating Cart CTA — solo conteggio, no prezzo */}
             <AnimatePresence>
@@ -406,31 +506,49 @@ export default function CustomerMenu() {
                             {/* Lista articoli con +/- e rimozione */}
                             <div className="space-y-3">
                                 {cart.map(item => (
-                                    <div key={item._id} className="flex items-center justify-between gap-3">
+                                    <div key={item.lineId} className="flex items-center justify-between gap-3">
                                         <div className="flex items-center gap-2">
                                             <div className="flex items-center gap-1 rounded-full bg-slate-100 p-0.5">
                                                 <button
-                                                    onClick={() => removeFromCart(item._id)}
+                                                    onClick={() => removeFromCart(item.lineId)}
                                                     className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-slate-600"
                                                 >
                                                     <Minus size={14} />
                                                 </button>
                                                 <span className="w-6 text-center text-sm font-black text-slate-800">{item.quantity}</span>
                                                 <button
-                                                    onClick={() => addToCart(item)}
+                                                    onClick={() => addConfiguredToCart({
+                                                        _id: item._id,
+                                                        name: item.name,
+                                                        description: item.description,
+                                                        basePrice: item.basePrice,
+                                                        categoryId: item.categoryId || "",
+                                                        kind: item.kind,
+                                                        requiresConfiguration: false,
+                                                    }, {
+                                                        menuSelections: item.menuSelections || [],
+                                                        selectedOptionLabels: item.selectedOptions || []
+                                                    })}
                                                     className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--brand-blue-700)] text-white"
                                                 >
                                                     <Plus size={14} />
                                                 </button>
                                             </div>
-                                            <span className="text-base font-bold text-slate-800">{item.name}</span>
+                                            <div>
+                                                <span className="text-base font-bold text-slate-800">{item.name}</span>
+                                                {Array.isArray(item.selectedOptions) && item.selectedOptions.length > 0 ? (
+                                                    <p className="text-xs font-semibold text-slate-500">
+                                                        {item.selectedOptions.join(" • ")}
+                                                    </p>
+                                                ) : null}
+                                            </div>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <span className="font-black text-slate-800">{(item.basePrice * item.quantity).toFixed(2)} €</span>
                                             <MenuCartDeleteDialog
                                                 itemName={item.name}
                                                 quantity={item.quantity}
-                                                onConfirm={() => deleteFromCart(item._id)}
+                                                onConfirm={() => deleteFromCart(item.lineId)}
                                             />
                                         </div>
                                     </div>

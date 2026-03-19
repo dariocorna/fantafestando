@@ -11,6 +11,13 @@ import { getCurrentDayCode, isProductAvailableToday } from "@/lib/product-availa
 import { getStockStatus } from "@/lib/inventory";
 import { resolveQuickDiscountPresetsFromSettings, toLegacyQuickDiscountSettings } from "@/lib/quick-discount-presets";
 import { normalizePosCatalogLayout } from "@/lib/pos-catalog-layout";
+import {
+    collectReferencedProductIds,
+    isProductVisibleInChannel,
+    normalizeProductKind,
+    normalizeSalesChannels,
+    productRequiresMenuConfiguration,
+} from "@/lib/fixed-menu";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -39,12 +46,21 @@ export async function GET(request: NextRequest) {
         const products = await Product.find({ eventId: event._id })
             .sort({ name: 1 })
             .lean();
+        const referencedProductIds = [...new Set(products.flatMap((product) => collectReferencedProductIds(product)))]
+        const referencedProducts = referencedProductIds.length > 0
+            ? await Product.find({
+                eventId: event._id,
+                _id: { $in: referencedProductIds }
+            }).select("_id name").lean()
+            : []
+        const referencedProductById = new Map(referencedProducts.map((product) => [String(product._id), product]))
         const currentDayCode = getCurrentDayCode("Europe/Rome");
         const dayAvailableProducts = products.filter((product) =>
             isProductAvailableToday((product as { availableDays?: string[] }).availableDays || [], currentDayCode)
         );
         const availableProducts = dayAvailableProducts
             .filter((product) => {
+                if (!isProductVisibleInChannel(product, channel === "pos" ? "POS" : "MENU")) return false
                 if (channel === "pos") return true;
                 const stockStatus = getStockStatus(
                     (product as { stockQuantity?: number | null }).stockQuantity ?? null,
@@ -54,10 +70,60 @@ export async function GET(request: NextRequest) {
             })
             .map((product) => ({
                 ...product,
+                kind: normalizeProductKind((product as { kind?: string }).kind),
+                salesChannels: normalizeSalesChannels((product as { salesChannels?: string[] }).salesChannels),
                 stockStatus: getStockStatus(
                     (product as { stockQuantity?: number | null }).stockQuantity ?? null,
                     Boolean((product as { isSoldOut?: boolean }).isSoldOut)
-                )
+                ),
+                requiresConfiguration: productRequiresMenuConfiguration(product),
+                menuComponents: Array.isArray((product as { menuComponents?: Array<{ productId?: unknown, quantity?: number }> }).menuComponents)
+                    ? ((product as { menuComponents?: Array<{ productId?: unknown, quantity?: number }> }).menuComponents || [])
+                        .map((component) => {
+                            const productId = String(component.productId || "")
+                            const referenced = referencedProductById.get(productId) as ({ name?: string } | undefined)
+                            return {
+                                productId,
+                                quantity: Number(component.quantity || 1),
+                                name: referenced?.name || "Prodotto"
+                            }
+                        })
+                    : [],
+                menuChoiceGroups: Array.isArray((product as {
+                    menuChoiceGroups?: Array<{
+                        id?: string
+                        name?: string
+                        minSelections?: number
+                        maxSelections?: number
+                        options?: Array<{ productId?: unknown, quantity?: number }>
+                    }>
+                }).menuChoiceGroups)
+                    ? ((product as {
+                        menuChoiceGroups?: Array<{
+                            id?: string
+                            name?: string
+                            minSelections?: number
+                            maxSelections?: number
+                            options?: Array<{ productId?: unknown, quantity?: number }>
+                        }>
+                    }).menuChoiceGroups || []).map((group, index) => ({
+                        id: group.id || `group-${index + 1}`,
+                        name: group.name || `Scelta ${index + 1}`,
+                        minSelections: Number(group.minSelections || 0),
+                        maxSelections: Number(group.maxSelections || 1),
+                        options: Array.isArray(group.options)
+                            ? group.options.map((option) => {
+                                const productId = String(option.productId || "")
+                                const referenced = referencedProductById.get(productId) as ({ name?: string } | undefined)
+                                return {
+                                    productId,
+                                    quantity: Number(option.quantity || 1),
+                                    name: referenced?.name || "Prodotto"
+                                }
+                            }).filter((option) => option.productId)
+                            : []
+                    }))
+                    : []
             }));
         const availableCategoryIds = new Set(
             availableProducts.map((product) => String((product as { categoryId: unknown }).categoryId))

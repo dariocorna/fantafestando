@@ -97,11 +97,24 @@ export async function POST(req: NextRequest) {
             const preferredMode: StockMode = (order as { stockOverrideApproved?: boolean }).stockOverrideApproved ? "override" : "strict"
             let appliedAdjustmentsToRollback: StockAdjustment[] = []
 
-            const cartPayload = order.cart.map((item: { productId: string | { toString(): string }, quantity: number, snapshotName: string, selectedOptions?: Array<{ name: string, priceVariation: number }> }) => ({
+            const cartPayload = order.cart.map((item: {
+                productId: string | { toString(): string }
+                quantity: number
+                snapshotName: string
+                selectedOptions?: Array<{ name: string, priceVariation: number }>
+                includedComponents?: Array<{ productId: string | { toString(): string }, snapshotName: string, quantity: number }>
+            }) => ({
                 productId: item.productId.toString(),
                 snapshotName: item.snapshotName,
                 quantity: item.quantity,
-                selectedOptions: item.selectedOptions || []
+                selectedOptions: item.selectedOptions || [],
+                includedComponents: Array.isArray(item.includedComponents)
+                    ? item.includedComponents.map((component) => ({
+                        productId: component.productId.toString(),
+                        snapshotName: component.snapshotName,
+                        quantity: component.quantity
+                    }))
+                    : []
             }))
 
             const stockResult = await applyStockForPaidOrder(
