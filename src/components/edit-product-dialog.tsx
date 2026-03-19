@@ -422,8 +422,12 @@ export function EditProductDialog({
                                     ) : null}
                                     {menuChoiceGroups.map((group, groupIndex) => (
                                         <div key={group.id} className="space-y-3 rounded-md border p-3">
-                                            <div className="grid gap-2 md:grid-cols-[1fr_110px_110px_auto]">
+                                            <div className="space-y-2">
+                                                <Label htmlFor={`menu-choice-group-name-edit-${group.id}`} className="text-xs font-medium text-muted-foreground">
+                                                    Nome gruppo
+                                                </Label>
                                                 <Input
+                                                    id={`menu-choice-group-name-edit-${group.id}`}
                                                     value={group.name}
                                                     onChange={(event) => {
                                                         const nextValue = event.target.value;
@@ -431,6 +435,8 @@ export function EditProductDialog({
                                                     }}
                                                     placeholder="Es: Bibita"
                                                 />
+                                            </div>
+                                            <div className="grid gap-2 md:grid-cols-[110px_110px_auto]">
                                                 <Input
                                                     type="number"
                                                     min="0"
