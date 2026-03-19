@@ -121,10 +121,13 @@ export async function createPublicOrder(data: {
             }>
             : []
         referencedProducts.forEach((product) => {
-            productById.set(String(product._id), {
-                _id: product._id,
-                name: product.name || "Prodotto"
-            })
+            const productId = String(product._id)
+            if (!productById.has(productId)) {
+                productById.set(productId, {
+                    _id: product._id,
+                    name: product.name || "Prodotto"
+                })
+            }
         })
         const hasUnavailableProducts = data.cart.some((item) => {
             const product = productById.get(item.productId)
