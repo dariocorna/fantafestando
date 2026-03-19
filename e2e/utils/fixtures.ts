@@ -7,8 +7,6 @@ import Printer from "../../src/models/Printer";
 import PosDevice from "../../src/models/PosDevice";
 import Peripheral from "../../src/models/Peripheral";
 import Order from "../../src/models/Order";
-import mongoose from "mongoose";
-import { ensureDbConnection } from "./db";
 
 // ---------------------------------------------------------------------------
 // Unique suffix for test isolation
@@ -27,128 +25,68 @@ export interface CreateEventOptions {
     portalEasterEggEnabled?: boolean;
 }
 
+const ADMIN_COOKIE_URL = "http://127.0.0.1:3000";
+
+export async function createActiveEventDirect(
+    eventName: string,
+    options?: CreateEventOptions,
+) {
+    await dbConnect();
+
+    await Event.updateMany({ active: true }, { $set: { active: false } });
+
+    const event = await Event.create({
+        name: eventName,
+        active: true,
+        archived: false,
+        settings: {
+            askName: options?.askName ?? false,
+            askTable: options?.askTable ?? false,
+            portalEasterEggEnabled: options?.portalEasterEggEnabled ?? false,
+        },
+        predefinedTables: options?.predefinedTables ?? [],
+    });
+
+    return {
+        eventId: String(event._id),
+    };
+}
+
+export async function setAdminEventContextCookie(page: Page, eventId: string) {
+    await page.context().addCookies([{
+        name: "admin_festa_id",
+        value: eventId,
+        url: ADMIN_COOKIE_URL,
+    }]);
+}
+
 export async function createAndActivateEvent(
     page: Page,
     eventName: string,
     options?: CreateEventOptions,
 ) {
-    await page.goto("/admin/settings/events");
-
-    await page.click("#new-event-btn");
-    const dialog = page.getByRole("dialog");
-    await dialog.locator("#name").fill(eventName);
-    await dialog.getByRole("button", { name: "Salva", exact: true }).click();
-
-    await expect(dialog).toBeHidden();
-    await expect(page.getByText(eventName)).toBeVisible();
-
-    const eventSelector = page.getByTestId("admin-event-selector");
-    await expect(eventSelector).toBeVisible({ timeout: 15000 });
-    await expect(eventSelector).toBeEnabled({ timeout: 15000 });
-    await eventSelector.click();
-
-    // Wait for the Server Action response and the subsequent router refresh
-    await Promise.all([
-        page.waitForResponse(r => r.url().includes("/admin") && r.status() === 200),
-        page.getByRole("option", { name: new RegExp(eventName) }).click()
-    ]);
-
-    await page.waitForLoadState("domcontentloaded").catch(() => undefined);
-
-    // Wait for the transition to finish by checking if the selector is enabled again
-    await expect(page.getByTestId("admin-event-selector")).not.toBeDisabled({ timeout: 15000 });
-    await expect(page.getByTestId("admin-event-selector")).toContainText(eventName, { timeout: 15000 });
-
-    // Give a small buffer and verify the cookie is actually set
-    const cookies = await page.context().cookies();
-    if (!cookies.some(c => c.name === "admin_festa_id")) {
-        await page.waitForTimeout(500);
-    }
-
-    await page.goto("/admin/settings");
-    const activeCheckbox = page.locator('input[name="active"]');
-    await expect(activeCheckbox).toBeVisible();
-    if (!(await activeCheckbox.isChecked())) {
-        await activeCheckbox.check();
-    }
-
-
-    if (options?.askTable !== undefined) {
-        const cb = page.locator('input[name="askTable"]');
-        if (options.askTable && !(await cb.isChecked())) await cb.check();
-        if (!options.askTable && (await cb.isChecked())) await cb.uncheck();
-    }
-
-    if (options?.askName !== undefined) {
-        const cb = page.locator('input[name="askName"]');
-        if (options.askName && !(await cb.isChecked())) await cb.check();
-        if (!options.askName && (await cb.isChecked())) await cb.uncheck();
-    }
-
-    if (options?.portalEasterEggEnabled !== undefined) {
-        const cb = page.locator('input[name="portalEasterEggEnabled"]');
-        if (options.portalEasterEggEnabled && !(await cb.isChecked())) await cb.check();
-        if (!options.portalEasterEggEnabled && (await cb.isChecked())) await cb.uncheck();
-    }
-
-    if (options?.predefinedTables?.length) {
-        await page.getByRole("button", { name: /Importa Elenco/i }).click();
-        await page.locator("#bulk-predefined-tables").fill(options.predefinedTables.join("\n"));
-        await page.getByRole("button", { name: /Importa in Lista/i }).click();
-    }
-
-    await page.getByRole("button", { name: /Salva Impostazioni/i }).click();
-    await expect.poll(async () => {
-        await ensureDbConnection();
-        const db = mongoose.connection.db;
-        if (!db) return false;
-
-        const event = await db.collection("events").findOne({ name: eventName }) as ({
-            active?: boolean;
-            settings?: {
-                askName?: boolean;
-                askTable?: boolean;
-                portalEasterEggEnabled?: boolean;
-            };
-            predefinedTables?: string[];
-        } | null);
-
-        if (!event?.active) return false;
-        if (options?.askName !== undefined && Boolean(event.settings?.askName) !== options.askName) return false;
-        if (options?.askTable !== undefined && Boolean(event.settings?.askTable) !== options.askTable) return false;
-        if (options?.portalEasterEggEnabled !== undefined && Boolean(event.settings?.portalEasterEggEnabled) !== options.portalEasterEggEnabled) return false;
-
-        if (options?.predefinedTables?.length) {
-            const savedTables = Array.isArray(event.predefinedTables) ? event.predefinedTables.map((table) => table.trim()) : [];
-            return options.predefinedTables.every((table) => savedTables.includes(table.trim()));
-        }
-
-        return true;
-    }, { timeout: 15000 }).toBe(true);
+    const { eventId } = await createActiveEventDirect(eventName, options);
+    await setAdminEventContextCookie(page, eventId);
+    await page.goto("/admin/settings", { waitUntil: "domcontentloaded" });
+    await expect(page.getByText(new RegExp(`Impostazioni Festa: ${eventName}`))).toBeVisible({ timeout: 15000 });
 }
 
 export async function selectEventContext(page: Page, eventName: string) {
+    await dbConnect();
+    const event = await Event.findOne({ name: eventName, archived: { $ne: true } }).select("_id").lean<{ _id: string } | null>();
+    expect(event?._id).toBeTruthy();
+
+    await setAdminEventContextCookie(page, String(event!._id));
+
+    const currentUrl = page.url();
+    const targetPath = currentUrl.startsWith(ADMIN_COOKIE_URL)
+        ? `${new URL(currentUrl).pathname}${new URL(currentUrl).search}`
+        : "/admin";
+
+    await page.goto(targetPath, { waitUntil: "domcontentloaded" });
     const selector = page.getByTestId("admin-event-selector");
-    await expect(selector).toBeVisible({ timeout: 15000 });
-    await expect(selector).toBeEnabled({ timeout: 15000 });
-    await selector.click();
-    const escapedName = eventName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-    // Wait for the Server Action response and the subsequent router refresh
-    await Promise.all([
-        page.waitForResponse(r => r.url().includes("/admin") && r.status() === 200),
-        page.getByRole("option", { name: new RegExp(`^${escapedName}(\\s+\\(Attiva\\))?$`) }).click()
-    ]);
-
-    await page.waitForLoadState("domcontentloaded").catch(() => undefined);
-
-    await expect(selector).not.toBeDisabled({ timeout: 15000 });
-    await expect(selector).toContainText(eventName, { timeout: 15000 });
-
-    // Give a small buffer and verify the cookie is actually set
-    const cookies = await page.context().cookies();
-    if (!cookies.some(c => c.name === "admin_festa_id")) {
-        await page.waitForTimeout(500);
+    if (await selector.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await expect(selector).toContainText(eventName, { timeout: 15000 });
     }
 }
 
@@ -359,24 +297,10 @@ export async function createActiveEventWithCatalogDirect(
     products: ProductDef[],
     options?: CreateEventOptions,
 ) {
-    await dbConnect();
-
-    await Event.updateMany({ active: true }, { $set: { active: false } });
-
-    const event = await Event.create({
-        name: eventName,
-        active: true,
-        archived: false,
-        settings: {
-            askName: options?.askName ?? false,
-            askTable: options?.askTable ?? false,
-            portalEasterEggEnabled: options?.portalEasterEggEnabled ?? false,
-        },
-        predefinedTables: options?.predefinedTables ?? [],
-    });
+    const { eventId } = await createActiveEventDirect(eventName, options);
 
     const category = await Category.create({
-        eventId: event._id,
+        eventId,
         name: categoryName,
         uiColor: "#2563eb",
         printOrder: 0,
@@ -384,7 +308,7 @@ export async function createActiveEventWithCatalogDirect(
 
     await Product.insertMany(
         products.map((product) => ({
-            eventId: event._id,
+            eventId,
             categoryId: category._id,
             name: product.name,
             shortName: product.shortName,
@@ -398,8 +322,38 @@ export async function createActiveEventWithCatalogDirect(
     );
 
     return {
-        eventId: String(event._id),
+        eventId,
         categoryId: String(category._id),
+    };
+}
+
+export async function createVirtualPrinterDirect(options: {
+    eventName: string;
+    printerName: string;
+    type?: "CASHIER" | "KITCHEN";
+    emulatorSlot?: number;
+}) {
+    await dbConnect();
+
+    const event = await Event.findOne({ name: options.eventName }).select("_id").lean<{ _id: string } | null>();
+    expect(event?._id).toBeTruthy();
+
+    const emulatorSlot = options.emulatorSlot ?? 1;
+    const port = 19100 + (emulatorSlot - 1);
+
+    const printer = await Printer.create({
+        eventId: event!._id,
+        name: options.printerName,
+        ip: "127.0.0.1",
+        port,
+        isVirtual: true,
+        emulatorSlot,
+        type: options.type ?? "CASHIER",
+    });
+
+    return {
+        printerId: String(printer._id),
+        eventId: String(event!._id),
     };
 }
 
@@ -585,18 +539,8 @@ export async function ensureAdminEventContext(page: Page) {
 
 
     const eventName = `Auto Event ${uniqueSuffix()}`;
-    await page.goto("/admin/settings/events");
-    await page.click("#new-event-btn");
-    const dialog = page.getByRole("dialog");
-    await dialog.locator("#name").fill(eventName);
-    await dialog.getByRole("button", { name: "Salva", exact: true }).click();
-    await expect(dialog).toBeHidden();
-
-    await page.goto("/admin");
-    await page.click('[data-testid="admin-event-selector"]');
-    await Promise.all([
-        page.waitForResponse(r => r.url().includes("/admin") && r.status() === 200),
-        page.getByRole("option", { name: new RegExp(eventName) }).click()
-    ]);
+    const { eventId } = await createActiveEventDirect(eventName);
+    await setAdminEventContextCookie(page, eventId);
+    await page.goto("/admin", { waitUntil: "domcontentloaded" });
     await expect(selector).not.toContainText("Seleziona Festa");
 }

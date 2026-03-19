@@ -140,7 +140,9 @@ test.describe("Admin Event Settings Logos", () => {
             await expect(page.locator('input[name="askName"]')).toBeChecked();
             await expect(page.locator('input[name="askTable"]')).not.toBeChecked();
 
-            await page.locator('input[name="portalEasterEggEnabled"]').check();
+            await expect(page.getByRole("button", { name: /Salva Impostazioni/i })).toBeEnabled();
+            await page.getByText("Abilita Easter Egg foto").click();
+            await expect(page.locator('input[name="portalEasterEggEnabled"]')).toBeChecked();
             await page.getByRole("button", { name: /Salva Impostazioni/i }).click();
             await expect(page.getByText(/Modifiche salvate!/i)).toBeVisible();
 

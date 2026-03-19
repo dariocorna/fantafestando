@@ -53,7 +53,13 @@ function mockProducts() {
             lean: vi.fn().mockResolvedValue([
                 {
                     _id: "prod-1",
-                    name: "Panino"
+                    name: "Panino",
+                    basePrice: 7,
+                    kind: "STANDARD",
+                    salesChannels: ["POS", "MENU"],
+                    availableDays: [],
+                    stockQuantity: null,
+                    isSoldOut: false,
                 }
             ])
         })
