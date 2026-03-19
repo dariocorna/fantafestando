@@ -64,7 +64,7 @@ export function CreateCategoryDialog({
                     <DialogHeader>
                         <DialogTitle>Aggiungi Categoria</DialogTitle>
                         <DialogDescription>
-                            Crea una nuova categoria prodotto e associa eventuale stampante reparto.
+                            Crea una nuova categoria prodotto, associa eventuale stampante reparto e scegli se escluderla dalla stampa comanda.
                         </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
@@ -112,6 +112,14 @@ export function CreateCategoryDialog({
                                 ))}
                             </select>
                         </div>
+                        <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                            <input
+                                id="skipKitchenPrint"
+                                name="skipKitchenPrint"
+                                type="checkbox"
+                            />
+                            Non stampare comanda
+                        </label>
                     </div>
                     {submitError ? (
                         <p className="text-sm font-medium text-red-600" role="alert">

@@ -39,6 +39,7 @@ export interface SerializedCategory {
     printOrder: number;
     printerName?: string;
     printerId?: string;
+    skipKitchenPrint?: boolean;
 }
 
 interface SortableCategoryTableProps {
@@ -114,6 +115,7 @@ export function SortableCategoryTable({
                         <TableHead className="w-[40px]"></TableHead>
                         <TableHead>Nome</TableHead>
                         <TableHead>Colore</TableHead>
+                        <TableHead>Stampa Comanda</TableHead>
                         <TableHead>Stampante Comanda</TableHead>
                         <TableHead className="w-[80px]">Azioni</TableHead>
                     </TableRow>
@@ -131,7 +133,22 @@ export function SortableCategoryTable({
                                     style={{ backgroundColor: normalizeCategoryColor(cat.uiColor) }}
                                 />
                             </TableCell>
-                            <TableCell>{cat.printerName || "Default Cassa"}</TableCell>
+                            <TableCell>
+                                {cat.skipKitchenPrint ? (
+                                    <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800">
+                                        Non stampare
+                                    </span>
+                                ) : (
+                                    <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">
+                                        Standard
+                                    </span>
+                                )}
+                            </TableCell>
+                            <TableCell>
+                                {cat.skipKitchenPrint
+                                    ? "Ignorata dal flag categoria"
+                                    : cat.printerName || "Default Cassa"}
+                            </TableCell>
                             <TableCell className="flex gap-2">
                                 {/* Dialogs are client-only anyway, so we just match the spacing */}
                                 <div className="w-7 h-7" />
@@ -158,6 +175,7 @@ export function SortableCategoryTable({
                             <TableHead className="w-[40px]"></TableHead>
                             <TableHead>Nome</TableHead>
                             <TableHead>Colore</TableHead>
+                            <TableHead>Stampa Comanda</TableHead>
                             <TableHead>Stampante Comanda</TableHead>
                             <TableHead className="w-[80px]">Azioni</TableHead>
                         </TableRow>
@@ -175,14 +193,30 @@ export function SortableCategoryTable({
                                         style={{ backgroundColor: normalizeCategoryColor(cat.uiColor) }}
                                     />
                                 </TableCell>
-                                <TableCell>{cat.printerName || "Default Cassa"}</TableCell>
+                                <TableCell>
+                                    {cat.skipKitchenPrint ? (
+                                        <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800">
+                                            Non stampare
+                                        </span>
+                                    ) : (
+                                        <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">
+                                            Standard
+                                        </span>
+                                    )}
+                                </TableCell>
+                                <TableCell>
+                                    {cat.skipKitchenPrint
+                                        ? "Ignorata dal flag categoria"
+                                        : cat.printerName || "Default Cassa"}
+                                </TableCell>
                                 <TableCell className="flex gap-2 relative z-10 w-fit">
                                     <EditCategoryDialog
                                         category={{
                                             id: String(cat._id),
                                             name: cat.name,
                                             uiColor: normalizeCategoryColor(cat.uiColor),
-                                            printerId: cat.printerId
+                                            printerId: cat.printerId,
+                                            skipKitchenPrint: cat.skipKitchenPrint
                                         }}
                                         eventId={eventId}
                                         printers={printers}
