@@ -42,7 +42,10 @@ export async function createAndActivateEvent(
     await expect(dialog).toBeHidden();
     await expect(page.getByText(eventName)).toBeVisible();
 
-    await page.click('[data-testid="admin-event-selector"]');
+    const eventSelector = page.getByTestId("admin-event-selector");
+    await expect(eventSelector).toBeVisible({ timeout: 15000 });
+    await expect(eventSelector).toBeEnabled({ timeout: 15000 });
+    await eventSelector.click();
 
     // Wait for the Server Action response and the subsequent router refresh
     await Promise.all([
@@ -50,9 +53,11 @@ export async function createAndActivateEvent(
         page.getByRole("option", { name: new RegExp(eventName) }).click()
     ]);
 
+    await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+
     // Wait for the transition to finish by checking if the selector is enabled again
-    await expect(page.getByTestId("admin-event-selector")).not.toBeDisabled();
-    await expect(page.getByTestId("admin-event-selector")).toContainText(eventName);
+    await expect(page.getByTestId("admin-event-selector")).not.toBeDisabled({ timeout: 15000 });
+    await expect(page.getByTestId("admin-event-selector")).toContainText(eventName, { timeout: 15000 });
 
     // Give a small buffer and verify the cookie is actually set
     const cookies = await page.context().cookies();
@@ -124,6 +129,8 @@ export async function createAndActivateEvent(
 
 export async function selectEventContext(page: Page, eventName: string) {
     const selector = page.getByTestId("admin-event-selector");
+    await expect(selector).toBeVisible({ timeout: 15000 });
+    await expect(selector).toBeEnabled({ timeout: 15000 });
     await selector.click();
     const escapedName = eventName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -133,8 +140,10 @@ export async function selectEventContext(page: Page, eventName: string) {
         page.getByRole("option", { name: new RegExp(`^${escapedName}(\\s+\\(Attiva\\))?$`) }).click()
     ]);
 
-    await expect(selector).not.toBeDisabled();
-    await expect(selector).toContainText(eventName);
+    await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+
+    await expect(selector).not.toBeDisabled({ timeout: 15000 });
+    await expect(selector).toContainText(eventName, { timeout: 15000 });
 
     // Give a small buffer and verify the cookie is actually set
     const cookies = await page.context().cookies();
@@ -195,6 +204,7 @@ export async function createPrinter(
             : "Reparto (Comanda Piatto)"
     }).click();
     await printerDialog.getByRole("button", { name: "Salva", exact: true }).click();
+    await expect(printerDialog).toBeHidden({ timeout: 15000 });
     await expect(page.getByText(printerName)).toBeVisible();
 }
 
@@ -207,7 +217,8 @@ export async function createCashBoxPeripheral(page: Page, cashBoxName: string) {
     await peripheralDialog.getByRole("combobox", { name: "Tipo Periferica" }).click();
     await page.getByRole("option", { name: "Cassetta Contanti (Manuale)" }).click();
     await peripheralDialog.getByRole("button", { name: "Aggiungi Periferica", exact: true }).click();
-    await expect(page.getByText(cashBoxName)).toBeVisible();
+    await expect(peripheralDialog).toBeHidden({ timeout: 15000 });
+    await expect(page.getByText(cashBoxName)).toBeVisible({ timeout: 15000 });
 }
 
 export async function createPosDevice(
@@ -227,7 +238,8 @@ export async function createPosDevice(
         await page.getByRole("option", { name: new RegExp(cashBoxName) }).click();
     }
     await posDialog.getByRole("button", { name: "Salva", exact: true }).click();
-    await expect(page.getByText(posName)).toBeVisible();
+    await expect(posDialog).toBeHidden({ timeout: 15000 });
+    await expect(page.getByText(posName)).toBeVisible({ timeout: 15000 });
 }
 
 export async function createCategoryWithPrinter(
@@ -460,7 +472,8 @@ export async function openCashSession(page: Page, openingFloatAmount: string) {
     await expect(openDialog).toBeVisible();
     await openDialog.locator("#opening-float-amount").fill(openingFloatAmount);
     await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click();
-    await expect(page.getByRole("button", { name: /Chiudi Cassa/i })).toBeVisible();
+    await expect(openDialog).toBeHidden({ timeout: 15000 });
+    await expect(page.getByRole("button", { name: /Chiudi Cassa/i })).toBeVisible({ timeout: 15000 });
 }
 
 export async function openCashSessionIfRequired(page: Page, openingFloatAmount = "0") {
