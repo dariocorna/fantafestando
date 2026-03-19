@@ -412,9 +412,9 @@ export async function openPosAndSelectDevice(page: Page, posName: string) {
 
     const selectorTitle = page.getByText(/In quale cassa sei\?/i);
     if (await selectorTitle.isVisible()) {
-        const posButton = page.getByRole("dialog").locator("button")
-            .filter({ hasText: new RegExp(posName) }).first();
-        await expect(posButton).toBeVisible();
+        const selectorDialog = page.getByRole("dialog", { name: /In quale cassa sei\?/i });
+        const posButton = selectorDialog.getByRole("button", { name: new RegExp(posName) }).first();
+        await expect(posButton).toBeVisible({ timeout: 10000 });
         await posButton.click();
         await expect(selectorTitle).toBeHidden();
     }
