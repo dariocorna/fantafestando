@@ -9,6 +9,13 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog"
+import {
+    Sheet,
+    SheetContent,
+    SheetDescription,
+    SheetHeader,
+    SheetTitle,
+} from "@/components/ui/sheet"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -29,6 +36,7 @@ import { resolveQuickDiscountPresetsFromSettings, type QuickDiscountPreset } fro
 import { normalizePosCatalogLayout } from "@/lib/pos-catalog-layout"
 import { FixedMenuConfigDialog, type FixedMenuChoiceGroupDto, type FixedMenuComponentDto } from "@/components/fixed-menu-config-dialog"
 import { buildMenuConfigurationKey, type MenuSelectionInput } from "@/lib/fixed-menu"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 interface ICategory {
     _id: string
@@ -201,6 +209,7 @@ export default function PosPage() {
     const [activeEvent, setActiveEvent] = useState<IEvent | null>(null)
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
     const [isDiscountsExpanded, setIsDiscountsExpanded] = useState(false)
+    const [isDiscountSheetOpen, setIsDiscountSheetOpen] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
     const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD">("CASH")
     const [posDevices, setPosDevices] = useState<IPosDevice[]>([])
@@ -208,6 +217,9 @@ export default function PosPage() {
     const [isPosSelectorOpen, setIsPosSelectorOpen] = useState(false)
 
     const [isCodeDialogOpen, setIsCodeDialogOpen] = useState(false)
+    const [isPendingOrdersSheetOpen, setIsPendingOrdersSheetOpen] = useState(false)
+    const [isCartSheetOpen, setIsCartSheetOpen] = useState(false)
+    const [isCashStatusSheetOpen, setIsCashStatusSheetOpen] = useState(false)
     const [orderCode, setOrderCode] = useState("")
     const [isCodeLoading, setIsCodeLoading] = useState(false)
     const [loadedPendingOrder, setLoadedPendingOrder] = useState<LoadedPendingOrder | null>(null)
@@ -236,6 +248,7 @@ export default function PosPage() {
     const [isRetryingFailedPrints, setIsRetryingFailedPrints] = useState(false)
     const [retryPrintsFeedback, setRetryPrintsFeedback] = useState<string | null>(null)
     const [configuringProduct, setConfiguringProduct] = useState<IProduct | null>(null)
+    const isMobilePos = useIsMobile()
 
     // Info Cliente
     const [customerName, setCustomerName] = useState("")
@@ -481,6 +494,11 @@ export default function PosPage() {
             setRecentPendingOrdersReferenceTime(loadedAt)
         }
         setIsRecentOrdersLoading(false)
+    }
+
+    const openPendingOrdersSurface = () => {
+        setIsPendingOrdersSheetOpen(true)
+        void loadRecentPendingOrdersForDialog()
     }
 
     const formatRecentOrderTime = (createdAt?: string) => {
@@ -732,6 +750,8 @@ export default function PosPage() {
         })))
         setRecentPendingOrders((prev) => prev.filter((order) => order.id !== result.order?.id))
         setIsCodeDialogOpen(false)
+        setIsPendingOrdersSheetOpen(false)
+        setIsCartSheetOpen(false)
     }
 
     const handleCheckout = async (allowStockOverride = false) => {
@@ -808,6 +828,7 @@ export default function PosPage() {
                 resetCheckoutForm()
                 resetPendingOrder()
                 setIsCheckoutOpen(false)
+                setIsCartSheetOpen(false)
                 setStockShortages([])
                 const printFailureMessage = buildPrintFailureMessage(completionResult.printSummary)
                 if (printFailureMessage) {
@@ -861,6 +882,7 @@ export default function PosPage() {
         if (result.success) {
             resetCheckoutForm()
             setIsCheckoutOpen(false)
+            setIsCartSheetOpen(false)
             setStockShortages([])
             const printFailureMessage = buildPrintFailureMessage(result.printSummary)
             if (printFailureMessage) {
@@ -892,8 +914,399 @@ export default function PosPage() {
         || (!cashAvailable && !cardAvailable)
         || (Boolean(activeEvent?.settings?.askTable) && !tableValueValid)
 
+    const oneHourAgo = (recentPendingOrdersReferenceTime ?? 0) - 60 * 60 * 1000
+    const sortedRecentPendingOrders = [
+        ...recentPendingOrders
+            .filter((order) => order.createdAt && new Date(order.createdAt).getTime() >= oneHourAgo)
+            .sort((a, b) => new Date(a.createdAt!).getTime() - new Date(b.createdAt!).getTime()),
+        ...recentPendingOrders
+            .filter((order) => !order.createdAt || new Date(order.createdAt).getTime() < oneHourAgo)
+            .sort((a, b) => {
+                if (!a.createdAt) return 1
+                if (!b.createdAt) return -1
+                return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            })
+    ]
+
+    const loadedPendingOrderBanner = loadedPendingOrder ? (
+        <div className="space-y-2 rounded-md border border-indigo-200 bg-indigo-50 p-3">
+            <div className="flex items-start justify-between gap-2">
+                <div>
+                    <p className="text-xs font-bold uppercase tracking-widest text-indigo-500">Ordine WebApp Caricato</p>
+                    <p className="text-base font-black text-indigo-700">Codice {loadedPendingOrder.code}</p>
+                    <p className="mt-1 text-xs font-semibold text-indigo-600">
+                        Carrello precompilato: puoi aggiungere/rimuovere prodotti prima della chiusura.
+                    </p>
+                    {loadedPendingOrder.easterEggAttached ? (
+                        <p className="mt-2 inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-amber-800">
+                            Foto allegata
+                        </p>
+                    ) : null}
+                </div>
+                <button
+                    className="text-indigo-500 hover:text-indigo-700"
+                    onClick={resetPendingOrder}
+                    title="Rimuovi ordine caricato"
+                >
+                    <X size={18} />
+                </button>
+            </div>
+        </div>
+    ) : null
+
+    const discountsSurfaceContent = (
+        <div
+            className="border border-[#d9e6f8] bg-white p-2"
+            data-testid={isMobilePos ? "pos-mobile-discount-presets" : "pos-discount-presets"}
+        >
+            {quickDiscountPresets.length === 0 ? (
+                <div className="border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center">
+                    <p className="text-sm font-black text-slate-700">Nessun preset sconto configurato</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">
+                        Configura i preset da Admin &gt; Impostazioni.
+                    </p>
+                </div>
+            ) : (
+                <div className="flex flex-wrap gap-1.5">
+                    {quickDiscountPresets.map((preset, index) => {
+                        const previewAmount = computePresetDiscountAmount(preset, discountBaseAmount)
+                        return (
+                            <button
+                                key={`discount-preset-card-${preset.label}-${preset.type}-${preset.value}-${index}`}
+                                id={`discount-preset-card-${index}`}
+                                onClick={() => {
+                                    addDiscountPresetToCart(preset)
+                                    if (isMobilePos) {
+                                        setIsDiscountSheetOpen(false)
+                                    }
+                                }}
+                                disabled={productCartItems.length === 0}
+                                className="inline-flex min-h-11 min-w-[200px] items-center gap-1.5 border border-emerald-200 bg-emerald-50 px-2 py-1 text-left transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                <span className="max-w-[120px] truncate text-xs font-black leading-tight text-emerald-800">
+                                    {preset.label}
+                                </span>
+                                <span className="inline-flex w-fit border border-emerald-200 bg-white px-1 py-0.5 text-[10px] font-bold text-emerald-700">
+                                    {preset.type === "PERCENT" ? `${preset.value}%` : `${preset.value.toFixed(2)} €`}
+                                </span>
+                                <span className="ml-auto whitespace-nowrap text-xs font-black text-emerald-700">
+                                    -{previewAmount.toFixed(2)} €
+                                </span>
+                            </button>
+                        )
+                    })}
+                </div>
+            )}
+        </div>
+    )
+
+    const recentPendingOrdersContent = (
+        <div>
+            <h3 className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                <Clock3 size={12} />
+                Ultimi ordini pendenti
+            </h3>
+            {isRecentOrdersLoading ? (
+                <div className="flex h-20 items-center justify-center rounded-xl border border-dashed text-slate-400">
+                    <Loader2 className="animate-spin" />
+                </div>
+            ) : sortedRecentPendingOrders.length === 0 ? (
+                <div className="rounded-xl border border-dashed p-4 text-center text-sm font-semibold text-slate-500">
+                    Nessun ordine pendente disponibile.
+                </div>
+            ) : (
+                <div className={isMobilePos ? "space-y-2" : "grid grid-cols-2 gap-2"}>
+                    {sortedRecentPendingOrders.map((order) => {
+                        const isOlderThanOneHour = !order.createdAt || new Date(order.createdAt).getTime() < oneHourAgo
+                        return (
+                            <button
+                                key={order.id}
+                                className={`w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-indigo-50 hover:border-indigo-200 dark:hover:bg-indigo-950/40 ${isOlderThanOneHour ? "bg-slate-50 border-slate-200 opacity-70 dark:bg-slate-900" : "bg-white border-slate-200 dark:bg-slate-800"}`}
+                                onClick={() => void handleLoadOrderByCode(order.code)}
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] font-bold uppercase text-slate-400">Ordine</span>
+                                        <span className="text-xl font-black text-indigo-700 dark:text-indigo-300">{order.code}</span>
+                                    </div>
+                                    <span className="text-sm font-black text-slate-700 dark:text-slate-200">
+                                        {order.totalAmount.toFixed(2)} €
+                                    </span>
+                                </div>
+                                <div className="mt-0.5 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                                    <span className="truncate">{order.customer?.name || "Cliente non indicato"}{order.customer?.table ? ` · T.${order.customer.table}` : ""}</span>
+                                    <span className="ml-1 shrink-0">{formatRecentOrderTime(order.createdAt)}</span>
+                                </div>
+                            </button>
+                        )
+                    })}
+                </div>
+            )}
+        </div>
+    )
+
+    const cartContent = (
+        <>
+            {loadedPendingOrderBanner}
+            {cart.length === 0 ? (
+                <div className="flex h-full min-h-[240px] flex-col items-center justify-center space-y-3 text-slate-400 opacity-50">
+                    <ShoppingCart size={52} />
+                    <p className="font-bold">Il carrello è vuoto</p>
+                </div>
+            ) : (
+                cart.map((item) => {
+                    const lineTotal = Number((item.quantity * item.price).toFixed(2))
+                    return (
+                        <div key={item.lineId} className="flex items-center justify-between rounded-md border bg-white p-2.5">
+                            <div className="flex flex-col">
+                                <span className={`text-sm font-bold ${item.isDiscount ? "text-emerald-700" : "text-slate-800 dark:text-slate-100"}`}>{item.name}</span>
+                                {item.isDiscount ? (
+                                    <span className="text-[11px] font-semibold text-emerald-600">
+                                        {item.discountPreset?.type === "PERCENT"
+                                            ? `${item.discountPreset.value}% su ${item.discountPreset.baseAmount.toFixed(2)} €`
+                                            : `Sconto fisso ${item.discountPreset?.value.toFixed(2)} €`}
+                                    </span>
+                                ) : (
+                                    <div className="space-y-1">
+                                        <span className="text-xs text-slate-500">{item.quantity} x {item.price.toFixed(2)} €</span>
+                                        {Array.isArray(item.selectedOptions) && item.selectedOptions.length > 0 ? (
+                                            <p className="text-[11px] font-semibold text-slate-500">
+                                                {item.selectedOptions.join(" • ")}
+                                            </p>
+                                        ) : null}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <div className="text-right">
+                                    <span className={`text-sm font-black ${item.isDiscount ? "text-emerald-700" : ""}`}>{lineTotal.toFixed(2)} €</span>
+                                </div>
+                                <button onClick={() => removeFromCart(item.lineId)} className="p-1.5 text-red-500">
+                                    <Trash2 size={18} />
+                                </button>
+                            </div>
+                        </div>
+                    )
+                })
+            )}
+        </>
+    )
+
+    const mobileProductList = (
+        <div className="space-y-3" data-testid="pos-mobile-catalog">
+            <div className="overflow-x-auto pb-1">
+                <div className="flex min-w-max gap-2">
+                    {categories.map((cat) => {
+                        const catTheme = getCategoryTheme(cat.uiColor)
+                        const isActive = selectedModernCategoryId === cat._id
+                        return (
+                            <button
+                                key={cat._id}
+                                type="button"
+                                onClick={() => setActiveCategory(cat._id)}
+                                className="inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.04em] transition-all"
+                                style={isActive
+                                    ? {
+                                        backgroundColor: catTheme.base,
+                                        color: catTheme.onBase,
+                                        borderColor: catTheme.base,
+                                    }
+                                    : {
+                                        backgroundColor: categoryColorWithAlpha(cat.uiColor, 0.16),
+                                        color: catTheme.base,
+                                        borderColor: catTheme.border,
+                                    }}
+                            >
+                                {isActive ? <Check size={14} /> : null}
+                                <span className="truncate">{cat.name}</span>
+                            </button>
+                        )
+                    })}
+                </div>
+            </div>
+            {!selectedModernCategory ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm font-semibold text-slate-500">
+                    Nessuna categoria disponibile.
+                </div>
+            ) : selectedModernCategoryProducts.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm font-semibold text-slate-500">
+                    Nessun prodotto nella categoria selezionata.
+                </div>
+            ) : (
+                <div className="space-y-3">
+                    {selectedModernCategoryProducts.map((product, productIndex) => {
+                        const stockStatus = product.stockStatus || getStockStatus(product.stockQuantity ?? null, Boolean(product.isSoldOut))
+                        const stockLabel = getStockLabel(product.stockQuantity ?? null, Boolean(product.isSoldOut))
+                        const showStockPill = stockStatus === "LOW" || stockStatus === "OUT"
+                        const cardBackground = stockStatus === "OUT"
+                            ? "rgba(254, 226, 226, 0.88)"
+                            : productIndex % 2 === 0
+                                ? categoryColorWithAlpha(selectedModernCategory.uiColor, 0.24)
+                                : categoryColorWithAlpha(selectedModernCategory.uiColor, 0.14)
+                        const cardBorderColor = stockStatus === "OUT" ? "#dc2626" : selectedModernCategoryTheme.base
+
+                        return (
+                            <button
+                                key={product._id}
+                                type="button"
+                                onClick={() => addToCart(product)}
+                                data-testid={`pos-product-${product._id}`}
+                                className="flex w-full flex-col gap-3 overflow-hidden rounded-3xl border-2 px-4 py-4 text-left shadow-sm transition-all active:scale-[0.99]"
+                                style={{
+                                    borderColor: cardBorderColor,
+                                    backgroundColor: cardBackground,
+                                }}
+                            >
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="line-clamp-3 text-lg font-black uppercase leading-tight text-slate-900">
+                                            {resolveProductDisplayName(product)}
+                                        </p>
+                                        {product.requiresConfiguration ? (
+                                            <span className="mt-2 inline-flex w-fit rounded-sm bg-white/85 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-slate-600">
+                                                Configura
+                                            </span>
+                                        ) : null}
+                                    </div>
+                                    <span
+                                        className="inline-flex min-w-[88px] shrink-0 justify-center rounded-xl border bg-white/90 px-3 py-2 text-lg font-black leading-none"
+                                        style={{
+                                            color: cardBorderColor,
+                                            borderColor: cardBorderColor,
+                                        }}
+                                    >
+                                        {product.basePrice.toFixed(2)} €
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2">
+                                    {showStockPill ? (
+                                        <span
+                                            className={`inline-flex w-fit rounded-full px-2 py-1 text-[10px] font-bold ${stockStatus === "OUT"
+                                                ? "bg-red-100 text-red-700"
+                                                : "bg-amber-100 text-amber-700"
+                                                }`}
+                                        >
+                                            {stockLabel}
+                                        </span>
+                                    ) : (
+                                        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                                            Tocca per aggiungere
+                                        </span>
+                                    )}
+                                    <span className="text-sm font-bold uppercase tracking-[0.08em] text-slate-600">
+                                        Aggiungi
+                                    </span>
+                                </div>
+                            </button>
+                        )
+                    })}
+                </div>
+            )}
+        </div>
+    )
+
+    if (isMobilePos === undefined) {
+        return (
+            <div className="brand-surface-pos h-screen w-screen overflow-hidden bg-[#f7fbff]" data-testid="pos-brand-shell">
+                <div className="flex h-full items-center justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-[var(--brand-blue-700)]" />
+                </div>
+            </div>
+        )
+    }
+
     return (
-        <div className="brand-surface-pos flex h-screen w-screen overflow-hidden" data-testid="pos-brand-shell">
+        <div className="brand-surface-pos h-screen w-screen overflow-hidden" data-testid="pos-brand-shell">
+            {isMobilePos ? (
+            <div className="flex h-full flex-col bg-[#f7fbff]">
+                <header className="sticky top-0 z-30 border-b border-[#d9e6f8] bg-white/95 px-3 py-3 backdrop-blur">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <p className="truncate text-base font-black uppercase tracking-tight text-[var(--brand-ink)]">
+                                {activeEvent?.name || "Cassa FantaFestando"}
+                            </p>
+                            <button
+                                onClick={() => setIsPosSelectorOpen(true)}
+                                className="mt-1 inline-flex max-w-full items-center gap-1 text-xs font-bold text-[var(--brand-blue-700)]"
+                            >
+                                <Monitor size={12} />
+                                <span className="truncate">{selectedPosDevice ? `Cassa: ${selectedPosDevice.name}` : "Seleziona Cassa"}</span>
+                            </button>
+                        </div>
+                        <div className="shrink-0 text-right">
+                            <p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">Totale</p>
+                            <p className="text-2xl font-black text-[var(--brand-blue-700)]">{effectiveTotal.toFixed(2)} €</p>
+                        </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setIsCashStatusSheetOpen(true)}
+                            className={`inline-flex min-h-11 items-center gap-2 rounded-full border px-3 py-2 text-sm font-black ${cashSession ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"}`}
+                        >
+                            <Wallet size={14} />
+                            {cashSession ? "Cassa aperta" : "Cassa chiusa"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={openPendingOrdersSurface}
+                            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-black text-indigo-700"
+                        >
+                            <Clock3 size={14} />
+                            Pendenti
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleCodeDialogOpenChange(true)}
+                            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-black text-slate-700"
+                        >
+                            <Search size={14} />
+                            Codice
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setIsDiscountSheetOpen(true)}
+                            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700"
+                        >
+                            <Banknote size={14} />
+                            Sconti
+                        </button>
+                    </div>
+                    {loadedPendingOrder ? (
+                        <div className="mt-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700">
+                            Ordine caricato: codice {loadedPendingOrder.code}
+                        </div>
+                    ) : null}
+                </header>
+
+                <main className="min-h-0 flex-1 overflow-y-auto px-3 pb-28 pt-3">
+                    {mobileProductList}
+                </main>
+
+                <div className="sticky bottom-0 z-30 border-t border-[#d9e6f8] bg-white/95 px-3 py-3 backdrop-blur">
+                    <button
+                        type="button"
+                        data-testid="pos-mobile-cart-bar"
+                        onClick={() => setIsCartSheetOpen(true)}
+                        className="flex w-full items-center justify-between rounded-2xl bg-[var(--brand-blue-700)] px-4 py-3 text-left text-white shadow-lg"
+                    >
+                        <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.1em] text-blue-100">
+                                {cart.length === 0 ? "Carrello vuoto" : `${cart.length} righe nel carrello`}
+                            </p>
+                            <p className="text-lg font-black">
+                                {effectiveTotal.toFixed(2)} €
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.08em]">
+                            <ShoppingCart size={18} />
+                            Apri
+                        </div>
+                    </button>
+                </div>
+            </div>
+            ) : (
+            <div className="flex h-full">
             {/* Sinistra: Selezione Prodotti (70%) */}
             <div className="flex h-full flex-1 flex-col border-r border-[#d9e6f8] bg-white">
                 <div className="shrink-0 border-b border-[#d9e6f8] bg-[#f7fbff] px-3 py-2">
@@ -1394,13 +1807,15 @@ export default function PosPage() {
                         <CheckCircle2 size={22} />
                         PAGA ORA
                     </button>
-                    {!cashSession ? (
-                        <p className="text-center text-xs font-black uppercase tracking-widest text-rose-600">
-                            Incasso bloccato: cassa non aperta
-                        </p>
+                {!cashSession ? (
+                    <p className="text-center text-xs font-black uppercase tracking-widest text-rose-600">
+                        Incasso bloccato: cassa non aperta
+                    </p>
                     ) : null}
                 </div>
             </div>
+            </div>
+            )}
 
             {configuringProduct ? (
                 <FixedMenuConfigDialog
@@ -1425,6 +1840,138 @@ export default function PosPage() {
                     }}
                 />
             ) : null}
+
+            <Sheet open={isCartSheetOpen} onOpenChange={setIsCartSheetOpen}>
+                <SheetContent side="bottom" className="max-h-[88dvh] rounded-t-3xl px-0 pb-0 md:hidden">
+                    <SheetHeader className="border-b border-[#d9e6f8] px-4 pb-3">
+                        <SheetTitle className="text-xl font-black text-[var(--brand-ink)]">Carrello</SheetTitle>
+                        <SheetDescription>
+                            {cart.length === 0 ? "Aggiungi prodotti dal catalogo." : `${cart.length} righe · Totale ${effectiveTotal.toFixed(2)} €`}
+                        </SheetDescription>
+                    </SheetHeader>
+                    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4" data-testid="pos-mobile-cart-sheet">
+                        {cartContent}
+                    </div>
+                    <div className="space-y-3 border-t border-[#d9e6f8] bg-white px-4 py-4">
+                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                            <p>Subtotale prodotti: {subtotal.toFixed(2)} €</p>
+                            <p>Sconti applicati: -{totalDiscountApplied.toFixed(2)} €</p>
+                        </div>
+                        <Button
+                            type="button"
+                            className="brand-cta-primary h-14 w-full text-lg font-black"
+                            data-testid="pos-pay-cta"
+                            onClick={() => {
+                                setIsCartSheetOpen(false)
+                                setIsCheckoutOpen(true)
+                            }}
+                            disabled={productCartItems.length === 0 || !selectedPosDeviceId || !cashSession || isProcessing || isCashSessionLoading}
+                        >
+                            <CheckCircle2 size={22} />
+                            PAGA ORA
+                        </Button>
+                        {!cashSession ? (
+                            <p className="text-center text-xs font-black uppercase tracking-widest text-rose-600">
+                                Incasso bloccato: cassa non aperta
+                            </p>
+                        ) : null}
+                    </div>
+                </SheetContent>
+            </Sheet>
+
+            <Sheet open={isDiscountSheetOpen} onOpenChange={setIsDiscountSheetOpen}>
+                <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-3xl px-0 pb-0 md:hidden">
+                    <SheetHeader className="border-b border-[#d9e6f8] px-4 pb-3">
+                        <SheetTitle className="text-xl font-black text-[var(--brand-ink)]">Sconti</SheetTitle>
+                        <SheetDescription>Preset rapidi applicabili al carrello corrente.</SheetDescription>
+                    </SheetHeader>
+                    <div className="overflow-y-auto px-4 py-4">
+                        {discountsSurfaceContent}
+                    </div>
+                </SheetContent>
+            </Sheet>
+
+            <Sheet open={isPendingOrdersSheetOpen} onOpenChange={(open) => {
+                setIsPendingOrdersSheetOpen(open)
+                if (open) {
+                    void loadRecentPendingOrdersForDialog()
+                }
+            }}>
+                <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-3xl px-0 pb-0 md:hidden">
+                    <SheetHeader className="border-b border-[#d9e6f8] px-4 pb-3">
+                        <SheetTitle className="text-xl font-black text-[var(--brand-ink)]">Ordini pendenti</SheetTitle>
+                        <SheetDescription>Ordini recenti caricabili senza uscire dal POS.</SheetDescription>
+                    </SheetHeader>
+                    <div className="overflow-y-auto px-4 py-4" data-testid="pos-mobile-pending-sheet">
+                        {recentPendingOrdersContent}
+                    </div>
+                </SheetContent>
+            </Sheet>
+
+            <Sheet open={isCashStatusSheetOpen} onOpenChange={setIsCashStatusSheetOpen}>
+                <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-3xl px-0 pb-0 md:hidden">
+                    <SheetHeader className="border-b border-[#d9e6f8] px-4 pb-3">
+                        <SheetTitle className="text-xl font-black text-[var(--brand-ink)]">Stato cassa</SheetTitle>
+                        <SheetDescription>
+                            {cashSession ? `Aperta alle ${formatSessionDateTime(cashSession.openedAt)}` : "Apri la cassa per iniziare gli incassi."}
+                        </SheetDescription>
+                    </SheetHeader>
+                    <div className="space-y-3 overflow-y-auto px-4 py-4">
+                        <div className={`rounded-2xl border p-3 ${cashSession ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
+                            <p className={`text-[10px] font-black uppercase tracking-widest ${cashSession ? "text-emerald-700" : "text-rose-700"}`}>
+                                Stato Cassa
+                            </p>
+                            {isCashSessionLoading ? (
+                                <p className="mt-1 text-sm font-semibold text-slate-500">Caricamento sessione...</p>
+                            ) : cashSession ? (
+                                <p className="mt-1 text-sm font-semibold text-emerald-700">
+                                    Aperta alle {formatSessionDateTime(cashSession.openedAt)} · Fondo {formatEuro(cashSession.openingFloatAmount)}
+                                </p>
+                            ) : (
+                                <p className="mt-1 text-sm font-semibold text-rose-700">Chiusa. Apri la cassa per iniziare gli incassi.</p>
+                            )}
+                        </div>
+                        {lastClosedSummary ? (
+                            <div className="rounded-2xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-600">
+                                <p className="font-black uppercase tracking-widest text-slate-500">Ultima chiusura</p>
+                                <p className="mt-1">Chiusa alle {formatSessionDateTime(lastClosedSummary.closedAt)}</p>
+                                <p>Atteso: {formatEuro(lastClosedSummary.expectedCashAmount)} · Contato: {formatEuro(lastClosedSummary.closingCountedCashAmount)}</p>
+                                <p className={lastClosedSummary.varianceAmount === 0 ? "text-emerald-700" : "text-amber-700"}>
+                                    Differenza: {formatEuro(lastClosedSummary.varianceAmount)}
+                                </p>
+                            </div>
+                        ) : null}
+                        {cashSession ? (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="h-12 w-full border-emerald-300 bg-white font-black text-emerald-700"
+                                onClick={() => {
+                                    setIsCashStatusSheetOpen(false)
+                                    void handleOpenCloseCashDialog()
+                                }}
+                                disabled={isCashSessionLoading || isCashSessionActionLoading || isCloseCashSessionPreviewLoading || isProcessing}
+                            >
+                                <Wallet size={14} />
+                                Chiudi Cassa
+                            </Button>
+                        ) : (
+                            <Button
+                                type="button"
+                                className="h-12 w-full bg-rose-600 font-black text-white hover:bg-rose-700"
+                                onClick={() => {
+                                    setIsCashStatusSheetOpen(false)
+                                    setIsOpenCashDialogOpen(true)
+                                }}
+                                disabled={isCashSessionLoading || isCashSessionActionLoading}
+                            >
+                                <Wallet size={14} />
+                                Apri Cassa
+                            </Button>
+                        )}
+                    </div>
+                </SheetContent>
+            </Sheet>
 
             {/* Modal di Checkout */}
             <Dialog open={isCheckoutOpen} onOpenChange={handleCheckoutDialogOpenChange}>
@@ -1794,112 +2341,96 @@ export default function PosPage() {
             </Dialog>
 
             {/* Modal Carica Ordine da Codice */}
-            <Dialog open={isCodeDialogOpen} onOpenChange={handleCodeDialogOpenChange}>
-                <DialogContent className="max-w-[680px] rounded-3xl p-0 overflow-hidden">
-                    <DialogHeader className="border-b bg-slate-50 px-6 py-4 dark:bg-slate-900">
-                        <DialogTitle className="flex items-center gap-3 text-xl font-black">
-                            <Search className="h-5 w-5 text-indigo-600" />
-                            Carica ordine da codice
-                        </DialogTitle>
-                        <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                            Inserisci il numero ordine oppure seleziona uno degli ordini pendenti.
-                        </p>
-                    </DialogHeader>
-                    <div className="space-y-4 p-5">
-                        {/* Barra ricerca compatta */}
-                        <div className="flex items-center gap-2">
-                            <Input
-                                id="order-code"
-                                value={orderCode}
-                                inputMode="numeric"
-                                onChange={(e) => setOrderCode(e.target.value.toUpperCase())}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                        e.preventDefault()
-                                        void handleLoadOrderByCode()
-                                    }
-                                }}
-                                placeholder="Es: 12"
-                                maxLength={8}
-                                className="h-11 flex-1 rounded-xl border-2 text-center text-xl font-black tracking-wide"
-                            />
-                            <Button
-                                className="h-11 rounded-xl px-5 font-black bg-indigo-600 hover:bg-indigo-700"
-                                onClick={() => void handleLoadOrderByCode()}
-                                disabled={isCodeLoading || !orderCode.trim()}
-                            >
-                                {isCodeLoading ? <Loader2 className="animate-spin" size={18} /> : "Carica"}
-                            </Button>
-                            <Button
-                                variant="outline"
-                                className="h-11 rounded-xl px-3 font-bold"
-                                onClick={() => void loadRecentPendingOrdersForDialog()}
-                                disabled={isRecentOrdersLoading || isCodeLoading}
-                            >
-                                {isRecentOrdersLoading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
-                            </Button>
+            {isMobilePos ? (
+                <Sheet open={isCodeDialogOpen} onOpenChange={handleCodeDialogOpenChange}>
+                    <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-3xl px-0 pb-0 md:hidden">
+                        <SheetHeader className="border-b border-[#d9e6f8] px-4 pb-3">
+                            <SheetTitle className="flex items-center gap-3 text-xl font-black">
+                                <Search className="h-5 w-5 text-indigo-600" />
+                                Carica ordine da codice
+                            </SheetTitle>
+                            <SheetDescription>
+                                Inserisci il numero ordine e recupera il carrello da chiudere.
+                            </SheetDescription>
+                        </SheetHeader>
+                        <div className="space-y-4 overflow-y-auto px-4 py-4">
+                            <div className="flex items-center gap-2">
+                                <Input
+                                    id="order-code"
+                                    value={orderCode}
+                                    inputMode="numeric"
+                                    onChange={(e) => setOrderCode(e.target.value.toUpperCase())}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            e.preventDefault()
+                                            void handleLoadOrderByCode()
+                                        }
+                                    }}
+                                    placeholder="Es: 12"
+                                    maxLength={8}
+                                    className="h-11 flex-1 rounded-xl border-2 text-center text-xl font-black tracking-wide"
+                                />
+                                <Button
+                                    className="h-11 rounded-xl px-5 font-black bg-indigo-600 hover:bg-indigo-700"
+                                    onClick={() => void handleLoadOrderByCode()}
+                                    disabled={isCodeLoading || !orderCode.trim()}
+                                >
+                                    {isCodeLoading ? <Loader2 className="animate-spin" size={18} /> : "Carica"}
+                                </Button>
+                            </div>
                         </div>
-
-                        {/* Lista ordini pendenti — griglia 2 colonne */}
-                        <div>
-                            <h3 className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                <Clock3 size={12} />
-                                Ultimi ordini pendenti
-                            </h3>
-                            {isRecentOrdersLoading ? (
-                                <div className="flex h-20 items-center justify-center rounded-xl border border-dashed text-slate-400">
-                                    <Loader2 className="animate-spin" />
-                                </div>
-                            ) : recentPendingOrders.length === 0 ? (
-                                <div className="rounded-xl border border-dashed p-4 text-center text-sm font-semibold text-slate-500">
-                                    Nessun ordine pendente disponibile.
-                                </div>
-                            ) : (
-                                <div className="grid grid-cols-2 gap-2">
-                                    {(() => {
-                                        const oneHourAgo = (recentPendingOrdersReferenceTime ?? 0) - 60 * 60 * 1000
-                                        const recentOrders = recentPendingOrders
-                                            .filter(o => o.createdAt && new Date(o.createdAt).getTime() >= oneHourAgo)
-                                            .sort((a, b) => new Date(a.createdAt!).getTime() - new Date(b.createdAt!).getTime())
-                                        const olderOrders = recentPendingOrders
-                                            .filter(o => !o.createdAt || new Date(o.createdAt).getTime() < oneHourAgo)
-                                            .sort((a, b) => {
-                                                if (!a.createdAt) return 1
-                                                if (!b.createdAt) return -1
-                                                return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-                                            })
-                                        const sorted = [...recentOrders, ...olderOrders]
-                                        return sorted.map((order) => {
-                                            const isOlderThanOneHour = !order.createdAt || new Date(order.createdAt).getTime() < oneHourAgo
-                                            return (
-                                                <button
-                                                    key={order.id}
-                                                    className={`w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-indigo-50 hover:border-indigo-200 dark:hover:bg-indigo-950/40 ${isOlderThanOneHour ? "bg-slate-50 border-slate-200 opacity-70 dark:bg-slate-900" : "bg-white border-slate-200 dark:bg-slate-800"}`}
-                                                    onClick={() => void handleLoadOrderByCode(order.code)}
-                                                >
-                                                    <div className="flex items-center justify-between gap-2">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-[10px] font-bold uppercase text-slate-400">Ordine</span>
-                                                            <span className="text-xl font-black text-indigo-700 dark:text-indigo-300">{order.code}</span>
-                                                        </div>
-                                                        <span className="text-sm font-black text-slate-700 dark:text-slate-200">
-                                                            {order.totalAmount.toFixed(2)} €
-                                                        </span>
-                                                    </div>
-                                                    <div className="mt-0.5 flex items-center justify-between text-[11px] font-semibold text-slate-500">
-                                                        <span className="truncate">{order.customer?.name || "Cliente non indicato"}{order.customer?.table ? ` · T.${order.customer.table}` : ""}</span>
-                                                        <span className="ml-1 shrink-0">{formatRecentOrderTime(order.createdAt)}</span>
-                                                    </div>
-                                                </button>
-                                            )
-                                        })
-                                    })()}
-                                </div>
-                            )}
+                    </SheetContent>
+                </Sheet>
+            ) : (
+                <Dialog open={isCodeDialogOpen} onOpenChange={handleCodeDialogOpenChange}>
+                    <DialogContent className="max-w-[680px] rounded-3xl p-0 overflow-hidden">
+                        <DialogHeader className="border-b bg-slate-50 px-6 py-4 dark:bg-slate-900">
+                            <DialogTitle className="flex items-center gap-3 text-xl font-black">
+                                <Search className="h-5 w-5 text-indigo-600" />
+                                Carica ordine da codice
+                            </DialogTitle>
+                            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                                Inserisci il numero ordine oppure seleziona uno degli ordini pendenti.
+                            </p>
+                        </DialogHeader>
+                        <div className="space-y-4 p-5">
+                            <div className="flex items-center gap-2">
+                                <Input
+                                    id="order-code"
+                                    value={orderCode}
+                                    inputMode="numeric"
+                                    onChange={(e) => setOrderCode(e.target.value.toUpperCase())}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            e.preventDefault()
+                                            void handleLoadOrderByCode()
+                                        }
+                                    }}
+                                    placeholder="Es: 12"
+                                    maxLength={8}
+                                    className="h-11 flex-1 rounded-xl border-2 text-center text-xl font-black tracking-wide"
+                                />
+                                <Button
+                                    className="h-11 rounded-xl px-5 font-black bg-indigo-600 hover:bg-indigo-700"
+                                    onClick={() => void handleLoadOrderByCode()}
+                                    disabled={isCodeLoading || !orderCode.trim()}
+                                >
+                                    {isCodeLoading ? <Loader2 className="animate-spin" size={18} /> : "Carica"}
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    className="h-11 rounded-xl px-3 font-bold"
+                                    onClick={() => void loadRecentPendingOrdersForDialog()}
+                                    disabled={isRecentOrdersLoading || isCodeLoading}
+                                >
+                                    {isRecentOrdersLoading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                                </Button>
+                            </div>
+                            {recentPendingOrdersContent}
                         </div>
-                    </div>
-                </DialogContent>
-            </Dialog>
+                    </DialogContent>
+                </Dialog>
+            )}
 
             {/* Modal Selezione Punto Cassa */}
             <Dialog open={isPosSelectorOpen} onOpenChange={setIsPosSelectorOpen}>
