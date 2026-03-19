@@ -58,7 +58,7 @@ export default async function AdminSettings() {
                         </div>
                     </CardHeader>
                     {serializedEvent ? (
-                        <ActiveEventSettingsForm event={serializedEvent} />
+                        <ActiveEventSettingsForm key={serializedEvent._id} event={serializedEvent} />
                     ) : (
                         <CardContent className="py-12 text-center">
                             <p className="text-muted-foreground mb-4">Seleziona una festa dall&apos;header per configurarne i parametri.</p>
