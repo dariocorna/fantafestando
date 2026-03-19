@@ -1434,6 +1434,7 @@ export class PrinterService {
         const categories = await Category.find({ _id: { $in: categoryIdsFromProducts } }).populate("printerId").lean() as Array<{
             _id: { toString(): string };
             name?: string;
+            skipKitchenPrint?: boolean;
             printerId?: {
                 _id?: unknown;
                 name?: string;
@@ -1516,6 +1517,8 @@ export class PrinterService {
             if (!product) return;
 
             const category = categoryById.get(product.categoryId.toString());
+            if (category?.skipKitchenPrint) return;
+
             const kitchenPrinter = category?.printerId;
             const categoryId = category?._id.toString() || product.categoryId.toString();
             const categoryName = category?.name?.trim();
