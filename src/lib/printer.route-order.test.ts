@@ -166,6 +166,54 @@ describe("PrinterService.routeOrderToPrinters", () => {
         );
     });
 
+    test("skips all comanda copies when the category is marked as non printable", async () => {
+        mockOrder(buildOrder("order-skip-single"));
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([
+            {
+                _id: { toString: () => "prod-1" },
+                categoryId: { toString: () => "cat-1" },
+                basePrice: 7
+            }
+        ]);
+        mockCategories([
+            {
+                _id: { toString: () => "cat-1" },
+                name: "Servizi",
+                skipKitchenPrint: true,
+                printerId: {
+                    _id: "kitchen-printer-1",
+                    name: "Stampante Servizi",
+                    ip: "192.168.178.210",
+                    port: 9100,
+                    isVirtual: false
+                }
+            }
+        ]);
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters("order-skip-single", "pos-1");
+
+        expect(result).toEqual([true]);
+        expect(printComandaSpy).toHaveBeenCalledTimes(1);
+        expect(printComandaSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                printType: "CASHIER_SUMMARY",
+                items: [expect.objectContaining({ name: "Panino" })]
+            }),
+            1
+        );
+    });
+
     test("serializes jobs across concurrent orders that target the same printer", async () => {
         vi.useFakeTimers();
         orderFindByIdMock.mockImplementation((orderId: string) => ({
@@ -399,6 +447,178 @@ describe("PrinterService.routeOrderToPrinters", () => {
                 expect.objectContaining({ items: [expect.objectContaining({ name: "Panino" })] }),
                 expect.objectContaining({ items: [expect.objectContaining({ name: "Patatine" })] })
             ])
+        );
+    });
+
+    test("prints only the printable portion of a mixed order when another category skips comanda printing", async () => {
+        mockOrder({
+            _id: { toString: () => "order-mixed-skip" },
+            eventId: { toString: () => "evt-1" },
+            pickupNumber: 45,
+            status: "PAID",
+            paymentMethod: "CASH",
+            totalAmount: 11,
+            customer: { name: "Mario", table: "A1" },
+            cart: [
+                {
+                    productId: "prod-1",
+                    snapshotName: "Panino",
+                    quantity: 1,
+                    selectedOptions: []
+                },
+                {
+                    productId: "prod-2",
+                    snapshotName: "Servizio",
+                    quantity: 1,
+                    selectedOptions: []
+                }
+            ]
+        });
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([
+            {
+                _id: { toString: () => "prod-1" },
+                categoryId: { toString: () => "cat-1" },
+                basePrice: 7
+            },
+            {
+                _id: { toString: () => "prod-2" },
+                categoryId: { toString: () => "cat-2" },
+                basePrice: 4
+            }
+        ]);
+        mockCategories([
+            {
+                _id: { toString: () => "cat-1" },
+                name: "Griglia",
+                printerId: {
+                    _id: "kitchen-printer-1",
+                    name: "Stampante Griglia",
+                    ip: "192.168.178.210",
+                    port: 9100,
+                    isVirtual: false
+                }
+            },
+            {
+                _id: { toString: () => "cat-2" },
+                name: "Servizi",
+                skipKitchenPrint: true,
+                printerId: {
+                    _id: "kitchen-printer-2",
+                    name: "Stampante Servizi",
+                    ip: "192.168.178.211",
+                    port: 9100,
+                    isVirtual: false
+                }
+            }
+        ]);
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters("order-mixed-skip", "pos-1");
+
+        expect(result).toEqual([true, true, true]);
+
+        const allJobs = printComandaSpy.mock.calls.map(([job]) => job);
+        const summaryJob = allJobs.find((job) => job.printType === "CASHIER_SUMMARY");
+        const kitchenJobs = allJobs.filter((job) => job.printType === "KITCHEN_ORDER");
+        const customerJobs = allJobs.filter((job) => job.printType === "CUSTOMER_ORDER");
+
+        expect(getPrintedItemNames(summaryJob || {})).toEqual(["Panino", "Servizio"]);
+        expect(kitchenJobs).toHaveLength(1);
+        expect(customerJobs).toHaveLength(1);
+        expect(getPrintedItemNames(kitchenJobs[0])).toEqual(["Panino"]);
+        expect(getPrintedItemNames(customerJobs[0])).toEqual(["Panino"]);
+    });
+
+    test("keeps only the cashier summary when every category in the order skips comanda printing", async () => {
+        mockOrder({
+            _id: { toString: () => "order-all-skip" },
+            eventId: { toString: () => "evt-1" },
+            pickupNumber: 46,
+            status: "PAID",
+            paymentMethod: "CASH",
+            totalAmount: 11,
+            customer: { name: "Mario", table: "A1" },
+            cart: [
+                {
+                    productId: "prod-1",
+                    snapshotName: "Servizio 1",
+                    quantity: 1,
+                    selectedOptions: []
+                },
+                {
+                    productId: "prod-2",
+                    snapshotName: "Servizio 2",
+                    quantity: 1,
+                    selectedOptions: []
+                }
+            ]
+        });
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([
+            {
+                _id: { toString: () => "prod-1" },
+                categoryId: { toString: () => "cat-1" },
+                basePrice: 7
+            },
+            {
+                _id: { toString: () => "prod-2" },
+                categoryId: { toString: () => "cat-2" },
+                basePrice: 4
+            }
+        ]);
+        mockCategories([
+            {
+                _id: { toString: () => "cat-1" },
+                name: "Servizi",
+                skipKitchenPrint: true
+            },
+            {
+                _id: { toString: () => "cat-2" },
+                name: "Digital",
+                skipKitchenPrint: true,
+                printerId: {
+                    _id: "kitchen-printer-2",
+                    name: "Stampante Digital",
+                    ip: "192.168.178.211",
+                    port: 9100,
+                    isVirtual: false
+                }
+            }
+        ]);
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters("order-all-skip", "pos-1");
+
+        expect(result).toEqual([true]);
+        expect(printComandaSpy).toHaveBeenCalledTimes(1);
+        expect(printComandaSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                printType: "CASHIER_SUMMARY",
+                items: [
+                    expect.objectContaining({ name: "Servizio 1" }),
+                    expect.objectContaining({ name: "Servizio 2" })
+                ]
+            }),
+            1
         );
     });
 
