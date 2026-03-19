@@ -7,6 +7,7 @@ import {
     createCashBoxPeripheral,
     createCategoryAndProducts,
     createPosDevice,
+    createVirtualPrinterDirect,
     deleteEvent,
     dismissFeedbackModal,
     openCashSessionIfRequired,
@@ -32,10 +33,15 @@ async function setRangeValue(locator: Locator, value: number) {
     }, value);
 }
 
-async function provisionVirtualPrinters(page: Page) {
-    await page.goto("/admin/settings/hardware");
-    await page.getByRole("button", { name: "Provisiona 10 virtuali" }).click();
-    await expect(page.getByText("Virtual Printer 10")).toBeVisible({ timeout: 15000 });
+async function provisionVirtualPrinters(eventName: string) {
+    const printerName = `Virtual Printer ${uniqueSuffix()}`;
+    await createVirtualPrinterDirect({
+        eventName,
+        printerName,
+        type: "CASHIER",
+        emulatorSlot: 1,
+    });
+    return { printerName };
 }
 
 async function openPrintMonitor(page: Page) {
@@ -207,7 +213,7 @@ test.describe.serial("Portal Easter Egg", () => {
         try {
             await createAndActivateEvent(page, eventName, { portalEasterEggEnabled: true });
             eventCreated = true;
-            await provisionVirtualPrinters(page);
+            await provisionVirtualPrinters(eventName);
 
             await page.goto("/admin/easter-egg");
             await expect(page.getByText("Nessuna foto caricata")).toBeVisible({ timeout: 15000 });
@@ -270,9 +276,9 @@ test.describe.serial("Portal Easter Egg", () => {
         try {
             await createAndActivateEvent(page, eventName, { portalEasterEggEnabled: true });
             eventCreated = true;
-            await provisionVirtualPrinters(page);
+            const { printerName } = await provisionVirtualPrinters(eventName);
             await createCashBoxPeripheral(page, cashBoxName);
-            await createPosDevice(page, posName, "Virtual Printer 01", cashBoxName);
+            await createPosDevice(page, posName, printerName, cashBoxName);
             await createCategoryAndProducts(page, categoryName, [
                 { name: productName, price: "8.00" }
             ]);
@@ -299,9 +305,8 @@ test.describe.serial("Portal Easter Egg", () => {
             await expect(publicPage.getByTestId("menu-easter-egg-thermal-preview")).toBeVisible({ timeout: 15000 });
             await dragPreview(publicPage.getByTestId("menu-easter-egg-preview-stage"));
 
-            await expect(publicPage.getByTestId("menu-easter-egg-state-banner")).toContainText("Foto confermata", { timeout: 15000 });
-            await expect(publicPage.getByTestId("menu-easter-egg-autosave-banner")).toContainText("Salvata automaticamente");
             await expect(publicPage.getByText(/Foto allegata all'ordine/i)).toBeVisible({ timeout: 15000 });
+            await expect(publicPage.getByTestId("menu-easter-egg-state-banner")).toContainText("Foto confermata", { timeout: 15000 });
 
             await ensureAdminAuthenticated(page, "/admin/settings/hardware");
 

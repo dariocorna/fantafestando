@@ -17,7 +17,7 @@ describe("menu cart storage", () => {
         expect(payload).toEqual({
             eventId: "event-1",
             items: [
-                { _id: "p1", name: "Pizza", basePrice: 8, quantity: 2 },
+                { lineId: "p1", _id: "p1", name: "Pizza", basePrice: 8, quantity: 2, selectedOptions: [], menuSelections: [] },
             ],
         })
         expect(getStoredMenuCartItemsForEvent(payload, "event-1")).toEqual(payload.items)
@@ -53,7 +53,7 @@ describe("menu cart storage", () => {
         expect(payload).toEqual({
             eventId: "event-a",
             items: [
-                { _id: "p1", name: "Pizza", basePrice: 8, quantity: 1 },
+                { lineId: "p1", _id: "p1", name: "Pizza", basePrice: 8, quantity: 1, selectedOptions: [], menuSelections: [] },
             ],
         })
     })
