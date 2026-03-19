@@ -15,6 +15,11 @@ export interface OrderCartPayloadItem {
     snapshotName: string
     quantity: number
     selectedOptions?: Array<{ name: string, priceVariation: number }>
+    includedComponents?: Array<{
+        productId: string
+        snapshotName: string
+        quantity: number
+    }>
 }
 
 export interface StockAdjustment {
@@ -30,11 +35,21 @@ export interface StockOperationResult {
 }
 
 export function buildDemandMap(cart: OrderCartPayloadItem[]): Map<string, number> {
-    const demandItems: CartStockItem[] = cart.map((item) => ({
-        productId: item.productId,
-        quantity: item.quantity,
-        snapshotName: item.snapshotName
-    }))
+    const demandItems: CartStockItem[] = cart.flatMap((item) => {
+        if (Array.isArray(item.includedComponents) && item.includedComponents.length > 0) {
+            return item.includedComponents.map((component) => ({
+                productId: component.productId,
+                quantity: component.quantity * item.quantity,
+                snapshotName: component.snapshotName
+            }))
+        }
+
+        return [{
+            productId: item.productId,
+            quantity: item.quantity,
+            snapshotName: item.snapshotName
+        }]
+    })
     return aggregateCartQuantities(demandItems)
 }
 

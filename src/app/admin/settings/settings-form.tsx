@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from "react";
+import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
 import { CardContent, CardFooter } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -64,7 +64,7 @@ function resolveInitialQuickDiscountPresets(event: SettingsFormEvent) {
     }));
 }
 
-export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps) {
+function ActiveEventSettingsFormInner({ event }: ActiveEventSettingsFormProps) {
     const [isPending, startTransition] = useTransition();
     const [saved, setSaved] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -86,8 +86,7 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
     const receiptPreviewObjectUrlRef = useRef<string | null>(null);
     const menuHeaderLogoFileInputRef = useRef<HTMLInputElement | null>(null);
     const receiptHeaderLogoFileInputRef = useRef<HTMLInputElement | null>(null);
-    const hasMountedEventStateRef = useRef(false);
-    const lastEventIdRef = useRef(event._id);
+    const isMountedRef = useRef(true);
     const [active, setActive] = useState(event.active);
     const [askName, setAskName] = useState(event.settings?.askName ?? false);
     const [askTable, setAskTable] = useState(event.settings?.askTable ?? false);
@@ -99,25 +98,6 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
         type: QuickDiscountType;
         value: string;
     }>>(() => resolveInitialQuickDiscountPresets(event));
-
-    const eventSnapshot = useMemo(() => ({
-        eventId: event._id,
-        active: event.active,
-        askName: event.settings?.askName ?? false,
-        askTable: event.settings?.askTable ?? false,
-        portalEasterEggEnabled: event.settings?.portalEasterEggEnabled ?? false,
-        posCatalogLayout: event.settings?.posCatalogLayout || "COMPACT_COLUMNS",
-        menuHeaderLogoUrl: event.settings?.menuHeaderLogoUrl || "",
-        receiptHeaderLogoUrl: event.settings?.receiptHeaderLogoUrl || "",
-        predefinedTables: resolveInitialPredefinedTables(event),
-        quickDiscountPresets: resolveInitialQuickDiscountPresets(event)
-    }), [
-        event._id,
-        event.active,
-        event.predefinedTables,
-        event.settings
-    ]);
-    const eventResetKey = useMemo(() => JSON.stringify(eventSnapshot), [eventSnapshot]);
 
     const predefinedTablesCount = predefinedTables.length;
     const predefinedTablesOverLimit = predefinedTablesCount > MAX_PREDEFINED_TABLES;
@@ -131,7 +111,9 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
     );
 
     useEffect(() => {
+        isMountedRef.current = true;
         return () => {
+            isMountedRef.current = false;
             if (previewObjectUrlRef.current) {
                 URL.revokeObjectURL(previewObjectUrlRef.current);
             }
@@ -140,60 +122,6 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
             }
         };
     }, []);
-
-    useEffect(() => {
-        if (!hasMountedEventStateRef.current) {
-            hasMountedEventStateRef.current = true;
-            lastEventIdRef.current = eventSnapshot.eventId;
-            return;
-        }
-
-        const didSwitchEvent = lastEventIdRef.current !== eventSnapshot.eventId;
-        lastEventIdRef.current = eventSnapshot.eventId;
-        if (!didSwitchEvent) {
-            return;
-        }
-
-        if (previewObjectUrlRef.current) {
-            URL.revokeObjectURL(previewObjectUrlRef.current);
-            previewObjectUrlRef.current = null;
-        }
-        if (receiptPreviewObjectUrlRef.current) {
-            URL.revokeObjectURL(receiptPreviewObjectUrlRef.current);
-            receiptPreviewObjectUrlRef.current = null;
-        }
-
-        if (menuHeaderLogoFileInputRef.current) {
-            menuHeaderLogoFileInputRef.current.value = "";
-        }
-        if (receiptHeaderLogoFileInputRef.current) {
-            receiptHeaderLogoFileInputRef.current.value = "";
-        }
-
-        setSaved(false);
-        setError(null);
-        setTablesError(null);
-        setNewTableValue("");
-        setBulkImportValue("");
-        setIsBulkImportOpen(false);
-        setActive(eventSnapshot.active);
-        setAskName(eventSnapshot.askName);
-        setAskTable(eventSnapshot.askTable);
-        setPortalEasterEggEnabled(eventSnapshot.portalEasterEggEnabled);
-        setPosCatalogLayout(eventSnapshot.posCatalogLayout);
-        setMenuHeaderLogoFileError(null);
-        setMenuHeaderLogoCurrentUrl(eventSnapshot.menuHeaderLogoUrl || null);
-        setMenuHeaderLogoPreviewUrl(eventSnapshot.menuHeaderLogoUrl || null);
-        setMenuHeaderLogoSelectedFile(null);
-        setRemoveMenuHeaderLogo(false);
-        setReceiptHeaderLogoFileError(null);
-        setReceiptHeaderLogoCurrentUrl(eventSnapshot.receiptHeaderLogoUrl || null);
-        setReceiptHeaderLogoPreviewUrl(eventSnapshot.receiptHeaderLogoUrl || null);
-        setReceiptHeaderLogoSelectedFile(null);
-        setRemoveReceiptHeaderLogo(false);
-        setPredefinedTables(eventSnapshot.predefinedTables);
-        setQuickDiscountPresets(eventSnapshot.quickDiscountPresets);
-    }, [eventResetKey, eventSnapshot]);
 
     const handleMenuHeaderLogoFileChange = async (file: File | null) => {
         setMenuHeaderLogoFileError(null);
@@ -379,7 +307,6 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
         submitEvent.preventDefault();
         setSaved(false);
         setError(null);
-        const submittedEventId = eventSnapshot.eventId;
         if (menuHeaderLogoFileError) {
             setError(menuHeaderLogoFileError);
             return;
@@ -398,7 +325,7 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
         }
         startTransition(async () => {
             const result = await updateEventSettingsAction(formData);
-            if (lastEventIdRef.current !== submittedEventId) {
+            if (!isMountedRef.current) {
                 return;
             }
             if (result?.error) {
@@ -885,4 +812,8 @@ export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps)
             </CardFooter>
         </form>
     );
+}
+
+export function ActiveEventSettingsForm({ event }: ActiveEventSettingsFormProps) {
+    return <ActiveEventSettingsFormInner key={event._id} event={event} />;
 }

@@ -7,12 +7,16 @@ export const EMPTY_STORED_MENU_CART_ITEMS: StoredMenuCartItem[] = []
 const MENU_CART_STORAGE_EVENT = "fantafestando:menu-cart-change"
 
 export interface StoredMenuCartItem {
+    lineId: string
     _id: string
     name: string
     basePrice: number
     quantity: number
+    kind?: "STANDARD" | "FIXED_MENU"
     categoryId?: string
     description?: string
+    selectedOptions?: string[]
+    menuSelections?: Array<{ groupId: string; productId: string }>
     variants?: { optionName: string; priceVariation: number }[]
 }
 
@@ -35,9 +39,11 @@ function isStoredMenuCartItem(value: unknown): value is StoredMenuCartItem {
     if (!value || typeof value !== "object") return false
 
     const item = value as Record<string, unknown>
+    const productId = typeof item._id === "string" ? item._id : ""
+    const lineId = typeof item.lineId === "string" ? item.lineId : productId
     return (
-        typeof item._id === "string"
-        && item._id.length > 0
+        lineId.length > 0
+        && productId.length > 0
         && typeof item.name === "string"
         && item.name.length > 0
         && typeof item.basePrice === "number"
@@ -49,7 +55,24 @@ function isStoredMenuCartItem(value: unknown): value is StoredMenuCartItem {
 }
 
 function filterStoredMenuCartItems(items: unknown[]): StoredMenuCartItem[] {
-    return items.filter(isStoredMenuCartItem)
+    return items
+        .filter(isStoredMenuCartItem)
+        .map((item) => ({
+            ...item,
+            lineId: item.lineId || item._id,
+            selectedOptions: Array.isArray(item.selectedOptions)
+                ? item.selectedOptions.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+                : [],
+            menuSelections: Array.isArray(item.menuSelections)
+                ? item.menuSelections
+                    .filter((entry) => entry && typeof entry === "object")
+                    .map((entry) => ({
+                        groupId: typeof entry.groupId === "string" ? entry.groupId : "",
+                        productId: typeof entry.productId === "string" ? entry.productId : ""
+                    }))
+                    .filter((entry) => entry.groupId && entry.productId)
+                : []
+        }))
 }
 
 export function parseStoredMenuCart(

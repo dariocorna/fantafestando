@@ -27,6 +27,8 @@ import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
 import { getStockLabel, getStockStatus, type StockShortage } from "@/lib/inventory"
 import { resolveQuickDiscountPresetsFromSettings, type QuickDiscountPreset } from "@/lib/quick-discount-presets"
 import { normalizePosCatalogLayout } from "@/lib/pos-catalog-layout"
+import { FixedMenuConfigDialog, type FixedMenuChoiceGroupDto, type FixedMenuComponentDto } from "@/components/fixed-menu-config-dialog"
+import { buildMenuConfigurationKey, type MenuSelectionInput } from "@/lib/fixed-menu"
 
 interface ICategory {
     _id: string
@@ -40,6 +42,10 @@ interface IProduct {
     shortName?: string
     basePrice: number
     categoryId: string
+    kind?: "STANDARD" | "FIXED_MENU"
+    requiresConfiguration?: boolean
+    menuComponents?: FixedMenuComponentDto[]
+    menuChoiceGroups?: FixedMenuChoiceGroupDto[]
     stockQuantity?: number | null
     isSoldOut?: boolean
     stockStatus?: "UNLIMITED" | "OK" | "LOW" | "OUT"
@@ -86,6 +92,9 @@ interface CartItem {
     price: number
     quantity: number
     variants: string[]
+    kind?: "STANDARD" | "FIXED_MENU"
+    selectedOptions?: string[]
+    menuSelections?: MenuSelectionInput[]
     isDiscount?: boolean
     discountPreset?: {
         label: string
@@ -109,6 +118,8 @@ interface LoadedPendingOrder {
         snapshotName: string
         quantity: number
         unitPrice: number
+        selectedOptions?: Array<{ name: string, priceVariation: number }>
+        menuSelections?: Array<{ groupId: string, productId: string }>
     }>
 }
 
@@ -224,6 +235,7 @@ export default function PosPage() {
     })
     const [isRetryingFailedPrints, setIsRetryingFailedPrints] = useState(false)
     const [retryPrintsFeedback, setRetryPrintsFeedback] = useState<string | null>(null)
+    const [configuringProduct, setConfiguringProduct] = useState<IProduct | null>(null)
 
     // Info Cliente
     const [customerName, setCustomerName] = useState("")
@@ -362,21 +374,40 @@ export default function PosPage() {
         return `clamp(38px, calc((100dvh - ${reservedVerticalPx}px - ${(safeCount - 1) * gapPx}px) / ${safeCount}), 96px)`
     }
 
-    const addToCart = (product: IProduct) => {
+    const addConfiguredToCart = (
+        product: IProduct,
+        options?: {
+            menuSelections?: MenuSelectionInput[]
+            selectedOptionLabels?: string[]
+        }
+    ) => {
         setCart((prev: CartItem[]) => {
-            const existing = prev.find((i: CartItem) => !i.isDiscount && i.productId === product._id)
+            const configurationKey = buildMenuConfigurationKey(options?.menuSelections || [])
+            const lineId = configurationKey ? `${product._id}:${configurationKey}` : product._id
+            const existing = prev.find((i: CartItem) => !i.isDiscount && i.lineId === lineId)
             if (existing) {
                 return prev.map((i: CartItem) => i.lineId === existing.lineId ? { ...i, quantity: i.quantity + 1 } : i)
             }
             return [...prev, {
-                lineId: product._id,
+                lineId,
                 productId: product._id,
                 name: resolveProductDisplayName(product),
                 price: product.basePrice,
                 quantity: 1,
-                variants: []
+                variants: [],
+                kind: product.kind || "STANDARD",
+                selectedOptions: options?.selectedOptionLabels || [],
+                menuSelections: options?.menuSelections || [],
             }]
         })
+    }
+
+    const addToCart = (product: IProduct) => {
+        if (product.requiresConfiguration) {
+            setConfiguringProduct(product)
+            return
+        }
+        addConfiguredToCart(product)
     }
 
     const addDiscountPresetToCart = (preset: QuickDiscountPreset) => {
@@ -695,7 +726,9 @@ export default function PosPage() {
             name: item.snapshotName,
             price: item.unitPrice,
             quantity: item.quantity,
-            variants: []
+            variants: [],
+            selectedOptions: (item.selectedOptions || []).map((option) => option.name),
+            menuSelections: item.menuSelections || [],
         })))
         setRecentPendingOrders((prev) => prev.filter((order) => order.id !== result.order?.id))
         setIsCodeDialogOpen(false)
@@ -762,7 +795,11 @@ export default function PosPage() {
                     productId: item.productId,
                     snapshotName: item.name,
                     quantity: item.quantity,
-                    selectedOptions: []
+                    selectedOptions: (item.selectedOptions || []).map((option) => ({
+                        name: option,
+                        priceVariation: 0
+                    })),
+                    menuSelections: item.menuSelections || []
                 }))
             })
 
@@ -809,7 +846,11 @@ export default function PosPage() {
                 productId: item.productId,
                 snapshotName: item.name,
                 quantity: item.quantity,
-                selectedOptions: []
+                selectedOptions: (item.selectedOptions || []).map((option) => ({
+                    name: option,
+                    priceVariation: 0
+                })),
+                menuSelections: item.menuSelections || []
             })),
             paymentMethod: effectivePaymentMethod,
             posDeviceId: selectedPosDeviceId,
@@ -1023,6 +1064,11 @@ export default function PosPage() {
                                                                 <p className="line-clamp-3 text-[1.02rem] font-black uppercase leading-tight text-slate-900">
                                                                     {resolveProductDisplayName(p)}
                                                                 </p>
+                                                                {p.requiresConfiguration ? (
+                                                                    <span className="inline-flex w-fit rounded-sm bg-white/85 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-slate-600">
+                                                                        Configura
+                                                                    </span>
+                                                                ) : null}
                                                                 <div className="mt-auto flex items-end justify-between gap-2">
                                                                     {showStockPill ? (
                                                                         <span
@@ -1132,6 +1178,11 @@ export default function PosPage() {
                                                                     <p className="mx-auto w-full max-w-[96%] truncate text-center text-[clamp(14px,0.95vw,20px)] font-black uppercase leading-tight text-slate-800">
                                                                         {resolveProductDisplayName(p)}
                                                                     </p>
+                                                                    {p.requiresConfiguration ? (
+                                                                        <span className="mx-auto inline-flex w-fit rounded-sm bg-white/85 px-1 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-slate-600">
+                                                                            Configura
+                                                                        </span>
+                                                                    ) : null}
                                                                     {showStockPill ? (
                                                                         <span
                                                                             className={`mx-auto inline-flex w-fit rounded-sm px-1 py-0.5 text-[10px] font-bold ${stockStatus === "OUT"
@@ -1299,7 +1350,14 @@ export default function PosPage() {
                                                     : `Sconto fisso ${item.discountPreset?.value.toFixed(2)} €`}
                                             </span>
                                         ) : (
-                                            <span className="text-xs text-slate-500">{item.quantity} x {item.price.toFixed(2)} €</span>
+                                            <div className="space-y-1">
+                                                <span className="text-xs text-slate-500">{item.quantity} x {item.price.toFixed(2)} €</span>
+                                                {Array.isArray(item.selectedOptions) && item.selectedOptions.length > 0 ? (
+                                                    <p className="text-[11px] font-semibold text-slate-500">
+                                                        {item.selectedOptions.join(" • ")}
+                                                    </p>
+                                                ) : null}
+                                            </div>
                                         )}
                                     </div>
                                     <div className="flex items-center gap-3">
@@ -1343,6 +1401,30 @@ export default function PosPage() {
                     ) : null}
                 </div>
             </div>
+
+            {configuringProduct ? (
+                <FixedMenuConfigDialog
+                    open
+                    onOpenChange={(nextOpen) => {
+                        if (!nextOpen) setConfiguringProduct(null)
+                    }}
+                    product={{
+                        _id: configuringProduct._id,
+                        name: resolveProductDisplayName(configuringProduct),
+                        basePrice: configuringProduct.basePrice,
+                        menuComponents: configuringProduct.menuComponents || [],
+                        menuChoiceGroups: configuringProduct.menuChoiceGroups || []
+                    }}
+                    confirmLabel="Aggiungi al carrello"
+                    onConfirm={(result) => {
+                        addConfiguredToCart(configuringProduct, {
+                            menuSelections: result.menuSelections,
+                            selectedOptionLabels: result.selectedOptionLabels
+                        })
+                        setConfiguringProduct(null)
+                    }}
+                />
+            ) : null}
 
             {/* Modal di Checkout */}
             <Dialog open={isCheckoutOpen} onOpenChange={handleCheckoutDialogOpenChange}>

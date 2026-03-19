@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import type { ProductKind } from './Product';
 
 export interface IOrder extends Document {
     eventId: Types.ObjectId;
@@ -23,6 +24,9 @@ export interface IOrder extends Document {
         snapshotName: string;
         customKitchenNotes?: string;
         quantity: number;
+        productKind?: ProductKind;
+        unitBasePrice?: number;
+        lineTotal?: number;
         discountApplied?: number;
         discountMeta?: {
             type: "NONE" | "PERCENT" | "FIXED";
@@ -30,6 +34,14 @@ export interface IOrder extends Document {
             value?: number;
             baseUnitAmount?: number;
         };
+        includedComponents?: Array<{
+            productId: Types.ObjectId;
+            snapshotName: string;
+            quantity: number;
+            source: "FIXED_ITEM" | "CHOICE_OPTION";
+            groupId?: string;
+            groupName?: string;
+        }>;
         selectedOptions: Array<{
             name: string;
             priceVariation: number;
@@ -91,6 +103,12 @@ const OrderSchema = new Schema<IOrder>({
         snapshotName: { type: String, required: true },
         customKitchenNotes: { type: String },
         quantity: { type: Number, required: true, min: 1 },
+        productKind: {
+            type: String,
+            enum: ["STANDARD", "FIXED_MENU"]
+        },
+        unitBasePrice: { type: Number, min: 0 },
+        lineTotal: { type: Number, min: 0 },
         discountApplied: { type: Number, min: 0, default: 0 },
         discountMeta: {
             type: {
@@ -101,6 +119,18 @@ const OrderSchema = new Schema<IOrder>({
             value: { type: Number, min: 0 },
             baseUnitAmount: { type: Number, min: 0 }
         },
+        includedComponents: [{
+            productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
+            snapshotName: { type: String, required: true },
+            quantity: { type: Number, required: true, min: 1 },
+            source: {
+                type: String,
+                enum: ["FIXED_ITEM", "CHOICE_OPTION"],
+                required: true
+            },
+            groupId: { type: String },
+            groupName: { type: String }
+        }],
         selectedOptions: [{
             name: { type: String, required: true },
             priceVariation: { type: Number, required: true }

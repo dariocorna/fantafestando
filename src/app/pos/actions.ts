@@ -32,6 +32,14 @@ import {
     type PeripheralType,
     type PosPaymentCapabilities,
 } from "@/lib/payment-logic"
+import {
+    collectReferencedProductIds,
+    getProductUnitBasePrice,
+    isProductVisibleInChannel,
+    normalizeProductKind,
+    resolveFixedMenuSelection,
+    type MenuSelectionInput,
+} from "@/lib/fixed-menu"
 
 interface PrintDispatchSummary {
     attempted: number
@@ -69,11 +77,17 @@ interface PosCartSelectedOption {
     priceVariation: number
 }
 
+interface PosCartMenuSelection {
+    groupId: string
+    productId: string
+}
+
 interface PosCartItemInput {
     productId: string
     snapshotName: string
     quantity: number
     selectedOptions: PosCartSelectedOption[]
+    menuSelections: PosCartMenuSelection[]
 }
 
 interface PosOrderPricingResult {
@@ -84,7 +98,17 @@ interface PosOrderPricingResult {
         productId: string
         snapshotName: string
         quantity: number
+        productKind: "STANDARD" | "FIXED_MENU"
+        unitBasePrice: number
+        lineTotal: number
         selectedOptions: PosCartSelectedOption[]
+        includedComponents?: Array<{
+            productId: string
+            snapshotName: string
+            quantity: number
+            source: "FIXED_ITEM" | "CHOICE_OPTION"
+            groupName?: string
+        }>
         discountApplied: number
         discountMeta?: LineDiscountMeta
     }>
@@ -110,6 +134,7 @@ function sanitizeCartItems(
         snapshotName: string
         quantity: number
         selectedOptions?: Array<{ name: string, priceVariation: number }>
+        menuSelections?: Array<{ groupId: string, productId: string }>
     }>
 ): PosCartItemInput[] | null {
     if (!Array.isArray(cart) || cart.length === 0) return null
@@ -138,7 +163,16 @@ function sanitizeCartItems(
             productId,
             snapshotName,
             quantity: Math.floor(quantity),
-            selectedOptions
+            selectedOptions,
+            menuSelections: Array.isArray(item.menuSelections)
+                ? item.menuSelections
+                    .filter((entry) => entry && typeof entry.groupId === "string" && typeof entry.productId === "string")
+                    .map((entry) => ({
+                        groupId: entry.groupId.trim(),
+                        productId: entry.productId.trim()
+                    }))
+                    .filter((entry) => entry.groupId && entry.productId)
+                : []
         })
     }
 
@@ -159,30 +193,138 @@ async function computePricingForCart(data: {
     const productDocs = await Product.find({
         eventId: data.eventId,
         _id: { $in: productIds }
-    }).select("_id basePrice").lean() as Array<{
+    }).select("_id name basePrice kind availableOnlyInMenus salesChannels menuComponents menuChoiceGroups").lean() as Array<{
         _id: string | { toString(): string }
-        basePrice?: number
+        name?: string
+        basePrice?: number | null
+        kind?: string
+        availableOnlyInMenus?: boolean
+        salesChannels?: string[]
+        menuComponents?: Array<{ productId?: string | { toString(): string }, quantity?: number | null }>
+        menuChoiceGroups?: Array<{
+            id?: string
+            name?: string
+            minSelections?: number | null
+            maxSelections?: number | null
+            options?: Array<{ productId?: string | { toString(): string }, quantity?: number | null }>
+        }>
     }>
 
     if (productDocs.length !== productIds.length) {
         return { success: false, error: "Impossibile calcolare il totale: prodotti non più disponibili" }
     }
 
-    const basePriceByProductId = new Map<string, number>()
+    const referencedProductIds = [...new Set(productDocs.flatMap((product) => collectReferencedProductIds(product)))]
+    const referencedProducts = referencedProductIds.length > 0
+        ? await Product.find({
+            eventId: data.eventId,
+            _id: { $in: referencedProductIds }
+        }).select("_id name").lean() as Array<{ _id: string | { toString(): string }, name?: string }>
+        : []
+
+    const productById = new Map<string, {
+        _id: string | { toString(): string }
+        name?: string
+        basePrice?: number | null
+        kind?: string
+        availableOnlyInMenus?: boolean
+        salesChannels?: string[]
+        menuComponents?: Array<{ productId?: string | { toString(): string }, quantity?: number | null }>
+        menuChoiceGroups?: Array<{
+            id?: string
+            name?: string
+            minSelections?: number | null
+            maxSelections?: number | null
+            options?: Array<{ productId?: string | { toString(): string }, quantity?: number | null }>
+        }>
+    }>()
     productDocs.forEach((product) => {
-        basePriceByProductId.set(product._id.toString(), normalizeCurrencyAmount(product.basePrice ?? 0))
+        productById.set(product._id.toString(), product)
+    })
+    referencedProducts.forEach((product) => {
+        if (!productById.has(product._id.toString())) {
+            productById.set(product._id.toString(), product)
+        }
     })
 
+    const resolvedCart = data.cart.map((item) => {
+        const product = productById.get(item.productId)
+        if (!product) {
+            return { success: false as const, error: "Impossibile calcolare il totale: prodotti non più disponibili" }
+        }
+
+        if (!isProductVisibleInChannel(product, "POS")) {
+            return { success: false as const, error: "Alcuni prodotti non sono disponibili nel POS" }
+        }
+
+        const productKind = normalizeProductKind(product.kind)
+        const unitBasePrice = normalizeCurrencyAmount(getProductUnitBasePrice(product))
+
+        if (productKind === "STANDARD") {
+            return {
+                success: true as const,
+                item: {
+                    productId: item.productId,
+                    snapshotName: item.snapshotName,
+                    quantity: item.quantity,
+                    productKind,
+                    unitBasePrice,
+                    selectedOptions: item.selectedOptions,
+                    includedComponents: []
+                }
+            }
+        }
+
+        const menuResolution = resolveFixedMenuSelection({
+            menu: product,
+            productById: new Map(
+                [...productById.entries()].map(([key, value]) => [key, { _id: value._id, name: value.name }])
+            ),
+            selections: item.menuSelections as MenuSelectionInput[]
+        })
+        if (!menuResolution.success) {
+            return { success: false as const, error: menuResolution.error }
+        }
+
+        return {
+            success: true as const,
+            item: {
+                productId: item.productId,
+                snapshotName: item.snapshotName,
+                quantity: item.quantity,
+                productKind,
+                unitBasePrice,
+                selectedOptions: menuResolution.selectedOptions,
+                includedComponents: menuResolution.includedComponents.map((component) => ({
+                    productId: component.productId,
+                    snapshotName: component.snapshotName,
+                    quantity: component.quantity,
+                    source: component.source,
+                    ...(component.groupId ? { groupId: component.groupId } : {}),
+                    ...(component.groupName ? { groupName: component.groupName } : {})
+                }))
+            }
+        }
+    })
+
+    const resolvedCartError = resolvedCart.find((entry) => !entry.success)
+    if (resolvedCartError && !resolvedCartError.success) {
+        return { success: false, error: resolvedCartError.error }
+    }
+
+    const normalizedCart = resolvedCart
+        .filter((entry): entry is Extract<typeof entry, { success: true }> => entry.success)
+        .map((entry) => entry.item)
+
     const computedDiscounts = computeOrderDiscounts({
-        lines: data.cart.map((item) => {
-            const basePrice = basePriceByProductId.get(item.productId) ?? 0
+        lines: normalizedCart.map((item) => {
             const optionsDelta = item.selectedOptions.reduce((sum, option) =>
                 sum + normalizeCurrencyAmount(option.priceVariation), 0
             )
             return {
                 productId: item.productId,
                 quantity: item.quantity,
-                unitAmount: normalizeCurrencyAmount(basePrice + optionsDelta)
+                unitAmount: normalizeCurrencyAmount(item.unitBasePrice + optionsDelta)
             }
         }),
         orderDiscount: data.orderDiscount,
@@ -208,13 +350,21 @@ async function computePricingForCart(data: {
             discountApplied: computedDiscounts.summary.discountApplied,
             finalAmount: computedDiscounts.summary.finalAmount,
             orderDiscountMeta: computedDiscounts.summary.orderDiscountMeta,
-            cartWithDiscounts: data.cart.map((item, index) => {
+            cartWithDiscounts: normalizedCart.map((item, index) => {
                 const line = computedDiscounts.summary.lineResults[index]
+                const optionsDelta = item.selectedOptions.reduce((sum, option) =>
+                    sum + normalizeCurrencyAmount(option.priceVariation), 0
+                )
+                const grossLineTotal = normalizeCurrencyAmount((item.unitBasePrice + optionsDelta) * item.quantity)
                 return {
                     productId: item.productId,
                     snapshotName: item.snapshotName,
                     quantity: item.quantity,
+                    productKind: item.productKind,
+                    unitBasePrice: item.unitBasePrice,
+                    lineTotal: normalizeCurrencyAmount(grossLineTotal - (line?.discountApplied ?? 0)),
                     selectedOptions: item.selectedOptions,
+                    includedComponents: item.includedComponents,
                     discountApplied: line?.discountApplied ?? 0,
                     discountMeta: line?.discountMeta
                 }
@@ -663,6 +813,7 @@ export async function createOrder(data: {
         snapshotName: string,
         quantity: number,
         selectedOptions: Array<{ name: string, priceVariation: number }>
+        menuSelections?: Array<{ groupId: string, productId: string }>
     }>,
     orderDiscount?: DiscountInput,
     lineDiscounts?: LineDiscountInput[],
@@ -706,11 +857,12 @@ export async function createOrder(data: {
         }
 
         const payableAmount = pricingResult.pricing.finalAmount
-        const stockPayload = sanitizedCart.map((item) => ({
+        const stockPayload = pricingResult.pricing.cartWithDiscounts.map((item) => ({
             productId: item.productId,
             snapshotName: item.snapshotName,
             quantity: item.quantity,
-            selectedOptions: item.selectedOptions
+            selectedOptions: item.selectedOptions,
+            includedComponents: item.includedComponents
         }))
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
@@ -901,7 +1053,19 @@ export async function loadPendingOrderByCode(data: {
             pickupNumber?: number
             totalAmount: number
             customer?: { name?: string, table?: string }
-            cart: Array<{ productId: string | { toString(): string }, snapshotName: string, quantity: number }>
+            cart: Array<{
+                productId: string | { toString(): string }
+                snapshotName: string
+                quantity: number
+                unitBasePrice?: number
+                lineTotal?: number
+                selectedOptions?: Array<{ name: string, priceVariation: number }>
+                includedComponents?: Array<{
+                    productId: string | { toString(): string }
+                    source?: "FIXED_ITEM" | "CHOICE_OPTION"
+                    groupId?: string
+                }>
+            }>
             easterEggAttachment?: { uploadedAt?: Date | string | null, printedAt?: Date | string | null }
         }
 
@@ -966,7 +1130,18 @@ export async function loadPendingOrderByCode(data: {
                     productId: item.productId.toString(),
                     snapshotName: item.snapshotName,
                     quantity: item.quantity,
-                    unitPrice: priceByProductId.get(item.productId.toString()) ?? fallbackUnitPrice
+                    unitPrice: Number.isFinite(item.unitBasePrice)
+                        ? Number(item.unitBasePrice)
+                        : (Number.isFinite(item.lineTotal) && item.quantity > 0
+                            ? Number((Number(item.lineTotal) / item.quantity).toFixed(2))
+                            : (priceByProductId.get(item.productId.toString()) ?? fallbackUnitPrice)),
+                    selectedOptions: item.selectedOptions || [],
+                    menuSelections: (item.includedComponents || [])
+                        .filter((component) => component.source === "CHOICE_OPTION" && component.groupId)
+                        .map((component) => ({
+                            groupId: component.groupId || "",
+                            productId: component.productId.toString()
+                        }))
                 }))
             }
         }
@@ -1038,6 +1213,7 @@ export async function completePendingOrderPayment(data: {
         snapshotName: string
         quantity: number
         selectedOptions?: Array<{ name: string, priceVariation: number }>
+        menuSelections?: Array<{ groupId: string, productId: string }>
     }>
 }) {
     let stockAdjustmentsToRollback: StockAdjustment[] = []
@@ -1082,11 +1258,23 @@ export async function completePendingOrderPayment(data: {
                     snapshotName: string
                     quantity: number
                     selectedOptions?: Array<{ name: string, priceVariation: number }>
+                    includedComponents?: Array<{
+                        productId: { toString(): string } | string
+                        source?: "FIXED_ITEM" | "CHOICE_OPTION"
+                        groupId?: string
+                        groupName?: string
+                    }>
                 }) => ({
                     productId: item.productId.toString(),
                     snapshotName: item.snapshotName,
                     quantity: item.quantity,
-                    selectedOptions: item.selectedOptions || []
+                    selectedOptions: item.selectedOptions || [],
+                    menuSelections: (item.includedComponents || [])
+                        .filter((component) => component.source === "CHOICE_OPTION" && component.groupId)
+                        .map((component) => ({
+                            groupId: component.groupId || "",
+                            productId: component.productId.toString()
+                        }))
                 }))
             ) || []
         }
@@ -1118,11 +1306,12 @@ export async function completePendingOrderPayment(data: {
         }
 
         const payableAmount = pricingResult.pricing.finalAmount
-        const currentCart = orderCartInput.map((item) => ({
+        const currentCart = pricingResult.pricing.cartWithDiscounts.map((item) => ({
             productId: item.productId,
             snapshotName: item.snapshotName,
             quantity: item.quantity,
-            selectedOptions: item.selectedOptions
+            selectedOptions: item.selectedOptions,
+            includedComponents: item.includedComponents
         }))
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
