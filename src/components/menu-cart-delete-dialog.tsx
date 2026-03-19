@@ -42,7 +42,7 @@ export function MenuCartDeleteDialog({
                     <AlertDialogTitle>Rimuovere questo prodotto dall&apos;ordine?</AlertDialogTitle>
                     <AlertDialogDescription>
                         <span className="font-semibold text-slate-700">{itemSummary}</span>
-                        {" "}verra' rimosso completamente dal carrello. Potrai sempre aggiungerlo di nuovo dal menu.
+                        {" "}verra&apos; rimosso completamente dal carrello. Potrai sempre aggiungerlo di nuovo dal menu.
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

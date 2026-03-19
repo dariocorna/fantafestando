@@ -17,6 +17,28 @@ import {
 } from "@/lib/product-availability";
 import { MAX_PRODUCT_SHORT_NAME_LENGTH } from "@/lib/product-fields";
 
+type ProductKind = "STANDARD" | "FIXED_MENU";
+type SalesChannel = "POS" | "MENU";
+
+interface MenuComponentState {
+    productId: string;
+    quantity: number;
+}
+
+interface MenuChoiceGroupState {
+    id: string;
+    name: string;
+    minSelections: number;
+    maxSelections: number;
+    options: MenuComponentState[];
+}
+
+interface ProductOption {
+    id: string;
+    name: string;
+    kind?: ProductKind;
+}
+
 function SubmitButton() {
     const { pending } = useFormStatus();
     return (
@@ -26,10 +48,15 @@ function SubmitButton() {
     );
 }
 
+function buildGroupId() {
+    return `group-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
 export function EditProductDialog({
     product,
     eventId,
     categories,
+    products,
     updateAction
 }: {
     product: {
@@ -40,10 +67,16 @@ export function EditProductDialog({
         categoryId: string,
         basePrice: number,
         stockQuantity?: number | null,
-        availableDays?: string[]
+        availableDays?: string[],
+        kind?: ProductKind,
+        availableOnlyInMenus?: boolean,
+        salesChannels?: SalesChannel[],
+        menuComponents?: MenuComponentState[],
+        menuChoiceGroups?: MenuChoiceGroupState[]
     },
     eventId?: string,
     categories: { id: string, name: string }[],
+    products: ProductOption[],
     updateAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>
 }) {
     const [open, setOpen] = useState(false);
@@ -51,6 +84,17 @@ export function EditProductDialog({
         normalizeAvailableDays(product.availableDays || [])
     );
     const [submitError, setSubmitError] = useState<string | null>(null);
+    const [kind, setKind] = useState<ProductKind>(product.kind || "STANDARD");
+    const [availableOnlyInMenus, setAvailableOnlyInMenus] = useState(Boolean(product.availableOnlyInMenus));
+    const [salesChannels, setSalesChannels] = useState<SalesChannel[]>(
+        Array.isArray(product.salesChannels) && product.salesChannels.length > 0 ? product.salesChannels : ["POS", "MENU"]
+    );
+    const [menuComponents, setMenuComponents] = useState<MenuComponentState[]>(
+        Array.isArray(product.menuComponents) ? product.menuComponents : []
+    );
+    const [menuChoiceGroups, setMenuChoiceGroups] = useState<MenuChoiceGroupState[]>(
+        Array.isArray(product.menuChoiceGroups) ? product.menuChoiceGroups : []
+    );
 
     async function handleSubmit(formData: FormData) {
         setSubmitError(null);
@@ -76,6 +120,42 @@ export function EditProductDialog({
         });
     };
 
+    const toggleSalesChannel = (channel: SalesChannel) => {
+        setSalesChannels((prev) => {
+            if (prev.includes(channel)) {
+                const next = prev.filter((entry) => entry !== channel);
+                return next.length > 0 ? next : prev;
+            }
+            return [...prev, channel];
+        });
+    };
+
+    const menuEligibleProducts = products.filter((entry) => entry.id !== product.id && entry.kind !== "FIXED_MENU");
+    const serializedMenuComponents = JSON.stringify(
+        menuComponents
+            .filter((entry) => entry.productId)
+            .map((entry) => ({
+                productId: entry.productId,
+                quantity: Math.max(1, Math.floor(entry.quantity || 1))
+            }))
+    );
+    const serializedMenuChoiceGroups = JSON.stringify(
+        menuChoiceGroups
+            .map((group) => ({
+                id: group.id,
+                name: group.name.trim(),
+                minSelections: Math.max(0, Math.floor(group.minSelections || 0)),
+                maxSelections: Math.max(1, Math.floor(group.maxSelections || 1)),
+                options: group.options
+                    .filter((option) => option.productId)
+                    .map((option) => ({
+                        productId: option.productId,
+                        quantity: Math.max(1, Math.floor(option.quantity || 1))
+                    }))
+            }))
+            .filter((group) => group.name && group.options.length > 0)
+    );
+
     return (
         <Dialog
             open={open}
@@ -84,6 +164,11 @@ export function EditProductDialog({
                 if (nextOpen) {
                     setAvailableDays(normalizeAvailableDays(product.availableDays || []));
                     setSubmitError(null);
+                    setKind(product.kind || "STANDARD");
+                    setAvailableOnlyInMenus(Boolean(product.availableOnlyInMenus));
+                    setSalesChannels(Array.isArray(product.salesChannels) && product.salesChannels.length > 0 ? product.salesChannels : ["POS", "MENU"]);
+                    setMenuComponents(Array.isArray(product.menuComponents) ? product.menuComponents : []);
+                    setMenuChoiceGroups(Array.isArray(product.menuChoiceGroups) ? product.menuChoiceGroups : []);
                 }
             }}
         >
@@ -92,7 +177,7 @@ export function EditProductDialog({
                     <Pencil className="h-4 w-4" />
                 </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-h-[90vh] overflow-y-auto">
                 <form action={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle>Modifica Prodotto</DialogTitle>
@@ -104,6 +189,27 @@ export function EditProductDialog({
                         <input type="hidden" name="id" value={product.id} />
                         {eventId && <input type="hidden" name="eventId" value={eventId} />}
                         <input type="hidden" name="availableDays" value={serializeAvailableDays(availableDays)} />
+                        <input type="hidden" name="kind" value={kind} />
+                        <input type="hidden" name="menuComponentsJson" value={serializedMenuComponents} />
+                        <input type="hidden" name="menuChoiceGroupsJson" value={serializedMenuChoiceGroups} />
+                        <div className="grid gap-2">
+                            <Label htmlFor="product-kind-edit">Tipo prodotto</Label>
+                            <select
+                                id="product-kind-edit"
+                                value={kind}
+                                onChange={(event) => {
+                                    const nextKind = event.target.value === "FIXED_MENU" ? "FIXED_MENU" : "STANDARD";
+                                    setKind(nextKind);
+                                    if (nextKind === "FIXED_MENU") {
+                                        setAvailableOnlyInMenus(false);
+                                    }
+                                }}
+                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                            >
+                                <option value="STANDARD">Prodotto standard</option>
+                                <option value="FIXED_MENU">Menu a prezzo fisso</option>
+                            </select>
+                        </div>
                         <div className="grid gap-2">
                             <Label htmlFor="productCategory">Categoria</Label>
                             <select
@@ -146,9 +252,52 @@ export function EditProductDialog({
                                 className="min-h-[84px] bg-background"
                             />
                         </div>
+                        <div className="grid gap-3 rounded-lg border p-3">
+                            <Label className="text-sm font-bold">Canali di vendita</Label>
+                            <div className="flex flex-wrap gap-4">
+                                <label className="flex items-center gap-2 text-sm font-medium">
+                                    <input
+                                        type="checkbox"
+                                        name="salesChannels"
+                                        value="POS"
+                                        checked={salesChannels.includes("POS")}
+                                        onChange={() => toggleSalesChannel("POS")}
+                                    />
+                                    Visibile nel POS
+                                </label>
+                                <label className="flex items-center gap-2 text-sm font-medium">
+                                    <input
+                                        type="checkbox"
+                                        name="salesChannels"
+                                        value="MENU"
+                                        checked={salesChannels.includes("MENU")}
+                                        onChange={() => toggleSalesChannel("MENU")}
+                                    />
+                                    Visibile nell&apos;app utente
+                                </label>
+                            </div>
+                        </div>
+                        {kind === "STANDARD" ? (
+                            <label className="flex items-center gap-2 rounded-lg border p-3 text-sm font-medium">
+                                <input
+                                    type="checkbox"
+                                    name="availableOnlyInMenus"
+                                    checked={availableOnlyInMenus}
+                                    onChange={(event) => setAvailableOnlyInMenus(event.target.checked)}
+                                />
+                                Vendibile solo nei menu
+                            </label>
+                        ) : null}
                         <div className="grid gap-2">
-                            <Label htmlFor="basePrice">Prezzo Base (€)</Label>
-                            <Input id="basePrice" name="basePrice" type="number" step="0.01" defaultValue={product.basePrice} required />
+                            <Label htmlFor="basePrice">{kind === "FIXED_MENU" ? "Prezzo Fisso (€)" : "Prezzo Base (€)"}</Label>
+                            <Input
+                                id="basePrice"
+                                name="basePrice"
+                                type="number"
+                                step="0.01"
+                                defaultValue={product.basePrice}
+                                required={kind === "FIXED_MENU" || !availableOnlyInMenus}
+                            />
                         </div>
                         <div className="grid gap-2">
                             <Label htmlFor="prod-edit-stock-quantity">Scorte</Label>
@@ -198,6 +347,185 @@ export function EditProductDialog({
                                 </Button>
                             </div>
                         </div>
+                        {kind === "FIXED_MENU" ? (
+                            <div className="grid gap-4 rounded-lg border p-4">
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <Label className="text-sm font-bold">Componenti fissi</Label>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setMenuComponents((prev) => [...prev, { productId: "", quantity: 1 }])}
+                                        >
+                                            Aggiungi componente
+                                        </Button>
+                                    </div>
+                                    {menuComponents.length === 0 ? (
+                                        <p className="text-xs text-muted-foreground">Nessun componente fisso configurato.</p>
+                                    ) : null}
+                                    {menuComponents.map((component, index) => (
+                                        <div key={`fixed-${index}`} className="grid gap-2 rounded-md border p-3 md:grid-cols-[1fr_110px_auto]">
+                                            <select
+                                                value={component.productId}
+                                                onChange={(event) => {
+                                                    const nextValue = event.target.value;
+                                                    setMenuComponents((prev) => prev.map((entry, entryIndex) => entryIndex === index ? { ...entry, productId: nextValue } : entry));
+                                                }}
+                                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                            >
+                                                <option value="">Seleziona prodotto</option>
+                                                {menuEligibleProducts.map((entry) => (
+                                                    <option key={entry.id} value={entry.id}>{entry.name}</option>
+                                                ))}
+                                            </select>
+                                            <Input
+                                                type="number"
+                                                min="1"
+                                                step="1"
+                                                value={component.quantity}
+                                                onChange={(event) => {
+                                                    const nextQuantity = Number(event.target.value || 1);
+                                                    setMenuComponents((prev) => prev.map((entry, entryIndex) => entryIndex === index ? { ...entry, quantity: Math.max(1, Math.floor(nextQuantity || 1)) } : entry));
+                                                }}
+                                            />
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                onClick={() => setMenuComponents((prev) => prev.filter((_, entryIndex) => entryIndex !== index))}
+                                            >
+                                                Rimuovi
+                                            </Button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <Label className="text-sm font-bold">Gruppi di scelta</Label>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setMenuChoiceGroups((prev) => [...prev, {
+                                                id: buildGroupId(),
+                                                name: "",
+                                                minSelections: 1,
+                                                maxSelections: 1,
+                                                options: [{ productId: "", quantity: 1 }]
+                                            }])}
+                                        >
+                                            Aggiungi gruppo
+                                        </Button>
+                                    </div>
+                                    {menuChoiceGroups.length === 0 ? (
+                                        <p className="text-xs text-muted-foreground">Nessun gruppo di scelta configurato.</p>
+                                    ) : null}
+                                    {menuChoiceGroups.map((group, groupIndex) => (
+                                        <div key={group.id} className="space-y-3 rounded-md border p-3">
+                                            <div className="grid gap-2 md:grid-cols-[1fr_110px_110px_auto]">
+                                                <Input
+                                                    value={group.name}
+                                                    onChange={(event) => {
+                                                        const nextValue = event.target.value;
+                                                        setMenuChoiceGroups((prev) => prev.map((entry, entryIndex) => entryIndex === groupIndex ? { ...entry, name: nextValue } : entry));
+                                                    }}
+                                                    placeholder="Es: Bibita"
+                                                />
+                                                <Input
+                                                    type="number"
+                                                    min="0"
+                                                    step="1"
+                                                    value={group.minSelections}
+                                                    onChange={(event) => {
+                                                        const nextValue = Number(event.target.value || 0);
+                                                        setMenuChoiceGroups((prev) => prev.map((entry, entryIndex) => entryIndex === groupIndex ? { ...entry, minSelections: Math.max(0, Math.floor(nextValue || 0)) } : entry));
+                                                    }}
+                                                />
+                                                <Input
+                                                    type="number"
+                                                    min="1"
+                                                    step="1"
+                                                    value={group.maxSelections}
+                                                    onChange={(event) => {
+                                                        const nextValue = Number(event.target.value || 1);
+                                                        setMenuChoiceGroups((prev) => prev.map((entry, entryIndex) => entryIndex === groupIndex ? { ...entry, maxSelections: Math.max(1, Math.floor(nextValue || 1)) } : entry));
+                                                    }}
+                                                />
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    onClick={() => setMenuChoiceGroups((prev) => prev.filter((_, entryIndex) => entryIndex !== groupIndex))}
+                                                >
+                                                    Rimuovi gruppo
+                                                </Button>
+                                            </div>
+                                            <div className="space-y-2">
+                                                {group.options.map((option, optionIndex) => (
+                                                    <div key={`${group.id}-option-${optionIndex}`} className="grid gap-2 md:grid-cols-[1fr_110px_auto]">
+                                                        <select
+                                                            value={option.productId}
+                                                            onChange={(event) => {
+                                                                const nextValue = event.target.value;
+                                                                setMenuChoiceGroups((prev) => prev.map((entry, entryIndex) => {
+                                                                    if (entryIndex !== groupIndex) return entry;
+                                                                    return {
+                                                                        ...entry,
+                                                                        options: entry.options.map((entryOption, entryOptionIndex) => entryOptionIndex === optionIndex ? { ...entryOption, productId: nextValue } : entryOption)
+                                                                    };
+                                                                }));
+                                                            }}
+                                                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                                        >
+                                                            <option value="">Seleziona opzione</option>
+                                                            {menuEligibleProducts.map((entry) => (
+                                                                <option key={entry.id} value={entry.id}>{entry.name}</option>
+                                                            ))}
+                                                        </select>
+                                                        <Input
+                                                            type="number"
+                                                            min="1"
+                                                            step="1"
+                                                            value={option.quantity}
+                                                            onChange={(event) => {
+                                                                const nextValue = Number(event.target.value || 1);
+                                                                setMenuChoiceGroups((prev) => prev.map((entry, entryIndex) => {
+                                                                    if (entryIndex !== groupIndex) return entry;
+                                                                    return {
+                                                                        ...entry,
+                                                                        options: entry.options.map((entryOption, entryOptionIndex) => entryOptionIndex === optionIndex ? { ...entryOption, quantity: Math.max(1, Math.floor(nextValue || 1)) } : entryOption)
+                                                                    };
+                                                                }));
+                                                            }}
+                                                        />
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            onClick={() => setMenuChoiceGroups((prev) => prev.map((entry, entryIndex) => {
+                                                                if (entryIndex !== groupIndex) return entry;
+                                                                return {
+                                                                    ...entry,
+                                                                    options: entry.options.filter((_, entryOptionIndex) => entryOptionIndex !== optionIndex)
+                                                                };
+                                                            }))}
+                                                        >
+                                                            Rimuovi
+                                                        </Button>
+                                                    </div>
+                                                ))}
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setMenuChoiceGroups((prev) => prev.map((entry, entryIndex) => entryIndex === groupIndex ? { ...entry, options: [...entry.options, { productId: "", quantity: 1 }] } : entry))}
+                                                >
+                                                    Aggiungi opzione
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
                     </div>
                     {submitError ? (
                         <p className="text-sm font-medium text-red-600" role="alert">

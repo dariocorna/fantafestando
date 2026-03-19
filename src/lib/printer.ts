@@ -1,4 +1,4 @@
-import { ThermalPrinter, PrinterTypes, CharacterSet } from "node-thermal-printer";
+import { ThermalPrinter, PrinterTypes } from "node-thermal-printer";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -125,6 +125,16 @@ interface CartItem {
     snapshotName: string;
     quantity: number;
     customKitchenNotes?: string;
+    unitBasePrice?: number;
+    lineTotal?: number;
+    includedComponents?: Array<{
+        productId: string;
+        snapshotName: string;
+        quantity: number;
+        source: "FIXED_ITEM" | "CHOICE_OPTION";
+        groupId?: string;
+        groupName?: string;
+    }>;
     selectedOptions?: Array<{
         name: string;
         priceVariation: number;
@@ -1416,7 +1426,15 @@ export class PrinterService {
             }
         }
 
-        const productIds = order.cart.map((item) => item.productId);
+        const productIds = Array.from(new Set(
+            order.cart.flatMap((item) => {
+                const directProductId = String(item.productId);
+                const includedProductIds = Array.isArray(item.includedComponents)
+                    ? item.includedComponents.map((component) => String(component.productId))
+                    : [];
+                return [directProductId, ...includedProductIds];
+            })
+        ));
         const products = await Product.find({ _id: { $in: productIds } }).lean() as Array<{
             _id: { toString(): string };
             categoryId: { toString(): string };
@@ -1461,13 +1479,15 @@ export class PrinterService {
 
         const cashierReceiptItems = order.cart.map((item) => {
             const product = productById.get(item.productId.toString());
-            const basePrice = Number(product?.basePrice || 0);
+            const basePrice = Number.isFinite(item.unitBasePrice) ? Number(item.unitBasePrice) : Number(product?.basePrice || 0);
             const optionsTotal = (item.selectedOptions || []).reduce(
                 (sum, option) => sum + Number(option.priceVariation || 0),
                 0
             );
             const unitPrice = Number((basePrice + optionsTotal).toFixed(2));
-            const lineTotal = Number((unitPrice * item.quantity).toFixed(2));
+            const lineTotal = Number.isFinite(item.lineTotal)
+                ? Number(item.lineTotal)
+                : Number((unitPrice * item.quantity).toFixed(2));
             return {
                 name: resolvePrintName(item.productId, item.snapshotName),
                 quantity: item.quantity,
@@ -1475,6 +1495,24 @@ export class PrinterService {
                 lineTotal,
                 selectedOptions: item.selectedOptions || []
             };
+        });
+
+        const expandedDepartmentItems = order.cart.flatMap((item) => {
+            if (Array.isArray(item.includedComponents) && item.includedComponents.length > 0) {
+                return item.includedComponents.map((component) => ({
+                    productId: component.productId,
+                    snapshotName: component.snapshotName,
+                    quantity: component.quantity * item.quantity,
+                    notes: item.customKitchenNotes,
+                }));
+            }
+
+            return [{
+                productId: item.productId,
+                snapshotName: item.snapshotName,
+                quantity: item.quantity,
+                notes: item.customKitchenNotes,
+            }];
         });
 
         const cashierJob: PrinterCommandJob = {
@@ -1512,8 +1550,8 @@ export class PrinterService {
             return existingJob;
         };
 
-        order.cart.forEach((item) => {
-            const product = productById.get(item.productId.toString());
+        expandedDepartmentItems.forEach((item) => {
+            const product = productById.get(String(item.productId));
             if (!product) return;
 
             const category = categoryById.get(product.categoryId.toString());
@@ -1569,14 +1607,14 @@ export class PrinterService {
             kitchenJob?.items.push({
                 name: resolvePrintName(item.productId, item.snapshotName),
                 quantity: item.quantity,
-                notes: item.customKitchenNotes
+                notes: item.notes
             });
 
             const customerJob = ensureCustomerJob(groupKey, departmentFooterLines);
             customerJob?.items.push({
                 name: resolvePrintName(item.productId, item.snapshotName),
                 quantity: item.quantity,
-                notes: item.customKitchenNotes
+                notes: item.notes
             });
         });
 
