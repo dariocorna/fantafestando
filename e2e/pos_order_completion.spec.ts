@@ -112,7 +112,7 @@ test.describe("POS - Completamento ordine da codice", () => {
         await loadDialog.getByRole("textbox").fill(orderCode)
         await loadDialog.getByRole("button", { name: /Carica/i, exact: true }).click()
 
-        await expect(page.getByText(new RegExp(`Codice ${orderCode}`, "i"))).toBeVisible()
+        await expect(page.getByText(new RegExp(`^Codice ${escapeRegExp(orderCode)}$`, "i"))).toBeVisible()
         await expect(page.getByText(new RegExp(`Tavolo ${tableCode}`, "i"))).toBeVisible()
 
         await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()
