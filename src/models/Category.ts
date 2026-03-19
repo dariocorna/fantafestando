@@ -6,6 +6,7 @@ export interface ICategory extends Document {
     uiColor: string;
     printOrder: number;
     printerId?: Types.ObjectId;
+    skipKitchenPrint: boolean;
 }
 
 const CategorySchema = new Schema<ICategory>({
@@ -13,7 +14,8 @@ const CategorySchema = new Schema<ICategory>({
     name: { type: String, required: true },
     uiColor: { type: String, required: true },
     printOrder: { type: Number, default: 0 },
-    printerId: { type: Schema.Types.ObjectId, ref: 'Printer' }
+    printerId: { type: Schema.Types.ObjectId, ref: 'Printer' },
+    skipKitchenPrint: { type: Boolean, default: false }
 }, {
     timestamps: true
 });

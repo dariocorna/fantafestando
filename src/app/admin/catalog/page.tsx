@@ -84,6 +84,7 @@ export default async function AdminCatalog() {
         const name = ((formData.get("name") as string | null) || "").trim();
         const uiColor = normalizeCategoryColor(formData.get("uiColor") as string | null);
         const printerId = formData.get("printerId") as string;
+        const skipKitchenPrint = formData.get("skipKitchenPrint") === "on";
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
 
@@ -109,7 +110,14 @@ export default async function AdminCatalog() {
         const lastCategory = await Category.findOne({ eventId: scopedEventId }).sort({ printOrder: -1 }).select('printOrder').lean();
         const nextPrintOrder = (lastCategory?.printOrder ?? -1) + 1;
 
-        await Category.create({ name, eventId: scopedEventId, uiColor, printerId: printerId || undefined, printOrder: nextPrintOrder });
+        await Category.create({
+            name,
+            eventId: scopedEventId,
+            uiColor,
+            printerId: printerId || undefined,
+            printOrder: nextPrintOrder,
+            skipKitchenPrint
+        });
         revalidatePath("/admin/catalog");
         return { success: true };
     }
@@ -227,6 +235,7 @@ export default async function AdminCatalog() {
         const name = formData.get("name") as string;
         const uiColor = normalizeCategoryColor(formData.get("uiColor") as string | null);
         const printerId = formData.get("printerId") as string;
+        const skipKitchenPrint = formData.get("skipKitchenPrint") === "on";
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
         if (!id || !name || !scopedEventId) return;
@@ -240,7 +249,7 @@ export default async function AdminCatalog() {
 
         await Category.findOneAndUpdate(
             { _id: id, eventId: scopedEventId },
-            { name, uiColor, printerId: printerId || null }
+            { name, uiColor, printerId: printerId || null, skipKitchenPrint }
         );
         revalidatePath("/admin/catalog");
     }
@@ -398,6 +407,7 @@ export default async function AdminCatalog() {
                         printOrder: c.printOrder,
                         printerName: (c.printerId as unknown as IPrinter)?.name || undefined,
                         printerId: getReferencedId(c.printerId),
+                        skipKitchenPrint: Boolean(c.skipKitchenPrint),
                     }))}
                     onReorder={reorderCategories}
                     eventId={currentEventId}

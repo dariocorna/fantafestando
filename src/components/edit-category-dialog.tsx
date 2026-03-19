@@ -24,7 +24,7 @@ export function EditCategoryDialog({
     printers,
     updateAction
 }: {
-    category: { id: string, name: string, uiColor: string, printerId?: string },
+    category: { id: string, name: string, uiColor: string, printerId?: string, skipKitchenPrint?: boolean },
     eventId?: string,
     printers: { id: string, name: string, ip: string, port?: number }[],
     updateAction: (formData: FormData) => Promise<void>
@@ -64,7 +64,7 @@ export function EditCategoryDialog({
                     <DialogHeader>
                         <DialogTitle>Modifica Categoria</DialogTitle>
                         <DialogDescription>
-                            Aggiorna nome, colore e stampante reparto della categoria.
+                            Aggiorna nome, colore, stampante reparto e regole di stampa della categoria.
                         </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
@@ -119,6 +119,15 @@ export function EditCategoryDialog({
                                 ))}
                             </select>
                         </div>
+                        <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                            <input
+                                id="skipKitchenPrint"
+                                name="skipKitchenPrint"
+                                type="checkbox"
+                                defaultChecked={Boolean(category.skipKitchenPrint)}
+                            />
+                            Non stampare comanda
+                        </label>
                     </div>
                     {submitError ? (
                         <p className="text-sm font-medium text-red-600" role="alert">
