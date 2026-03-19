@@ -391,6 +391,15 @@ export async function createActiveEventWithCatalogDirect(
     };
 }
 
+export async function seedActiveEventWithCatalog(
+    eventName: string,
+    categoryName: string,
+    products: ProductDef[],
+    options?: CreateEventOptions,
+) {
+    return createActiveEventWithCatalogDirect(eventName, categoryName, products, options);
+}
+
 export async function createProduct(page: Page, categoryName: string, product: ProductDef) {
     await page.click("#new-product-btn");
     const dialog = page.getByRole("dialog");
