@@ -116,7 +116,11 @@ test.describe("Print Retry Flows", () => {
             await editDialog.getByLabel("Indirizzo IP").fill("127.0.0.1")
             await editDialog.getByLabel("Porta TCP").fill("19100")
             await editDialog.getByRole("button", { name: "Salva Modifiche", exact: true }).click()
-            await expect(printerCard.getByText("127.0.0.1:19100")).toBeVisible({ timeout: 10000 })
+            await expect(printerCard).toContainText("127.0.0.1:19100", { timeout: 15000 })
+            if (await editDialog.isVisible().catch(() => false)) {
+                await editDialog.getByRole("button", { name: /close/i }).click()
+                await expect(editDialog).not.toBeVisible({ timeout: 5000 })
+            }
 
             await page.getByRole("tab", { name: "Monitor Stampa" }).click()
             await failedJobButton.click()

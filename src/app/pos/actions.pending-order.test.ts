@@ -95,7 +95,9 @@ describe("loadPendingOrderByCode", () => {
                         productId: "prod-1",
                         snapshotName: "Patatine",
                         quantity: 1,
-                        unitPrice: 7
+                        unitPrice: 7,
+                        selectedOptions: [],
+                        menuSelections: []
                     }
                 ]
             }
@@ -146,7 +148,9 @@ describe("loadPendingOrderByCode", () => {
                         productId: "prod-1",
                         snapshotName: "Patatine",
                         quantity: 1,
-                        unitPrice: 7
+                        unitPrice: 7,
+                        selectedOptions: [],
+                        menuSelections: []
                     }
                 ]
             }
