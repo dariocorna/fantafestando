@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/table";
 import type { IEvent } from "@/models/Event";
 import { OrderRowActions } from "./order-row-actions";
+import { ResetOrdersForm } from "./reset-orders-form";
 
 interface OrderProjection {
     _id: unknown
@@ -71,6 +72,8 @@ export default async function AdminOrders() {
                     <div className="text-2xl font-black text-green-600">{totalRevenue.toFixed(2)} €</div>
                 </div>
             </div>
+
+            <ResetOrdersForm eventName={contextEvent.name} />
 
             <div className="bg-white dark:bg-slate-900 border rounded-xl overflow-hidden shadow-sm">
                 <Table>
