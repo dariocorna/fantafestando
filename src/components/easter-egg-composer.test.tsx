@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { beforeEach, afterEach, describe, expect, test, vi } from "vitest";
 
 const onSubmitRasterMock = vi.fn();
@@ -31,7 +32,9 @@ vi.mock("@/lib/easter-egg-raster", () => ({
 
 import { EasterEggComposer } from "@/components/easter-egg-composer";
 
-function renderComposer() {
+function renderComposer(
+    props?: Partial<ComponentProps<typeof EasterEggComposer>>
+) {
     return render(
         <EasterEggComposer
             title="Foto dell'ordine"
@@ -43,6 +46,7 @@ function renderComposer() {
             emptyStateDescription="Anteprima mock"
             testIdPrefix="composer-test"
             onSubmitRaster={onSubmitRasterMock}
+            {...props}
         />
     );
 }
@@ -148,7 +152,7 @@ describe("EasterEggComposer", () => {
         expect(screen.getByTestId("composer-test-autosave-banner")).toHaveTextContent("Salvata automaticamente");
     });
 
-    test("auto-saves a modified image after 5 seconds from the last change", async () => {
+    test("auto-saves a modified image after 5 seconds from the last change in unlocked mode", async () => {
         onSubmitRasterMock.mockResolvedValue({
             success: "Foto allegata all'ordine. Puoi sostituirla finche' non paghi in cassa."
         });
@@ -180,6 +184,74 @@ describe("EasterEggComposer", () => {
         });
 
         expect(onSubmitRasterMock).toHaveBeenCalledTimes(2);
+    });
+
+    test("locks the menu photo after the first save and ignores direct file changes until the user confirms", async () => {
+        onSubmitRasterMock.mockResolvedValue({
+            success: "Foto allegata all'ordine. Se vuoi cambiarla, dovrai prima confermare lo sblocco."
+        });
+
+        renderComposer({
+            lockAfterFirstSave: true,
+            requireUnlockConfirmation: true,
+            autoSaveDelayMs: 3000
+        });
+
+        await uploadPhoto("first.jpg");
+        await act(async () => {
+            await vi.runOnlyPendingTimersAsync();
+        });
+
+        expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Foto bloccata");
+        expect(screen.getByTestId("composer-test-autosave-banner")).toHaveTextContent("Foto bloccata dopo il salvataggio");
+        expect(screen.getByRole("button", { name: /Modifica foto/i })).toBeInTheDocument();
+
+        await uploadPhoto("second.jpg");
+
+        expect(onSubmitRasterMock).toHaveBeenCalledTimes(1);
+        expect(screen.queryByText("second.jpg")).not.toBeInTheDocument();
+        expect(screen.getByText("first.jpg")).toBeInTheDocument();
+        expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Foto bloccata");
+    });
+
+    test("requires an explicit unlock confirmation before saving a new menu edit after 3 seconds", async () => {
+        onSubmitRasterMock.mockResolvedValue({
+            success: "Foto allegata all'ordine. Se vuoi cambiarla, dovrai prima confermare lo sblocco."
+        });
+
+        renderComposer({
+            lockAfterFirstSave: true,
+            requireUnlockConfirmation: true,
+            autoSaveDelayMs: 3000
+        });
+
+        await uploadPhoto("first.jpg");
+        await act(async () => {
+            await vi.runOnlyPendingTimersAsync();
+        });
+
+        fireEvent.click(screen.getByRole("button", { name: /Modifica foto/i }));
+        expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: /Sblocca modifica/i }));
+
+        await uploadPhoto("second.jpg");
+
+        expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Nuova versione in attesa");
+        expect(screen.getByTestId("composer-test-autosave-banner")).toHaveTextContent("Salvataggio automatico tra 3 secondi");
+        expect(onSubmitRasterMock).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            vi.advanceTimersByTime(2999);
+        });
+        expect(onSubmitRasterMock).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            vi.advanceTimersByTime(1);
+            await Promise.resolve();
+        });
+
+        expect(onSubmitRasterMock).toHaveBeenCalledTimes(2);
+        expect(screen.getByTestId("composer-test-state-banner")).toHaveTextContent("Foto bloccata");
     });
 
     test("restarts the autosave countdown when the image changes again", async () => {

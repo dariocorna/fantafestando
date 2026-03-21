@@ -25,12 +25,25 @@ interface PrintJobListItem {
 }
 
 async function setRangeValue(locator: Locator, value: number) {
-    await locator.evaluate((element, nextValue) => {
-        const input = element as HTMLInputElement;
-        input.value = String(nextValue);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-    }, value);
+    const min = Number(await locator.getAttribute("min") ?? "0");
+    const max = Number(await locator.getAttribute("max") ?? "100");
+    const clampedValue = Math.min(max, Math.max(min, value));
+    const midpoint = min + ((max - min) / 2);
+    const page = locator.page();
+
+    await locator.focus();
+    if (clampedValue >= midpoint) {
+        await page.keyboard.press("End");
+        for (let current = max; current > clampedValue; current -= 1) {
+            await page.keyboard.press("ArrowLeft");
+        }
+        return;
+    }
+
+    await page.keyboard.press("Home");
+    for (let current = min; current < clampedValue; current += 1) {
+        await page.keyboard.press("ArrowRight");
+    }
 }
 
 async function provisionVirtualPrinters(eventName: string) {
@@ -64,6 +77,17 @@ async function fetchPrintJobs(page: Page): Promise<PrintJobListItem[] | null> {
     } catch {
         return null;
     }
+}
+
+async function countSentManualTestJobs(page: Page) {
+    const jobs = await fetchPrintJobs(page);
+    if (!jobs) return 0;
+
+    return jobs.filter((job) =>
+        job.source === "MANUAL_TEST"
+        && job.printType === "EASTER_EGG_IMAGE"
+        && job.status === "SENT"
+    ).length;
 }
 
 async function buildPortraitPhotoBuffer() {
@@ -130,6 +154,18 @@ async function dragPreview(stage: Locator) {
     await page.mouse.down();
     await page.mouse.move(startX + 70, startY + 55, { steps: 8 });
     await page.mouse.up();
+}
+
+async function expectPreviewToFitViewport(page: Page, stage: Locator) {
+    const box = await stage.boundingBox();
+    expect(box).toBeTruthy();
+    if (!box) return;
+
+    const viewport = page.viewportSize();
+    expect(viewport).toBeTruthy();
+    if (!viewport) return;
+
+    expect(box.height).toBeLessThanOrEqual(viewport.height);
 }
 
 async function createMenuOrder(page: Page, productName: string) {
@@ -227,10 +263,6 @@ test.describe.serial("Portal Easter Egg", () => {
             await expect(page.getByTestId("portal-easter-egg-thermal-preview")).toBeVisible({ timeout: 15000 });
             await dragPreview(page.getByTestId("portal-easter-egg-preview-stage"));
 
-            const brightnessSlider = page.locator("#portal-easter-egg-brightness");
-            await setRangeValue(brightnessSlider, 56);
-            await expect(brightnessSlider).toHaveValue("56");
-
             await expect(page.getByTestId("portal-easter-egg-state-banner")).toContainText("Foto confermata", { timeout: 15000 });
             await expect(page.getByTestId("portal-easter-egg-autosave-banner")).toContainText("Salvata automaticamente");
             await expect(page.getByText("Stampa easter egg inviata.")).toBeVisible({ timeout: 15000 });
@@ -247,11 +279,130 @@ test.describe.serial("Portal Easter Egg", () => {
                 timeout: 15000
             }).toBe(true);
 
+            const initialManualTestJobs = await countSentManualTestJobs(page);
+
+            const brightnessSlider = page.locator("#portal-easter-egg-brightness");
+            await setRangeValue(brightnessSlider, 56);
+            await expect.poll(async () => Number(await brightnessSlider.inputValue())).toBeGreaterThan(40);
+
+            await expect.poll(async () => {
+                return await countSentManualTestJobs(page);
+            }, {
+                timeout: 15000
+            }).toBeGreaterThan(initialManualTestJobs);
+
             await page.goto("/admin/easter-egg", { waitUntil: "domcontentloaded" });
             await expect(page.getByText("Nessuna foto caricata")).toBeVisible({ timeout: 15000 });
             await expect(page.getByTestId("portal-easter-egg-thermal-preview")).toHaveCount(0);
         } finally {
             if (eventCreated && !page.isClosed()) {
+                await deleteEvent(page, eventName);
+            }
+        }
+    });
+
+    test("il menu blocca la foto dopo il primo salvataggio, richiede conferma per modificarla e resta scrollabile su viewport mobile bassa", async ({ page, browser }) => {
+        test.setTimeout(120000);
+
+        const suffix = uniqueSuffix();
+        const eventName = `Menu Easter Lock ${suffix}`;
+        const categoryName = `Photo Cat ${suffix}`;
+        const productName = `Panino ${suffix}`;
+        const uploadBuffer = await buildPortraitPhotoBuffer();
+        let eventCreated = false;
+        let publicContext: BrowserContext | null = null;
+
+        await ensureAdminAuthenticated(page, "/admin");
+
+        try {
+            await createActiveEventWithCatalogDirect(
+                eventName,
+                categoryName,
+                [{ name: productName, price: "8.00" }],
+                { portalEasterEggEnabled: true }
+            );
+            eventCreated = true;
+
+            publicContext = await browser.newContext({
+                viewport: { width: 390, height: 560 },
+                isMobile: true,
+                hasTouch: true
+            });
+            const publicPage = await publicContext.newPage();
+
+            const uploadTimestamps: number[] = [];
+            await publicPage.route("**/api/public/orders/*/easter-egg", async (route) => {
+                uploadTimestamps.push(Date.now());
+                await route.fulfill({
+                    status: 200,
+                    contentType: "application/json",
+                    body: JSON.stringify({
+                        success: "Messaggio server personalizzato"
+                    })
+                });
+            });
+
+            const { orderId } = await createMenuOrder(publicPage, productName);
+            await expect.poll(async () => (
+                publicPage.evaluate((nextOrderId) => (
+                    window.sessionStorage.getItem(`fantafestando:easter-egg-upload:${nextOrderId}`)
+                ), orderId)
+            ), {
+                timeout: 15000
+            }).toBeTruthy();
+            await publicPage.reload({ waitUntil: "domcontentloaded" });
+
+            await publicPage.getByTestId("menu-easter-egg-file-input").setInputFiles({
+                name: "menu-easter-egg.jpg",
+                mimeType: "image/jpeg",
+                buffer: uploadBuffer
+            });
+
+            const previewStage = publicPage.getByTestId("menu-easter-egg-preview-stage");
+            await expect(publicPage.getByTestId("menu-easter-egg-thermal-preview")).toBeVisible({ timeout: 15000 });
+            await expect(publicPage.getByTestId("menu-easter-egg-state-banner")).toContainText("Foto bloccata", { timeout: 15000 });
+            await expect(publicPage.getByTestId("menu-easter-egg-autosave-banner")).toContainText("Foto bloccata dopo il salvataggio");
+            await expect(publicPage.getByText("Messaggio server personalizzato")).toBeVisible({ timeout: 15000 });
+            await expect(publicPage.getByRole("button", { name: /Modifica foto/i })).toBeVisible();
+            expect(uploadTimestamps).toHaveLength(1);
+
+            await expectPreviewToFitViewport(publicPage, previewStage);
+            await previewStage.hover();
+            const scrollBefore = await publicPage.evaluate(() => window.scrollY);
+            await publicPage.mouse.wheel(0, 320);
+            await expect.poll(async () => publicPage.evaluate((previousScrollY) => window.scrollY > previousScrollY, scrollBefore), {
+                timeout: 5000
+            }).toBe(true);
+
+            await publicPage.getByRole("button", { name: /Modifica foto/i }).click();
+            await expect(publicPage.getByRole("alertdialog")).toBeVisible();
+            await publicPage.getByRole("button", { name: /Sblocca modifica/i }).click();
+
+            const secondUploadStartedAt = Date.now();
+            await publicPage.getByTestId("menu-easter-egg-file-input").setInputFiles({
+                name: "menu-easter-egg-updated.jpg",
+                mimeType: "image/jpeg",
+                buffer: uploadBuffer
+            });
+
+            await expect(publicPage.getByTestId("menu-easter-egg-state-banner")).toContainText("Nuova versione in attesa");
+            await expect(publicPage.getByTestId("menu-easter-egg-autosave-banner")).toContainText("Salvataggio automatico tra 3 secondi");
+            expect(uploadTimestamps).toHaveLength(1);
+
+            await publicPage.waitForTimeout(2000);
+            expect(uploadTimestamps).toHaveLength(1);
+
+            await expect.poll(() => uploadTimestamps.length, {
+                timeout: 2500
+            }).toBe(2);
+            expect(uploadTimestamps[1] - secondUploadStartedAt).toBeGreaterThanOrEqual(2800);
+            await expect(publicPage.getByTestId("menu-easter-egg-state-banner")).toContainText("Foto bloccata", { timeout: 15000 });
+        } finally {
+            if (publicContext) {
+                await publicContext.close().catch(() => undefined);
+            }
+            if (eventCreated && !page.isClosed()) {
+                await ensureAdminAuthenticated(page, "/admin");
                 await deleteEvent(page, eventName);
             }
         }
@@ -306,7 +457,7 @@ test.describe.serial("Portal Easter Egg", () => {
             await dragPreview(publicPage.getByTestId("menu-easter-egg-preview-stage"));
 
             await expect(publicPage.getByText(/Foto allegata all'ordine/i)).toBeVisible({ timeout: 15000 });
-            await expect(publicPage.getByTestId("menu-easter-egg-state-banner")).toContainText("Foto confermata", { timeout: 15000 });
+            await expect(publicPage.getByTestId("menu-easter-egg-state-banner")).toContainText("Foto bloccata", { timeout: 15000 });
 
             await ensureAdminAuthenticated(page, "/admin/settings/hardware");
 
