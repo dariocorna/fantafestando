@@ -91,6 +91,7 @@ export function PortalEasterEggMobile({
                 emptyStateDescription="Scatta o scegli una foto per generare localmente il raster termico."
                 captureMode="user"
                 showAdvancedControls
+                autoSaveDelayMs={5000}
                 testIdPrefix="portal-easter-egg"
                 onSubmitRaster={handleSubmitRaster}
             />
