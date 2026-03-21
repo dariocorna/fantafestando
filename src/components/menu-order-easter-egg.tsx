@@ -50,9 +50,9 @@ export function MenuOrderEasterEgg({ orderId }: { orderId: string | null }) {
         }
 
         return {
-            success: typeof payload.success === "string"
+            success: typeof payload.success === "string" && payload.success.trim().length > 0
                 ? payload.success
-                : "Foto allegata all'ordine. Puoi sostituirla finché non paghi in cassa."
+                : "Foto allegata all'ordine. Se vuoi cambiarla, dovrai prima confermare lo sblocco."
         };
     }
 
@@ -63,10 +63,13 @@ export function MenuOrderEasterEgg({ orderId }: { orderId: string | null }) {
                 submitLabel="Allega foto all'ordine"
                 submittingLabel="Invio allegato..."
                 inputLabel="Selfie o foto"
-                helpText="Usa due dita per zoomare e trascina la preview per centrare il soggetto. Puoi inviarne una nuova finché l'ordine è in attesa."
+                helpText="Usa due dita per zoomare e trascina la preview per centrare il soggetto. Dopo il salvataggio la foto si blocca, e per modificarla di nuovo serve una conferma."
                 emptyStateTitle="Scatta la tua foto"
                 emptyStateDescription="Si aprirà la fotocamera del telefono; vedrai subito la preview in bianco e nero."
                 captureMode="user"
+                lockAfterFirstSave
+                requireUnlockConfirmation
+                autoSaveDelayMs={3000}
                 testIdPrefix="menu-easter-egg"
                 onSubmitRaster={handleSubmitRaster}
             />

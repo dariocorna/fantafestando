@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, CheckCircle2, Loader2, PencilLine, Sparkles, Upload, ZoomIn } from "lucide-react";
+import { Camera, CheckCircle2, Loader2, Lock, PencilLine, Sparkles, Upload, ZoomIn } from "lucide-react";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -36,11 +46,14 @@ interface EasterEggComposerProps {
     emptyStateDescription: string;
     captureMode?: "user" | "environment";
     showAdvancedControls?: boolean;
+    lockAfterFirstSave?: boolean;
+    requireUnlockConfirmation?: boolean;
+    autoSaveDelayMs?: number;
     testIdPrefix: string;
     onSubmitRaster: (raster: ThermalRasterPayload) => Promise<EasterEggComposerResult>;
 }
 
-const AUTO_SAVE_DELAY_MS = 5000;
+const DEFAULT_AUTO_SAVE_DELAY_MS = 5000;
 
 interface PointerPoint {
     x: number;
@@ -54,7 +67,10 @@ interface GestureStartState {
 }
 
 const PREVIEW_CONTENT_WIDTH = 240;
+const PREVIEW_CONTENT_HEIGHT = getThermalTargetHeight(PREVIEW_CONTENT_WIDTH);
 const PREVIEW_PAPER_WIDTH = Math.round((PREVIEW_CONTENT_WIDTH / getThermalContentWidth()) * getThermalPaperWidth());
+const PREVIEW_STAGE_ASPECT_RATIO = PREVIEW_PAPER_WIDTH / PREVIEW_CONTENT_HEIGHT;
+const PREVIEW_MAX_VIEWPORT_HEIGHT = "62dvh";
 
 function clamp(value: number, min: number, max: number) {
     if (!Number.isFinite(value)) return min;
@@ -157,6 +173,9 @@ export function EasterEggComposer({
     emptyStateDescription,
     captureMode,
     showAdvancedControls = false,
+    lockAfterFirstSave = false,
+    requireUnlockConfirmation = false,
+    autoSaveDelayMs = DEFAULT_AUTO_SAVE_DELAY_MS,
     testIdPrefix,
     onSubmitRaster
 }: EasterEggComposerProps) {
@@ -179,6 +198,8 @@ export function EasterEggComposer({
     const [fileError, setFileError] = useState<string | null>(null);
     const [isImageReady, setIsImageReady] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isEditingUnlocked, setIsEditingUnlocked] = useState(false);
+    const [isUnlockDialogOpen, setIsUnlockDialogOpen] = useState(false);
     const [confirmedRasterSignature, setConfirmedRasterSignature] = useState<string | null>(null);
     const [pendingAutoSaveSignature, setPendingAutoSaveSignature] = useState<string | null>(null);
     const [zoom, setZoom] = useState(1.6);
@@ -212,9 +233,17 @@ export function EasterEggComposer({
         && pendingAutoSaveSignature
         && currentRasterSignature === pendingAutoSaveSignature
     );
-    const choosePhotoLabel = fileName ? "Sostituisci foto" : "Scatta o scegli una foto";
-    const previewStatusChipLabel = isSelectionConfirmed
-        ? "Confermata"
+    const isEditLocked = lockAfterFirstSave && isSelectionConfirmed && !isEditingUnlocked;
+    const canEditCurrentSelection = isImageReady && (!isSelectionConfirmed || !lockAfterFirstSave || isEditingUnlocked);
+    const choosePhotoLabel = isEditLocked
+        ? "Modifica foto"
+        : fileName
+            ? "Sostituisci foto"
+            : "Scatta o scegli una foto";
+    const previewStatusChipLabel = isEditLocked
+        ? "Bloccata"
+        : isSelectionConfirmed
+            ? "Confermata"
         : isSubmitting
             ? "Salvataggio"
             : hasPendingConfirmation
@@ -289,6 +318,10 @@ export function EasterEggComposer({
             const result = await onSubmitRaster(raster);
             if (result.success && latestSignatureRef.current === signature) {
                 setConfirmedRasterSignature(signature);
+                if (lockAfterFirstSave) {
+                    setIsEditingUnlocked(false);
+                    setIsUnlockDialogOpen(false);
+                }
             }
             setStatus(result);
         } catch {
@@ -316,7 +349,7 @@ export function EasterEggComposer({
             return;
         }
 
-        const delay = confirmedRasterSignature ? AUTO_SAVE_DELAY_MS : 0;
+        const delay = confirmedRasterSignature ? autoSaveDelayMs : 0;
         setPendingAutoSaveSignature(currentRasterSignature);
 
         autoSaveTimeoutRef.current = window.setTimeout(() => {
@@ -329,9 +362,13 @@ export function EasterEggComposer({
                 autoSaveTimeoutRef.current = null;
             }
         };
-    }, [confirmedRasterSignature, currentRasterSignature, isImageReady, isSubmitting]);
+    }, [autoSaveDelayMs, confirmedRasterSignature, currentRasterSignature, isImageReady, isSubmitting]);
 
     const openFilePicker = () => {
+        if (isEditLocked) {
+            setIsUnlockDialogOpen(true);
+            return;
+        }
         fileInputRef.current?.click();
     };
 
@@ -350,6 +387,9 @@ export function EasterEggComposer({
     };
 
     const loadFile = (file: File | null) => {
+        if (isEditLocked) {
+            return;
+        }
         setStatus({});
         setFileError(null);
         resetGestureState();
@@ -392,7 +432,7 @@ export function EasterEggComposer({
     };
 
     const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-        if (!isImageReady) return;
+        if (!canEditCurrentSelection) return;
         event.currentTarget.setPointerCapture(event.pointerId);
         pointerMapRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
@@ -428,7 +468,7 @@ export function EasterEggComposer({
     };
 
     const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-        if (!isImageReady || !imageRef.current || !pointerMapRef.current.has(event.pointerId)) return;
+        if (!canEditCurrentSelection || !imageRef.current || !pointerMapRef.current.has(event.pointerId)) return;
         pointerMapRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
         const start = gestureStartRef.current;
@@ -465,6 +505,7 @@ export function EasterEggComposer({
     };
 
     const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+        if (!canEditCurrentSelection) return;
         pointerMapRef.current.delete(event.pointerId);
         if (pointerMapRef.current.size === 0) {
             resetGestureState();
@@ -486,18 +527,28 @@ export function EasterEggComposer({
         }
     };
 
+    const unlockEditing = () => {
+        setIsUnlockDialogOpen(false);
+        setIsEditingUnlocked(true);
+        setStatus({});
+        setFileError(null);
+    };
+
     return (
-        <Card className="overflow-hidden border-2 border-[#d9e6f8] shadow-[var(--brand-shadow-soft)]">
-            <CardHeader className="space-y-2 border-b border-[#d9e6f8] bg-[#f7fbff]">
-                <CardTitle className="text-xl text-[var(--brand-ink)]">{title}</CardTitle>
-                {description ? <CardDescription>{description}</CardDescription> : null}
-            </CardHeader>
-            <CardContent className="space-y-5 p-5">
+        <>
+            <Card className="overflow-hidden border-2 border-[#d9e6f8] shadow-[var(--brand-shadow-soft)]">
+                <CardHeader className="space-y-2 border-b border-[#d9e6f8] bg-[#f7fbff]">
+                    <CardTitle className="text-xl text-[var(--brand-ink)]">{title}</CardTitle>
+                    {description ? <CardDescription>{description}</CardDescription> : null}
+                </CardHeader>
+                <CardContent className="space-y-5 p-5">
                 {currentRasterSignature ? (
                     <div
                         className={[
                             "rounded-[28px] border p-4 shadow-sm transition-colors",
-                            isSelectionConfirmed
+                            isEditLocked
+                                ? "border-slate-300 bg-[linear-gradient(135deg,#f8fafc_0%,#e2e8f0_100%)]"
+                                : isSelectionConfirmed
                                 ? "border-emerald-200 bg-[linear-gradient(135deg,#f0fdf4_0%,#dcfce7_100%)]"
                                 : hasPendingConfirmation
                                     ? "border-amber-400 bg-[linear-gradient(135deg,#fff1b8_0%,#ffd257_48%,#ffbf47_100%)] shadow-[0_18px_38px_rgba(245,158,11,0.24)]"
@@ -509,14 +560,18 @@ export function EasterEggComposer({
                             <div
                                 className={[
                                     "mt-0.5 rounded-2xl p-2.5",
-                                    isSelectionConfirmed
+                                    isEditLocked
+                                        ? "bg-white/80 text-slate-700"
+                                        : isSelectionConfirmed
                                         ? "bg-white/75 text-emerald-600"
                                         : hasPendingConfirmation
                                             ? "bg-white/70 text-amber-700"
                                             : "bg-white/75 text-[var(--brand-blue-700)]"
                                 ].join(" ")}
                             >
-                                {isSelectionConfirmed ? (
+                                {isEditLocked ? (
+                                    <Lock className="h-5 w-5" />
+                                ) : isSelectionConfirmed ? (
                                     <CheckCircle2 className="h-5 w-5" />
                                 ) : hasPendingConfirmation ? (
                                     <PencilLine className="h-5 w-5" />
@@ -528,14 +583,18 @@ export function EasterEggComposer({
                                 <p
                                     className={[
                                         "text-xs font-black uppercase tracking-[0.14em]",
-                                        isSelectionConfirmed
+                                        isEditLocked
+                                            ? "text-slate-700"
+                                            : isSelectionConfirmed
                                             ? "text-emerald-700"
                                             : hasPendingConfirmation
                                                 ? "text-amber-700"
                                                 : "text-[var(--brand-blue-700)]"
                                     ].join(" ")}
                                 >
-                                    {isSelectionConfirmed
+                                    {isEditLocked
+                                        ? "Foto bloccata"
+                                        : isSelectionConfirmed
                                         ? "Foto confermata"
                                         : isSubmitting
                                             ? "Salvataggio automatico in corso"
@@ -546,7 +605,9 @@ export function EasterEggComposer({
                                             : null}
                                 </p>
                                 <p className="mt-1 text-base font-black leading-tight text-[var(--brand-ink)]">
-                                    {isSelectionConfirmed
+                                    {isEditLocked
+                                        ? "Questa e' la foto attiva. Per cambiarla serve una conferma esplicita."
+                                        : isSelectionConfirmed
                                         ? "Questa e' la foto attualmente confermata."
                                         : isSubmitting
                                             ? "Sto salvando automaticamente l'anteprima mostrata."
@@ -557,14 +618,16 @@ export function EasterEggComposer({
                                         : null}
                                 </p>
                                 <p className="mt-1 text-sm font-medium leading-relaxed text-slate-600">
-                                    {isSelectionConfirmed
+                                    {isEditLocked
+                                        ? "Usa il pulsante qui sotto per riaprire l'editing, poi potrai ritoccarla o caricare una nuova immagine."
+                                        : isSelectionConfirmed
                                         ? "Se vuoi ritoccarla ancora, sposta la preview o carica un'altra foto: il salvataggio ripartira' in automatico."
                                         : isSubmitting
                                             ? "Non serve premere nulla: appena finisco, questa versione diventera' quella attiva."
                                             : hasPendingConfirmation
                                                 ? confirmedRasterSignature
                                                     ? isQueuedForAutoSave
-                                                        ? "Aspetto 5 secondi dall'ultima modifica prima di aggiornare la foto."
+                                                        ? `Aspetto ${Math.round(autoSaveDelayMs / 1000)} secondi dall'ultima modifica prima di aggiornare la foto.`
                                                         : "Preparo il salvataggio automatico della nuova versione."
                                                     : "Non serve confermare: questa prima foto viene inviata appena disponibile."
                                         : null}
@@ -592,8 +655,9 @@ export function EasterEggComposer({
                                 type="button"
                                 className="gap-2 rounded-2xl px-4 py-5 text-sm font-black"
                                 onClick={openFilePicker}
+                                data-testid={`${testIdPrefix}-${isEditLocked ? "unlock-trigger" : "replace-trigger"}`}
                             >
-                                <Camera className="h-4 w-4" />
+                                {isEditLocked ? <Lock className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
                                 {choosePhotoLabel}
                             </Button>
                         ) : null}
@@ -611,21 +675,37 @@ export function EasterEggComposer({
                         <div>
                             <p className="font-bold text-[var(--brand-ink)]">Anteprima</p>
                             <p className="text-xs text-slate-500">
-                                Muovi e zooma direttamente sulla preview. Il colore non viene mai inviato al server.
+                                {canEditCurrentSelection
+                                    ? "Muovi e zooma direttamente sulla preview. Il colore non viene mai inviato al server."
+                                    : "La preview e' bloccata finche' non confermi di volerla modificare di nuovo."}
                             </p>
                         </div>
-                        <span className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
-                            <ZoomIn className="mr-1.5 h-3.5 w-3.5" />
-                            Pinch per zoom
-                        </span>
+                        {canEditCurrentSelection ? (
+                            <span className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
+                                <ZoomIn className="mr-1.5 h-3.5 w-3.5" />
+                                Pinch per zoom
+                            </span>
+                        ) : (
+                            <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                                <Lock className="mr-1.5 h-3.5 w-3.5" />
+                                Modifica protetta
+                            </span>
+                        )}
                     </div>
 
-                    <div className="relative mx-auto w-full max-w-[340px]">
+                    <div
+                        className="relative mx-auto w-full"
+                        style={{
+                            width: `min(100%, 340px, calc(${PREVIEW_MAX_VIEWPORT_HEIGHT} * ${PREVIEW_STAGE_ASPECT_RATIO}))`
+                        }}
+                    >
                         {isImageReady && previewStatusChipLabel ? (
                             <div
                                 className={[
                                     "pointer-events-none absolute left-3 top-3 z-10 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black uppercase tracking-[0.12em] shadow-sm",
-                                    isSelectionConfirmed
+                                    isEditLocked
+                                        ? "bg-slate-700 text-white"
+                                        : isSelectionConfirmed
                                         ? "bg-emerald-600 text-white"
                                         : isSubmitting
                                             ? "bg-[var(--brand-blue-700)] text-white"
@@ -633,7 +713,7 @@ export function EasterEggComposer({
                                 ].join(" ")}
                                 data-testid={`${testIdPrefix}-preview-status-chip`}
                             >
-                                {(hasPendingConfirmation || isSubmitting) && !isSelectionConfirmed ? (
+                                {(hasPendingConfirmation || isSubmitting) && !isSelectionConfirmed && !isEditLocked ? (
                                     <span className="relative flex h-2.5 w-2.5">
                                         <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${isSubmitting ? "bg-white opacity-35" : "bg-[#7a4b00] opacity-45"}`} />
                                         <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${isSubmitting ? "bg-white" : "bg-[#7a4b00]"}`} />
@@ -645,14 +725,20 @@ export function EasterEggComposer({
 
                         <div
                             className={[
-                                "w-full touch-none overflow-hidden rounded-[34px] border-[3px] bg-white shadow-[var(--brand-shadow-soft)] transition-colors",
-                                isSelectionConfirmed
+                                "w-full overflow-hidden rounded-[34px] border-[3px] bg-white shadow-[var(--brand-shadow-soft)] transition-colors",
+                                canEditCurrentSelection ? "touch-none" : "touch-pan-y",
+                                isEditLocked
+                                    ? "border-slate-400"
+                                    : isSelectionConfirmed
                                     ? "border-emerald-500"
                                     : hasPendingConfirmation
                                         ? "border-amber-500 ring-4 ring-amber-200/70"
                                         : "border-[var(--brand-ink)]"
                             ].join(" ")}
-                            style={{ aspectRatio: `${PREVIEW_PAPER_WIDTH} / ${getThermalTargetHeight(PREVIEW_CONTENT_WIDTH)}` }}
+                            style={{
+                                aspectRatio: `${PREVIEW_PAPER_WIDTH} / ${PREVIEW_CONTENT_HEIGHT}`,
+                                maxHeight: `min(${PREVIEW_MAX_VIEWPORT_HEIGHT}, 420px)`
+                            }}
                             onPointerDown={handlePointerDown}
                             onPointerMove={handlePointerMove}
                             onPointerUp={handlePointerUp}
@@ -745,7 +831,9 @@ export function EasterEggComposer({
                 <div
                     className={[
                         "flex items-start gap-3 rounded-[22px] border px-4 py-4",
-                        isSelectionConfirmed
+                        isEditLocked
+                            ? "border-slate-300 bg-slate-100 text-slate-700"
+                            : isSelectionConfirmed
                             ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                             : isSubmitting
                                 ? "border-[var(--brand-blue-200)] bg-[#eef6ff] text-[var(--brand-blue-700)]"
@@ -757,6 +845,8 @@ export function EasterEggComposer({
                 >
                     {isSubmitting ? (
                         <Loader2 className="mt-0.5 h-4 w-4 animate-spin" />
+                    ) : isEditLocked ? (
+                        <Lock className="mt-0.5 h-4 w-4" />
                     ) : isSelectionConfirmed ? (
                         <CheckCircle2 className="mt-0.5 h-4 w-4" />
                     ) : hasPendingConfirmation ? (
@@ -766,30 +856,54 @@ export function EasterEggComposer({
                     )}
                     <div className="min-w-0">
                         <p className="text-sm font-black leading-tight">
-                            {isSelectionConfirmed
+                            {isEditLocked
+                                ? "Foto bloccata dopo il salvataggio"
+                                : isSelectionConfirmed
                                 ? "Salvata automaticamente"
                                 : isSubmitting
                                     ? submittingLabel
                                     : hasPendingConfirmation
                                         ? confirmedRasterSignature
-                                            ? "Salvataggio automatico tra 5 secondi"
+                                            ? `Salvataggio automatico tra ${Math.round(autoSaveDelayMs / 1000)} secondi`
                                             : submitLabel
-                                        : "Il salvataggio automatico partirà quando carichi una foto"}
+                                        : "Il salvataggio automatico partira' quando carichi una foto"}
                         </p>
                         <p className="mt-1 text-xs font-semibold leading-relaxed opacity-90">
-                            {isSelectionConfirmed
-                                ? "Questa è la versione attiva al momento."
+                            {isEditLocked
+                                ? "Per sbloccarla serve una conferma utente prima di riaprire l'editing."
+                                : isSelectionConfirmed
+                                ? "Questa e' la versione attiva al momento."
                                 : isSubmitting
                                     ? "Attendi qualche istante mentre aggiorno la foto."
                                     : hasPendingConfirmation
                                         ? confirmedRasterSignature
-                                            ? "Ogni nuova modifica fa ripartire il conto dei 5 secondi."
+                                            ? `Ogni nuova modifica fa ripartire il conto dei ${Math.round(autoSaveDelayMs / 1000)} secondi.`
                                             : "La prima foto viene inviata subito, senza pulsanti."
-                                        : "Non serve più confermare manualmente."}
+                                        : "Non serve piu' confermare manualmente."}
                         </p>
                     </div>
                 </div>
-            </CardContent>
-        </Card>
+                </CardContent>
+            </Card>
+
+            {requireUnlockConfirmation ? (
+                <AlertDialog open={isUnlockDialogOpen} onOpenChange={setIsUnlockDialogOpen}>
+                    <AlertDialogContent size="sm">
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>Vuoi modificare la foto gia&apos; salvata?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                La preview verra&apos; sbloccata e ogni nuova modifica sara&apos; salvata di nuovo in automatico.
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel>Annulla</AlertDialogCancel>
+                            <AlertDialogAction onClick={unlockEditing}>
+                                Sblocca modifica
+                            </AlertDialogAction>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
+            ) : null}
+        </>
     );
 }
