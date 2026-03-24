@@ -75,6 +75,13 @@ cd /opt/fantafestando
 `deploy.sh` applica automaticamente una migrazione DB idempotente per l'indice
 ordini `eventId + pickupNumber` (unique parziale su `pickupNumber` numerico).
 Questo evita errori `E11000` sui flussi POS che non usano `pickupNumber`.
+Per default il deploy usa la cache Docker locale e al termine esegue una pulizia
+prudente delle immagini inutilizzate piu' vecchie di 7 giorni e della build cache piu' vecchia di 48 ore.
+Per forzare un rebuild completamente pulito:
+
+```bash
+./scripts/deploy.sh --no-cache
+```
 
 Verifica:
 
@@ -454,7 +461,37 @@ Lo script:
 - usa `.env.production` locale
 - avvia o aggiorna lo stack con `docker compose`
 - applica la migrazione dell'indice pickup
+- pulisce automaticamente immagini inutilizzate piu' vecchie di 7 giorni e build cache Docker piu' vecchia di 48 ore
 - mostra lo stato dei servizi a fine deploy
+
+#### Deploy remoto da workstation verso Raspberry Pi arm64
+
+Se vuoi evitare i build Docker sulla SD del Raspberry, usa il deploy remoto via SSH:
+
+```bash
+npm run deploy:rpi -- --host fantafestando
+```
+
+Lo script:
+- builda localmente le immagini per `linux/arm64` con `docker buildx`
+- trasferisce le immagini al Raspberry con `docker save | ssh ... docker load`
+- sincronizza repository ed env sul Raspberry
+- avvia `docker compose up -d --no-build` sul target
+
+Opzioni utili:
+
+```bash
+# build pulita locale e attivazione tunnel Oracle
+npm run deploy:rpi -- --host fantafestando --no-cache --profile oracle-tunnel
+
+# piattaforma esplicita, se vuoi forzare il target
+npm run deploy:rpi -- --host fantafestando --platform linux/arm64
+```
+
+Prerequisiti sulla macchina di build:
+- `docker buildx` disponibile
+- supporto QEMU/binfmt per build `linux/arm64`
+
 
 #### Flusso manuale equivalente
 
@@ -483,7 +520,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yml ps
 - Se usi stampanti virtuali, avvia lo stack con profilo `demo` e mantieni:
   - `PRINTER_EMULATOR_HOST=printer-emulator`
   - `PRINTER_EMULATOR_START_PORT=19100`
-- Aggiorna `APP_BUILD` a ogni deploy (commit short SHA) per avere in admin la release effettiva.
+- Aggiorna `APP_BUILD` a ogni deploy (`<commit-short-sha>` oppure `<commit-short-sha>-dirty`) per avere in admin la release effettiva.
 - Quando vedi codice vecchio dopo un deploy, esegui `build --no-cache` prima di `up -d`.
 - Il deploy fallisce se le route upload attese non compaiono nel manifest o se gli `URL` attivi per menu/scontrino tornano `404`.
 - Verifica asset PWA pubblicati:
@@ -501,6 +538,7 @@ Per VM Oracle appena create (Ubuntu), usare lo script unificato che:
 - sincronizza il repository sulla VM
 - aggiorna metadata release (`APP_VERSION`, `APP_BUILD`, `APP_BUILD_DATE`)
 - builda e avvia stack Docker Compose direttamente sulla VM (no dipendenza da `.next` locale)
+- usa la cache Docker remota per default e pulisce automaticamente immagini inutilizzate piu' vecchie di 7 giorni e build cache piu' vecchia di 48 ore
 - esegue health check locali su VM
 
 Comando:
@@ -541,8 +579,10 @@ Note operative:
 - Lo script bootstrap disabilita `nginx` e abilita `caddy` per evitare conflitti su porte `80/443` (entrambi restano installati).
 - `Apache` non viene configurato automaticamente nello scenario Oracle: se vuoi usarlo come edge, devi abilitarlo e gestire tu virtual host e certificati.
 - Lo script Oracle salta la build locale di default: la compilazione Next.js avviene dentro il Docker build remoto.
+- Per Raspberry Pi arm64 e storage su SD, preferisci `npm run deploy:rpi -- --host <rpi>` per buildare fuori dal target e fare solo `docker load` + `up --no-build`. Anche qui, se il working tree locale non e` pulito, la release viene marcata `-dirty`.
+- Se vuoi forzare una build remota completamente pulita, usa `./scripts/deploy-oracle.sh --host <oracle-vm> --no-cache`.
 - Per deploy multipli sulla stessa VM, imposta almeno `--project-name`, `--backoffice-port`, `--menu-port` e `--remote-env-file` con valori distinti per ogni istanza.
-- Lo script aggiorna automaticamente nel file env remoto `APP_RUNTIME_ENV_FILE`, `APP_IMAGE_NAME` e `APP_IMAGE_TAG`, cosi` ogni progetto usa il proprio file runtime e il proprio tag immagine.
+- Lo script aggiorna automaticamente nel file env remoto `APP_RUNTIME_ENV_FILE`, `APP_IMAGE_NAME` e `APP_IMAGE_TAG`, cosi` ogni progetto usa il proprio file runtime e il proprio tag immagine. Se il working tree locale non e` pulito, il tag diventa `<commit-short-sha>-dirty`.
 - Se pubblichi solo il menu, mantieni comunque valorizzato `NEXTAUTH_URL_MENU` e puoi lasciare il backoffice non esposto.
 - Se il backoffice resta privato, imposta `NEXTAUTH_URL` sull'URL LAN/interno reale del backoffice; per un futuro PoC pubblico basta sostituirlo con il dominio pubblico scelto.
 - Se vuoi un PoC futuro con backoffice pubblico, puoi riportare `BACKOFFICE_BIND_HOST=127.0.0.1` e rimettere il reverse proxy davanti al container senza cambiare il menu pubblico.

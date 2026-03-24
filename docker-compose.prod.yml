@@ -1,7 +1,14 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   mongo:
     image: mongo:8
     restart: unless-stopped
+    logging: *default-logging
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD is required}
@@ -31,6 +38,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: ${APP_IMAGE_NAME:-fantafestando-app}:${APP_IMAGE_TAG:-latest}
+    logging: *default-logging
     user: '${APP_RUNTIME_UID:-1000}:${APP_RUNTIME_GID:-1000}'
     restart: unless-stopped
     depends_on:
@@ -70,6 +78,7 @@ services:
 
   fantafestando-menu:
     image: ${APP_IMAGE_NAME:-fantafestando-app}:${APP_IMAGE_TAG:-latest}
+    logging: *default-logging
     user: '${APP_RUNTIME_UID:-1000}:${APP_RUNTIME_GID:-1000}'
     restart: unless-stopped
     depends_on:
@@ -112,6 +121,7 @@ services:
   printer-emulator:
     image: node:20-alpine
     restart: unless-stopped
+    logging: *default-logging
     profiles:
       - demo
     working_dir: /app
@@ -132,6 +142,7 @@ services:
       dockerfile: docker/oracle-menu-tunnel/Dockerfile
     image: ${APP_IMAGE_NAME:-fantafestando-app}-oracle-menu-tunnel:${APP_IMAGE_TAG:-latest}
     restart: unless-stopped
+    logging: *default-logging
     profiles:
       - oracle-tunnel
     depends_on:
