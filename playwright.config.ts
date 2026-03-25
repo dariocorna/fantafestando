@@ -1,9 +1,11 @@
+import path from "node:path";
 import { defineConfig, devices } from '@playwright/test';
 
 const playwrightPort = Number(process.env.PLAYWRIGHT_PORT ?? '3000');
 const baseURL = `http://127.0.0.1:${playwrightPort}`;
 const emulatorStartPort = Number(process.env.PRINTER_EMULATOR_START_PORT ?? '19100');
 const emulatorOutputDir = process.env.PRINTER_EMULATOR_OUTPUT_DIR ?? '/tmp/fantafestando-printer-emulator';
+const backupTargetsRoot = process.env.BACKUP_TARGETS_ROOT ?? path.join(process.cwd(), "test-results", "e2e-backup-targets");
 const webServerEnv = {
     PRINTER_CONNECT_TIMEOUT_MS: process.env.PRINTER_CONNECT_TIMEOUT_MS ?? "500",
     PRINTER_EXECUTE_TIMEOUT_MS: process.env.PRINTER_EXECUTE_TIMEOUT_MS ?? "1500",
@@ -13,6 +15,8 @@ const webServerEnv = {
     PRINTER_EMULATOR_HOST: process.env.PRINTER_EMULATOR_HOST ?? "127.0.0.1",
     PRINTER_EMULATOR_START_PORT: String(emulatorStartPort),
     PRINTER_EMULATOR_OUTPUT_DIR: emulatorOutputDir,
+    BACKUP_TARGETS_ROOT: backupTargetsRoot,
+    BACKUP_SCHEDULER_POLL_SECONDS: process.env.BACKUP_SCHEDULER_POLL_SECONDS ?? "60",
 };
 
 export default defineConfig({
@@ -49,6 +53,8 @@ export default defineConfig({
                 `PRINTER_EMULATOR_HOST=${webServerEnv.PRINTER_EMULATOR_HOST}`,
                 `PRINTER_EMULATOR_START_PORT=${webServerEnv.PRINTER_EMULATOR_START_PORT}`,
                 `PRINTER_EMULATOR_OUTPUT_DIR=${webServerEnv.PRINTER_EMULATOR_OUTPUT_DIR}`,
+                `BACKUP_TARGETS_ROOT=${webServerEnv.BACKUP_TARGETS_ROOT}`,
+                `BACKUP_SCHEDULER_POLL_SECONDS=${webServerEnv.BACKUP_SCHEDULER_POLL_SECONDS}`,
                 `npx next dev --webpack --port ${playwrightPort}`
             ].join(" "),
             url: baseURL,
