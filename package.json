@@ -26,6 +26,10 @@
     "deploy:local": "./scripts/deploy.sh",
     "deploy:rpi": "./scripts/deploy-rpi.sh",
     "deploy:oracle": "./scripts/deploy-oracle.sh",
+    "backup:runtime": "./scripts/backup-runtime.sh",
+    "restore:runtime": "./scripts/restore-runtime.sh",
+    "backup:mongo": "./scripts/backup-mongo.sh",
+    "restore:mongo": "./scripts/restore-mongo.sh",
     "db:up": "docker compose up -d mongodb",
     "db:down": "docker compose stop mongodb"
   },
