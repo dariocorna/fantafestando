@@ -5,6 +5,7 @@ import { AdminEventSelector } from "@/components/admin-event-selector";
 import { getAllEvents, getAdminContextEventId } from "@/lib/events";
 import { getAppVersionLabel } from "@/lib/app-version";
 import { requireAdminPageSession } from "@/lib/authz";
+import { ensureRuntimeBackupSchedulerStarted } from "@/lib/runtime-backup-scheduler";
 import { signOut } from "@/auth";
 import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
@@ -24,6 +25,8 @@ export default async function AdminLayout({
 }: Readonly<{
     children: React.ReactNode;
 }>) {
+    ensureRuntimeBackupSchedulerStarted();
+
     const adminUser = await requireAdminPageSession();
     const events = await getAllEvents();
     const selectableEvents = events.filter(event => !event.archived);

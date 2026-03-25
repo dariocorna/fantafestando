@@ -1,7 +1,6 @@
 import "server-only";
 
 import { normalizeAppSurface } from "@/lib/runtime-surface";
-import { maybeRunScheduledBackup } from "@/lib/runtime-backup";
 
 type RuntimeBackupSchedulerState = {
     started: boolean;
@@ -46,6 +45,7 @@ export function ensureRuntimeBackupSchedulerStarted() {
         if (state.checkInFlight) return;
         state.checkInFlight = true;
         try {
+            const { maybeRunScheduledBackup } = await import("@/lib/runtime-backup");
             await maybeRunScheduledBackup();
         } catch (error) {
             console.error("Runtime backup scheduler error:", error);
