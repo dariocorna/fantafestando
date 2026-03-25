@@ -12,6 +12,9 @@ import { ArchiveForm } from "@/components/archive-form";
 import { revalidatePath } from "next/cache";
 import { CreateEventDialog } from "@/components/create-event-dialog";
 import { CloneEventDialog } from "@/components/clone-event-dialog";
+import { ImportEventDialog } from "@/components/import-event-dialog";
+import { Button } from "@/components/ui/button";
+import { Download } from "lucide-react";
 
 export default async function EventsPage() {
     await dbConnect();
@@ -58,7 +61,10 @@ export default async function EventsPage() {
         <div className="space-y-6">
             <div className="flex justify-between items-center">
                 <h1 className="text-3xl font-bold tracking-tight">Feste (Eventi)</h1>
-                <CreateEventDialog />
+                <div className="flex items-center gap-2">
+                    <ImportEventDialog importUrl="/api/admin/events/import" />
+                    <CreateEventDialog />
+                </div>
             </div>
 
             {events.length === 0 ? (
@@ -83,6 +89,13 @@ export default async function EventsPage() {
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
+                                <Button asChild variant="outline" size="sm">
+                                    <a href={`/api/admin/events/${String(evt._id)}/export`} download>
+                                        <Download className="h-4 w-4" />
+                                        Esporta
+                                    </a>
+                                </Button>
+
                                 <CloneEventDialog sourceEventId={String(evt._id)} sourceEventName={evt.name} />
 
                                 {!evt.archived && (
