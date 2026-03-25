@@ -3,7 +3,7 @@ import "server-only";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { constants, createWriteStream } from "node:fs";
-import { access, cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import mongoose from "mongoose";
@@ -135,6 +135,20 @@ type CollectionDefinition = {
   fileName: string;
 };
 
+type StagedRestoreCollection = {
+  collectionName: string;
+  tempCollectionName: string;
+  backupCollectionName: string;
+  liveCollectionExists: boolean;
+  documentCount: number;
+};
+
+type StagedUploadsRestore = {
+  liveDirPath: string;
+  stagedDirPath: string;
+  backupDirPath: string;
+};
+
 const runtimeBackupGlobal = globalThis as typeof globalThis & {
   __fantafestandoRuntimeBackupState?: RuntimeBackupGlobalState;
 };
@@ -227,6 +241,7 @@ function requireMongoDb() {
   }
   return db;
 }
+
 async function runTarArchive(bundleRootDir: string, bundleDirName: string, outputFilePath: string) {
   await mkdir(path.dirname(outputFilePath), { recursive: true });
 
@@ -642,6 +657,7 @@ export async function generateRuntimeBackupDownload(): Promise<GeneratedBackupBu
     fileName: bundle.fileName,
     manifest: bundle.manifest,
   }));
+  void runtimeState.activeBackupPromise.catch(() => undefined);
 
   try {
     return await promise;
@@ -660,6 +676,111 @@ export async function maybeRunScheduledBackup() {
 
 function toCollectionMap() {
   return new Map(getCollectionDefinitions().map((definition) => [definition.collectionName, definition]));
+}
+
+async function getCollectionMetadata(db: ReturnType<typeof requireMongoDb>, collectionName: string) {
+  const collections = await db.listCollections({ name: collectionName }).toArray();
+  return collections[0] ?? null;
+}
+
+async function collectionExists(db: ReturnType<typeof requireMongoDb>, collectionName: string) {
+  return Boolean(await getCollectionMetadata(db, collectionName));
+}
+
+function isNamespaceNotFoundError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+
+  const maybeCode = "code" in error ? error.code : undefined;
+  const maybeMessage = "message" in error ? error.message : undefined;
+  return maybeCode === 26 || (typeof maybeMessage === "string" && maybeMessage.includes("ns not found"));
+}
+
+async function dropCollectionIfExists(db: ReturnType<typeof requireMongoDb>, collectionName: string) {
+  try {
+    await db.collection(collectionName).drop();
+    return true;
+  } catch (error) {
+    if (isNamespaceNotFoundError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function sanitizeCollectionOptions(options: Record<string, unknown> | undefined) {
+  if (!options) return undefined;
+
+  const allowedKeys = new Set([
+    "capped",
+    "size",
+    "max",
+    "validator",
+    "validationLevel",
+    "validationAction",
+    "collation",
+    "timeseries",
+    "expireAfterSeconds",
+    "clusteredIndex",
+    "changeStreamPreAndPostImages",
+  ]);
+
+  const sanitized = Object.fromEntries(
+    Object.entries(options).filter(([key, value]) => allowedKeys.has(key) && typeof value !== "undefined")
+  );
+
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
+
+function sanitizeIndexSpecification(index: Record<string, unknown>) {
+  const { key, name, ...rest } = index;
+
+  if (!key || typeof key !== "object" || typeof name !== "string") {
+    return null;
+  }
+
+  delete rest.ns;
+  delete rest.v;
+  delete rest.background;
+
+  return {
+    key,
+    name,
+    ...rest,
+  };
+}
+
+async function createRestoreTempCollection(
+  db: ReturnType<typeof requireMongoDb>,
+  sourceCollectionName: string,
+  tempCollectionName: string
+) {
+  const sourceMetadata = await getCollectionMetadata(db, sourceCollectionName);
+  await dropCollectionIfExists(db, tempCollectionName);
+
+  const createOptions = sanitizeCollectionOptions(
+    sourceMetadata?.options as Record<string, unknown> | undefined
+  );
+  if (createOptions) {
+    await db.createCollection(tempCollectionName, createOptions);
+  } else {
+    await db.createCollection(tempCollectionName);
+  }
+
+  if (!sourceMetadata) {
+    return false;
+  }
+
+  const indexes = await db.collection(sourceCollectionName).indexes();
+  const indexSpecifications = indexes
+    .filter((index) => index.name !== "_id_")
+    .map((index) => sanitizeIndexSpecification(index as Record<string, unknown>))
+    .filter((index): index is NonNullable<typeof index> => Boolean(index));
+
+  if (indexSpecifications.length > 0) {
+    await db.collection(tempCollectionName).createIndexes(indexSpecifications);
+  }
+
+  return true;
 }
 
 function resolveBundlePath(bundleDirPath: string, relativePath: string) {
@@ -686,6 +807,147 @@ async function restoreCollectionFile(collectionName: string, filePath: string) {
   return documents.length;
 }
 
+function buildRestoreCollectionNames(collectionName: string, restoreToken: string) {
+  return {
+    tempCollectionName: `${collectionName}__restore_tmp_${restoreToken}`,
+    backupCollectionName: `${collectionName}__restore_backup_${restoreToken}`,
+  };
+}
+
+async function stageRestoreCollection(
+  db: ReturnType<typeof requireMongoDb>,
+  collectionName: string,
+  filePath: string,
+  restoreToken: string
+): Promise<StagedRestoreCollection> {
+  const { tempCollectionName, backupCollectionName } = buildRestoreCollectionNames(
+    collectionName,
+    restoreToken
+  );
+  const liveCollectionExists = await createRestoreTempCollection(db, collectionName, tempCollectionName);
+
+  try {
+    const documentCount = await restoreCollectionFile(tempCollectionName, filePath);
+    return {
+      collectionName,
+      tempCollectionName,
+      backupCollectionName,
+      liveCollectionExists,
+      documentCount,
+    };
+  } catch (error) {
+    await dropCollectionIfExists(db, tempCollectionName);
+    throw error;
+  }
+}
+
+async function rollbackActivatedCollections(
+  db: ReturnType<typeof requireMongoDb>,
+  collections: StagedRestoreCollection[]
+) {
+  for (const entry of [...collections].reverse()) {
+    await dropCollectionIfExists(db, entry.collectionName);
+    if (entry.liveCollectionExists && (await collectionExists(db, entry.backupCollectionName))) {
+      await db.collection(entry.backupCollectionName).rename(entry.collectionName);
+    }
+  }
+}
+
+async function activateStagedCollections(
+  db: ReturnType<typeof requireMongoDb>,
+  collections: StagedRestoreCollection[]
+) {
+  const activatedCollections: StagedRestoreCollection[] = [];
+
+  for (const entry of collections) {
+    let liveMovedToBackup = false;
+
+    try {
+      await dropCollectionIfExists(db, entry.backupCollectionName);
+      if (entry.liveCollectionExists) {
+        await db.collection(entry.collectionName).rename(entry.backupCollectionName);
+        liveMovedToBackup = true;
+      }
+
+      await db.collection(entry.tempCollectionName).rename(entry.collectionName);
+      activatedCollections.push(entry);
+    } catch (error) {
+      if (liveMovedToBackup) {
+        await dropCollectionIfExists(db, entry.collectionName);
+        if (await collectionExists(db, entry.backupCollectionName)) {
+          await db.collection(entry.backupCollectionName).rename(entry.collectionName);
+        }
+      }
+
+      await rollbackActivatedCollections(db, activatedCollections);
+      throw error;
+    }
+  }
+}
+
+async function cleanupRestoreCollectionArtifacts(
+  db: ReturnType<typeof requireMongoDb>,
+  collections: StagedRestoreCollection[]
+) {
+  for (const entry of collections) {
+    await dropCollectionIfExists(db, entry.tempCollectionName);
+    await dropCollectionIfExists(db, entry.backupCollectionName);
+  }
+}
+
+async function stageUploadsRestore(
+  uploadsSourceDir: string | null,
+  restoreToken: string
+): Promise<StagedUploadsRestore> {
+  const uploadsRootDir = path.join(process.cwd(), "public");
+  const liveDirPath = path.join(uploadsRootDir, "uploads");
+  const stagedDirPath = path.join(uploadsRootDir, `.uploads-restore-stage-${restoreToken}`);
+  const backupDirPath = path.join(uploadsRootDir, `.uploads-restore-backup-${restoreToken}`);
+
+  await mkdir(uploadsRootDir, { recursive: true });
+  await rm(stagedDirPath, { recursive: true, force: true });
+  await rm(backupDirPath, { recursive: true, force: true });
+
+  if (uploadsSourceDir && (await pathExists(uploadsSourceDir))) {
+    await cp(uploadsSourceDir, stagedDirPath, { recursive: true });
+  } else {
+    await mkdir(stagedDirPath, { recursive: true });
+  }
+
+  return {
+    liveDirPath,
+    stagedDirPath,
+    backupDirPath,
+  };
+}
+
+async function activateStagedUploads(uploads: StagedUploadsRestore) {
+  const liveUploadsExist = await pathExists(uploads.liveDirPath);
+  let liveMovedToBackup = false;
+
+  try {
+    if (liveUploadsExist) {
+      await rename(uploads.liveDirPath, uploads.backupDirPath);
+      liveMovedToBackup = true;
+    }
+
+    await rename(uploads.stagedDirPath, uploads.liveDirPath);
+  } catch (error) {
+    await rm(uploads.liveDirPath, { recursive: true, force: true });
+
+    if (liveMovedToBackup && (await pathExists(uploads.backupDirPath))) {
+      await rename(uploads.backupDirPath, uploads.liveDirPath);
+    }
+
+    throw error;
+  }
+}
+
+async function cleanupStagedUploads(uploads: StagedUploadsRestore) {
+  await rm(uploads.stagedDirPath, { recursive: true, force: true });
+  await rm(uploads.backupDirPath, { recursive: true, force: true });
+}
+
 export async function restoreRuntimeBackupBundle(
   bundleFilePath: string
 ): Promise<RestoreRuntimeBackupResult> {
@@ -699,6 +961,7 @@ export async function restoreRuntimeBackupBundle(
 
   runtimeState.restoreInProgress = true;
   const extractRoot = await mkdtemp(path.join(tmpdir(), "fantafestando-admin-restore-"));
+  const restoreToken = `${formatBackupTimestamp(new Date())}-${Math.random().toString(36).slice(2, 8)}`;
 
   try {
     await extractTarArchive(bundleFilePath, extractRoot);
@@ -739,26 +1002,47 @@ export async function restoreRuntimeBackupBundle(
 
     await dbConnect();
     const db = requireMongoDb();
-
-    for (const entry of validatedCollections) {
-      await db.collection(entry.collectionName).deleteMany({});
-    }
+    const stagedCollections: StagedRestoreCollection[] = [];
+    let stagedUploads: StagedUploadsRestore | null = null;
 
     let restoredCollections = 0;
     let restoredDocuments = 0;
-    for (const entry of validatedCollections) {
-      const count = await restoreCollectionFile(entry.collectionName, entry.filePath);
-      restoredCollections += 1;
-      restoredDocuments += count;
-    }
 
-    const uploadsDestinationDir = path.join(process.cwd(), "public", "uploads");
-    await rm(uploadsDestinationDir, { recursive: true, force: true });
-    await mkdir(path.dirname(uploadsDestinationDir), { recursive: true });
-    if (manifest.uploads.included && (await pathExists(uploadsSourceDir))) {
-      await cp(uploadsSourceDir, uploadsDestinationDir, { recursive: true });
-    } else {
-      await mkdir(uploadsDestinationDir, { recursive: true });
+    try {
+      for (const entry of validatedCollections) {
+        const stagedCollection = await stageRestoreCollection(
+          db,
+          entry.collectionName,
+          entry.filePath,
+          restoreToken
+        );
+
+        stagedCollections.push(stagedCollection);
+        restoredCollections += 1;
+        restoredDocuments += stagedCollection.documentCount;
+      }
+
+      stagedUploads = await stageUploadsRestore(
+        manifest.uploads.included && (await pathExists(uploadsSourceDir)) ? uploadsSourceDir : null,
+        restoreToken
+      );
+
+      let collectionsActivated = false;
+      try {
+        await activateStagedCollections(db, stagedCollections);
+        collectionsActivated = true;
+        await activateStagedUploads(stagedUploads);
+      } catch (error) {
+        if (collectionsActivated) {
+          await rollbackActivatedCollections(db, stagedCollections);
+        }
+        throw error;
+      }
+    } finally {
+      await cleanupRestoreCollectionArtifacts(db, stagedCollections);
+      if (stagedUploads) {
+        await cleanupStagedUploads(stagedUploads);
+      }
     }
 
     await updateRestoreStatus("SUCCESS", `Ripristino completato da ${path.basename(bundleFilePath)}`);
