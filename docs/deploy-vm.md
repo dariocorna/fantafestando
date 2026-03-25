@@ -633,24 +633,121 @@ Esempio:
 ./scripts/rollback.sh v0.3.1
 ```
 
-## 8. Backup e Restore MongoDB
+## 8. Backup e Restore Runtime
 
-### Backup
+### 8.0 UI admin backup
+
+Il backoffice espone anche una UI admin in `/admin/settings/backups` per:
+- configurare backup periodici
+- scegliere la directory di destinazione sotto una root host montata nel container
+- scaricare un backup manuale come file
+- caricare un bundle `tar.gz` per restore manuale
+
+Per rendere visibili chiavette USB o altre directory host alla UI, il compose di produzione monta:
+- `${BACKUP_TARGETS_HOST_ROOT:-/media}` nel container backoffice come `/data/backup-targets`
+- `BACKUP_SCHEDULER_POLL_SECONDS` per la frequenza di controllo del job periodico
+
+Configurazione tipica su Raspberry:
+- `BACKUP_TARGETS_HOST_ROOT=/media` se la chiavetta viene montata sotto `/media/<utente>/<LABEL>`
+- `BACKUP_TARGETS_HOST_ROOT=/mnt` se usi mount manuali
+
+Dopo avere aggiornato `.env.production`, riavvia il backoffice e verifica la lista destinazioni dalla pagina admin.
+
+### 8.1 Bundle completo consigliato
+
+Il backup operativo consigliato non salva solo MongoDB: include anche `public/uploads`,
+un manifest con metadata della release e, opzionalmente, una copia del file env runtime.
+Il risultato e' un bundle `tar.gz` unico, pensato per essere copiato su USB o su un altro host.
+
+Backup completo locale:
 
 ```bash
 cd /opt/fantafestando
-./scripts/backup-mongo.sh
+./scripts/backup-runtime.sh
 ls -lh backups/
 ```
 
-### Restore
+Backup su chiavetta USB con retention a 30 bundle:
 
 ```bash
 cd /opt/fantafestando
+./scripts/backup-runtime.sh   --output-dir /mnt/usb/fantafestando-backups   --keep 30
+```
+
+Se vuoi includere anche `.env.production` nel bundle:
+
+```bash
+./scripts/backup-runtime.sh --include-env
+```
+
+Nota: `--include-env` copia segreti applicativi nel bundle. Usarlo solo su supporti fidati.
+
+Il bundle contiene:
+- dump MongoDB dell'applicazione (`mongodump --db $MONGO_INITDB_DATABASE`)
+- archivio di `public/uploads`
+- `manifest.env` con timestamp, host e release
+- `SHA256SUMS` se `sha256sum` e' disponibile sull'host
+
+Script npm equivalenti:
+
+```bash
+npm run backup:runtime
+npm run backup:mongo
+```
+
+### 8.2 Restore completo runtime
+
+Il restore runtime e' distruttivo e richiede sempre `--force`.
+Se disponibili, `fantafestando-backoffice` e `fantafestando-menu` vengono fermati durante il ripristino e riavviati alla fine.
+Dopo il restore lo script rilancia la migrazione indice ordini e verifica gli upload attivi.
+
+Restore completo:
+
+```bash
+cd /opt/fantafestando
+./scripts/restore-runtime.sh backups/fantafestando-runtime-backup-YYYYMMDD-HHMMSS.tar.gz --force
+```
+
+Se devi ripristinare anche il file env salvato nel bundle:
+
+```bash
+./scripts/restore-runtime.sh   /mnt/usb/fantafestando-backups/fantafestando-runtime-backup-YYYYMMDD-HHMMSS.tar.gz   --restore-env   --force
+```
+
+Restore parziale:
+
+```bash
+# solo MongoDB
+./scripts/restore-runtime.sh backups/<bundle>.tar.gz --mongo-only --force
+
+# solo upload statici
+./scripts/restore-runtime.sh backups/<bundle>.tar.gz --uploads-only --force
+```
+
+Script npm equivalente:
+
+```bash
+npm run restore:runtime -- backups/<bundle>.tar.gz --force
+```
+
+### 8.3 Fallback Mongo-only
+
+Restano disponibili anche gli script storici solo database, utili per emergenze o test mirati:
+
+```bash
+./scripts/backup-mongo.sh
 ./scripts/restore-mongo.sh backups/mongo-YYYYMMDD-HHMMSS.archive.gz
 ```
 
-Dopo restore, verificare frontali e admin.
+### 8.4 Automazione minima consigliata
+
+Esempio `cron` ogni 6 ore verso chiavetta USB montata su `/mnt/usb`:
+
+```bash
+0 */6 * * * cd /opt/fantafestando && ./scripts/backup-runtime.sh --output-dir /mnt/usb/fantafestando-backups --keep 56 >> /var/log/fantafestando-backup.log 2>&1
+```
+
+Almeno una volta al mese eseguire un test restore su una copia dell'ambiente o in finestra di manutenzione.
 
 ## 9. Sicurezza minima consigliata
 
