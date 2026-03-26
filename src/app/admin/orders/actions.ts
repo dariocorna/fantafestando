@@ -28,6 +28,10 @@ interface OrderForStornoProjection {
         productId: string | { toString(): string }
         quantity?: number
     }>
+    ingredientPlan?: Array<{
+        ingredientId?: string | { toString(): string }
+        quantity?: number
+    }>
     stornoMeta?: {
         status?: "IN_PROGRESS" | "COMPLETED" | "FAILED"
         refundStatus?: "SKIPPED" | "DONE" | "FAILED"
@@ -36,12 +40,23 @@ interface OrderForStornoProjection {
 }
 
 function buildStockAdjustmentsFromOrder(order: OrderForStornoProjection): StockAdjustment[] {
-    return order.cart
+    const productAdjustments = order.cart
         .map((item) => ({
-            productId: item.productId?.toString(),
+            entityType: "PRODUCT" as const,
+            entityId: item.productId?.toString(),
             quantity: Math.max(0, Math.floor(Number(item.quantity ?? 0)))
         }))
-        .filter((entry) => Boolean(entry.productId) && entry.quantity > 0) as StockAdjustment[]
+        .filter((entry) => Boolean(entry.entityId) && entry.quantity > 0) as StockAdjustment[]
+
+    const ingredientAdjustments = (order.ingredientPlan || [])
+        .map((entry) => ({
+            entityType: "INGREDIENT" as const,
+            entityId: entry.ingredientId?.toString(),
+            quantity: Math.max(0, Math.floor(Number(entry.quantity ?? 0)))
+        }))
+        .filter((entry) => Boolean(entry.entityId) && entry.quantity > 0) as StockAdjustment[]
+
+    return [...productAdjustments, ...ingredientAdjustments]
 }
 
 async function resolveSumUpApiKeyForOrder(eventId: string, posDeviceId?: string): Promise<

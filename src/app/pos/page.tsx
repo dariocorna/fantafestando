@@ -149,6 +149,9 @@ interface PendingIngredientQueueItem {
     quantity: number
     orderCount: number
     legacy: boolean
+    stockQuantity?: number | null
+    remainingStockQuantity?: number | null
+    active?: boolean
 }
 
 interface OpenCashSessionState {
@@ -1061,6 +1064,13 @@ export default function PosPage() {
                                         </div>
                                         <p className="mt-0.5 text-[11px] font-semibold text-amber-700">
                                             {item.orderCount} ordini coinvolti
+                                        </p>
+                                        <p className="mt-0.5 text-[11px] font-semibold text-amber-700">
+                                            {item.stockQuantity === null || item.stockQuantity === undefined
+                                                ? "Scorta non tracciata"
+                                                : item.remainingStockQuantity === 0
+                                                    ? "Residuo stimato: esaurito"
+                                                    : `Residuo stimato: ${item.remainingStockQuantity}`}
                                         </p>
                                     </div>
                                     <span

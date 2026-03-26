@@ -120,13 +120,35 @@ export async function POST(req: NextRequest) {
             const stockResult = await applyStockForPaidOrder(
                 order.eventId.toString(),
                 cartPayload,
-                preferredMode
+                preferredMode,
+                Array.isArray(order.ingredientPlan)
+                    ? order.ingredientPlan.map((entry: {
+                        ingredientId?: string | { toString(): string }
+                        quantity?: number
+                    }) => ({
+                        ingredientId: entry.ingredientId?.toString(),
+                        quantity: Number(entry.quantity ?? 0)
+                    }))
+                    : []
             )
 
             if (!stockResult.success) {
                 if (preferredMode === "strict") {
                     console.warn("[SumUp Webhook] Stock shortage in strict mode, applying override fallback.", stockResult.stockShortages);
-                    const overrideResult = await applyStockForPaidOrder(order.eventId.toString(), cartPayload, "override")
+                    const overrideResult = await applyStockForPaidOrder(
+                        order.eventId.toString(),
+                        cartPayload,
+                        "override",
+                        Array.isArray(order.ingredientPlan)
+                            ? order.ingredientPlan.map((entry: {
+                                ingredientId?: string | { toString(): string }
+                                quantity?: number
+                            }) => ({
+                                ingredientId: entry.ingredientId?.toString(),
+                                quantity: Number(entry.quantity ?? 0)
+                            }))
+                            : []
+                    )
                     if (!overrideResult.success) {
                         console.error("[SumUp Webhook] Override stock apply failed.", overrideResult.stockShortages)
                         return NextResponse.json({ error: "Stock apply failed" }, { status: 409 })

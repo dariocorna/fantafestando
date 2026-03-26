@@ -9,6 +9,7 @@ export interface IngredientCatalogShape {
     _id: unknown
     name?: string | null
     shortName?: string | null
+    stockQuantity?: number | null
     active?: boolean | null
 }
 
@@ -70,6 +71,12 @@ export interface PendingIngredientQueueEntry {
     quantity: number
     orderCount: number
     legacy: boolean
+}
+
+export interface PendingIngredientQueueWithCatalogEntry extends PendingIngredientQueueEntry {
+    stockQuantity?: number | null
+    remainingStockQuantity?: number | null
+    active?: boolean
 }
 
 function normalizeQuantity(value: unknown): number {
@@ -309,5 +316,32 @@ export function aggregatePendingIngredientQueue(
             return right.quantity - left.quantity
         }
         return left.label.localeCompare(right.label, "it")
+    })
+}
+
+export function attachIngredientCatalogMetadata(
+    queue: PendingIngredientQueueEntry[],
+    ingredientById: Map<string, Pick<IngredientCatalogShape, "stockQuantity" | "active">>
+): PendingIngredientQueueWithCatalogEntry[] {
+    return queue.map((entry) => {
+        if (!entry.ingredientKey.startsWith("ingredient:")) {
+            return entry
+        }
+
+        const ingredientId = entry.ingredientKey.slice("ingredient:".length)
+        const ingredient = ingredientById.get(ingredientId)
+        const stockQuantity = ingredient?.stockQuantity
+        const normalizedStockQuantity = typeof stockQuantity === "number" && Number.isFinite(stockQuantity)
+            ? Math.max(0, Math.floor(stockQuantity))
+            : null
+
+        return {
+            ...entry,
+            stockQuantity: normalizedStockQuantity,
+            remainingStockQuantity: normalizedStockQuantity === null
+                ? null
+                : Math.max(0, normalizedStockQuantity - entry.quantity),
+            active: typeof ingredient?.active === "boolean" ? ingredient.active : undefined
+        }
     })
 }

@@ -43,6 +43,7 @@ import {
 } from "@/lib/fixed-menu"
 import {
     aggregatePendingIngredientQueue,
+    attachIngredientCatalogMetadata,
     buildIngredientPlanForCart,
     normalizeRecipeItems,
 } from "@/lib/ingredient-plan"
@@ -962,7 +963,7 @@ export async function createOrder(data: {
                 }
             }
         } else {
-            const stockApplyResult = await applyStockForPaidOrder(data.eventId, stockPayload, stockMode)
+            const stockApplyResult = await applyStockForPaidOrder(data.eventId, stockPayload, stockMode, ingredientPlan)
             if (!stockApplyResult.success) {
                 return {
                     success: false,
@@ -1287,7 +1288,7 @@ export async function listPendingIngredientQueue(data: {
     eventId: string
     limit?: number
 }): Promise<
-    { success: true, items: Array<{ ingredientKey: string, label: string, quantity: number, orderCount: number, legacy: boolean }> }
+    { success: true, items: Array<{ ingredientKey: string, label: string, quantity: number, orderCount: number, legacy: boolean, stockQuantity?: number | null, remainingStockQuantity?: number | null, active?: boolean }> }
     | { success: false, error: string }
 > {
     try {
@@ -1322,9 +1323,28 @@ export async function listPendingIngredientQueue(data: {
                 }>
             }>
 
+        const aggregatedQueue = aggregatePendingIngredientQueue(pendingOrders)
+        const ingredientIds = aggregatedQueue
+            .filter((entry) => entry.ingredientKey.startsWith("ingredient:"))
+            .map((entry) => entry.ingredientKey.slice("ingredient:".length))
+
+        const ingredients = ingredientIds.length > 0
+            ? await Ingredient.find({
+                eventId: data.eventId,
+                _id: { $in: ingredientIds }
+            }).select("_id stockQuantity active").lean() as Array<{
+                _id: string | { toString(): string }
+                stockQuantity?: number | null
+                active?: boolean
+            }>
+            : []
+
         return {
             success: true,
-            items: aggregatePendingIngredientQueue(pendingOrders).slice(0, safeLimit)
+            items: attachIngredientCatalogMetadata(
+                aggregatedQueue,
+                new Map(ingredients.map((ingredient) => [ingredient._id.toString(), ingredient]))
+            ).slice(0, safeLimit)
         }
     } catch (error) {
         console.error("List Pending Ingredient Queue Error:", error)
@@ -1462,7 +1482,7 @@ export async function completePendingOrderPayment(data: {
         )
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
-        const stockApplyResult = await applyStockForPaidOrder(data.eventId, currentCart, stockMode)
+        const stockApplyResult = await applyStockForPaidOrder(data.eventId, currentCart, stockMode, ingredientPlan)
         if (!stockApplyResult.success) {
             return {
                 success: false,

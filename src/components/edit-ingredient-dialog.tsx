@@ -26,7 +26,7 @@ export function EditIngredientDialog({
         id: string
         name: string
         shortName?: string
-        sortOrder: number
+        stockQuantity?: number | null
         active: boolean
     }
     eventId: string
@@ -91,14 +91,15 @@ export function EditIngredientDialog({
                             />
                         </div>
                         <div className="grid gap-2">
-                            <Label htmlFor={`ingredient-edit-sort-order-${ingredient.id}`}>Ordine</Label>
+                            <Label htmlFor={`ingredient-edit-stock-quantity-${ingredient.id}`}>Scorte (opzionale)</Label>
                             <Input
-                                id={`ingredient-edit-sort-order-${ingredient.id}`}
-                                name="sortOrder"
+                                id={`ingredient-edit-stock-quantity-${ingredient.id}`}
+                                name="stockQuantity"
                                 type="number"
                                 min="0"
                                 step="1"
-                                defaultValue={ingredient.sortOrder}
+                                defaultValue={ingredient.stockQuantity ?? ""}
+                                placeholder="Lascia vuoto per non tracciare"
                             />
                         </div>
                         <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">

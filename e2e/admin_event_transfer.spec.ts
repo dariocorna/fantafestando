@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 import mongoose from "mongoose";
 import Category from "../src/models/Category";
 import Event from "../src/models/Event";
+import Ingredient from "../src/models/Ingredient";
 import Order from "../src/models/Order";
 import Peripheral from "../src/models/Peripheral";
 import PosDevice from "../src/models/PosDevice";
@@ -151,6 +152,14 @@ async function seedEventTransferFixture(sourceEventName: string, token: string):
     printOrder: 7,
     printerId: kitchenPrinter._id,
     skipKitchenPrint: false,
+  });
+
+  await Ingredient.create({
+    eventId: sourceEventId,
+    name: `Patate ${token}`,
+    shortName: "PATA",
+    stockQuantity: 40,
+    active: true,
   });
 
   const panino = await Product.create({
@@ -382,6 +391,7 @@ test.describe("Admin event export/import", () => {
       importedPrinters,
       importedPeripherals,
       importedCategories,
+      importedIngredients,
       importedProducts,
       importedPosDevices,
       importedOrderCount,
@@ -390,6 +400,7 @@ test.describe("Admin event export/import", () => {
       Printer.find({ eventId: importedEventId }).lean(),
       Peripheral.find({ eventId: importedEventId }).lean(),
       Category.find({ eventId: importedEventId }).lean(),
+      Ingredient.find({ eventId: importedEventId }).lean(),
       Product.find({ eventId: importedEventId }).lean(),
       PosDevice.find({ eventId: importedEventId }).lean(),
       Order.countDocuments({ eventId: importedEventId }),
@@ -397,12 +408,13 @@ test.describe("Admin event export/import", () => {
         Printer.countDocuments({ eventId: importedEventId }),
         Peripheral.countDocuments({ eventId: importedEventId }),
         Category.countDocuments({ eventId: importedEventId }),
+        Ingredient.countDocuments({ eventId: importedEventId }),
         Product.countDocuments({ eventId: importedEventId }),
         PosDevice.countDocuments({ eventId: importedEventId }),
       ]),
     ]);
 
-    expect(importedCounts).toEqual([2, 2, 1, 3, 1]);
+    expect(importedCounts).toEqual([2, 2, 1, 1, 3, 1]);
     expect(importedOrderCount).toBe(0);
 
     expect(importedPrinters.map((printer) => printer.name)).toEqual(
@@ -420,6 +432,7 @@ test.describe("Admin event export/import", () => {
     const importedPaymentPeripheral = importedPeripherals.find((peripheral) => peripheral.type === "SUMUP") || null;
     const importedCashBoxPeripheral = importedPeripherals.find((peripheral) => peripheral.type === "CASH_BOX") || null;
     const importedCategory = importedCategories.find((category) => category.name === expectedCategoryName) || importedCategories[0] || null;
+    const importedIngredient = importedIngredients.find((ingredient) => ingredient.shortName === "PATA") || null;
     const importedPanino = importedProducts.find((product) => product.name === expectedPaninoName) || null;
     const importedPatatine = importedProducts.find((product) => product.name === expectedPatatineName) || null;
     const importedCombo = importedProducts.find((product) => product.name === expectedComboName) || null;
@@ -428,6 +441,11 @@ test.describe("Admin event export/import", () => {
     expect(importedCategory).toMatchObject({
       printOrder: 7,
       skipKitchenPrint: false,
+    });
+    expect(importedIngredient).toMatchObject({
+      shortName: "PATA",
+      stockQuantity: 40,
+      active: true,
     });
     expect(String(importedCategory!.printerId)).toBe(String(importedKitchenPrinter!._id));
 
