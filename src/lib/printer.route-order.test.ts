@@ -66,7 +66,7 @@ function mockOrder(order: unknown) {
     });
 }
 
-function buildOrder(orderId: string) {
+function buildOrder(orderId: string, overrides?: Record<string, unknown>) {
     return {
         _id: { toString: () => orderId },
         eventId: { toString: () => "evt-1" },
@@ -82,7 +82,8 @@ function buildOrder(orderId: string) {
                 quantity: 1,
                 selectedOptions: []
             }
-        ]
+        ],
+        ...overrides
     };
 }
 
@@ -661,6 +662,72 @@ describe("PrinterService.routeOrderToPrinters", () => {
         expect(printComandaSpy.mock.calls[1]?.[2]).toEqual(
             expect.objectContaining({ immediateFailureReason: "Skipped after previous destination failure" })
         );
+    });
+
+    test("adds pizza number to cashier and customer copies and prints barcode on pizza kitchen jobs", async () => {
+        mockOrder(buildOrder("order-pizza", {
+            pizzaTicket: {
+                pizzaNumber: 81,
+                state: "QUEUED"
+            }
+        }));
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([
+            {
+                _id: { toString: () => "prod-1" },
+                categoryId: { toString: () => "cat-pizza" },
+                basePrice: 7,
+                shortName: "PIZ"
+            }
+        ]);
+        mockCategories([
+            {
+                _id: { toString: () => "cat-pizza" },
+                name: "Pizze",
+                pizzaFlowEnabled: true,
+                printerId: {
+                    _id: "kitchen-printer-1",
+                    name: "Forno",
+                    ip: "192.168.178.210",
+                    port: 9100,
+                    isVirtual: false
+                }
+            }
+        ]);
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters("order-pizza", "pos-1");
+        const printedJobs = printComandaSpy.mock.calls.map(([job]) => job);
+        const cashierJob = printedJobs.find((job) => job.printType === "CASHIER_SUMMARY");
+        const kitchenJob = printedJobs.find((job) => job.printType === "KITCHEN_ORDER");
+        const customerJob = printedJobs.find((job) => job.printType === "CUSTOMER_ORDER");
+
+        expect(result).toEqual([true, true, true]);
+        expect(printComandaSpy).toHaveBeenCalledTimes(3);
+        expect(cashierJob).toEqual(expect.objectContaining({
+            printType: "CASHIER_SUMMARY",
+            pizzaNumber: 81
+        }));
+        expect(cashierJob?.pizzaBarcodeValue).toBeUndefined();
+        expect(kitchenJob).toEqual(expect.objectContaining({
+            printType: "KITCHEN_ORDER",
+            pizzaNumber: 81,
+            pizzaBarcodeValue: "PZ:order-pizza"
+        }));
+        expect(customerJob).toEqual(expect.objectContaining({
+            printType: "CUSTOMER_ORDER",
+            pizzaNumber: 81
+        }));
+        expect(customerJob?.pizzaBarcodeValue).toBeUndefined();
     });
 
     test("prints the easter egg raster on cashier close and clears the stored binary after success", async () => {

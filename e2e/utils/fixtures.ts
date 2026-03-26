@@ -8,6 +8,7 @@ import Printer from "../../src/models/Printer";
 import PosDevice from "../../src/models/PosDevice";
 import Peripheral from "../../src/models/Peripheral";
 import Order from "../../src/models/Order";
+import OrderCounter from "../../src/models/OrderCounter";
 
 // ---------------------------------------------------------------------------
 // Unique suffix for test isolation
@@ -101,6 +102,7 @@ export async function deleteEvent(_page: Page, eventName: string) {
     const eventId = String(event._id);
 
     await Order.deleteMany({ eventId });
+    await OrderCounter.deleteMany({ eventId });
     await PosDevice.deleteMany({ eventId });
     await Peripheral.deleteMany({ eventId });
     await Printer.deleteMany({ eventId });
@@ -182,25 +184,42 @@ export async function createPosDevice(
     await expect(page.getByText(posName)).toBeVisible({ timeout: 15000 });
 }
 
+export interface CreateCategoryOptions {
+    kitchenPrinterName?: string;
+    pizzaFlowEnabled?: boolean;
+}
+
 export async function createCategoryWithPrinter(
     page: Page,
     categoryName: string,
     kitchenPrinterName?: string,
+) {
+    await createCategory(page, categoryName, { kitchenPrinterName });
+}
+
+export async function createCategory(
+    page: Page,
+    categoryName: string,
+    options?: CreateCategoryOptions
 ) {
     await page.goto("/admin/catalog");
     await page.click("#new-category-btn");
     const dialog = page.getByRole("dialog");
     await dialog.locator("#cat-name").fill(categoryName);
 
-    if (kitchenPrinterName) {
+    if (options?.kitchenPrinterName) {
         const printerSelect = dialog.getByLabel("Stampante Reparto");
         const printerValue = await printerSelect.evaluate((element, needle) => {
             const select = element as HTMLSelectElement;
             const option = Array.from(select.options).find((item) => item.text.includes(needle));
             return option?.value ?? null;
-        }, kitchenPrinterName);
+        }, options.kitchenPrinterName);
         expect(printerValue).toBeTruthy();
         await printerSelect.selectOption(printerValue!);
+    }
+
+    if (options?.pizzaFlowEnabled) {
+        await dialog.getByLabel("Categoria pizza").check();
     }
 
     await dialog.getByRole("button", { name: "Salva Categoria", exact: true }).click();
@@ -275,16 +294,6 @@ export function localPrinterIp(): string {
 // ---------------------------------------------------------------------------
 // Catalog
 // ---------------------------------------------------------------------------
-export async function createCategory(page: Page, categoryName: string) {
-    await page.goto("/admin/catalog");
-    await page.click("#new-category-btn");
-    const dialog = page.getByRole("dialog");
-    await dialog.locator("#cat-name").fill(categoryName);
-    await dialog.getByRole("button", { name: "Salva Categoria", exact: true }).click();
-    await expect(dialog).toBeHidden();
-    await expect(page.getByText(categoryName)).toBeVisible();
-}
-
 export interface ProductDef {
     name: string;
     price: string;

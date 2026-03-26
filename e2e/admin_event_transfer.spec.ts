@@ -152,6 +152,7 @@ async function seedEventTransferFixture(sourceEventName: string, token: string):
     printOrder: 7,
     printerId: kitchenPrinter._id,
     skipKitchenPrint: false,
+    pizzaFlowEnabled: true,
   });
 
   await Ingredient.create({
@@ -441,6 +442,7 @@ test.describe("Admin event export/import", () => {
     expect(importedCategory).toMatchObject({
       printOrder: 7,
       skipKitchenPrint: false,
+      pizzaFlowEnabled: true,
     });
     expect(importedIngredient).toMatchObject({
       shortName: "PATA",
