@@ -10,6 +10,7 @@ export interface PublicOrderSummaryItem {
 export interface PublicOrderSummary {
     orderId: string;
     shortCode: string;
+    pizzaNumber?: number;
     totalAmount: number;
     customer: {
         name?: string;
@@ -21,6 +22,9 @@ export interface PublicOrderSummary {
 interface PublicOrderSummarySource {
     _id?: string | { toString(): string } | null;
     pickupNumber?: number | null;
+    pizzaTicket?: {
+        pizzaNumber?: number | null;
+    };
     totalAmount: number;
     customer?: {
         name?: string;
@@ -45,6 +49,9 @@ export function buildPublicOrderSummary(order: PublicOrderSummarySource): Public
     return {
         orderId,
         shortCode,
+        pizzaNumber: typeof order.pizzaTicket?.pizzaNumber === "number" && order.pizzaTicket.pizzaNumber > 0
+            ? order.pizzaTicket.pizzaNumber
+            : undefined,
         totalAmount: order.totalAmount,
         customer: {
             name: order.customer?.name?.trim() || undefined,

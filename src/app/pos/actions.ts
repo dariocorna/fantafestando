@@ -12,6 +12,7 @@ import { PrinterService } from "@/lib/printer"
 import { createSumUpCheckout } from "@/lib/sumup"
 import { decryptSecret } from "@/lib/secrets"
 import { getOrderCodeFromOrder, parseOrderNumberInput } from "@/lib/order-code"
+import { resolvePizzaTicketForCart } from "@/lib/pizza-ticket"
 import { type StockMode } from "@/lib/inventory"
 import { computeCashSessionSummary } from "@/lib/cash-session"
 import { aggregateOrderProductConsumptions } from "@/lib/product-consumption"
@@ -950,6 +951,19 @@ export async function createOrder(data: {
                 }))
             }))
         )
+        const pizzaTicket = await resolvePizzaTicketForCart(
+            data.eventId,
+            pricingResult.pricing.cartWithDiscounts.map((item) => ({
+                productId: item.productId,
+                snapshotName: item.snapshotName,
+                quantity: item.quantity,
+                includedComponents: item.includedComponents?.map((component) => ({
+                    productId: component.productId,
+                    snapshotName: component.snapshotName,
+                    quantity: component.quantity
+                }))
+            }))
+        )
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
         const requiresPendingState = computeRequiresPendingState(data.paymentMethod, capabilitiesResult.capabilities)
@@ -984,6 +998,7 @@ export async function createOrder(data: {
             discountMeta: pricingResult.pricing.orderDiscountMeta,
             cart: pricingResult.pricing.cartWithDiscounts,
             ingredientPlan,
+            pizzaTicket,
             paymentMethod: data.paymentMethod,
             sumupCheckoutId: requiresPendingState ? undefined : data.sumupCheckoutId,
             posDeviceId: data.posDeviceId,
@@ -1502,6 +1517,20 @@ export async function completePendingOrderPayment(data: {
                     }))
                 }))
             )
+        const pizzaTicket = await resolvePizzaTicketForCart(
+            data.eventId,
+            pricingResult.pricing.cartWithDiscounts.map((item) => ({
+                productId: item.productId,
+                snapshotName: item.snapshotName,
+                quantity: item.quantity,
+                includedComponents: item.includedComponents?.map((component) => ({
+                    productId: component.productId,
+                    snapshotName: component.snapshotName,
+                    quantity: component.quantity
+                }))
+            })),
+            order.pizzaTicket
+        )
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
         const stockApplyResult = await applyStockForPaidOrder(data.eventId, currentCart, stockMode, ingredientPlan)
@@ -1516,6 +1545,7 @@ export async function completePendingOrderPayment(data: {
 
         order.set("cart", pricingResult.pricing.cartWithDiscounts)
         order.set("ingredientPlan", ingredientPlan)
+        order.set("pizzaTicket", pizzaTicket || undefined)
         order.totalAmount = payableAmount
         order.discountApplied = pricingResult.pricing.discountApplied
         order.set("discountMeta", pricingResult.pricing.orderDiscountMeta || undefined)

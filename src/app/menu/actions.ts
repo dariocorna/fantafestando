@@ -11,6 +11,7 @@ import { getCurrentDayCode, isProductAvailableToday } from "@/lib/product-availa
 import { createEasterEggUploadToken } from "@/lib/easter-egg-order"
 import { buildPublicOrderSummary } from "@/lib/public-order-summary"
 import { type StockShortage } from "@/lib/inventory"
+import { resolvePizzaTicketForCart } from "@/lib/pizza-ticket"
 import {
     collectReferencedProductIds,
     getProductUnitBasePrice,
@@ -333,6 +334,19 @@ export async function createPublicOrder(data: {
         const easterEggUpload = event.settings?.portalEasterEggEnabled
             ? createEasterEggUploadToken()
             : null
+        const pizzaTicket = await resolvePizzaTicketForCart(
+            data.eventId,
+            normalizedCart.map((item) => ({
+                productId: item.productId,
+                snapshotName: item.snapshotName,
+                quantity: item.quantity,
+                includedComponents: item.includedComponents?.map((component) => ({
+                    productId: component.productId,
+                    snapshotName: component.snapshotName,
+                    quantity: component.quantity
+                }))
+            }))
+        )
 
         // Create the order with PENDING status
         const order = await Order.create({
@@ -343,6 +357,7 @@ export async function createPublicOrder(data: {
             totalAmount: computedTotalAmount,
             cart: normalizedCart,
             ingredientPlan,
+            pizzaTicket,
             easterEggAttachment: easterEggUpload
                 ? {
                     uploadTokenHash: easterEggUpload.hash
@@ -360,6 +375,7 @@ export async function createPublicOrder(data: {
             orderSummary: buildPublicOrderSummary({
                 _id: order._id,
                 pickupNumber: order.pickupNumber,
+                pizzaTicket: order.pizzaTicket,
                 totalAmount: order.totalAmount,
                 customer: order.customer,
                 cart: order.cart
