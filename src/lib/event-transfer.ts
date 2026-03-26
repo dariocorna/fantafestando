@@ -134,7 +134,8 @@ interface ExportedIngredient {
   bundleId: string;
   name: string;
   shortName?: string;
-  sortOrder: number;
+  stockQuantity: number | null;
+  sortOrder?: number;
   active: boolean;
 }
 
@@ -440,7 +441,7 @@ export async function buildEventTransferBundle(eventId: string): Promise<Generat
     Printer.find({ eventId }).sort({ name: 1 }).lean(),
     Peripheral.find({ eventId }).sort({ name: 1 }).lean(),
     Category.find({ eventId }).sort({ printOrder: 1, name: 1 }).lean(),
-    Ingredient.find({ eventId }).sort({ sortOrder: 1, name: 1 }).lean(),
+    Ingredient.find({ eventId }).sort({ name: 1 }).lean(),
     Product.find({ eventId }).sort({ name: 1 }).lean(),
     PosDevice.find({ eventId }).sort({ name: 1 }).lean(),
   ]);
@@ -522,7 +523,7 @@ export async function buildEventTransferBundle(eventId: string): Promise<Generat
       bundleId: String(ingredient._id),
       name: String(ingredient.name || "Ingrediente"),
       shortName: normalizeOptionalString(ingredient.shortName),
-      sortOrder: typeof ingredient.sortOrder === "number" ? ingredient.sortOrder : 0,
+      stockQuantity: normalizeStockQuantity((ingredient.stockQuantity as number | null | undefined) ?? null),
       active: Boolean(ingredient.active),
     })),
     products: products.map((product) => ({
@@ -734,7 +735,7 @@ export async function importEventTransferBundle(
         eventId: newEvent._id,
         name: ingredient.name,
         shortName: ingredient.shortName,
-        sortOrder: typeof ingredient.sortOrder === "number" ? ingredient.sortOrder : importedIngredientCount,
+        stockQuantity: normalizeStockQuantity(ingredient.stockQuantity ?? null),
         active: Boolean(ingredient.active),
       });
       ingredientMap.set(ingredient.bundleId, String(createdIngredient._id));

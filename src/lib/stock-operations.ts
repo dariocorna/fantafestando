@@ -1,3 +1,4 @@
+import Ingredient from "@/models/Ingredient"
 import Product from "@/models/Product"
 import {
     aggregateCartQuantities,
@@ -23,7 +24,8 @@ export interface OrderCartPayloadItem {
 }
 
 export interface StockAdjustment {
-    productId: string
+    entityType: "PRODUCT" | "INGREDIENT"
+    entityId: string
     quantity: number
 }
 
@@ -53,6 +55,21 @@ export function buildDemandMap(cart: OrderCartPayloadItem[]): Map<string, number
     return aggregateCartQuantities(demandItems)
 }
 
+export function buildIngredientDemandMap(
+    ingredientPlan: Array<{ ingredientId?: string, quantity: number }>
+): Map<string, number> {
+    return aggregateCartQuantities(
+        ingredientPlan.flatMap((entry) => {
+            const ingredientId = entry.ingredientId?.trim()
+            if (!ingredientId) return []
+            return [{
+                productId: ingredientId,
+                quantity: entry.quantity
+            }]
+        })
+    )
+}
+
 export async function loadProductStocks(eventId: string, productIds: string[]): Promise<Map<string, ProductStockInfo>> {
     const docs = await Product.find({
         eventId,
@@ -78,9 +95,32 @@ export async function loadProductStocks(eventId: string, productIds: string[]): 
 }
 
 export function splitMissingShortages(shortages: StockShortage[]) {
-    const missing = shortages.filter((entry) => entry.productName === "Prodotto non trovato")
-    const stock = shortages.filter((entry) => entry.productName !== "Prodotto non trovato")
+    const missing = shortages.filter((entry) => /non trovato$/i.test(entry.productName))
+    const stock = shortages.filter((entry) => !/non trovato$/i.test(entry.productName))
     return { missing, stock }
+}
+
+export async function loadIngredientStocks(eventId: string, ingredientIds: string[]): Promise<Map<string, ProductStockInfo>> {
+    const docs = await Ingredient.find({
+        eventId,
+        _id: { $in: ingredientIds }
+    }).select("_id name stockQuantity").lean() as Array<{
+        _id: string | { toString(): string }
+        name: string
+        stockQuantity?: number | null
+    }>
+
+    return new Map(
+        docs.map((doc) => [
+            doc._id.toString(),
+            {
+                id: doc._id.toString(),
+                name: doc.name,
+                stockQuantity: normalizeStockQuantity(doc.stockQuantity ?? null),
+                isSoldOut: false
+            }
+        ])
+    )
 }
 
 export async function syncSoldOutFlags(eventId: string, productIds: string[]) {
@@ -109,19 +149,30 @@ export async function syncSoldOutFlags(eventId: string, productIds: string[]) {
 export function aggregateStockAdjustments(adjustments: StockAdjustment[]): StockAdjustment[] {
     const totals = new Map<string, number>()
     for (const adjustment of adjustments) {
-        const productId = adjustment.productId?.trim()
+        const entityId = adjustment.entityId?.trim()
         const quantity = Number(adjustment.quantity)
-        if (!productId || !Number.isFinite(quantity) || quantity <= 0) continue
-        totals.set(productId, (totals.get(productId) || 0) + quantity)
+        if (!entityId || !Number.isFinite(quantity) || quantity <= 0) continue
+        const aggregationKey = `${adjustment.entityType}:${entityId}`
+        totals.set(aggregationKey, (totals.get(aggregationKey) || 0) + quantity)
     }
-    return [...totals.entries()].map(([productId, quantity]) => ({ productId, quantity }))
+    return [...totals.entries()].map(([aggregationKey, quantity]) => {
+        const [entityType, entityId] = aggregationKey.split(":")
+        return {
+            entityType: entityType === "INGREDIENT" ? "INGREDIENT" : "PRODUCT",
+            entityId,
+            quantity
+        }
+    })
 }
 
 export async function rollbackStockAdjustments(eventId: string, adjustments: StockAdjustment[]) {
     const aggregatedAdjustments = aggregateStockAdjustments(adjustments)
     if (aggregatedAdjustments.length === 0) return
 
-    const targetProductIds = aggregatedAdjustments.map((entry) => entry.productId)
+    const productAdjustments = aggregatedAdjustments.filter((entry) => entry.entityType === "PRODUCT")
+    const ingredientAdjustments = aggregatedAdjustments.filter((entry) => entry.entityType === "INGREDIENT")
+
+    const targetProductIds = productAdjustments.map((entry) => entry.entityId)
     const currentStocks = await Product.find({
         eventId,
         _id: { $in: targetProductIds }
@@ -136,19 +187,44 @@ export async function rollbackStockAdjustments(eventId: string, adjustments: Sto
             .map((product) => product._id.toString())
     )
 
-    if (trackedProductIds.size === 0) return
-
     const updatedTrackedProductIds: string[] = []
-    for (const adjustment of aggregatedAdjustments) {
-        if (!trackedProductIds.has(adjustment.productId)) continue
+    for (const adjustment of productAdjustments) {
+        if (!trackedProductIds.has(adjustment.entityId)) continue
         await Product.updateOne(
-            { eventId, _id: adjustment.productId },
+            { eventId, _id: adjustment.entityId },
             { $inc: { stockQuantity: adjustment.quantity } }
         )
-        updatedTrackedProductIds.push(adjustment.productId)
+        updatedTrackedProductIds.push(adjustment.entityId)
     }
 
-    await syncSoldOutFlags(eventId, updatedTrackedProductIds)
+    if (ingredientAdjustments.length > 0) {
+        const targetIngredientIds = ingredientAdjustments.map((entry) => entry.entityId)
+        const currentIngredientStocks = await Ingredient.find({
+            eventId,
+            _id: { $in: targetIngredientIds }
+        }).select("_id stockQuantity").lean() as Array<{
+            _id: string | { toString(): string }
+            stockQuantity?: number | null
+        }>
+
+        const trackedIngredientIds = new Set(
+            currentIngredientStocks
+                .filter((ingredient) => isStockTracked(normalizeStockQuantity(ingredient.stockQuantity ?? null)))
+                .map((ingredient) => ingredient._id.toString())
+        )
+
+        for (const adjustment of ingredientAdjustments) {
+            if (!trackedIngredientIds.has(adjustment.entityId)) continue
+            await Ingredient.updateOne(
+                { eventId, _id: adjustment.entityId },
+                { $inc: { stockQuantity: adjustment.quantity } }
+            )
+        }
+    }
+
+    if (updatedTrackedProductIds.length > 0) {
+        await syncSoldOutFlags(eventId, updatedTrackedProductIds)
+    }
 }
 
 async function decrementTrackedStocksStrict(
@@ -185,10 +261,10 @@ async function decrementTrackedStocksStrict(
             }
         }
 
-        applied.push({ productId, quantity: requestedQuantity })
+        applied.push({ entityType: "PRODUCT", entityId: productId, quantity: requestedQuantity })
     }
 
-    await syncSoldOutFlags(eventId, applied.map((entry) => entry.productId))
+    await syncSoldOutFlags(eventId, applied.map((entry) => entry.entityId))
     return { success: true, appliedAdjustments: applied }
 }
 
@@ -241,7 +317,7 @@ async function decrementTrackedStocksOverride(
 
         const appliedQty = Math.min(requestedQuantity, isStockTracked(product.stockQuantity) ? product.stockQuantity : requestedQuantity)
         if (appliedQty > 0) {
-            applied.push({ productId, quantity: appliedQty })
+            applied.push({ entityType: "PRODUCT", entityId: productId, quantity: appliedQty })
         }
         touched.push(productId)
     }
@@ -250,23 +326,117 @@ async function decrementTrackedStocksOverride(
     return { success: true, appliedAdjustments: applied }
 }
 
+async function decrementTrackedIngredientStocksStrict(
+    eventId: string,
+    demands: Map<string, number>,
+    ingredients: Map<string, ProductStockInfo>
+): Promise<StockOperationResult> {
+    const applied: StockAdjustment[] = []
+
+    for (const [ingredientId, requestedQuantity] of demands.entries()) {
+        const ingredient = ingredients.get(ingredientId)
+        if (!ingredient || !isStockTracked(ingredient.stockQuantity)) continue
+
+        const updated = await Ingredient.findOneAndUpdate(
+            {
+                eventId,
+                _id: ingredientId,
+                stockQuantity: { $gte: requestedQuantity }
+            },
+            { $inc: { stockQuantity: -requestedQuantity } },
+            { new: true }
+        ).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
+
+        if (!updated) {
+            await rollbackStockAdjustments(eventId, applied)
+
+            const refreshedStocks = await loadIngredientStocks(eventId, [...demands.keys()])
+            const refreshedShortages = collectStockShortages(demands, refreshedStocks).map((entry) => ({
+                ...entry,
+                productName: entry.productName === "Prodotto non trovato" ? "Ingrediente non trovato" : entry.productName
+            }))
+            return {
+                success: false,
+                error: "Scorte ingredienti non sufficienti per completare l'operazione",
+                stockShortages: refreshedShortages,
+                appliedAdjustments: []
+            }
+        }
+
+        applied.push({ entityType: "INGREDIENT", entityId: ingredientId, quantity: requestedQuantity })
+    }
+
+    return { success: true, appliedAdjustments: applied }
+}
+
+async function decrementTrackedIngredientStocksOverride(
+    eventId: string,
+    demands: Map<string, number>,
+    ingredients: Map<string, ProductStockInfo>
+): Promise<StockOperationResult> {
+    const applied: StockAdjustment[] = []
+
+    for (const [ingredientId, requestedQuantity] of demands.entries()) {
+        const ingredient = ingredients.get(ingredientId)
+        if (!ingredient || !isStockTracked(ingredient.stockQuantity)) continue
+
+        const updated = await Ingredient.findOneAndUpdate(
+            { eventId, _id: ingredientId },
+            { $inc: { stockQuantity: -requestedQuantity } },
+            { new: true }
+        ).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
+
+        if (!updated) {
+            await rollbackStockAdjustments(eventId, applied)
+            return {
+                success: false,
+                error: "Ingrediente non trovato durante l'aggiornamento scorte",
+                stockShortages: [{
+                    productId: ingredientId,
+                    productName: ingredient.name,
+                    requestedQuantity,
+                    availableQuantity: 0
+                }],
+                appliedAdjustments: []
+            }
+        }
+
+        const appliedQty = Math.min(requestedQuantity, isStockTracked(ingredient.stockQuantity) ? ingredient.stockQuantity : requestedQuantity)
+        if (appliedQty > 0) {
+            applied.push({ entityType: "INGREDIENT", entityId: ingredientId, quantity: appliedQty })
+        }
+    }
+
+    return { success: true, appliedAdjustments: applied }
+}
+
 export async function applyStockForPaidOrder(
     eventId: string,
     cart: OrderCartPayloadItem[],
-    mode: StockMode
+    mode: StockMode,
+    ingredientPlan: Array<{ ingredientId?: string, quantity: number }> = []
 ): Promise<StockOperationResult> {
     const demands = buildDemandMap(cart)
-    if (demands.size === 0) return { success: true }
+    const ingredientDemands = buildIngredientDemandMap(ingredientPlan)
+    if (demands.size === 0 && ingredientDemands.size === 0) return { success: true }
 
     const productIds = [...demands.keys()]
     const productStocks = await loadProductStocks(eventId, productIds)
-    const shortages = collectStockShortages(demands, productStocks)
+    const ingredientIds = [...ingredientDemands.keys()]
+    const ingredientStocks = await loadIngredientStocks(eventId, ingredientIds)
+    const shortages = [
+        ...collectStockShortages(demands, productStocks),
+        ...collectStockShortages(ingredientDemands, ingredientStocks).map((entry) => ({
+            ...entry,
+            productName: entry.productName === "Prodotto non trovato" ? "Ingrediente non trovato" : entry.productName
+        }))
+    ]
     const { missing, stock } = splitMissingShortages(shortages)
 
     if (missing.length > 0) {
         return {
             success: false,
-            error: "Alcuni prodotti non sono più disponibili",
+            error: "Alcuni articoli di magazzino non sono più disponibili",
             stockShortages: shortages
         }
     }
@@ -280,10 +450,40 @@ export async function applyStockForPaidOrder(
     }
 
     if (mode === "strict") {
-        return decrementTrackedStocksStrict(eventId, demands, productStocks)
+        const productResult = await decrementTrackedStocksStrict(eventId, demands, productStocks)
+        if (!productResult.success) return productResult
+
+        const ingredientResult = await decrementTrackedIngredientStocksStrict(eventId, ingredientDemands, ingredientStocks)
+        if (!ingredientResult.success) {
+            await rollbackStockAdjustments(eventId, productResult.appliedAdjustments || [])
+            return ingredientResult
+        }
+
+        return {
+            success: true,
+            appliedAdjustments: [
+                ...(productResult.appliedAdjustments || []),
+                ...(ingredientResult.appliedAdjustments || [])
+            ]
+        }
     }
 
-    return decrementTrackedStocksOverride(eventId, demands, productStocks)
+    const productResult = await decrementTrackedStocksOverride(eventId, demands, productStocks)
+    if (!productResult.success) return productResult
+
+    const ingredientResult = await decrementTrackedIngredientStocksOverride(eventId, ingredientDemands, ingredientStocks)
+    if (!ingredientResult.success) {
+        await rollbackStockAdjustments(eventId, productResult.appliedAdjustments || [])
+        return ingredientResult
+    }
+
+    return {
+        success: true,
+        appliedAdjustments: [
+            ...(productResult.appliedAdjustments || []),
+            ...(ingredientResult.appliedAdjustments || [])
+        ]
+    }
 }
 
 export async function validateStockForPendingOrder(

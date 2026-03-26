@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+    attachIngredientCatalogMetadata,
     aggregatePendingIngredientQueue,
     buildIngredientPlanForCart,
     buildLegacyIngredientPlanFromOrderCart,
@@ -239,4 +240,45 @@ describe("ingredient queue aggregation", () => {
             }
         ]);
     });
+
+    test("attaches tracked stock information for catalog ingredients", () => {
+        const queue = attachIngredientCatalogMetadata([
+            {
+                ingredientKey: "ingredient:ing-potato",
+                label: "Patatine",
+                quantity: 7,
+                orderCount: 2,
+                legacy: false
+            },
+            {
+                ingredientKey: "legacy:prod-water",
+                label: "Acqua",
+                quantity: 2,
+                orderCount: 1,
+                legacy: true
+            }
+        ], new Map([
+            ["ing-potato", { stockQuantity: 12, active: true }]
+        ]))
+
+        expect(queue).toEqual([
+            {
+                ingredientKey: "ingredient:ing-potato",
+                label: "Patatine",
+                quantity: 7,
+                orderCount: 2,
+                legacy: false,
+                stockQuantity: 12,
+                remainingStockQuantity: 5,
+                active: true
+            },
+            {
+                ingredientKey: "legacy:prod-water",
+                label: "Acqua",
+                quantity: 2,
+                orderCount: 1,
+                legacy: true
+            }
+        ])
+    })
 });
