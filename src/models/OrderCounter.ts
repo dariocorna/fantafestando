@@ -2,13 +2,13 @@ import mongoose, { Document, Schema, Types } from "mongoose";
 
 export interface IOrderCounter extends Document {
     eventId: Types.ObjectId;
-    scope: "PUBLIC_ORDER";
+    scope: "PUBLIC_ORDER" | "PIZZA_ORDER";
     seq: number;
 }
 
 const OrderCounterSchema = new Schema<IOrderCounter>({
     eventId: { type: Schema.Types.ObjectId, ref: "Event", required: true },
-    scope: { type: String, enum: ["PUBLIC_ORDER"], required: true },
+    scope: { type: String, enum: ["PUBLIC_ORDER", "PIZZA_ORDER"], required: true },
     seq: { type: Number, required: true, default: 0, min: 0 }
 }, {
     timestamps: true

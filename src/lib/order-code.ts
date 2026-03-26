@@ -1,5 +1,7 @@
 import OrderCounter from "@/models/OrderCounter";
 
+export type OrderCounterScope = "PUBLIC_ORDER" | "PIZZA_ORDER";
+
 type OrderCodeSource = {
     pickupNumber?: number | null;
     _id?: string | { toString(): string } | null;
@@ -24,12 +26,20 @@ export function getOrderCodeFromOrder(order: OrderCodeSource): string {
     return order._id.toString().slice(-4).toUpperCase();
 }
 
-export async function getNextPublicOrderNumber(eventId: string): Promise<number> {
+async function getNextScopedOrderNumber(eventId: string, scope: OrderCounterScope): Promise<number> {
     const counter = await OrderCounter.findOneAndUpdate(
-        { eventId, scope: "PUBLIC_ORDER" },
+        { eventId, scope },
         { $inc: { seq: 1 } },
         { upsert: true, new: true, setDefaultsOnInsert: true }
     ).select("seq").lean();
 
     return counter?.seq ?? 1;
+}
+
+export async function getNextPublicOrderNumber(eventId: string): Promise<number> {
+    return getNextScopedOrderNumber(eventId, "PUBLIC_ORDER");
+}
+
+export async function getNextPizzaOrderNumber(eventId: string): Promise<number> {
+    return getNextScopedOrderNumber(eventId, "PIZZA_ORDER");
 }

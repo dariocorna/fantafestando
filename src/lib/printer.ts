@@ -12,6 +12,7 @@ import PrintJobModel, { type PrintJobSource, type PrintJobType } from "@/models/
 import mongoose from "mongoose";
 import dbConnect from "./mongoose";
 import { getOrderCodeFromOrder } from "./order-code";
+import { getPizzaBarcodeValue } from "./pizza-ticket";
 import {
     DEFAULT_PRINTER_PORT,
     getPrinterCharacterSet,
@@ -75,6 +76,8 @@ export interface PrinterCommandJob {
     tableNumber?: string;
     orderId: string;
     shortCode?: string;
+    pizzaNumber?: number;
+    pizzaBarcodeValue?: string;
     footerLines?: string[];
 }
 
@@ -628,6 +631,30 @@ export class PrinterService {
         printer.alignLeft();
     }
 
+    private static printPizzaTicketHighlight(printer: ThermalPrinter, document: PrintDocumentV2) {
+        if (!document.pizzaNumber) return;
+
+        const rowWidth = 40;
+        printer.alignCenter();
+        printer.bold(true);
+        printer.setTextDoubleWidth();
+        printer.setTextDoubleHeight();
+        splitByLength("PIZZA N°", rowWidth).forEach((line) => printer.println(line));
+        splitByLength(String(document.pizzaNumber), rowWidth).forEach((line) => printer.println(line));
+        printer.setTextNormal();
+        printer.bold(false);
+
+        if (document.printType === "KITCHEN_ORDER" && document.pizzaBarcodeValue) {
+            printer.println(" ");
+            printer.code128(document.pizzaBarcodeValue, {
+                height: 60,
+                text: 1
+            });
+        }
+
+        printer.println(RECEIPT_SEPARATOR);
+    }
+
     private static printHeader(printer: ThermalPrinter, document: PrintDocumentV2, withLargeEventTitle: boolean) {
         const rowWidth = 40;
 
@@ -669,6 +696,7 @@ export class PrinterService {
         printer.setTextNormal();
         printer.println(document.copyLabel.toUpperCase());
         printer.println(RECEIPT_SEPARATOR);
+        this.printPizzaTicketHighlight(printer, document);
 
         const isOrderComanda = document.printType === "CUSTOMER_ORDER" || document.printType === "KITCHEN_ORDER";
         if (isOrderComanda) {
@@ -864,6 +892,9 @@ export class PrinterService {
             printer.println(`DATA/ORA ORDINE: ${formatPrintDateTime(document.createdAt)}`);
             if (document.referenceCode) {
                 printer.println(`NUMERO ORDINE: ${document.referenceCode}`);
+            }
+            if (document.pizzaNumber) {
+                printer.println(`NUMERO PIZZA: ${document.pizzaNumber}`);
             }
             printer.println(RECEIPT_SEPARATOR);
             printer.cut();
@@ -1188,6 +1219,8 @@ export class PrinterService {
             copyLabel: job.copyLabel,
             orderId: job.orderId,
             shortCode: job.shortCode,
+            pizzaNumber: job.pizzaNumber,
+            pizzaBarcodeValue: job.pizzaBarcodeValue,
             customerName: job.customerName,
             tableNumber: job.tableNumber,
             items: job.items,
@@ -1380,6 +1413,11 @@ export class PrinterService {
             _id: { toString(): string };
             eventId: { toString(): string };
             pickupNumber?: number;
+            pizzaTicket?: {
+                pizzaNumber?: number;
+                state?: "QUEUED" | "READY";
+                readyAt?: Date | string;
+            };
             status?: string;
             paymentMethod?: string;
             totalAmount?: number;
@@ -1453,6 +1491,7 @@ export class PrinterService {
             _id: { toString(): string };
             name?: string;
             skipKitchenPrint?: boolean;
+            pizzaFlowEnabled?: boolean;
             printerId?: {
                 _id?: unknown;
                 name?: string;
@@ -1532,7 +1571,8 @@ export class PrinterService {
             customerName: order.customer?.name,
             tableNumber: order.customer?.table,
             orderId: order._id.toString(),
-            shortCode: orderCode || undefined
+            shortCode: orderCode || undefined,
+            pizzaNumber: typeof order.pizzaTicket?.pizzaNumber === "number" ? order.pizzaTicket.pizzaNumber : undefined
         };
 
         const ensureCustomerJob = (groupKey: string, footerLines?: string[]) => {
@@ -1561,6 +1601,7 @@ export class PrinterService {
             const categoryId = category?._id.toString() || product.categoryId.toString();
             const categoryName = category?.name?.trim();
             const printerName = kitchenPrinter?.name?.trim();
+            const isPizzaItem = Boolean(category?.pizzaFlowEnabled) && typeof order.pizzaTicket?.pizzaNumber === "number";
             const groupKey = kitchenPrinter?._id
                 ? `printer:${String(kitchenPrinter._id)}`
                 : `category:${categoryId}`;
@@ -1602,6 +1643,11 @@ export class PrinterService {
                     footerLines: departmentFooterLines
                 };
                 kitchenJobsByGroup.set(groupKey, kitchenJob);
+            }
+
+            if (isPizzaItem && kitchenJob) {
+                kitchenJob.pizzaNumber = order.pizzaTicket?.pizzaNumber;
+                kitchenJob.pizzaBarcodeValue = getPizzaBarcodeValue(order._id.toString());
             }
 
             kitchenJob?.items.push({
@@ -2004,7 +2050,9 @@ export class PrinterService {
             customerName: payload.customerName,
             tableNumber: payload.tableNumber,
             orderId: payload.orderId,
-            shortCode: payload.shortCode
+            shortCode: payload.shortCode,
+            pizzaNumber: payload.pizzaNumber,
+            pizzaBarcodeValue: payload.pizzaBarcodeValue
         };
 
         const printed = await this.printComanda(printJob, job.copies || 1);

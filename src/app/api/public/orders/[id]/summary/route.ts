@@ -19,10 +19,11 @@ export async function GET(
 
         await dbConnect();
         const order = await Order.findById(id)
-            .select("_id pickupNumber totalAmount customer cart")
+            .select("_id pickupNumber pizzaTicket.pizzaNumber totalAmount customer cart")
             .lean() as ({
                 _id: string | { toString(): string };
                 pickupNumber?: number;
+                pizzaTicket?: { pizzaNumber?: number };
                 totalAmount: number;
                 customer?: { name?: string; table?: string };
                 cart: Array<{
