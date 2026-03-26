@@ -80,6 +80,21 @@ describe("print-report", () => {
         expect(document.footerLines).not.toContain("Vale solo per il ritiro");
     });
 
+    it("carries pizza number and barcode fields when present", () => {
+        const document = buildOrderPrintDocumentV2({
+            printType: "KITCHEN_ORDER",
+            title: "Comanda Pizza",
+            orderId: "order-pizza-1",
+            shortCode: "701",
+            pizzaNumber: 33,
+            pizzaBarcodeValue: "PZ:order-pizza-1",
+            items: [{ name: "Margherita", quantity: 1 }]
+        });
+
+        expect(document.pizzaNumber).toBe(33);
+        expect(document.pizzaBarcodeValue).toBe("PZ:order-pizza-1");
+    });
+
     it("builds order document v2 for CASHIER_SUMMARY kind as CASH_RECEIPT", () => {
         const document = buildOrderPrintDocumentV2({
             printType: "CASHIER_SUMMARY",
@@ -279,6 +294,8 @@ describe("print-report", () => {
             title: "Comanda Cucina",
             copyLabel: "COPIA CUCINA",
             referenceCode: "REF-123",
+            pizzaNumber: 55,
+            pizzaBarcodeValue: "PZ:ord-1",
             createdAt: "2026-02-28T10:00:00.000Z",
             headerLines: ["FESTA: Test"],
             items: [{ name: "Pasta", qty: 2 }],
@@ -297,6 +314,8 @@ describe("print-report", () => {
         expect(normalized.title).toBe("Comanda Cucina");
         expect(normalized.copyLabel).toBe("COPIA CUCINA");
         expect(normalized.referenceCode).toBe("REF-123");
+        expect(normalized.pizzaNumber).toBe(55);
+        expect(normalized.pizzaBarcodeValue).toBe("PZ:ord-1");
         expect(normalized.eventName).toBe("Test Event");
     });
 
@@ -373,6 +392,7 @@ describe("print-report", () => {
             title: "Comanda Cliente",
             copyLabel: "COPIA CLIENTE",
             referenceCode: "123",
+            pizzaNumber: 44,
             createdAt: "2026-02-28T10:00:00.000Z",
             headerLines: ["FESTA: Evento Test", "CLIENTE: Mario", "TAVOLO: C1"],
             items: [{ qty: 1, quantity: 1, name: "Panino" }],
@@ -382,6 +402,7 @@ describe("print-report", () => {
 
         expect(lines).toContain("COMANDA CLIENTE");
         expect(lines).toContain("COPIA CLIENTE");
+        expect(lines).toContain("PIZZA N° 44");
         expect(lines).toContain("ORDINE N° 123");
         expect(lines).toContain("DESCRIZIONE");
         expect(lines).toContain("1x Panino");
@@ -507,6 +528,8 @@ describe("print-report", () => {
             kind: "COMANDA",
             title: "Comanda",
             shortCode: "ABC",
+            pizzaNumber: 18,
+            pizzaBarcodeValue: "PZ:retry-order",
             customerName: "Anna",
             tableNumber: "T5",
             items: [{ name: "Patatine", quantity: 2 }],
@@ -515,6 +538,8 @@ describe("print-report", () => {
 
         expect(payload.orderId).toBe("fallback-order");
         expect(payload.shortCode).toBe("ABC");
+        expect(payload.pizzaNumber).toBe(18);
+        expect(payload.pizzaBarcodeValue).toBe("PZ:retry-order");
         expect(payload.items[0]).toMatchObject({ name: "Patatine", quantity: 2 });
         expect(payload.totals[0]).toMatchObject({ label: "TOTALE", value: "6.00 EUR" });
     });

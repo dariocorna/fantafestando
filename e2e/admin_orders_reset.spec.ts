@@ -107,6 +107,7 @@ test.describe("Admin reset ordini festa", () => {
         })
 
         await OrderCounter.create({ eventId, scope: "PUBLIC_ORDER", seq: 88 })
+        await OrderCounter.create({ eventId, scope: "PIZZA_ORDER", seq: 12 })
 
         await PrintJob.create({
             eventId,
@@ -147,7 +148,7 @@ test.describe("Admin reset ordini festa", () => {
         await expect(page.getByTestId("admin-reset-orders-error")).toContainText("Token di conferma non valido")
 
         await expect.poll(async () => Order.countDocuments({ eventId })).toBe(2)
-        await expect.poll(async () => OrderCounter.countDocuments({ eventId })).toBe(1)
+        await expect.poll(async () => OrderCounter.countDocuments({ eventId })).toBe(2)
         await expect.poll(async () => CashSession.countDocuments({ eventId })).toBe(1)
         await expect.poll(async () => PrintJob.countDocuments({ eventId, source: { $in: ["ORDER", "CASH_SESSION"] } })).toBe(2)
 
