@@ -13,6 +13,7 @@ import dbConnect from "@/lib/mongoose";
 import CashSession from "@/models/CashSession";
 import Category from "@/models/Category";
 import Event from "@/models/Event";
+import Ingredient from "@/models/Ingredient";
 import Order from "@/models/Order";
 import OrderCounter from "@/models/OrderCounter";
 import Peripheral from "@/models/Peripheral";
@@ -40,6 +41,7 @@ const COLLECTION_MODELS = [
   User,
   Event,
   Category,
+  Ingredient,
   Product,
   Printer,
   Peripheral,

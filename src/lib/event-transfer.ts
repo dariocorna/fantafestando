@@ -12,6 +12,7 @@ import { normalizeStockQuantity } from "@/lib/inventory";
 import { getAppVersion, getAppVersionLabel } from "@/lib/app-version";
 import Category from "@/models/Category";
 import Event from "@/models/Event";
+import Ingredient from "@/models/Ingredient";
 import Peripheral from "@/models/Peripheral";
 import PosDevice from "@/models/PosDevice";
 import Printer from "@/models/Printer";
@@ -90,6 +91,7 @@ interface EventTransferManifest {
     printers: number;
     peripherals: number;
     categories: number;
+    ingredients: number;
     products: number;
     posDevices: number;
   };
@@ -128,6 +130,14 @@ interface ExportedCategory {
   skipKitchenPrint: boolean;
 }
 
+interface ExportedIngredient {
+  bundleId: string;
+  name: string;
+  shortName?: string;
+  sortOrder: number;
+  active: boolean;
+}
+
 interface ExportedProductComponent {
   productBundleId: string;
   quantity: number;
@@ -151,6 +161,10 @@ interface ExportedProduct {
   isSoldOut: boolean;
   stockQuantity: number | null;
   availableDays: string[];
+  recipeItems: Array<{
+    ingredientBundleId: string;
+    quantity: number;
+  }>;
   menuComponents: ExportedProductComponent[];
   menuChoiceGroups: Array<{
     id: string;
@@ -180,6 +194,7 @@ interface EventTransferBundlePayload {
   printers: ExportedPrinter[];
   peripherals: ExportedPeripheral[];
   categories: ExportedCategory[];
+  ingredients: ExportedIngredient[];
   products: ExportedProduct[];
   posDevices: ExportedPosDevice[];
 }
@@ -198,6 +213,7 @@ export interface ImportedEventTransferResult {
     printers: number;
     peripherals: number;
     categories: number;
+    ingredients: number;
     products: number;
     posDevices: number;
   };
@@ -391,6 +407,7 @@ async function deleteImportedEventCascade(eventId: string) {
     Peripheral.deleteMany({ eventId }),
     Printer.deleteMany({ eventId }),
     Product.deleteMany({ eventId }),
+    Ingredient.deleteMany({ eventId }),
     Category.deleteMany({ eventId }),
     Event.deleteOne({ _id: eventId }),
   ]);
@@ -419,10 +436,11 @@ export async function buildEventTransferBundle(eventId: string): Promise<Generat
     throw new Error("Festa non trovata.");
   }
 
-  const [printers, peripherals, categories, products, posDevices] = await Promise.all([
+  const [printers, peripherals, categories, ingredients, products, posDevices] = await Promise.all([
     Printer.find({ eventId }).sort({ name: 1 }).lean(),
     Peripheral.find({ eventId }).sort({ name: 1 }).lean(),
     Category.find({ eventId }).sort({ printOrder: 1, name: 1 }).lean(),
+    Ingredient.find({ eventId }).sort({ sortOrder: 1, name: 1 }).lean(),
     Product.find({ eventId }).sort({ name: 1 }).lean(),
     PosDevice.find({ eventId }).sort({ name: 1 }).lean(),
   ]);
@@ -453,6 +471,7 @@ export async function buildEventTransferBundle(eventId: string): Promise<Generat
         printers: printers.length,
         peripherals: peripherals.length,
         categories: categories.length,
+        ingredients: ingredients.length,
         products: products.length,
         posDevices: posDevices.length,
       },
@@ -499,6 +518,13 @@ export async function buildEventTransferBundle(eventId: string): Promise<Generat
       printerBundleId: normalizeOptionalString(category.printerId ? String(category.printerId) : undefined),
       skipKitchenPrint: Boolean(category.skipKitchenPrint),
     })),
+    ingredients: ingredients.map((ingredient) => ({
+      bundleId: String(ingredient._id),
+      name: String(ingredient.name || "Ingrediente"),
+      shortName: normalizeOptionalString(ingredient.shortName),
+      sortOrder: typeof ingredient.sortOrder === "number" ? ingredient.sortOrder : 0,
+      active: Boolean(ingredient.active),
+    })),
     products: products.map((product) => ({
       bundleId: String(product._id),
       categoryBundleId: String(product.categoryId),
@@ -514,6 +540,12 @@ export async function buildEventTransferBundle(eventId: string): Promise<Generat
       isSoldOut: Boolean(product.isSoldOut),
       stockQuantity: normalizeStockQuantity((product.stockQuantity as number | null | undefined) ?? null),
       availableDays: normalizeAvailableDays((product.availableDays as string[] | undefined) || []),
+      recipeItems: Array.isArray(product.recipeItems)
+        ? product.recipeItems.map((entry: Record<string, unknown>) => ({
+            ingredientBundleId: String(entry.ingredientId),
+            quantity: typeof entry.quantity === "number" ? entry.quantity : 1,
+          }))
+        : [],
       menuComponents: Array.isArray(product.menuComponents)
         ? product.menuComponents.map((component: Record<string, unknown>) => ({
             productBundleId: String(component.productId),
@@ -695,6 +727,20 @@ export async function importEventTransferBundle(
       importedCategoryCount += 1;
     }
 
+    let importedIngredientCount = 0;
+    const ingredientMap = new Map<string, string>();
+    for (const ingredient of payload.ingredients || []) {
+      const createdIngredient = await Ingredient.create({
+        eventId: newEvent._id,
+        name: ingredient.name,
+        shortName: ingredient.shortName,
+        sortOrder: typeof ingredient.sortOrder === "number" ? ingredient.sortOrder : importedIngredientCount,
+        active: Boolean(ingredient.active),
+      });
+      ingredientMap.set(ingredient.bundleId, String(createdIngredient._id));
+      importedIngredientCount += 1;
+    }
+
     let importedProductCount = 0;
     const productMap = new Map<string, string>();
     for (const product of payload.products || []) {
@@ -712,6 +758,18 @@ export async function importEventTransferBundle(
         isSoldOut: productStockQuantity !== null ? productStockQuantity <= 0 : Boolean(product.isSoldOut),
         stockQuantity: productStockQuantity,
         availableDays: normalizeAvailableDays(product.availableDays || []),
+        recipeItems: Array.isArray(product.recipeItems)
+          ? product.recipeItems
+              .map((entry) => ({
+                ingredientId: getMappedIdOrThrow(
+                  "ingrediente prodotto",
+                  entry.ingredientBundleId,
+                  ingredientMap,
+                  "ingrediente"
+                ),
+                quantity: entry.quantity,
+              }))
+          : [],
         menuComponents: [],
         menuChoiceGroups: [],
         variants: Array.isArray(product.variants)
@@ -803,6 +861,7 @@ export async function importEventTransferBundle(
         printers: importedPrinterCount,
         peripherals: importedPeripheralCount,
         categories: importedCategoryCount,
+        ingredients: importedIngredientCount,
         products: importedProductCount,
         posDevices: importedPosDeviceCount,
       },

@@ -47,6 +47,14 @@ export interface IOrder extends Document {
             priceVariation: number;
         }>;
     }>;
+    ingredientPlan: Array<{
+        ingredientId?: Types.ObjectId;
+        snapshotName: string;
+        quantity: number;
+        sourceProductId?: Types.ObjectId;
+        sourceProductName?: string;
+        legacy?: boolean;
+    }>;
     paymentMethod: "CASH" | "CARD" | "OTHER";
     sumupCheckoutId?: string;
     sumupPaymentId?: string;
@@ -135,6 +143,14 @@ const OrderSchema = new Schema<IOrder>({
             name: { type: String, required: true },
             priceVariation: { type: Number, required: true }
         }]
+    }],
+    ingredientPlan: [{
+        ingredientId: { type: Schema.Types.ObjectId, ref: "Ingredient" },
+        snapshotName: { type: String, required: true },
+        quantity: { type: Number, required: true, min: 1 },
+        sourceProductId: { type: Schema.Types.ObjectId, ref: "Product" },
+        sourceProductName: { type: String },
+        legacy: { type: Boolean, default: false }
     }],
     paymentMethod: { type: String, enum: ["CASH", "CARD", "OTHER"], default: "CASH" },
     sumupCheckoutId: { type: String },
