@@ -7,6 +7,7 @@ export interface ICategory extends Document {
     printOrder: number;
     printerId?: Types.ObjectId;
     skipKitchenPrint: boolean;
+    pizzaFlowEnabled: boolean;
 }
 
 const CategorySchema = new Schema<ICategory>({
@@ -15,7 +16,8 @@ const CategorySchema = new Schema<ICategory>({
     uiColor: { type: String, required: true },
     printOrder: { type: Number, default: 0 },
     printerId: { type: Schema.Types.ObjectId, ref: 'Printer' },
-    skipKitchenPrint: { type: Boolean, default: false }
+    skipKitchenPrint: { type: Boolean, default: false },
+    pizzaFlowEnabled: { type: Boolean, default: false }
 }, {
     timestamps: true
 });
