@@ -2,6 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import dbConnect from "../../src/lib/mongoose";
 import Event from "../../src/models/Event";
 import Category from "../../src/models/Category";
+import Ingredient from "../../src/models/Ingredient";
 import Product from "../../src/models/Product";
 import Printer from "../../src/models/Printer";
 import PosDevice from "../../src/models/PosDevice";
@@ -104,6 +105,7 @@ export async function deleteEvent(_page: Page, eventName: string) {
     await Peripheral.deleteMany({ eventId });
     await Printer.deleteMany({ eventId });
     await Product.deleteMany({ eventId });
+    await Ingredient.deleteMany({ eventId });
     await Category.deleteMany({ eventId });
     await Event.findByIdAndDelete(eventId);
 }
@@ -317,6 +319,7 @@ export async function createActiveEventWithCatalogDirect(
             stockQuantity: product.stock ? Number(product.stock) : null,
             isSoldOut: false,
             availableDays: [],
+            recipeItems: [],
             variants: [],
         }))
     );
