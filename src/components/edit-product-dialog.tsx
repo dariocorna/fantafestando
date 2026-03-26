@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Pencil } from "lucide-react";
 import { useFormStatus } from "react-dom";
+import { ProductRecipeEditor, type ProductRecipeIngredientOption, type ProductRecipeItemState } from "@/components/product-recipe-editor";
 import {
     DAY_CODES,
     DAY_LABELS_IT,
@@ -57,6 +58,7 @@ export function EditProductDialog({
     eventId,
     categories,
     products,
+    ingredients,
     updateAction
 }: {
     product: {
@@ -72,11 +74,13 @@ export function EditProductDialog({
         availableOnlyInMenus?: boolean,
         salesChannels?: SalesChannel[],
         menuComponents?: MenuComponentState[],
-        menuChoiceGroups?: MenuChoiceGroupState[]
+        menuChoiceGroups?: MenuChoiceGroupState[],
+        recipeItems?: ProductRecipeItemState[]
     },
     eventId?: string,
     categories: { id: string, name: string }[],
     products: ProductOption[],
+    ingredients: ProductRecipeIngredientOption[],
     updateAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>
 }) {
     const [open, setOpen] = useState(false);
@@ -94,6 +98,9 @@ export function EditProductDialog({
     );
     const [menuChoiceGroups, setMenuChoiceGroups] = useState<MenuChoiceGroupState[]>(
         Array.isArray(product.menuChoiceGroups) ? product.menuChoiceGroups : []
+    );
+    const [recipeItems, setRecipeItems] = useState<ProductRecipeItemState[]>(
+        Array.isArray(product.recipeItems) ? product.recipeItems : []
     );
 
     async function handleSubmit(formData: FormData) {
@@ -155,6 +162,14 @@ export function EditProductDialog({
             }))
             .filter((group) => group.name && group.options.length > 0)
     );
+    const serializedRecipeItems = JSON.stringify(
+        recipeItems
+            .filter((entry) => entry.ingredientId)
+            .map((entry) => ({
+                ingredientId: entry.ingredientId,
+                quantity: Math.max(1, Math.floor(entry.quantity || 1))
+            }))
+    );
 
     return (
         <Dialog
@@ -169,6 +184,7 @@ export function EditProductDialog({
                     setSalesChannels(Array.isArray(product.salesChannels) && product.salesChannels.length > 0 ? product.salesChannels : ["POS", "MENU"]);
                     setMenuComponents(Array.isArray(product.menuComponents) ? product.menuComponents : []);
                     setMenuChoiceGroups(Array.isArray(product.menuChoiceGroups) ? product.menuChoiceGroups : []);
+                    setRecipeItems(Array.isArray(product.recipeItems) ? product.recipeItems : []);
                 }
             }}
         >
@@ -192,6 +208,7 @@ export function EditProductDialog({
                         <input type="hidden" name="kind" value={kind} />
                         <input type="hidden" name="menuComponentsJson" value={serializedMenuComponents} />
                         <input type="hidden" name="menuChoiceGroupsJson" value={serializedMenuChoiceGroups} />
+                        <input type="hidden" name="recipeItemsJson" value={serializedRecipeItems} />
                         <div className="grid gap-2">
                             <Label htmlFor="product-kind-edit">Tipo prodotto</Label>
                             <select
@@ -202,6 +219,7 @@ export function EditProductDialog({
                                     setKind(nextKind);
                                     if (nextKind === "FIXED_MENU") {
                                         setAvailableOnlyInMenus(false);
+                                        setRecipeItems([]);
                                     }
                                 }}
                                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
@@ -347,6 +365,13 @@ export function EditProductDialog({
                                 </Button>
                             </div>
                         </div>
+                        {kind === "STANDARD" ? (
+                            <ProductRecipeEditor
+                                ingredients={ingredients}
+                                recipeItems={recipeItems}
+                                onChange={setRecipeItems}
+                            />
+                        ) : null}
                         {kind === "FIXED_MENU" ? (
                             <div className="grid gap-4 rounded-lg border p-4">
                                 <div className="space-y-2">
