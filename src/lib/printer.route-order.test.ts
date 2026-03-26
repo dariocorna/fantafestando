@@ -886,6 +886,338 @@ describe("PrinterService.routeOrderToPrinters", () => {
         expect(customerJob?.pizzaBarcodeValue).toBeUndefined();
     });
 
+    test("splits kitchen and customer jobs per unit when the product flag is enabled", async () => {
+        mockOrder(buildOrder("order-split", {
+            cart: [
+                {
+                    productId: "prod-1",
+                    snapshotName: "Patatine",
+                    quantity: 10,
+                    selectedOptions: []
+                }
+            ]
+        }));
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([
+            {
+                _id: { toString: () => "prod-1" },
+                categoryId: { toString: () => "cat-1" },
+                basePrice: 4,
+                shortName: "PAT",
+                splitKitchenPrintPerUnit: true
+            }
+        ]);
+        mockCategories([
+            {
+                _id: { toString: () => "cat-1" },
+                name: "Friggitoria",
+                printerId: {
+                    _id: "kitchen-printer-1",
+                    name: "Stampante Friggitoria",
+                    ip: "192.168.178.210",
+                    port: 9100,
+                    isVirtual: false
+                }
+            }
+        ]);
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters("order-split", "pos-1");
+        const allJobs = printComandaSpy.mock.calls.map(([job]) => job);
+        const kitchenJobs = allJobs.filter((job) => job.printType === "KITCHEN_ORDER");
+        const customerJobs = allJobs.filter((job) => job.printType === "CUSTOMER_ORDER");
+        const cashierJob = allJobs.find((job) => job.printType === "CASHIER_SUMMARY");
+
+        expect(result).toHaveLength(21);
+        expect(cashierJob).toEqual(expect.objectContaining({
+            printType: "CASHIER_SUMMARY",
+            items: [expect.objectContaining({ name: "PAT", quantity: 10 })]
+        }));
+        expect(kitchenJobs).toHaveLength(10);
+        expect(customerJobs).toHaveLength(10);
+        expect(kitchenJobs.every((job) => job.items.length === 1 && job.items[0]?.quantity === 1)).toBe(true);
+        expect(customerJobs.every((job) => job.items.length === 1 && job.items[0]?.quantity === 1)).toBe(true);
+    });
+
+    test("keeps default kitchen and customer grouping when the product flag is disabled", async () => {
+        mockOrder(buildOrder("order-nosplit", {
+            cart: [
+                {
+                    productId: "prod-1",
+                    snapshotName: "Patatine",
+                    quantity: 10,
+                    selectedOptions: []
+                }
+            ]
+        }));
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([
+            {
+                _id: { toString: () => "prod-1" },
+                categoryId: { toString: () => "cat-1" },
+                basePrice: 4,
+                shortName: "PAT",
+                splitKitchenPrintPerUnit: false
+            }
+        ]);
+        mockCategories([
+            {
+                _id: { toString: () => "cat-1" },
+                name: "Friggitoria",
+                printerId: {
+                    _id: "kitchen-printer-1",
+                    name: "Stampante Friggitoria",
+                    ip: "192.168.178.210",
+                    port: 9100,
+                    isVirtual: false
+                }
+            }
+        ]);
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters("order-nosplit", "pos-1");
+        const allJobs = printComandaSpy.mock.calls.map(([job]) => job);
+        const kitchenJobs = allJobs.filter((job) => job.printType === "KITCHEN_ORDER");
+        const customerJobs = allJobs.filter((job) => job.printType === "CUSTOMER_ORDER");
+
+        expect(result).toEqual([true, true, true]);
+        expect(kitchenJobs).toHaveLength(1);
+        expect(customerJobs).toHaveLength(1);
+        expect(kitchenJobs[0]?.items).toEqual([expect.objectContaining({ name: "PAT", quantity: 10 })]);
+        expect(customerJobs[0]?.items).toEqual([expect.objectContaining({ name: "PAT", quantity: 10 })]);
+    });
+
+    test("splits only the products marked with separate per-unit printing", async () => {
+        mockOrder(buildOrder("order-mixed-split", {
+            cart: [
+                {
+                    productId: "prod-1",
+                    snapshotName: "Patatine",
+                    quantity: 2,
+                    selectedOptions: []
+                },
+                {
+                    productId: "prod-2",
+                    snapshotName: "Crocchette",
+                    quantity: 2,
+                    selectedOptions: []
+                }
+            ]
+        }));
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([
+            {
+                _id: { toString: () => "prod-1" },
+                categoryId: { toString: () => "cat-1" },
+                basePrice: 4,
+                shortName: "PAT",
+                splitKitchenPrintPerUnit: true
+            },
+            {
+                _id: { toString: () => "prod-2" },
+                categoryId: { toString: () => "cat-1" },
+                basePrice: 5,
+                shortName: "CRO",
+                splitKitchenPrintPerUnit: false
+            }
+        ]);
+        mockCategories([
+            {
+                _id: { toString: () => "cat-1" },
+                name: "Friggitoria",
+                printerId: {
+                    _id: "kitchen-printer-1",
+                    name: "Stampante Friggitoria",
+                    ip: "192.168.178.210",
+                    port: 9100,
+                    isVirtual: false
+                }
+            }
+        ]);
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters("order-mixed-split", "pos-1");
+        const allJobs = printComandaSpy.mock.calls.map(([job]) => job);
+        const kitchenJobs = allJobs.filter((job) => job.printType === "KITCHEN_ORDER");
+        const customerJobs = allJobs.filter((job) => job.printType === "CUSTOMER_ORDER");
+
+        expect(result).toHaveLength(7);
+        expect(kitchenJobs).toHaveLength(3);
+        expect(customerJobs).toHaveLength(3);
+        expect(kitchenJobs.filter((job) => getPrintedItemNames(job)[0] === "PAT")).toHaveLength(2);
+        expect(customerJobs.filter((job) => getPrintedItemNames(job)[0] === "PAT")).toHaveLength(2);
+        expect(kitchenJobs.find((job) => getPrintedItemNames(job)[0] === "CRO")?.items).toEqual([
+            expect.objectContaining({ name: "CRO", quantity: 2 })
+        ]);
+    });
+
+    test("splits menu components per unit based on the printed component product flag", async () => {
+        mockOrder(buildOrder("order-fixed-menu-split", {
+            cart: [
+                {
+                    productId: "menu-1",
+                    snapshotName: "Menu Degustazione",
+                    quantity: 1,
+                    selectedOptions: [],
+                    includedComponents: [
+                        {
+                            productId: "prod-1",
+                            snapshotName: "Nuggets",
+                            quantity: 2,
+                            source: "FIXED_ITEM"
+                        }
+                    ]
+                }
+            ]
+        }));
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([
+            {
+                _id: { toString: () => "menu-1" },
+                categoryId: { toString: () => "cat-menu" },
+                basePrice: 12,
+                shortName: "MENU",
+                splitKitchenPrintPerUnit: false
+            },
+            {
+                _id: { toString: () => "prod-1" },
+                categoryId: { toString: () => "cat-1" },
+                basePrice: 4,
+                shortName: "NUG",
+                splitKitchenPrintPerUnit: true
+            }
+        ]);
+        mockCategories([
+            {
+                _id: { toString: () => "cat-menu" },
+                name: "Menu"
+            },
+            {
+                _id: { toString: () => "cat-1" },
+                name: "Friggitoria",
+                printerId: {
+                    _id: "kitchen-printer-1",
+                    name: "Stampante Friggitoria",
+                    ip: "192.168.178.210",
+                    port: 9100,
+                    isVirtual: false
+                }
+            }
+        ]);
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters("order-fixed-menu-split", "pos-1");
+        const allJobs = printComandaSpy.mock.calls.map(([job]) => job);
+        const kitchenJobs = allJobs.filter((job) => job.printType === "KITCHEN_ORDER");
+        const customerJobs = allJobs.filter((job) => job.printType === "CUSTOMER_ORDER");
+        const cashierJob = allJobs.find((job) => job.printType === "CASHIER_SUMMARY");
+
+        expect(result).toHaveLength(5);
+        expect(cashierJob?.items).toEqual([expect.objectContaining({ name: "MENU", quantity: 1 })]);
+        expect(kitchenJobs).toHaveLength(2);
+        expect(customerJobs).toHaveLength(2);
+        expect(kitchenJobs.every((job) => job.items[0]?.name === "NUG" && job.items[0]?.quantity === 1)).toBe(true);
+        expect(customerJobs.every((job) => job.items[0]?.name === "NUG" && job.items[0]?.quantity === 1)).toBe(true);
+    });
+
+    test("keeps pizza metadata on each separated kitchen and customer copy", async () => {
+        mockOrder(buildOrder("order-pizza-split", {
+            pizzaTicket: {
+                pizzaNumber: 88,
+                state: "QUEUED"
+            },
+            cart: [
+                {
+                    productId: "prod-1",
+                    snapshotName: "Pizza Margherita",
+                    quantity: 2,
+                    selectedOptions: []
+                }
+            ]
+        }));
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([
+            {
+                _id: { toString: () => "prod-1" },
+                categoryId: { toString: () => "cat-pizza" },
+                basePrice: 7,
+                shortName: "PIZ",
+                splitKitchenPrintPerUnit: true
+            }
+        ]);
+        mockCategories([
+            {
+                _id: { toString: () => "cat-pizza" },
+                name: "Pizze",
+                pizzaFlowEnabled: true,
+                printerId: {
+                    _id: "kitchen-printer-1",
+                    name: "Forno",
+                    ip: "192.168.178.210",
+                    port: 9100,
+                    isVirtual: false
+                }
+            }
+        ]);
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters("order-pizza-split", "pos-1");
+        const allJobs = printComandaSpy.mock.calls.map(([job]) => job);
+        const kitchenJobs = allJobs.filter((job) => job.printType === "KITCHEN_ORDER");
+        const customerJobs = allJobs.filter((job) => job.printType === "CUSTOMER_ORDER");
+
+        expect(result).toHaveLength(5);
+        expect(kitchenJobs).toHaveLength(2);
+        expect(customerJobs).toHaveLength(2);
+        expect(kitchenJobs.every((job) => job.pizzaNumber === 88 && job.pizzaBarcodeValue === "00000888")).toBe(true);
+        expect(customerJobs.every((job) => job.pizzaNumber === 88 && job.pizzaBarcodeValue === undefined)).toBe(true);
+    });
+
     test("prints the easter egg raster on cashier close and clears the stored binary after success", async () => {
         const rasterWidth = getThermalContentWidth();
         const rasterBuffer = Buffer.alloc((rasterWidth / 8) * 12, 0xaa);

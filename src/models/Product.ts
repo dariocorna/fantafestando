@@ -13,6 +13,7 @@ export interface IProduct extends Document {
     kind: ProductKind;
     availableOnlyInMenus: boolean;
     salesChannels: SalesChannel[];
+    splitKitchenPrintPerUnit: boolean;
     isSoldOut: boolean;
     stockQuantity: number | null;
     availableDays: string[];
@@ -55,6 +56,7 @@ const ProductSchema = new Schema<IProduct>({
         enum: ["POS", "MENU"],
         default: ["POS", "MENU"]
     },
+    splitKitchenPrintPerUnit: { type: Boolean, default: false },
     isSoldOut: { type: Boolean, default: false },
     stockQuantity: { type: Number, default: null, min: 0 },
     availableDays: { type: [String], default: [] },
