@@ -40,6 +40,7 @@ export interface SerializedCategory {
     printerName?: string;
     printerId?: string;
     skipKitchenPrint?: boolean;
+    pizzaFlowEnabled?: boolean;
 }
 
 interface SortableCategoryTableProps {
@@ -47,7 +48,7 @@ interface SortableCategoryTableProps {
     onReorder: (newOrder: string[]) => void;
     eventId: string;
     printers: { id: string; name: string; ip: string; port?: number }[];
-    updateAction: (formData: FormData) => Promise<void>;
+    updateAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>;
     deleteAction: (formData: FormData) => Promise<void>;
 }
 
@@ -115,6 +116,7 @@ export function SortableCategoryTable({
                         <TableHead className="w-[40px]"></TableHead>
                         <TableHead>Nome</TableHead>
                         <TableHead>Colore</TableHead>
+                        <TableHead>Flusso Pizza</TableHead>
                         <TableHead>Stampa Comanda</TableHead>
                         <TableHead>Stampante Comanda</TableHead>
                         <TableHead className="w-[80px]">Azioni</TableHead>
@@ -132,6 +134,17 @@ export function SortableCategoryTable({
                                     className="w-4 h-4 rounded-full border border-black/10"
                                     style={{ backgroundColor: normalizeCategoryColor(cat.uiColor) }}
                                 />
+                            </TableCell>
+                            <TableCell>
+                                {cat.pizzaFlowEnabled ? (
+                                    <span className="rounded-full bg-rose-100 px-2 py-1 text-xs font-bold text-rose-700">
+                                        Pizza
+                                    </span>
+                                ) : (
+                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
+                                        No
+                                    </span>
+                                )}
                             </TableCell>
                             <TableCell>
                                 {cat.skipKitchenPrint ? (
@@ -174,10 +187,11 @@ export function SortableCategoryTable({
                         <TableRow>
                             <TableHead className="w-[40px]"></TableHead>
                             <TableHead>Nome</TableHead>
-                            <TableHead>Colore</TableHead>
-                            <TableHead>Stampa Comanda</TableHead>
-                            <TableHead>Stampante Comanda</TableHead>
-                            <TableHead className="w-[80px]">Azioni</TableHead>
+                        <TableHead>Colore</TableHead>
+                        <TableHead>Flusso Pizza</TableHead>
+                        <TableHead>Stampa Comanda</TableHead>
+                        <TableHead>Stampante Comanda</TableHead>
+                        <TableHead className="w-[80px]">Azioni</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -192,6 +206,17 @@ export function SortableCategoryTable({
                                         className="w-4 h-4 rounded-full border border-black/10"
                                         style={{ backgroundColor: normalizeCategoryColor(cat.uiColor) }}
                                     />
+                                </TableCell>
+                                <TableCell>
+                                    {cat.pizzaFlowEnabled ? (
+                                        <span className="rounded-full bg-rose-100 px-2 py-1 text-xs font-bold text-rose-700">
+                                            Pizza
+                                        </span>
+                                    ) : (
+                                        <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
+                                            No
+                                        </span>
+                                    )}
                                 </TableCell>
                                 <TableCell>
                                     {cat.skipKitchenPrint ? (
@@ -216,7 +241,8 @@ export function SortableCategoryTable({
                                             name: cat.name,
                                             uiColor: normalizeCategoryColor(cat.uiColor),
                                             printerId: cat.printerId,
-                                            skipKitchenPrint: cat.skipKitchenPrint
+                                            skipKitchenPrint: cat.skipKitchenPrint,
+                                            pizzaFlowEnabled: cat.pizzaFlowEnabled
                                         }}
                                         eventId={eventId}
                                         printers={printers}

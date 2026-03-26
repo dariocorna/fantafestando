@@ -156,7 +156,7 @@ export async function resetEventOrdersAction(formData: FormData): Promise<
             deletedCashSessionsResult
         ] = await Promise.all([
             Order.deleteMany({ eventId }),
-            OrderCounter.deleteMany({ eventId, scope: "PUBLIC_ORDER" }),
+            OrderCounter.deleteMany({ eventId }),
             PrintJob.deleteMany({ eventId, $or: printJobClauses }),
             CashSession.deleteMany({ eventId })
         ])
