@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useFormStatus } from "react-dom";
+import { ProductRecipeEditor, type ProductRecipeIngredientOption, type ProductRecipeItemState } from "@/components/product-recipe-editor";
 import {
     DAY_CODES,
     DAY_LABELS_IT,
@@ -55,11 +56,13 @@ export function CreateProductDialog({
     eventId,
     categories,
     products,
+    ingredients,
     createAction
 }: {
     eventId: string,
     categories: { id: string, name: string }[],
     products: ProductOption[],
+    ingredients: ProductRecipeIngredientOption[],
     createAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>
 }) {
     const [open, setOpen] = useState(false);
@@ -70,6 +73,7 @@ export function CreateProductDialog({
     const [salesChannels, setSalesChannels] = useState<SalesChannel[]>(["POS", "MENU"]);
     const [menuComponents, setMenuComponents] = useState<MenuComponentState[]>([]);
     const [menuChoiceGroups, setMenuChoiceGroups] = useState<MenuChoiceGroupState[]>([]);
+    const [recipeItems, setRecipeItems] = useState<ProductRecipeItemState[]>([]);
 
     async function handleSubmit(formData: FormData) {
         setSubmitError(null);
@@ -95,6 +99,7 @@ export function CreateProductDialog({
         setSalesChannels(["POS", "MENU"]);
         setMenuComponents([]);
         setMenuChoiceGroups([]);
+        setRecipeItems([]);
     }
 
     const toggleDay = (day: DayCode) => {
@@ -141,6 +146,14 @@ export function CreateProductDialog({
             }))
             .filter((group) => group.name && group.options.length > 0)
     );
+    const serializedRecipeItems = JSON.stringify(
+        recipeItems
+            .filter((entry) => entry.ingredientId)
+            .map((entry) => ({
+                ingredientId: entry.ingredientId,
+                quantity: Math.max(1, Math.floor(entry.quantity || 1))
+            }))
+    );
 
     return (
         <Dialog
@@ -169,6 +182,7 @@ export function CreateProductDialog({
                         <input type="hidden" name="kind" value={kind} />
                         <input type="hidden" name="menuComponentsJson" value={serializedMenuComponents} />
                         <input type="hidden" name="menuChoiceGroupsJson" value={serializedMenuChoiceGroups} />
+                        <input type="hidden" name="recipeItemsJson" value={serializedRecipeItems} />
                         <div className="grid gap-2">
                             <Label htmlFor="product-kind">Tipo prodotto</Label>
                             <select
@@ -179,6 +193,7 @@ export function CreateProductDialog({
                                     setKind(nextKind);
                                     if (nextKind === "FIXED_MENU") {
                                         setAvailableOnlyInMenus(false);
+                                        setRecipeItems([]);
                                     }
                                 }}
                                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
@@ -320,6 +335,13 @@ export function CreateProductDialog({
                                 </Button>
                             </div>
                         </div>
+                        {kind === "STANDARD" ? (
+                            <ProductRecipeEditor
+                                ingredients={ingredients}
+                                recipeItems={recipeItems}
+                                onChange={setRecipeItems}
+                            />
+                        ) : null}
                         {kind === "FIXED_MENU" ? (
                             <div className="grid gap-4 rounded-lg border p-4">
                                 <div className="space-y-2">

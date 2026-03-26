@@ -2,6 +2,7 @@ import dbConnect from "@/lib/mongoose";
 import mongoose from "mongoose";
 import { ensureAdminSession } from "@/lib/authz";
 import Category, { ICategory } from "@/models/Category";
+import Ingredient, { IIngredient } from "@/models/Ingredient";
 import Product, { IProduct } from "@/models/Product";
 import Printer, { IPrinter } from "@/models/Printer";
 import { getAdminContextEventId } from "@/lib/events";
@@ -30,7 +31,9 @@ import {
 import { revalidatePath } from "next/cache";
 import { EditProductDialog } from "@/components/edit-product-dialog";
 import { CreateCategoryDialog } from "@/components/create-category-dialog";
+import { CreateIngredientDialog } from "@/components/create-ingredient-dialog";
 import { CreateProductDialog } from "@/components/create-product-dialog";
+import { EditIngredientDialog } from "@/components/edit-ingredient-dialog";
 import { normalizeCategoryColor } from "@/lib/category-colors";
 import { X } from "lucide-react";
 import {
@@ -48,6 +51,10 @@ import {
     normalizeProductShortName,
     validateProductShortName
 } from "@/lib/product-fields";
+import {
+    normalizeRecipeItems,
+    parseRecipeItemsInput,
+} from "@/lib/ingredient-plan";
 import {
     normalizeMenuChoiceGroups,
     normalizeMenuComponents,
@@ -80,6 +87,20 @@ function parseBasePriceInput(rawValue: FormDataEntryValue | null) {
     return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : null;
 }
 
+function parseSortOrderInput(rawValue: FormDataEntryValue | null, fallback: number) {
+    if (typeof rawValue !== "string") return fallback;
+    const trimmed = rawValue.trim();
+    if (!trimmed) return fallback;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : fallback;
+}
+
+function normalizeIngredientShortName(rawValue: FormDataEntryValue | null) {
+    if (typeof rawValue !== "string") return undefined;
+    const trimmed = rawValue.trim();
+    return trimmed ? trimmed.slice(0, 24) : undefined;
+}
+
 function formatDirectPrice(product: Pick<IProduct, "kind" | "availableOnlyInMenus" | "basePrice">) {
     const kind = normalizeProductKind(product.kind);
     if (kind === "STANDARD" && product.availableOnlyInMenus) {
@@ -110,6 +131,23 @@ function formatMenuSummary(product: Pick<IProduct, "kind" | "menuComponents" | "
     return parts.length > 0 ? parts.join(" · ") : "Menu vuoto";
 }
 
+function formatRecipeSummary(
+    product: Pick<IProduct, "recipeItems">,
+    ingredientById: Map<string, { name: string; shortName?: string }>
+) {
+    const recipeItems = normalizeRecipeItems(product.recipeItems);
+    if (recipeItems.length === 0) return "Fallback legacy";
+
+    return recipeItems
+        .slice(0, 3)
+        .map((entry) => {
+            const ingredient = ingredientById.get(entry.ingredientId);
+            const label = ingredient?.shortName || ingredient?.name || "Ingrediente rimosso";
+            return `${label} x${entry.quantity}`;
+        })
+        .join(" · ");
+}
+
 async function parseProductPayload(
     formData: FormData,
     currentEventId: string | null,
@@ -133,6 +171,7 @@ async function parseProductPayload(
     const choiceGroups = normalizeMenuChoiceGroups(
         parseJsonArrayInput<MenuChoiceGroupInput>(formData.get("menuChoiceGroupsJson"))
     );
+    const recipeItems = parseRecipeItemsInput(formData.get("recipeItemsJson"));
     const parsedBasePrice = parseBasePriceInput(formData.get("basePrice"));
     const shortNameValidationError = validateProductShortName(shortName);
 
@@ -191,6 +230,10 @@ async function parseProductPayload(
         return { error: "I prodotti solo menu non possono definire gruppi di scelta" };
     }
 
+    if (kind === "FIXED_MENU" && recipeItems.length > 0) {
+        return { error: "Configura gli ingredienti sui singoli prodotti del menu, non sul menu contenitore" };
+    }
+
     const referencedProductIds = [
         ...fixedComponents.map((entry) => entry.productId),
         ...choiceGroups.flatMap((group) => group.options.map((option) => option.productId))
@@ -230,6 +273,18 @@ async function parseProductPayload(
         }
     }
 
+    if (recipeItems.length > 0) {
+        const ingredientIds = [...new Set(recipeItems.map((entry) => entry.ingredientId))];
+        const ingredients = await Ingredient.find({
+            eventId: scopedEventId,
+            _id: { $in: ingredientIds }
+        }).select("_id").lean() as Array<{ _id: string | { toString(): string } }>;
+
+        if (ingredients.length !== ingredientIds.length) {
+            return { error: "Alcuni ingredienti selezionati non sono validi per l'evento corrente" };
+        }
+    }
+
     return {
         success: true as const,
         payload: {
@@ -245,6 +300,7 @@ async function parseProductPayload(
             salesChannels,
             stockQuantity,
             availableDays,
+            recipeItems: kind === "STANDARD" ? recipeItems : [],
             menuComponents: kind === "FIXED_MENU" ? fixedComponents : [],
             menuChoiceGroups: kind === "FIXED_MENU" ? choiceGroups : [],
             isSoldOut: stockQuantity !== null ? stockQuantity <= 0 : false,
@@ -261,8 +317,67 @@ export default async function AdminCatalog() {
     }
 
     const categories = await Category.find({ eventId: currentEventId }).sort({ printOrder: 1 }).populate('printerId').lean();
+    const ingredients = await Ingredient.find({ eventId: currentEventId }).sort({ sortOrder: 1, name: 1 }).lean();
     const products = await Product.find({ eventId: currentEventId }).populate('categoryId').lean();
     const printers = await Printer.find({ eventId: currentEventId }).lean();
+    const ingredientById = new Map(
+        ingredients.map((ingredient: IIngredient) => [String(ingredient._id), {
+            name: ingredient.name,
+            shortName: ingredient.shortName || undefined
+        }])
+    );
+    const nextIngredientSortOrder = ingredients.reduce((maxValue: number, ingredient: IIngredient) => {
+        return Math.max(maxValue, Number(ingredient.sortOrder) || 0);
+    }, -1) + 1;
+
+    async function createIngredient(formData: FormData) {
+        "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return { error: sessionCheck.error };
+
+        const submittedEventId = formData.get("eventId") as string | null;
+        const scopedEventId = currentEventId;
+        const normalizedSubmittedEventId = submittedEventId?.trim();
+        const name = ((formData.get("name") as string | null) || "").trim();
+        const shortName = normalizeIngredientShortName(formData.get("shortName"));
+        const sortOrder = parseSortOrderInput(formData.get("sortOrder"), nextIngredientSortOrder);
+        const active = formData.get("active") === "on";
+        const shortNameValidationError = validateProductShortName(shortName);
+
+        if (shortNameValidationError) return { error: shortNameValidationError };
+        if (!name || !scopedEventId) return { error: "Nome ingrediente obbligatorio" };
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return { error: "Festa non valida" };
+
+        await dbConnect();
+
+        const existingIngredient = await Ingredient.findOne({
+            eventId: scopedEventId,
+            name: { $regex: new RegExp(`^${escapeRegExp(name)}$`, "i") }
+        }).select("_id").lean();
+        if (existingIngredient) {
+            return { error: "Esiste già un ingrediente con questo nome" };
+        }
+
+        if (shortName) {
+            const existingShortName = await Ingredient.findOne({
+                eventId: scopedEventId,
+                shortName: { $regex: new RegExp(`^${escapeRegExp(shortName)}$`, "i") }
+            }).select("_id").lean();
+            if (existingShortName) {
+                return { error: "Esiste già un ingrediente con questo nome breve" };
+            }
+        }
+
+        await Ingredient.create({
+            eventId: scopedEventId,
+            name,
+            shortName,
+            sortOrder,
+            active
+        });
+        revalidatePath("/admin/catalog");
+        return { success: true };
+    }
 
     async function createCategory(formData: FormData) {
         "use server"
@@ -331,6 +446,71 @@ export default async function AdminCatalog() {
         return { success: true };
     }
 
+    async function updateIngredient(formData: FormData) {
+        "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return { error: sessionCheck.error };
+
+        const id = (formData.get("id") as string | null)?.trim();
+        const submittedEventId = formData.get("eventId") as string | null;
+        const scopedEventId = currentEventId;
+        const normalizedSubmittedEventId = submittedEventId?.trim();
+        const name = ((formData.get("name") as string | null) || "").trim();
+        const shortName = normalizeIngredientShortName(formData.get("shortName"));
+        const sortOrder = parseSortOrderInput(formData.get("sortOrder"), 0);
+        const active = formData.get("active") === "on";
+        const shortNameValidationError = validateProductShortName(shortName);
+
+        if (shortNameValidationError) return { error: shortNameValidationError };
+        if (!id || !name || !scopedEventId) return { error: "Dati ingrediente non validi" };
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return { error: "Festa non valida" };
+
+        await dbConnect();
+
+        const ingredient = await Ingredient.findOne({ _id: id, eventId: scopedEventId }).select("_id").lean();
+        if (!ingredient) {
+            return { error: "Ingrediente non trovato" };
+        }
+
+        const existingIngredient = await Ingredient.findOne({
+            eventId: scopedEventId,
+            _id: { $ne: id },
+            name: { $regex: new RegExp(`^${escapeRegExp(name)}$`, "i") }
+        }).select("_id").lean();
+        if (existingIngredient) {
+            return { error: "Esiste già un ingrediente con questo nome" };
+        }
+
+        if (shortName) {
+            const existingShortName = await Ingredient.findOne({
+                eventId: scopedEventId,
+                _id: { $ne: id },
+                shortName: { $regex: new RegExp(`^${escapeRegExp(shortName)}$`, "i") }
+            }).select("_id").lean();
+            if (existingShortName) {
+                return { error: "Esiste già un ingrediente con questo nome breve" };
+            }
+        }
+
+        const updateSet: Record<string, unknown> = {
+            name,
+            sortOrder,
+            active,
+            ...(shortName ? { shortName } : {})
+        };
+        const updateUnset: Record<string, 1> = shortName ? {} : { shortName: 1 };
+
+        await Ingredient.findOneAndUpdate(
+            { _id: id, eventId: scopedEventId },
+            {
+                $set: updateSet,
+                ...(Object.keys(updateUnset).length > 0 ? { $unset: updateUnset } : {})
+            }
+        );
+        revalidatePath("/admin/catalog");
+        return { success: true };
+    }
+
     async function reorderCategories(orderedIds: string[]) {
         "use server"
         const sessionCheck = await ensureAdminSession();
@@ -372,6 +552,29 @@ export default async function AdminCatalog() {
         if (!deletedCategory) return;
         // Also delete products in this category to keep consistency
         await Product.deleteMany({ eventId: scopedEventId, categoryId: id });
+        revalidatePath("/admin/catalog");
+    }
+
+    async function deleteIngredient(formData: FormData) {
+        "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return;
+
+        const submittedEventId = formData.get("eventId") as string | null;
+        const id = formData.get("id") as string;
+        const normalizedSubmittedEventId = submittedEventId?.trim();
+        const scopedEventId = currentEventId;
+        if (!id || !scopedEventId) return;
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
+
+        await dbConnect();
+        const deletedIngredient = await Ingredient.findOneAndDelete({ _id: id, eventId: scopedEventId }).select("_id").lean();
+        if (!deletedIngredient) return;
+
+        await Product.updateMany(
+            { eventId: scopedEventId },
+            { $pull: { recipeItems: { ingredientId: id } } }
+        );
         revalidatePath("/admin/catalog");
     }
 
@@ -448,6 +651,7 @@ export default async function AdminCatalog() {
             stockQuantity: parsed.payload.stockQuantity,
             isSoldOut: parsed.payload.isSoldOut,
             availableDays: parsed.payload.availableDays,
+            recipeItems: parsed.payload.recipeItems,
             menuComponents: parsed.payload.menuComponents,
             menuChoiceGroups: parsed.payload.menuChoiceGroups,
             ...(parsed.payload.shortName ? { shortName: parsed.payload.shortName } : {}),
@@ -563,11 +767,86 @@ export default async function AdminCatalog() {
             </section>
 
             <section>
+                <div className="mb-4 flex items-center justify-between">
+                    <div>
+                        <h2 className="text-2xl font-bold">Ingredienti</h2>
+                        <p className="text-sm text-muted-foreground">
+                            Gli ingredienti vengono riutilizzati nelle ricette prodotto e alimentano la coda ingredienti nel POS.
+                        </p>
+                    </div>
+                    <CreateIngredientDialog
+                        eventId={currentEventId}
+                        nextSortOrder={nextIngredientSortOrder}
+                        createAction={createIngredient}
+                    />
+                </div>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Nome</TableHead>
+                            <TableHead>Nome breve</TableHead>
+                            <TableHead>Ordine</TableHead>
+                            <TableHead>Stato</TableHead>
+                            <TableHead className="w-[120px]">Azioni</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {ingredients.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+                                    Nessun ingrediente configurato.
+                                </TableCell>
+                            </TableRow>
+                        ) : ingredients.map((ingredient: IIngredient) => (
+                            <TableRow key={String(ingredient._id)}>
+                                <TableCell className="font-medium">{ingredient.name}</TableCell>
+                                <TableCell className="text-slate-600">{ingredient.shortName || "-"}</TableCell>
+                                <TableCell>{ingredient.sortOrder}</TableCell>
+                                <TableCell>
+                                    <span className={`rounded-full px-2 py-1 text-xs font-bold ${ingredient.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+                                        {ingredient.active ? "Attivo" : "Inattivo"}
+                                    </span>
+                                </TableCell>
+                                <TableCell className="flex gap-2">
+                                    <EditIngredientDialog
+                                        ingredient={{
+                                            id: String(ingredient._id),
+                                            name: ingredient.name,
+                                            shortName: ingredient.shortName || "",
+                                            sortOrder: ingredient.sortOrder,
+                                            active: Boolean(ingredient.active),
+                                        }}
+                                        eventId={currentEventId}
+                                        updateAction={updateIngredient}
+                                    />
+                                    <DeleteForm
+                                        id={String(ingredient._id)}
+                                        idName="id"
+                                        hiddenFields={[{ name: "eventId", value: currentEventId }]}
+                                        message="Eliminare questo ingrediente? Verrà rimosso anche dalle ricette dei prodotti che lo usano."
+                                        action={deleteIngredient}
+                                        buttonSize="xs"
+                                        iconSize={16}
+                                    />
+                                </TableCell>
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+            </section>
+
+            <section>
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-2xl font-bold">Prodotti</h2>
                     <CreateProductDialog
                         eventId={currentEventId}
                         categories={categories.map((c: ICategory) => ({ id: String(c._id), name: c.name }))}
+                        ingredients={ingredients.map((ingredient: IIngredient) => ({
+                            id: String(ingredient._id),
+                            name: ingredient.name,
+                            shortName: ingredient.shortName || "",
+                            active: Boolean(ingredient.active)
+                        }))}
                         products={products.map((p: IProduct) => ({
                             id: String(p._id),
                             name: p.name,
@@ -588,6 +867,7 @@ export default async function AdminCatalog() {
                             <TableHead>Scorte</TableHead>
                             <TableHead>Disponibilità</TableHead>
                             <TableHead>Menu</TableHead>
+                            <TableHead>Ricetta</TableHead>
                             <TableHead>Varianti</TableHead>
                             <TableHead className="w-[120px]">Azioni</TableHead>
                         </TableRow>
@@ -643,6 +923,13 @@ export default async function AdminCatalog() {
                                     </div>
                                 </TableCell>
                                 <TableCell>
+                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-700">
+                                        {normalizeProductKind(p.kind) === "STANDARD"
+                                            ? formatRecipeSummary(p, ingredientById)
+                                            : "Derivata dai componenti"}
+                                    </span>
+                                </TableCell>
+                                <TableCell>
                                     {normalizeProductKind(p.kind) === "STANDARD" && !Boolean(p.availableOnlyInMenus) ? (
                                         <div className="flex flex-wrap gap-1">
                                             {p.variants?.map((v, idx) => (
@@ -683,9 +970,16 @@ export default async function AdminCatalog() {
                                             salesChannels: normalizeSalesChannels(p.salesChannels),
                                             menuComponents: normalizeMenuComponents(p.menuComponents),
                                             menuChoiceGroups: normalizeMenuChoiceGroups(p.menuChoiceGroups),
+                                            recipeItems: normalizeRecipeItems(p.recipeItems),
                                         }}
                                         eventId={currentEventId}
                                         categories={categories.map((c: ICategory) => ({ id: String(c._id), name: c.name }))}
+                                        ingredients={ingredients.map((ingredient: IIngredient) => ({
+                                            id: String(ingredient._id),
+                                            name: ingredient.name,
+                                            shortName: ingredient.shortName || "",
+                                            active: Boolean(ingredient.active)
+                                        }))}
                                         products={products.map((entry: IProduct) => ({
                                             id: String(entry._id),
                                             name: entry.name,
