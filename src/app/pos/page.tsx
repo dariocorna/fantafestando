@@ -22,6 +22,7 @@ import {
     createOrder,
     loadPendingOrderByCode,
     completePendingOrderPayment,
+    listPendingIngredientQueue,
     listRecentPendingOrders,
     getCashSessionStatus,
     openCashSession,
@@ -142,6 +143,14 @@ interface RecentPendingOrder {
     createdAt?: string
 }
 
+interface PendingIngredientQueueItem {
+    ingredientKey: string
+    label: string
+    quantity: number
+    orderCount: number
+    legacy: boolean
+}
+
 interface OpenCashSessionState {
     id: string
     openedAt: string
@@ -196,6 +205,10 @@ function getCurrentEpochMs() {
     return Date.now()
 }
 
+function toPendingIngredientTestId(key: string) {
+    return key.replace(/[^a-zA-Z0-9-]+/g, "-")
+}
+
 function getPeripheralRef(value: IPosDevice["paymentTerminalId"] | IPosDevice["cashBoxId"]) {
     if (!value || typeof value !== "object") return null
     return value
@@ -224,6 +237,7 @@ export default function PosPage() {
     const [isCodeLoading, setIsCodeLoading] = useState(false)
     const [loadedPendingOrder, setLoadedPendingOrder] = useState<LoadedPendingOrder | null>(null)
     const [recentPendingOrders, setRecentPendingOrders] = useState<RecentPendingOrder[]>([])
+    const [pendingIngredientQueue, setPendingIngredientQueue] = useState<PendingIngredientQueueItem[]>([])
     const [isRecentOrdersLoading, setIsRecentOrdersLoading] = useState(false)
     const [recentPendingOrdersReferenceTime, setRecentPendingOrdersReferenceTime] = useState<number | null>(null)
     const [stockShortages, setStockShortages] = useState<StockShortage[]>([])
@@ -484,15 +498,22 @@ export default function PosPage() {
         if (!activeEventId) return
 
         setIsRecentOrdersLoading(true)
-        const result = await listRecentPendingOrders({ eventId: activeEventId, limit: 10 })
+        const [ordersResult, ingredientQueueResult] = await Promise.all([
+            listRecentPendingOrders({ eventId: activeEventId, limit: 10 }),
+            listPendingIngredientQueue({ eventId: activeEventId, limit: 12 })
+        ])
         const loadedAt = getCurrentEpochMs()
-        if (result.success) {
-            setRecentPendingOrders(result.orders)
-            setRecentPendingOrdersReferenceTime(loadedAt)
+        if (ordersResult.success) {
+            setRecentPendingOrders(ordersResult.orders)
         } else {
             setRecentPendingOrders([])
-            setRecentPendingOrdersReferenceTime(loadedAt)
         }
+        if (ingredientQueueResult.success) {
+            setPendingIngredientQueue(ingredientQueueResult.items)
+        } else {
+            setPendingIngredientQueue([])
+        }
+        setRecentPendingOrdersReferenceTime(loadedAt)
         setIsRecentOrdersLoading(false)
     }
 
@@ -1001,47 +1022,102 @@ export default function PosPage() {
     )
 
     const recentPendingOrdersContent = (
-        <div>
-            <h3 className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                <Clock3 size={12} />
-                Ultimi ordini pendenti
-            </h3>
-            {isRecentOrdersLoading ? (
-                <div className="flex h-20 items-center justify-center rounded-xl border border-dashed text-slate-400">
-                    <Loader2 className="animate-spin" />
-                </div>
-            ) : sortedRecentPendingOrders.length === 0 ? (
-                <div className="rounded-xl border border-dashed p-4 text-center text-sm font-semibold text-slate-500">
-                    Nessun ordine pendente disponibile.
-                </div>
-            ) : (
-                <div className={isMobilePos ? "space-y-2" : "grid grid-cols-2 gap-2"}>
-                    {sortedRecentPendingOrders.map((order) => {
-                        const isOlderThanOneHour = !order.createdAt || new Date(order.createdAt).getTime() < oneHourAgo
-                        return (
-                            <button
-                                key={order.id}
-                                className={`w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-indigo-50 hover:border-indigo-200 dark:hover:bg-indigo-950/40 ${isOlderThanOneHour ? "bg-slate-50 border-slate-200 opacity-70 dark:bg-slate-900" : "bg-white border-slate-200 dark:bg-slate-800"}`}
-                                onClick={() => void handleLoadOrderByCode(order.code)}
+        <div className="space-y-4">
+            <div>
+                <h3 className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    <Hash size={12} />
+                    Ingredienti in coda
+                </h3>
+                {isRecentOrdersLoading ? (
+                    <div className="flex h-20 items-center justify-center rounded-xl border border-dashed text-slate-400">
+                        <Loader2 className="animate-spin" />
+                    </div>
+                ) : pendingIngredientQueue.length === 0 ? (
+                    <div className="rounded-xl border border-dashed p-4 text-center text-sm font-semibold text-slate-500">
+                        Nessun ingrediente pendente disponibile.
+                    </div>
+                ) : (
+                    <div className={isMobilePos ? "space-y-2" : "grid grid-cols-2 gap-2"}>
+                        {pendingIngredientQueue.map((item) => (
+                            <div
+                                key={item.ingredientKey}
+                                data-testid={`pending-ingredient-card-${toPendingIngredientTestId(item.ingredientKey)}`}
+                                className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left"
                             >
                                 <div className="flex items-center justify-between gap-2">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[10px] font-bold uppercase text-slate-400">Ordine</span>
-                                        <span className="text-xl font-black text-indigo-700 dark:text-indigo-300">{order.code}</span>
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <span
+                                                className="truncate text-sm font-black text-amber-900"
+                                                data-testid={`pending-ingredient-label-${toPendingIngredientTestId(item.ingredientKey)}`}
+                                            >
+                                                {item.label}
+                                            </span>
+                                            {item.legacy ? (
+                                                <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                                                    Legacy
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                        <p className="mt-0.5 text-[11px] font-semibold text-amber-700">
+                                            {item.orderCount} ordini coinvolti
+                                        </p>
                                     </div>
-                                    <span className="text-sm font-black text-slate-700 dark:text-slate-200">
-                                        {order.totalAmount.toFixed(2)} €
+                                    <span
+                                        className="shrink-0 text-2xl font-black text-amber-800"
+                                        data-testid={`pending-ingredient-quantity-${toPendingIngredientTestId(item.ingredientKey)}`}
+                                    >
+                                        {item.quantity}
                                     </span>
                                 </div>
-                                <div className="mt-0.5 flex items-center justify-between text-[11px] font-semibold text-slate-500">
-                                    <span className="truncate">{order.customer?.name || "Cliente non indicato"}{order.customer?.table ? ` · T.${order.customer.table}` : ""}</span>
-                                    <span className="ml-1 shrink-0">{formatRecentOrderTime(order.createdAt)}</span>
-                                </div>
-                            </button>
-                        )
-                    })}
-                </div>
-            )}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            <div>
+                <h3 className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    <Clock3 size={12} />
+                    Ultimi ordini pendenti
+                </h3>
+                {isRecentOrdersLoading ? (
+                    <div className="flex h-20 items-center justify-center rounded-xl border border-dashed text-slate-400">
+                        <Loader2 className="animate-spin" />
+                    </div>
+                ) : sortedRecentPendingOrders.length === 0 ? (
+                    <div className="rounded-xl border border-dashed p-4 text-center text-sm font-semibold text-slate-500">
+                        Nessun ordine pendente disponibile.
+                    </div>
+                ) : (
+                    <div className={isMobilePos ? "space-y-2" : "grid grid-cols-2 gap-2"}>
+                        {sortedRecentPendingOrders.map((order) => {
+                            const isOlderThanOneHour = !order.createdAt || new Date(order.createdAt).getTime() < oneHourAgo
+                            return (
+                                <button
+                                    key={order.id}
+                                    className={`w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-indigo-50 hover:border-indigo-200 dark:hover:bg-indigo-950/40 ${isOlderThanOneHour ? "bg-slate-50 border-slate-200 opacity-70 dark:bg-slate-900" : "bg-white border-slate-200 dark:bg-slate-800"}`}
+                                    onClick={() => void handleLoadOrderByCode(order.code)}
+                                >
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[10px] font-bold uppercase text-slate-400">Ordine</span>
+                                            <span className="text-xl font-black text-indigo-700 dark:text-indigo-300">{order.code}</span>
+                                        </div>
+                                        <span className="text-sm font-black text-slate-700 dark:text-slate-200">
+                                            {order.totalAmount.toFixed(2)} €
+                                        </span>
+                                    </div>
+                                    <div className="mt-0.5 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                                        <span className="truncate">{order.customer?.name || "Cliente non indicato"}{order.customer?.table ? ` · T.${order.customer.table}` : ""}</span>
+                                        <span className="ml-1 shrink-0">{formatRecentOrderTime(order.createdAt)}</span>
+                                    </div>
+                                </button>
+                            )
+                        })}
+                    </div>
+                )}
+            </div>
         </div>
     )
 
