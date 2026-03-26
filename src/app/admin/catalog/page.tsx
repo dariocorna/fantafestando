@@ -6,9 +6,6 @@ import Ingredient, { IIngredient } from "@/models/Ingredient";
 import Product, { IProduct } from "@/models/Product";
 import Printer, { IPrinter } from "@/models/Printer";
 import { getAdminContextEventId } from "@/lib/events";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
     Table,
     TableBody,
@@ -19,24 +16,13 @@ import {
 } from "@/components/ui/table";
 import { SortableCategoryTable } from "./sortable-category-table";
 import { DeleteForm } from "@/components/delete-form";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-    DialogFooter
-} from "@/components/ui/dialog";
 import { revalidatePath } from "next/cache";
-import { EditProductDialog } from "@/components/edit-product-dialog";
 import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { CreateIngredientDialog } from "@/components/create-ingredient-dialog";
 import { CreateProductDialog } from "@/components/create-product-dialog";
 import { EditIngredientDialog } from "@/components/edit-ingredient-dialog";
 import { validatePizzaCategoryConfiguration } from "@/lib/category-pizza-validation";
 import { normalizeCategoryColor } from "@/lib/category-colors";
-import { X } from "lucide-react";
 import {
     formatAvailableDaysLabel,
     normalizeAvailableDays,
@@ -66,6 +52,7 @@ import {
     type MenuChoiceGroupInput,
     type MenuComponentInput,
 } from "@/lib/fixed-menu";
+import { ProductTable } from "./product-table";
 
 function getReferencedId(value: unknown): string | undefined {
     if (!value) return undefined;
@@ -163,6 +150,7 @@ async function parseProductPayload(
     const scopedEventId = currentEventId;
     const kind = normalizeProductKind(formData.get("kind"));
     const availableOnlyInMenus = formData.get("availableOnlyInMenus") === "on";
+    const splitKitchenPrintPerUnit = kind === "STANDARD" && formData.get("splitKitchenPrintPerUnit") === "on";
     const salesChannels = parseSalesChannelsInput(formData.getAll("salesChannels"));
     const fixedComponents = normalizeMenuComponents(
         parseJsonArrayInput<MenuComponentInput>(formData.get("menuComponentsJson"))
@@ -296,6 +284,7 @@ async function parseProductPayload(
                 ? parsedBasePrice || 0
                 : (availableOnlyInMenus ? (parsedBasePrice || 0) : (parsedBasePrice || 0)),
             availableOnlyInMenus: kind === "STANDARD" ? availableOnlyInMenus : false,
+            splitKitchenPrintPerUnit: kind === "STANDARD" ? splitKitchenPrintPerUnit : false,
             salesChannels,
             stockQuantity,
             availableDays,
@@ -663,6 +652,7 @@ export default async function AdminCatalog() {
             basePrice: parsed.payload.basePrice,
             kind: parsed.payload.kind,
             availableOnlyInMenus: parsed.payload.availableOnlyInMenus,
+            splitKitchenPrintPerUnit: parsed.payload.splitKitchenPrintPerUnit,
             salesChannels: parsed.payload.salesChannels,
             stockQuantity: parsed.payload.stockQuantity,
             isSoldOut: parsed.payload.isSoldOut,
@@ -692,6 +682,54 @@ export default async function AdminCatalog() {
             }
         );
         revalidateCatalogSurfaces();
+        return { success: true };
+    }
+
+    async function bulkUpdateProductKitchenPrintMode(formData: FormData) {
+        "use server"
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return { error: sessionCheck.error };
+
+        const submittedEventId = (formData.get("eventId") as string | null)?.trim();
+        const productIdsJson = formData.get("productIdsJson");
+        const nextModeRaw = formData.get("splitKitchenPrintPerUnit");
+        if (!currentEventId) return { error: "Evento non valido" };
+        if (submittedEventId && submittedEventId !== currentEventId) return { error: "Festa non valida" };
+        if (typeof productIdsJson !== "string" || !productIdsJson.trim()) {
+            return { error: "Seleziona almeno un prodotto" };
+        }
+        if (nextModeRaw !== "true" && nextModeRaw !== "false") {
+            return { error: "Modalità stampa non valida" };
+        }
+
+        let parsedIds: unknown;
+        try {
+            parsedIds = JSON.parse(productIdsJson);
+        } catch {
+            return { error: "Selezione prodotti non valida" };
+        }
+
+        const productIds = Array.isArray(parsedIds)
+            ? Array.from(new Set(parsedIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)))
+            : [];
+        if (productIds.length === 0) {
+            return { error: "Seleziona almeno un prodotto" };
+        }
+
+        await dbConnect();
+        await Product.updateMany(
+            {
+                eventId: currentEventId,
+                _id: { $in: productIds },
+                kind: "STANDARD"
+            },
+            {
+                $set: {
+                    splitKitchenPrintPerUnit: nextModeRaw === "true"
+                }
+            }
+        );
+        revalidatePath("/admin/catalog");
         return { success: true };
     }
 
@@ -742,6 +780,63 @@ export default async function AdminCatalog() {
         revalidateCatalogSurfaces();
     }
 
+    const kitchenPrinterOptions = printers.filter((printer: IPrinter) => printer.type === "KITCHEN").map((printer: IPrinter) => ({
+        id: String(printer._id),
+        name: printer.name,
+        ip: printer.ip,
+        port: printer.port || 9100
+    }));
+    const categoryOptions = categories.map((category: ICategory) => ({
+        id: String(category._id),
+        name: category.name
+    }));
+    const ingredientOptions = ingredients.map((ingredient: IIngredient) => ({
+        id: String(ingredient._id),
+        name: ingredient.name,
+        shortName: ingredient.shortName || "",
+        active: Boolean(ingredient.active)
+    }));
+    const productOptions = products.map((product: IProduct) => ({
+        id: String(product._id),
+        name: product.name,
+        kind: normalizeProductKind(product.kind)
+    }));
+    const serializedProducts = products.map((product: IProduct) => ({
+        id: String(product._id),
+        name: product.name,
+        shortName: product.shortName || "",
+        description: product.description || "",
+        categoryId: getReferencedId(product.categoryId) || "",
+        categoryName: (product.categoryId as unknown as ICategory)?.name || "N/A",
+        basePrice: product.basePrice,
+        stockQuantity: product.stockQuantity ?? null,
+        isSoldOut: Boolean(product.isSoldOut),
+        availableDays: normalizeAvailableDays(product.availableDays),
+        kind: normalizeProductKind(product.kind),
+        availableOnlyInMenus: Boolean(product.availableOnlyInMenus),
+        splitKitchenPrintPerUnit: Boolean(product.splitKitchenPrintPerUnit),
+        salesChannels: normalizeSalesChannels(product.salesChannels),
+        menuComponents: normalizeMenuComponents(product.menuComponents),
+        menuChoiceGroups: normalizeMenuChoiceGroups(product.menuChoiceGroups),
+        recipeItems: normalizeRecipeItems(product.recipeItems),
+        variants: Array.isArray(product.variants) ? product.variants.map((variant) => ({
+            optionName: variant.optionName,
+            priceVariation: variant.priceVariation,
+            stockQuantity: variant.stockQuantity ?? null
+        })) : [],
+        priceLabel: formatDirectPrice(product),
+        salesChannelsLabel: formatSalesChannelsLabel(product),
+        stockLabel: getStockLabel(product.stockQuantity, product.isSoldOut),
+        stockTone: getStockStatus(product.stockQuantity, product.isSoldOut) === "OUT"
+            ? ("OUT" as const)
+            : getStockStatus(product.stockQuantity, product.isSoldOut) === "LOW"
+                ? ("LOW" as const)
+                : ("DEFAULT" as const),
+        availabilityLabel: formatAvailableDaysLabel(product.availableDays),
+        menuSummary: formatMenuSummary(product),
+        recipeSummary: formatRecipeSummary(product, ingredientById)
+    }));
+
     return (
         <div className="space-y-10">
             <section>
@@ -749,12 +844,7 @@ export default async function AdminCatalog() {
                     <h2 className="text-2xl font-bold">Categorie</h2>
                     <CreateCategoryDialog
                         eventId={currentEventId}
-                        printers={printers.filter((p: IPrinter) => p.type === 'KITCHEN').map((p: IPrinter) => ({
-                            id: String(p._id),
-                            name: p.name,
-                            ip: p.ip,
-                            port: p.port || 9100
-                        }))}
+                        printers={kitchenPrinterOptions}
                         createAction={createCategory}
                     />
                 </div>
@@ -865,213 +955,24 @@ export default async function AdminCatalog() {
                     <h2 className="text-2xl font-bold">Prodotti</h2>
                     <CreateProductDialog
                         eventId={currentEventId}
-                        categories={categories.map((c: ICategory) => ({ id: String(c._id), name: c.name }))}
-                        ingredients={ingredients.map((ingredient: IIngredient) => ({
-                            id: String(ingredient._id),
-                            name: ingredient.name,
-                            shortName: ingredient.shortName || "",
-                            active: Boolean(ingredient.active)
-                        }))}
-                        products={products.map((p: IProduct) => ({
-                            id: String(p._id),
-                            name: p.name,
-                            kind: normalizeProductKind(p.kind)
-                        }))}
+                        categories={categoryOptions}
+                        ingredients={ingredientOptions}
+                        products={productOptions}
                         createAction={createProduct}
                     />
                 </div>
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Nome</TableHead>
-                            <TableHead>Nome breve</TableHead>
-                            <TableHead>Categoria</TableHead>
-                            <TableHead>Tipo</TableHead>
-                            <TableHead>Canali</TableHead>
-                            <TableHead>Prezzo</TableHead>
-                            <TableHead>Scorte</TableHead>
-                            <TableHead>Disponibilità</TableHead>
-                            <TableHead>Menu</TableHead>
-                            <TableHead>Ricetta</TableHead>
-                            <TableHead>Varianti</TableHead>
-                            <TableHead className="w-[120px]">Azioni</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {products.map((p: IProduct) => (
-                            <TableRow key={String(p._id)}>
-                                <TableCell className="font-medium">{p.name}</TableCell>
-                                <TableCell className="font-medium text-slate-600">{p.shortName || "-"}</TableCell>
-                                <TableCell>{(p.categoryId as unknown as ICategory)?.name || "N/A"}</TableCell>
-                                <TableCell>
-                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
-                                        {normalizeProductKind(p.kind) === "FIXED_MENU" ? "Menu fisso" : "Standard"}
-                                    </span>
-                                </TableCell>
-                                <TableCell>
-                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
-                                        {formatSalesChannelsLabel(p)}
-                                    </span>
-                                </TableCell>
-                                <TableCell>{formatDirectPrice(p)}</TableCell>
-                                <TableCell>
-                                    <span
-                                        className={`rounded-full px-2 py-1 text-xs font-bold ${getStockStatus(p.stockQuantity, p.isSoldOut) === "OUT"
-                                            ? "bg-red-100 text-red-700"
-                                            : getStockStatus(p.stockQuantity, p.isSoldOut) === "LOW"
-                                                ? "bg-amber-100 text-amber-700"
-                                                : "bg-slate-100 text-slate-700"
-                                            }`}
-                                    >
-                                        {getStockLabel(p.stockQuantity, p.isSoldOut)}
-                                    </span>
-                                </TableCell>
-                                <TableCell>
-                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
-                                        {formatAvailableDaysLabel(p.availableDays)}
-                                    </span>
-                                </TableCell>
-                                <TableCell>
-                                    <div className="flex flex-wrap gap-1">
-                                        {Boolean(p.availableOnlyInMenus) ? (
-                                            <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-700">
-                                                Solo menu
-                                            </span>
-                                        ) : null}
-                                        {normalizeProductKind(p.kind) === "FIXED_MENU" ? (
-                                            <span className="rounded-full bg-sky-100 px-2 py-1 text-[10px] font-bold text-sky-700">
-                                                {formatMenuSummary(p)}
-                                            </span>
-                                        ) : (
-                                            <span className="text-xs text-slate-400">-</span>
-                                        )}
-                                    </div>
-                                </TableCell>
-                                <TableCell>
-                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-700">
-                                        {normalizeProductKind(p.kind) === "STANDARD"
-                                            ? formatRecipeSummary(p, ingredientById)
-                                            : "Derivata dai componenti"}
-                                    </span>
-                                </TableCell>
-                                <TableCell>
-                                    {normalizeProductKind(p.kind) === "STANDARD" && !Boolean(p.availableOnlyInMenus) ? (
-                                        <div className="flex flex-wrap gap-1">
-                                            {p.variants?.map((v, idx) => (
-                                                <span key={idx} className="text-[10px] bg-slate-100 dark:bg-slate-800 px-1 rounded flex items-center gap-1 group">
-                                                    <span>
-                                                        {v.optionName} ({v.priceVariation >= 0 ? '+' : ''}{v.priceVariation}€)
-                                                        {" · "}
-                                                        {getStockLabel(v.stockQuantity, false)}
-                                                    </span>
-                                                    <form action={removeVariant} className="flex items-center">
-                                                        <input type="hidden" name="productId" value={String(p._id)} />
-                                                        <input type="hidden" name="eventId" value={currentEventId} />
-                                                        <input type="hidden" name="optionName" value={v.optionName} />
-                                                        <button type="submit" className="text-red-500 hover:bg-red-200 rounded-full cursor-pointer ml-1 p-0.5 opacity-50 group-hover:opacity-100 transition-opacity">
-                                                            <X className="h-3 w-3" />
-                                                        </button>
-                                                    </form>
-                                                </span>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <span className="text-xs text-slate-400">Non applicabili</span>
-                                    )}
-                                </TableCell>
-                                <TableCell className="flex gap-2">
-                                    <EditProductDialog
-                                        product={{
-                                            id: String(p._id),
-                                            name: p.name,
-                                            shortName: p.shortName || "",
-                                            description: p.description || "",
-                                            categoryId: getReferencedId(p.categoryId) || "",
-                                            basePrice: p.basePrice,
-                                            stockQuantity: p.stockQuantity ?? null,
-                                            availableDays: normalizeAvailableDays(p.availableDays),
-                                            kind: normalizeProductKind(p.kind),
-                                            availableOnlyInMenus: Boolean(p.availableOnlyInMenus),
-                                            salesChannels: normalizeSalesChannels(p.salesChannels),
-                                            menuComponents: normalizeMenuComponents(p.menuComponents),
-                                            menuChoiceGroups: normalizeMenuChoiceGroups(p.menuChoiceGroups),
-                                            recipeItems: normalizeRecipeItems(p.recipeItems),
-                                        }}
-                                        eventId={currentEventId}
-                                        categories={categories.map((c: ICategory) => ({ id: String(c._id), name: c.name }))}
-                                        ingredients={ingredients.map((ingredient: IIngredient) => ({
-                                            id: String(ingredient._id),
-                                            name: ingredient.name,
-                                            shortName: ingredient.shortName || "",
-                                            active: Boolean(ingredient.active)
-                                        }))}
-                                        products={products.map((entry: IProduct) => ({
-                                            id: String(entry._id),
-                                            name: entry.name,
-                                            kind: normalizeProductKind(entry.kind)
-                                        }))}
-                                        updateAction={updateProduct}
-                                    />
-                                    {normalizeProductKind(p.kind) === "STANDARD" && !Boolean(p.availableOnlyInMenus) ? (
-                                        <Dialog>
-                                            <DialogTrigger asChild>
-                                                <Button variant="outline" size="icon" className="h-7 w-7" title="Aggiungi Variante">
-                                                    <span className="font-bold">+</span>
-                                                </Button>
-                                            </DialogTrigger>
-                                            <DialogContent>
-                                                <form action={addVariant}>
-                                                    <input type="hidden" name="productId" value={String(p._id)} />
-                                                    <input type="hidden" name="eventId" value={currentEventId} />
-                                                    <DialogHeader>
-                                                        <DialogTitle>Gestisci Varianti per {p.name}</DialogTitle>
-                                                        <DialogDescription>
-                                                            Aggiungi una nuova opzione variante con prezzo e scorte dedicate.
-                                                        </DialogDescription>
-                                                    </DialogHeader>
-                                                    <div className="grid gap-4 py-4">
-                                                        <div className="grid gap-2">
-                                                            <Label htmlFor="optionName">Nome Opzione</Label>
-                                                            <Input name="optionName" placeholder="Extra Formaggio..." required />
-                                                        </div>
-                                                        <div className="grid gap-2">
-                                                            <Label htmlFor="priceVariation">Varianza Prezzo (€)</Label>
-                                                            <Input name="priceVariation" type="number" step="0.01" placeholder="1.00" required />
-                                                        </div>
-                                                        <div className="grid gap-2">
-                                                            <Label htmlFor="stockQuantity">Scorte Variante</Label>
-                                                            <Input
-                                                                name="stockQuantity"
-                                                                type="number"
-                                                                min="0"
-                                                                step="1"
-                                                                inputMode="numeric"
-                                                                placeholder="Illimitato"
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <DialogFooter>
-                                                        <Button type="submit">Aggiungi Variante</Button>
-                                                    </DialogFooter>
-                                                </form>
-                                            </DialogContent>
-                                        </Dialog>
-                                    ) : null}
-
-                                    <DeleteForm
-                                        id={String(p._id)}
-                                        idName="id"
-                                        hiddenFields={[{ name: "eventId", value: currentEventId }]}
-                                        message="Eliminare questo prodotto?"
-                                        action={deleteProduct}
-                                        buttonSize="xs"
-                                        iconSize={16}
-                                    />
-                                </TableCell>
-                            </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
+                <ProductTable
+                    eventId={currentEventId}
+                    products={serializedProducts}
+                    categories={categoryOptions}
+                    productOptions={productOptions}
+                    ingredients={ingredientOptions}
+                    updateAction={updateProduct}
+                    deleteAction={deleteProduct}
+                    addVariantAction={addVariant}
+                    removeVariantAction={removeVariant}
+                    bulkUpdateProductKitchenPrintModeAction={bulkUpdateProductKitchenPrintMode}
+                />
             </section>
         </div>
     );

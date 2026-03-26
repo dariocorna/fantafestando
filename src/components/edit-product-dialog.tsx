@@ -72,6 +72,7 @@ export function EditProductDialog({
         availableDays?: string[],
         kind?: ProductKind,
         availableOnlyInMenus?: boolean,
+        splitKitchenPrintPerUnit?: boolean,
         salesChannels?: SalesChannel[],
         menuComponents?: MenuComponentState[],
         menuChoiceGroups?: MenuChoiceGroupState[],
@@ -90,6 +91,7 @@ export function EditProductDialog({
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [kind, setKind] = useState<ProductKind>(product.kind || "STANDARD");
     const [availableOnlyInMenus, setAvailableOnlyInMenus] = useState(Boolean(product.availableOnlyInMenus));
+    const [splitKitchenPrintPerUnit, setSplitKitchenPrintPerUnit] = useState(Boolean(product.splitKitchenPrintPerUnit));
     const [salesChannels, setSalesChannels] = useState<SalesChannel[]>(
         Array.isArray(product.salesChannels) && product.salesChannels.length > 0 ? product.salesChannels : ["POS", "MENU"]
     );
@@ -181,6 +183,7 @@ export function EditProductDialog({
                     setSubmitError(null);
                     setKind(product.kind || "STANDARD");
                     setAvailableOnlyInMenus(Boolean(product.availableOnlyInMenus));
+                    setSplitKitchenPrintPerUnit(Boolean(product.splitKitchenPrintPerUnit));
                     setSalesChannels(Array.isArray(product.salesChannels) && product.salesChannels.length > 0 ? product.salesChannels : ["POS", "MENU"]);
                     setMenuComponents(Array.isArray(product.menuComponents) ? product.menuComponents : []);
                     setMenuChoiceGroups(Array.isArray(product.menuChoiceGroups) ? product.menuChoiceGroups : []);
@@ -219,6 +222,7 @@ export function EditProductDialog({
                                     setKind(nextKind);
                                     if (nextKind === "FIXED_MENU") {
                                         setAvailableOnlyInMenus(false);
+                                        setSplitKitchenPrintPerUnit(false);
                                         setRecipeItems([]);
                                     }
                                 }}
@@ -304,6 +308,17 @@ export function EditProductDialog({
                                     onChange={(event) => setAvailableOnlyInMenus(event.target.checked)}
                                 />
                                 Vendibile solo nei menu
+                            </label>
+                        ) : null}
+                        {kind === "STANDARD" ? (
+                            <label className="flex items-center gap-2 rounded-lg border p-3 text-sm font-medium">
+                                <input
+                                    type="checkbox"
+                                    name="splitKitchenPrintPerUnit"
+                                    checked={splitKitchenPrintPerUnit}
+                                    onChange={(event) => setSplitKitchenPrintPerUnit(event.target.checked)}
+                                />
+                                Stampa comanda separata per unità
                             </label>
                         ) : null}
                         <div className="grid gap-2">

@@ -1496,6 +1496,7 @@ export class PrinterService {
             categoryId: { toString(): string };
             basePrice?: number;
             shortName?: string;
+            splitKitchenPrintPerUnit?: boolean;
         }>;
         const productById = new Map(products.map((product) => [product._id.toString(), product]));
         const resolvePrintName = (productId: unknown, snapshotName: string) => {
@@ -1571,6 +1572,26 @@ export class PrinterService {
                 notes: item.customKitchenNotes,
             }];
         });
+        let splitSequence = 0;
+        const departmentItemsForPrinting = expandedDepartmentItems.flatMap((item) => {
+            const product = productById.get(String(item.productId));
+            if (!product) return [];
+
+            const normalizedQuantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
+            if (!product.splitKitchenPrintPerUnit) {
+                return [{
+                    ...item,
+                    quantity: normalizedQuantity,
+                    splitSequence: undefined as number | undefined
+                }];
+            }
+
+            return Array.from({ length: normalizedQuantity }, () => ({
+                ...item,
+                quantity: 1,
+                splitSequence: splitSequence++
+            }));
+        });
 
         const cashierJob: PrinterCommandJob = {
             ip: cashierPrinter?.ip || "",
@@ -1608,7 +1629,7 @@ export class PrinterService {
             return existingJob;
         };
 
-        expandedDepartmentItems.forEach((item) => {
+        departmentItemsForPrinting.forEach((item) => {
             const product = productById.get(String(item.productId));
             if (!product) return;
 
@@ -1621,9 +1642,12 @@ export class PrinterService {
             const printerName = kitchenPrinter?.name?.trim();
             const isPizzaItem = Boolean(category?.pizzaFlowEnabled) && typeof order.pizzaTicket?.pizzaNumber === "number";
             const printFlowKey = isPizzaItem ? "pizza" : "standard";
-            const customerGroupKey = kitchenPrinter?._id
+            const baseGroupKey = kitchenPrinter?._id
                 ? `printer:${String(kitchenPrinter._id)}`
                 : `category:${categoryId}`;
+            const customerGroupKey = typeof item.splitSequence === "number"
+                ? `${baseGroupKey}:unit:${item.splitSequence}`
+                : baseGroupKey;
             const kitchenGroupKey = `${customerGroupKey}:${printFlowKey}`;
             const departmentLabel = printerName || categoryName || resolvePrintName(item.productId, item.snapshotName);
             if (departmentLabel) involvedDepartments.add(departmentLabel);

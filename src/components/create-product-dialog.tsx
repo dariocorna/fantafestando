@@ -71,6 +71,7 @@ export function CreateProductDialog({
     const [kind, setKind] = useState<ProductKind>("STANDARD");
     const [availableOnlyInMenus, setAvailableOnlyInMenus] = useState(false);
     const [salesChannels, setSalesChannels] = useState<SalesChannel[]>(["POS", "MENU"]);
+    const [splitKitchenPrintPerUnit, setSplitKitchenPrintPerUnit] = useState(false);
     const [menuComponents, setMenuComponents] = useState<MenuComponentState[]>([]);
     const [menuChoiceGroups, setMenuChoiceGroups] = useState<MenuChoiceGroupState[]>([]);
     const [recipeItems, setRecipeItems] = useState<ProductRecipeItemState[]>([]);
@@ -97,6 +98,7 @@ export function CreateProductDialog({
         setKind("STANDARD");
         setAvailableOnlyInMenus(false);
         setSalesChannels(["POS", "MENU"]);
+        setSplitKitchenPrintPerUnit(false);
         setMenuComponents([]);
         setMenuChoiceGroups([]);
         setRecipeItems([]);
@@ -193,6 +195,7 @@ export function CreateProductDialog({
                                     setKind(nextKind);
                                     if (nextKind === "FIXED_MENU") {
                                         setAvailableOnlyInMenus(false);
+                                        setSplitKitchenPrintPerUnit(false);
                                         setRecipeItems([]);
                                     }
                                 }}
@@ -270,6 +273,17 @@ export function CreateProductDialog({
                                     onChange={(event) => setAvailableOnlyInMenus(event.target.checked)}
                                 />
                                 Vendibile solo nei menu
+                            </label>
+                        ) : null}
+                        {kind === "STANDARD" ? (
+                            <label className="flex items-center gap-2 rounded-lg border p-3 text-sm font-medium">
+                                <input
+                                    type="checkbox"
+                                    name="splitKitchenPrintPerUnit"
+                                    checked={splitKitchenPrintPerUnit}
+                                    onChange={(event) => setSplitKitchenPrintPerUnit(event.target.checked)}
+                                />
+                                Stampa comanda separata per unità
                             </label>
                         ) : null}
                         <div className="grid gap-2">
