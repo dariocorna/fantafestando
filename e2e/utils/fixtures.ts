@@ -301,6 +301,7 @@ export interface ProductDef {
     stock?: string;
     shortName?: string;
     description?: string;
+    splitKitchenPrintPerUnit?: boolean;
 }
 
 export async function createActiveEventWithCatalogDirect(
@@ -326,6 +327,7 @@ export async function createActiveEventWithCatalogDirect(
             shortName: product.shortName,
             description: product.description,
             basePrice: Number(product.price),
+            splitKitchenPrintPerUnit: Boolean(product.splitKitchenPrintPerUnit),
             stockQuantity: product.stock ? Number(product.stock) : null,
             isSoldOut: false,
             availableDays: [],
@@ -381,7 +383,8 @@ export async function seedActiveEventWithCatalog(
 
 export async function createProduct(page: Page, categoryName: string, product: ProductDef) {
     await page.click("#new-product-btn");
-    const dialog = page.getByRole("dialog");
+    const dialog = page.getByRole("dialog").filter({ hasText: /Aggiungi Prodotto/i }).first();
+    await expect(dialog).toBeVisible({ timeout: 15000 });
     await dialog.getByLabel("Nome").fill(product.name);
     if (product.shortName) {
         await dialog.getByLabel("Etichetta breve POS/Scontrino (opzionale)").fill(product.shortName);
@@ -394,8 +397,11 @@ export async function createProduct(page: Page, categoryName: string, product: P
     if (product.stock) {
         await dialog.getByLabel("Scorte").fill(product.stock);
     }
+    if (product.splitKitchenPrintPerUnit) {
+        await dialog.getByLabel("Stampa comanda separata per unità").check();
+    }
     await dialog.getByRole("button", { name: "Salva Prodotto", exact: true }).click();
-    await expect(dialog).toBeHidden();
+    await expect(dialog).toBeHidden({ timeout: 15000 });
     await expect(page.getByText(product.name)).toBeVisible();
 }
 
