@@ -34,6 +34,7 @@ import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { CreateIngredientDialog } from "@/components/create-ingredient-dialog";
 import { CreateProductDialog } from "@/components/create-product-dialog";
 import { EditIngredientDialog } from "@/components/edit-ingredient-dialog";
+import { validatePizzaCategoryConfiguration } from "@/lib/category-pizza-validation";
 import { normalizeCategoryColor } from "@/lib/category-colors";
 import { X } from "lucide-react";
 import {
@@ -377,6 +378,7 @@ export default async function AdminCatalog() {
         const uiColor = normalizeCategoryColor(formData.get("uiColor") as string | null);
         const printerId = formData.get("printerId") as string;
         const skipKitchenPrint = formData.get("skipKitchenPrint") === "on";
+        const pizzaFlowEnabled = formData.get("pizzaFlowEnabled") === "on";
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
 
@@ -388,6 +390,14 @@ export default async function AdminCatalog() {
         if (printerId) {
             const printer = await Printer.findOne({ _id: printerId, eventId: scopedEventId, type: "KITCHEN" }).select("_id").lean();
             if (!printer) return { error: "Stampante reparto non valida" };
+        }
+        const pizzaCategoryValidationError = validatePizzaCategoryConfiguration({
+            pizzaFlowEnabled,
+            printerId: printerId || undefined,
+            skipKitchenPrint
+        });
+        if (pizzaCategoryValidationError) {
+            return { error: pizzaCategoryValidationError };
         }
 
         const existingCategory = await Category.findOne({
@@ -408,7 +418,8 @@ export default async function AdminCatalog() {
             uiColor,
             printerId: printerId || undefined,
             printOrder: nextPrintOrder,
-            skipKitchenPrint
+            skipKitchenPrint,
+            pizzaFlowEnabled
         });
         revalidatePath("/admin/catalog");
         return { success: true };
@@ -577,22 +588,32 @@ export default async function AdminCatalog() {
         const uiColor = normalizeCategoryColor(formData.get("uiColor") as string | null);
         const printerId = formData.get("printerId") as string;
         const skipKitchenPrint = formData.get("skipKitchenPrint") === "on";
+        const pizzaFlowEnabled = formData.get("pizzaFlowEnabled") === "on";
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
-        if (!id || !name || !scopedEventId) return;
-        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
+        if (!id || !name || !scopedEventId) return { error: "Dati categoria non validi" };
+        if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return { error: "Festa non valida" };
 
         await dbConnect();
         if (printerId) {
             const printer = await Printer.findOne({ _id: printerId, eventId: scopedEventId, type: "KITCHEN" }).select("_id").lean();
-            if (!printer) return;
+            if (!printer) return { error: "Stampante reparto non valida" };
+        }
+        const pizzaCategoryValidationError = validatePizzaCategoryConfiguration({
+            pizzaFlowEnabled,
+            printerId: printerId || undefined,
+            skipKitchenPrint
+        });
+        if (pizzaCategoryValidationError) {
+            return { error: pizzaCategoryValidationError };
         }
 
         await Category.findOneAndUpdate(
             { _id: id, eventId: scopedEventId },
-            { name, uiColor, printerId: printerId || null, skipKitchenPrint }
+            { name, uiColor, printerId: printerId || null, skipKitchenPrint, pizzaFlowEnabled }
         );
         revalidatePath("/admin/catalog");
+        return { success: true };
     }
 
     async function deleteProduct(formData: FormData) {
@@ -739,6 +760,7 @@ export default async function AdminCatalog() {
                         printerName: (c.printerId as unknown as IPrinter)?.name || undefined,
                         printerId: getReferencedId(c.printerId),
                         skipKitchenPrint: Boolean(c.skipKitchenPrint),
+                        pizzaFlowEnabled: Boolean(c.pizzaFlowEnabled),
                     }))}
                     onReorder={reorderCategories}
                     eventId={currentEventId}

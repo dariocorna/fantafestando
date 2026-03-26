@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,19 +24,26 @@ export function EditCategoryDialog({
     printers,
     updateAction
 }: {
-    category: { id: string, name: string, uiColor: string, printerId?: string, skipKitchenPrint?: boolean },
+    category: { id: string, name: string, uiColor: string, printerId?: string, skipKitchenPrint?: boolean, pizzaFlowEnabled?: boolean },
     eventId?: string,
     printers: { id: string, name: string, ip: string, port?: number }[],
-    updateAction: (formData: FormData) => Promise<void>
+    updateAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>
 }) {
     const [open, setOpen] = useState(false);
+    const [formInstanceKey, setFormInstanceKey] = useState(0);
     const [selectedColor, setSelectedColor] = useState(() => normalizeCategoryColor(category.uiColor));
+    const [pizzaFlowEnabled, setPizzaFlowEnabled] = useState(Boolean(category.pizzaFlowEnabled));
     const [submitError, setSubmitError] = useState<string | null>(null);
+    const skipKitchenPrintRef = useRef<HTMLInputElement>(null);
 
     async function handleSubmit(formData: FormData) {
         setSubmitError(null);
         try {
-            await updateAction(formData);
+            const result = await updateAction(formData);
+            if (result && typeof result === "object" && "error" in result && result.error) {
+                setSubmitError(result.error);
+                return;
+            }
             setOpen(false);
         } catch (error) {
             console.error("Errore durante l'aggiornamento categoria", error);
@@ -51,6 +58,8 @@ export function EditCategoryDialog({
                 setOpen(nextOpen);
                 if (nextOpen) {
                     setSubmitError(null);
+                    setPizzaFlowEnabled(Boolean(category.pizzaFlowEnabled));
+                    setFormInstanceKey((current) => current + 1);
                 }
             }}
         >
@@ -60,7 +69,7 @@ export function EditCategoryDialog({
                 </Button>
             </DialogTrigger>
             <DialogContent>
-                <form action={handleSubmit}>
+                <form key={formInstanceKey} action={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle>Modifica Categoria</DialogTitle>
                         <DialogDescription>
@@ -121,13 +130,36 @@ export function EditCategoryDialog({
                         </div>
                         <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
                             <input
+                                id="pizzaFlowEnabled"
+                                name="pizzaFlowEnabled"
+                                type="checkbox"
+                                checked={pizzaFlowEnabled}
+                                onChange={(event) => {
+                                    const nextValue = event.target.checked;
+                                    setPizzaFlowEnabled(nextValue);
+                                    if (nextValue && skipKitchenPrintRef.current) {
+                                        skipKitchenPrintRef.current.checked = false;
+                                    }
+                                }}
+                            />
+                            Categoria pizza
+                        </label>
+                        <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                            <input
+                                ref={skipKitchenPrintRef}
                                 id="skipKitchenPrint"
                                 name="skipKitchenPrint"
                                 type="checkbox"
                                 defaultChecked={Boolean(category.skipKitchenPrint)}
+                                disabled={pizzaFlowEnabled}
                             />
                             Non stampare comanda
                         </label>
+                        {pizzaFlowEnabled ? (
+                            <p className="text-xs font-semibold text-amber-700">
+                                Le categorie pizza devono stampare su una stampante reparto kitchen.
+                            </p>
+                        ) : null}
                     </div>
                     {submitError ? (
                         <p className="text-sm font-medium text-red-600" role="alert">

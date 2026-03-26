@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,8 +28,11 @@ export function CreateCategoryDialog({
     createAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>
 }) {
     const [open, setOpen] = useState(false);
+    const [formInstanceKey, setFormInstanceKey] = useState(0);
     const [selectedColor, setSelectedColor] = useState(DEFAULT_CATEGORY_COLOR);
+    const [pizzaFlowEnabled, setPizzaFlowEnabled] = useState(false);
     const [submitError, setSubmitError] = useState<string | null>(null);
+    const skipKitchenPrintRef = useRef<HTMLInputElement>(null);
 
     async function handleSubmit(formData: FormData) {
         setSubmitError(null);
@@ -53,6 +56,12 @@ export function CreateCategoryDialog({
                 setOpen(nextOpen);
                 if (!nextOpen) {
                     setSubmitError(null);
+                    setSelectedColor(DEFAULT_CATEGORY_COLOR);
+                    setPizzaFlowEnabled(false);
+                    if (skipKitchenPrintRef.current) {
+                        skipKitchenPrintRef.current.checked = false;
+                    }
+                    setFormInstanceKey((current) => current + 1);
                 }
             }}
         >
@@ -60,7 +69,7 @@ export function CreateCategoryDialog({
                 <Button size="sm" id="new-category-btn">+ Nuova Categoria</Button>
             </DialogTrigger>
             <DialogContent>
-                <form action={handleSubmit}>
+                <form key={formInstanceKey} action={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle>Aggiungi Categoria</DialogTitle>
                         <DialogDescription>
@@ -114,12 +123,35 @@ export function CreateCategoryDialog({
                         </div>
                         <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
                             <input
+                                id="pizzaFlowEnabled"
+                                name="pizzaFlowEnabled"
+                                type="checkbox"
+                                checked={pizzaFlowEnabled}
+                                onChange={(event) => {
+                                    const nextValue = event.target.checked;
+                                    setPizzaFlowEnabled(nextValue);
+                                    if (nextValue && skipKitchenPrintRef.current) {
+                                        skipKitchenPrintRef.current.checked = false;
+                                    }
+                                }}
+                            />
+                            Categoria pizza
+                        </label>
+                        <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                            <input
+                                ref={skipKitchenPrintRef}
                                 id="skipKitchenPrint"
                                 name="skipKitchenPrint"
                                 type="checkbox"
+                                disabled={pizzaFlowEnabled}
                             />
                             Non stampare comanda
                         </label>
+                        {pizzaFlowEnabled ? (
+                            <p className="text-xs font-semibold text-amber-700">
+                                Le categorie pizza devono stampare su una stampante reparto kitchen.
+                            </p>
+                        ) : null}
                     </div>
                     {submitError ? (
                         <p className="text-sm font-medium text-red-600" role="alert">
