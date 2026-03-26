@@ -16,6 +16,10 @@ export interface IProduct extends Document {
     isSoldOut: boolean;
     stockQuantity: number | null;
     availableDays: string[];
+    recipeItems: Array<{
+        ingredientId: Types.ObjectId;
+        quantity: number;
+    }>;
     menuComponents: Array<{
         productId: Types.ObjectId;
         quantity: number;
@@ -54,6 +58,10 @@ const ProductSchema = new Schema<IProduct>({
     isSoldOut: { type: Boolean, default: false },
     stockQuantity: { type: Number, default: null, min: 0 },
     availableDays: { type: [String], default: [] },
+    recipeItems: [{
+        ingredientId: { type: Schema.Types.ObjectId, ref: 'Ingredient', required: true },
+        quantity: { type: Number, required: true, min: 1, default: 1 }
+    }],
     menuComponents: [{
         productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
         quantity: { type: Number, required: true, min: 1, default: 1 }

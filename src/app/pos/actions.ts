@@ -4,6 +4,7 @@ import dbConnect from "@/lib/mongoose"
 import Order from "@/models/Order"
 import PosDevice from "@/models/PosDevice"
 import Product from "@/models/Product"
+import Ingredient from "@/models/Ingredient"
 import CashSession from "@/models/CashSession"
 import PrintJob from "@/models/PrintJob"
 import { revalidatePath } from "next/cache"
@@ -40,6 +41,11 @@ import {
     resolveFixedMenuSelection,
     type MenuSelectionInput,
 } from "@/lib/fixed-menu"
+import {
+    aggregatePendingIngredientQueue,
+    buildIngredientPlanForCart,
+    normalizeRecipeItems,
+} from "@/lib/ingredient-plan"
 
 interface PrintDispatchSummary {
     attempted: number
@@ -115,6 +121,19 @@ interface PosOrderPricingResult {
     orderDiscountMeta?: OrderDiscountMeta
 }
 
+interface IngredientPlanCartSource {
+    productId: string
+    snapshotName: string
+    quantity: number
+}
+
+interface IngredientPlanCartPayload {
+    productId: string
+    snapshotName: string
+    quantity: number
+    includedComponents?: IngredientPlanCartSource[]
+}
+
 function normalizeCurrencyAmount(value: number): number {
     if (!Number.isFinite(value)) return 0
     return Number(Math.max(0, value).toFixed(2))
@@ -177,6 +196,58 @@ function sanitizeCartItems(
     }
 
     return sanitized
+}
+
+async function buildPersistedIngredientPlan(
+    eventId: string,
+    cart: IngredientPlanCartPayload[]
+) {
+    const productIds = [...new Set(
+        cart.flatMap((item) => [
+            item.productId,
+            ...((item.includedComponents || []).map((component) => component.productId))
+        ])
+    )]
+
+    if (productIds.length === 0) {
+        return []
+    }
+
+    const products = await Product.find({
+        eventId,
+        _id: { $in: productIds }
+    }).select("_id name recipeItems").lean() as Array<{
+        _id: string | { toString(): string }
+        name?: string
+        recipeItems?: Array<{
+            ingredientId?: string | { toString(): string }
+            quantity?: number | null
+        }>
+    }>
+
+    const productById = new Map(products.map((product) => [product._id.toString(), product]))
+    const ingredientIds = [...new Set(
+        products.flatMap((product) => normalizeRecipeItems(product.recipeItems).map((entry) => entry.ingredientId))
+    )]
+    const ingredients = ingredientIds.length > 0
+        ? await Ingredient.find({
+            eventId,
+            _id: { $in: ingredientIds }
+        }).select("_id name shortName active").lean() as Array<{
+            _id: string | { toString(): string }
+            name?: string
+            shortName?: string
+            active?: boolean
+        }>
+        : []
+
+    const ingredientById = new Map(ingredients.map((ingredient) => [ingredient._id.toString(), ingredient]))
+
+    return buildIngredientPlanForCart({
+        cart,
+        productById,
+        ingredientById
+    })
 }
 
 async function computePricingForCart(data: {
@@ -864,6 +935,19 @@ export async function createOrder(data: {
             selectedOptions: item.selectedOptions,
             includedComponents: item.includedComponents
         }))
+        const ingredientPlan = await buildPersistedIngredientPlan(
+            data.eventId,
+            pricingResult.pricing.cartWithDiscounts.map((item) => ({
+                productId: item.productId,
+                snapshotName: item.snapshotName,
+                quantity: item.quantity,
+                includedComponents: item.includedComponents?.map((component) => ({
+                    productId: component.productId,
+                    snapshotName: component.snapshotName,
+                    quantity: component.quantity
+                }))
+            }))
+        )
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
         const requiresPendingState = computeRequiresPendingState(data.paymentMethod, capabilitiesResult.capabilities)
@@ -897,6 +981,7 @@ export async function createOrder(data: {
             discountApplied: pricingResult.pricing.discountApplied,
             discountMeta: pricingResult.pricing.orderDiscountMeta,
             cart: pricingResult.pricing.cartWithDiscounts,
+            ingredientPlan,
             paymentMethod: data.paymentMethod,
             sumupCheckoutId: requiresPendingState ? undefined : data.sumupCheckoutId,
             posDeviceId: data.posDeviceId,
@@ -1198,6 +1283,55 @@ export async function listRecentPendingOrders(data: {
     }
 }
 
+export async function listPendingIngredientQueue(data: {
+    eventId: string
+    limit?: number
+}): Promise<
+    { success: true, items: Array<{ ingredientKey: string, label: string, quantity: number, orderCount: number, legacy: boolean }> }
+    | { success: false, error: string }
+> {
+    try {
+        if (!data.eventId) {
+            return { success: false, error: "Evento non valido" }
+        }
+
+        const requestedLimit = data.limit ?? 12
+        const safeLimit = Math.min(Math.max(requestedLimit, 1), 30)
+
+        await dbConnect()
+        const pendingOrders = await Order.find({ eventId: data.eventId, status: "PENDING" })
+            .select("ingredientPlan cart")
+            .lean() as Array<{
+                ingredientPlan?: Array<{
+                    ingredientId?: string | { toString(): string }
+                    snapshotName?: string
+                    quantity?: number
+                    sourceProductId?: string | { toString(): string }
+                    sourceProductName?: string
+                    legacy?: boolean
+                }>
+                cart?: Array<{
+                    productId?: string | { toString(): string }
+                    snapshotName?: string
+                    quantity?: number
+                    includedComponents?: Array<{
+                        productId?: string | { toString(): string }
+                        snapshotName?: string
+                        quantity?: number
+                    }>
+                }>
+            }>
+
+        return {
+            success: true,
+            items: aggregatePendingIngredientQueue(pendingOrders).slice(0, safeLimit)
+        }
+    } catch (error) {
+        console.error("List Pending Ingredient Queue Error:", error)
+        return { success: false, error: "Errore durante il recupero ingredienti in coda" }
+    }
+}
+
 export async function completePendingOrderPayment(data: {
     eventId: string
     orderId: string
@@ -1313,6 +1447,19 @@ export async function completePendingOrderPayment(data: {
             selectedOptions: item.selectedOptions,
             includedComponents: item.includedComponents
         }))
+        const ingredientPlan = await buildPersistedIngredientPlan(
+            data.eventId,
+            pricingResult.pricing.cartWithDiscounts.map((item) => ({
+                productId: item.productId,
+                snapshotName: item.snapshotName,
+                quantity: item.quantity,
+                includedComponents: item.includedComponents?.map((component) => ({
+                    productId: component.productId,
+                    snapshotName: component.snapshotName,
+                    quantity: component.quantity
+                }))
+            }))
+        )
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
         const stockApplyResult = await applyStockForPaidOrder(data.eventId, currentCart, stockMode)
@@ -1326,6 +1473,7 @@ export async function completePendingOrderPayment(data: {
         stockAdjustmentsToRollback = stockApplyResult.appliedAdjustments || []
 
         order.set("cart", pricingResult.pricing.cartWithDiscounts)
+        order.set("ingredientPlan", ingredientPlan)
         order.totalAmount = payableAmount
         order.discountApplied = pricingResult.pricing.discountApplied
         order.set("discountMeta", pricingResult.pricing.orderDiscountMeta || undefined)

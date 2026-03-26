@@ -3,6 +3,7 @@
 import dbConnect from "@/lib/mongoose"
 import Order from "@/models/Order"
 import Product from "@/models/Product"
+import Ingredient from "@/models/Ingredient"
 import Event from "@/models/Event"
 import { revalidatePath } from "next/cache"
 import { getNextPublicOrderNumber, getOrderCodeFromOrder } from "@/lib/order-code"
@@ -24,6 +25,75 @@ import {
     resolveFixedMenuSelection,
     type MenuSelectionInput,
 } from "@/lib/fixed-menu"
+import {
+    buildIngredientPlanForCart,
+    normalizeRecipeItems,
+} from "@/lib/ingredient-plan"
+
+interface IngredientPlanCartSource {
+    productId: string
+    snapshotName: string
+    quantity: number
+}
+
+interface IngredientPlanCartPayload {
+    productId: string
+    snapshotName: string
+    quantity: number
+    includedComponents?: IngredientPlanCartSource[]
+}
+
+async function buildPersistedIngredientPlan(
+    eventId: string,
+    cart: IngredientPlanCartPayload[]
+) {
+    const productIds = [...new Set(
+        cart.flatMap((item) => [
+            item.productId,
+            ...((item.includedComponents || []).map((component) => component.productId))
+        ])
+    )]
+
+    if (productIds.length === 0) {
+        return []
+    }
+
+    const products = await Product.find({
+        eventId,
+        _id: { $in: productIds }
+    }).select("_id name recipeItems").lean() as Array<{
+        _id: string | { toString(): string }
+        name?: string
+        recipeItems?: Array<{
+            ingredientId?: string | { toString(): string }
+            quantity?: number | null
+        }>
+    }>
+
+    const productById = new Map(products.map((product) => [product._id.toString(), product]))
+    const ingredientIds = [...new Set(
+        products.flatMap((product) => normalizeRecipeItems(product.recipeItems).map((entry) => entry.ingredientId))
+    )]
+    const ingredients = ingredientIds.length > 0
+        ? await Ingredient.find({
+            eventId,
+            _id: { $in: ingredientIds }
+        }).select("_id name shortName active").lean() as Array<{
+            _id: string | { toString(): string }
+            name?: string
+            shortName?: string
+            active?: boolean
+        }>
+        : []
+
+    const ingredientById = new Map(ingredients.map((ingredient) => [ingredient._id.toString(), ingredient]))
+
+    return buildIngredientPlanForCart({
+        cart,
+        productById,
+        ingredientById
+    })
+}
 
 export async function createPublicOrder(data: {
     eventId: string,
@@ -268,6 +338,19 @@ export async function createPublicOrder(data: {
         const easterEggUpload = event.settings?.portalEasterEggEnabled
             ? createEasterEggUploadToken()
             : null
+        const ingredientPlan = await buildPersistedIngredientPlan(
+            data.eventId,
+            normalizedCart.map((item) => ({
+                productId: item.productId,
+                snapshotName: item.snapshotName,
+                quantity: item.quantity,
+                includedComponents: item.includedComponents?.map((component) => ({
+                    productId: component.productId,
+                    snapshotName: component.snapshotName,
+                    quantity: component.quantity
+                }))
+            }))
+        )
 
         // Create the order with PENDING status
         const order = await Order.create({
@@ -277,6 +360,7 @@ export async function createPublicOrder(data: {
             customer: data.customer,
             totalAmount: computedTotalAmount,
             cart: normalizedCart,
+            ingredientPlan,
             easterEggAttachment: easterEggUpload
                 ? {
                     uploadTokenHash: easterEggUpload.hash
