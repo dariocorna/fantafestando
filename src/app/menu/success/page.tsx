@@ -34,6 +34,7 @@ function SuccessContent() {
     )
     const shouldFetchSummary = Boolean(orderId && code && !summary)
     const isLoadingSummary = shouldFetchSummary && !summaryFetchFailed
+    const pizzaNumber = summary?.pizzaNumber
 
     useEffect(() => {
         if (!orderId || !code || summary) return
@@ -124,17 +125,48 @@ function SuccessContent() {
 
                             </div>
 
-                            <div className="rounded-[34px] border-2 border-dashed border-[#d9e6f8] bg-[#f7fbff] px-6 py-7 text-center">
-                                <span className="block text-xs font-black uppercase tracking-[0.14em] text-slate-500">
-                                    Il tuo numero ordine
-                                </span>
-                                <span className="font-brand-display mt-3 block text-7xl font-black tracking-[-0.08em] text-[var(--brand-blue-700)] md:text-8xl">
-                                    {code || "---"}
-                                </span>
-                                <p className="mt-4 text-sm font-bold leading-relaxed text-slate-500">
-                                    Questo resta il focus principale della schermata.
-                                </p>
-                            </div>
+                            {pizzaNumber ? (
+                                <div
+                                    data-testid="menu-success-pizza-card"
+                                    className="rounded-[34px] border-2 border-[#ffb15b] bg-[linear-gradient(145deg,#fff7e8_0%,#ffe6b8_52%,#ffd189_100%)] px-6 py-7 text-center shadow-[0_20px_48px_rgba(194,106,9,0.18)]"
+                                >
+                                    <span className="block text-xs font-black uppercase tracking-[0.16em] text-[#9a4d00]">
+                                        Numero pizza
+                                    </span>
+                                    <span
+                                        data-testid="menu-success-pizza-number"
+                                        className="font-brand-display mt-3 block text-7xl font-black tracking-[-0.08em] text-[#8a2f00] md:text-8xl"
+                                    >
+                                        {pizzaNumber}
+                                    </span>
+                                    <div className="mt-5 rounded-[24px] border border-white/70 bg-white/75 px-4 py-3">
+                                        <p className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">
+                                            Codice ordine generale
+                                        </p>
+                                        <p
+                                            data-testid="menu-success-general-order-code"
+                                            className="mt-1 text-3xl font-black tracking-[-0.06em] text-[var(--brand-blue-700)]"
+                                        >
+                                            {code || "---"}
+                                        </p>
+                                    </div>
+                                    <p className="mt-4 text-sm font-bold leading-relaxed text-[#8a4d10]">
+                                        Quando la pizza sarà pronta, verrà chiamato questo numero.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="rounded-[34px] border-2 border-dashed border-[#d9e6f8] bg-[#f7fbff] px-6 py-7 text-center">
+                                    <span className="block text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+                                        Il tuo numero ordine
+                                    </span>
+                                    <span className="font-brand-display mt-3 block text-7xl font-black tracking-[-0.08em] text-[var(--brand-blue-700)] md:text-8xl">
+                                        {code || "---"}
+                                    </span>
+                                    <p className="mt-4 text-sm font-bold leading-relaxed text-slate-500">
+                                        Questo resta il focus principale della schermata.
+                                    </p>
+                                </div>
+                            )}
                         </div>
                     </motion.section>
 

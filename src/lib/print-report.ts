@@ -30,6 +30,8 @@ export interface PrintDocumentV2 {
     title: string;
     copyLabel: string;
     referenceCode?: string;
+    pizzaNumber?: number;
+    pizzaBarcodeValue?: string;
     createdAt: string;
     headerLines: string[];
     items: PrintDocumentItemRow[];
@@ -56,6 +58,8 @@ export interface BuildOrderPrintDocumentInput {
     eventName?: string;
     orderId: string;
     shortCode?: string;
+    pizzaNumber?: number;
+    pizzaBarcodeValue?: string;
     customerName?: string;
     tableNumber?: string;
     items: Array<{
@@ -109,6 +113,8 @@ export interface PrintOrderJobPayload {
     copyLabel?: string;
     orderId: string;
     shortCode?: string;
+    pizzaNumber?: number;
+    pizzaBarcodeValue?: string;
     customerName?: string;
     tableNumber?: string;
     items: Array<{
@@ -145,6 +151,12 @@ function asNumber(value: unknown): number | undefined {
         if (Number.isFinite(parsed)) return parsed;
     }
     return undefined;
+}
+
+function asPositiveInteger(value: unknown): number | undefined {
+    const parsed = asNumber(value);
+    if (!Number.isInteger(parsed) || !parsed || parsed <= 0) return undefined;
+    return parsed;
 }
 
 function asTrimmedString(value: unknown): string | undefined {
@@ -353,6 +365,8 @@ export function buildOrderPrintDocumentV2(input: BuildOrderPrintDocumentInput): 
     const printType = input.printType;
     const shortCode = asTrimmedString(input.shortCode);
     const orderId = asTrimmedString(input.orderId) || "";
+    const pizzaNumber = asPositiveInteger(input.pizzaNumber);
+    const pizzaBarcodeValue = asTrimmedString(input.pizzaBarcodeValue);
     const customerName = asTrimmedString(input.customerName);
     const tableNumber = asTrimmedString(input.tableNumber);
     const eventName = asTrimmedString(input.eventName);
@@ -376,6 +390,8 @@ export function buildOrderPrintDocumentV2(input: BuildOrderPrintDocumentInput): 
         title: asTrimmedString(input.title) || "COMANDA",
         copyLabel: asTrimmedString(input.copyLabel) || defaultCopyLabel(printType),
         referenceCode: resolveReferenceCode(orderId, shortCode),
+        pizzaNumber,
+        pizzaBarcodeValue,
         createdAt,
         headerLines,
         items: normalizeItems(input.items),
@@ -458,6 +474,8 @@ export function normalizeLegacyPrintDocument(document: Record<string, unknown> |
             title: asTrimmedString(record.title) || "RICEVUTA",
             copyLabel: asTrimmedString(record.copyLabel) || defaultCopyLabel(printType),
             referenceCode: asTrimmedString(record.referenceCode),
+            pizzaNumber: asPositiveInteger(record.pizzaNumber),
+            pizzaBarcodeValue: asTrimmedString(record.pizzaBarcodeValue),
             createdAt,
             headerLines: normalizeLines(record.headerLines),
             items: normalizeItems(record.items),
@@ -498,6 +516,8 @@ export function normalizeLegacyPrintDocument(document: Record<string, unknown> |
         title,
         copyLabel: defaultCopyLabel(printType),
         referenceCode: shortCode || sessionId?.slice(-8).toUpperCase() || resolveReferenceCode(orderId, undefined),
+        pizzaNumber: asPositiveInteger(record.pizzaNumber),
+        pizzaBarcodeValue: asTrimmedString(record.pizzaBarcodeValue),
         createdAt,
         headerLines: buildLegacyHeaderLines(record, printType),
         items: normalizeItems(record.items),
@@ -546,6 +566,14 @@ export function buildPreviewLines(document: Record<string, unknown> | PrintDocum
     lines.push(...wrapLine(normalized.title.toUpperCase(), maxLength));
     lines.push(...wrapLine(normalized.copyLabel.toUpperCase(), maxLength));
     lines.push(RECEIPT_SEPARATOR);
+
+    if (typeof normalized.pizzaNumber === "number") {
+        lines.push(...wrapLine(`PIZZA N° ${normalized.pizzaNumber}`, maxLength));
+        if (normalized.pizzaBarcodeValue) {
+            lines.push(...wrapLine(`BARCODE: ${normalized.pizzaBarcodeValue}`, maxLength));
+        }
+        lines.push(RECEIPT_SEPARATOR);
+    }
 
     if (normalized.referenceCode) {
         const referencePrefix = normalized.printType === "CASH_SESSION_SUMMARY" ? "SESSIONE N°" : "ORDINE N°";
@@ -606,6 +634,8 @@ export function toOrderJobPayloadFromDocument(
         copyLabel: normalized.copyLabel,
         orderId: normalized.orderId || fallbackOrderId,
         shortCode: normalized.shortCode || normalized.referenceCode,
+        pizzaNumber: normalized.pizzaNumber,
+        pizzaBarcodeValue: normalized.pizzaBarcodeValue,
         customerName: normalized.customerName,
         tableNumber: normalized.tableNumber,
         items: normalized.items.map((item) => ({
