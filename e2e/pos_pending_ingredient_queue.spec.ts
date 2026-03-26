@@ -14,7 +14,7 @@ import {
 async function createIngredient(page: Page, ingredient: {
     name: string;
     shortName?: string;
-    sortOrder?: string;
+    stockQuantity?: string;
     active?: boolean;
 }) {
     await page.goto("/admin/catalog");
@@ -25,8 +25,8 @@ async function createIngredient(page: Page, ingredient: {
     if (ingredient.shortName) {
         await dialog.locator("#ingredient-short-name").fill(ingredient.shortName);
     }
-    if (ingredient.sortOrder) {
-        await dialog.locator("#ingredient-sort-order").fill(ingredient.sortOrder);
+    if (ingredient.stockQuantity) {
+        await dialog.locator("#ingredient-stock-quantity").fill(ingredient.stockQuantity);
     }
     if (ingredient.active === false) {
         await dialog.getByLabel("Ingrediente attivo").uncheck();
@@ -158,8 +158,8 @@ test.describe.serial("POS - ingredienti in coda", () => {
         createdEvents.push(eventName);
         await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName);
         await createCategory(page, categoryName);
-        await createIngredient(page, { name: ingredientPotatoes, sortOrder: "0" });
-        await createIngredient(page, { name: ingredientFish, sortOrder: "1" });
+        await createIngredient(page, { name: ingredientPotatoes, stockQuantity: "5" });
+        await createIngredient(page, { name: ingredientFish, stockQuantity: "2" });
         await createProductWithRecipe(page, {
             categoryName,
             name: fishProduct,
@@ -203,8 +203,11 @@ test.describe.serial("POS - ingredienti in coda", () => {
         const fishCard = pendingDialog.locator('[data-testid^="pending-ingredient-card-"]').filter({ hasText: ingredientFish }).first();
         const legacyCard = pendingDialog.locator('[data-testid^="pending-ingredient-card-"]').filter({ hasText: legacyProduct }).first();
         await expect(potatoesCard).toContainText("3");
+        await expect(potatoesCard).toContainText("Residuo stimato: 2");
         await expect(fishCard).toContainText("1");
+        await expect(fishCard).toContainText("Residuo stimato: 1");
         await expect(legacyCard).toContainText("Legacy");
+        await expect(legacyCard).toContainText("Scorta non tracciata");
         await expect(legacyCard).toContainText("1");
 
         await pendingDialog.getByRole("textbox").fill(firstOrderCode);
@@ -224,6 +227,7 @@ test.describe.serial("POS - ingredienti in coda", () => {
         await expect(pendingDialog.locator('[data-testid^="pending-ingredient-card-"]').filter({ hasText: ingredientFish })).toHaveCount(0);
         await expect(pendingDialog.locator('[data-testid^="pending-ingredient-card-"]').filter({ hasText: legacyProduct })).toHaveCount(0);
         await expect(pendingDialog.locator('[data-testid^="pending-ingredient-card-"]').filter({ hasText: ingredientPotatoes }).first()).toContainText("2");
+        await expect(pendingDialog.locator('[data-testid^="pending-ingredient-card-"]').filter({ hasText: ingredientPotatoes }).first()).toContainText("Residuo stimato: 3");
 
         await expect(pendingDialog.getByText(ingredientPotatoes)).toBeVisible();
     });

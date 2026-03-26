@@ -18,11 +18,9 @@ function SubmitButton() {
 
 export function CreateIngredientDialog({
     eventId,
-    nextSortOrder,
     createAction
 }: {
     eventId: string
-    nextSortOrder: number
     createAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>
 }) {
     const [open, setOpen] = useState(false);
@@ -75,15 +73,18 @@ export function CreateIngredientDialog({
                             <Input id="ingredient-short-name" name="shortName" placeholder="PATATINE" maxLength={24} />
                         </div>
                         <div className="grid gap-2">
-                            <Label htmlFor="ingredient-sort-order">Ordine</Label>
+                            <Label htmlFor="ingredient-stock-quantity">Scorte (opzionale)</Label>
                             <Input
-                                id="ingredient-sort-order"
-                                name="sortOrder"
+                                id="ingredient-stock-quantity"
+                                name="stockQuantity"
                                 type="number"
                                 min="0"
                                 step="1"
-                                defaultValue={nextSortOrder}
+                                placeholder="Lascia vuoto per non tracciare"
                             />
+                            <p className="text-xs text-muted-foreground">
+                                Se valorizzate, la coda POS mostrerà il residuo stimato dopo gli ordini pendenti.
+                            </p>
                         </div>
                         <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
                             <input

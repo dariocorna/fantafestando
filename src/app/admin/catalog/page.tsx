@@ -87,14 +87,6 @@ function parseBasePriceInput(rawValue: FormDataEntryValue | null) {
     return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : null;
 }
 
-function parseSortOrderInput(rawValue: FormDataEntryValue | null, fallback: number) {
-    if (typeof rawValue !== "string") return fallback;
-    const trimmed = rawValue.trim();
-    if (!trimmed) return fallback;
-    const parsed = Number(trimmed);
-    return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : fallback;
-}
-
 function normalizeIngredientShortName(rawValue: FormDataEntryValue | null) {
     if (typeof rawValue !== "string") return undefined;
     const trimmed = rawValue.trim();
@@ -317,7 +309,7 @@ export default async function AdminCatalog() {
     }
 
     const categories = await Category.find({ eventId: currentEventId }).sort({ printOrder: 1 }).populate('printerId').lean();
-    const ingredients = await Ingredient.find({ eventId: currentEventId }).sort({ sortOrder: 1, name: 1 }).lean();
+    const ingredients = await Ingredient.find({ eventId: currentEventId }).sort({ name: 1 }).lean();
     const products = await Product.find({ eventId: currentEventId }).populate('categoryId').lean();
     const printers = await Printer.find({ eventId: currentEventId }).lean();
     const ingredientById = new Map(
@@ -326,10 +318,6 @@ export default async function AdminCatalog() {
             shortName: ingredient.shortName || undefined
         }])
     );
-    const nextIngredientSortOrder = ingredients.reduce((maxValue: number, ingredient: IIngredient) => {
-        return Math.max(maxValue, Number(ingredient.sortOrder) || 0);
-    }, -1) + 1;
-
     async function createIngredient(formData: FormData) {
         "use server"
         const sessionCheck = await ensureAdminSession();
@@ -340,7 +328,7 @@ export default async function AdminCatalog() {
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const name = ((formData.get("name") as string | null) || "").trim();
         const shortName = normalizeIngredientShortName(formData.get("shortName"));
-        const sortOrder = parseSortOrderInput(formData.get("sortOrder"), nextIngredientSortOrder);
+        const stockQuantity = parseStockQuantityInput(formData.get("stockQuantity") as string | null);
         const active = formData.get("active") === "on";
         const shortNameValidationError = validateProductShortName(shortName);
 
@@ -372,7 +360,7 @@ export default async function AdminCatalog() {
             eventId: scopedEventId,
             name,
             shortName,
-            sortOrder,
+            stockQuantity,
             active
         });
         revalidatePath("/admin/catalog");
@@ -457,7 +445,7 @@ export default async function AdminCatalog() {
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const name = ((formData.get("name") as string | null) || "").trim();
         const shortName = normalizeIngredientShortName(formData.get("shortName"));
-        const sortOrder = parseSortOrderInput(formData.get("sortOrder"), 0);
+        const stockQuantity = parseStockQuantityInput(formData.get("stockQuantity") as string | null);
         const active = formData.get("active") === "on";
         const shortNameValidationError = validateProductShortName(shortName);
 
@@ -494,7 +482,7 @@ export default async function AdminCatalog() {
 
         const updateSet: Record<string, unknown> = {
             name,
-            sortOrder,
+            stockQuantity,
             active,
             ...(shortName ? { shortName } : {})
         };
@@ -776,7 +764,6 @@ export default async function AdminCatalog() {
                     </div>
                     <CreateIngredientDialog
                         eventId={currentEventId}
-                        nextSortOrder={nextIngredientSortOrder}
                         createAction={createIngredient}
                     />
                 </div>
@@ -785,7 +772,7 @@ export default async function AdminCatalog() {
                         <TableRow>
                             <TableHead>Nome</TableHead>
                             <TableHead>Nome breve</TableHead>
-                            <TableHead>Ordine</TableHead>
+                            <TableHead>Scorte</TableHead>
                             <TableHead>Stato</TableHead>
                             <TableHead className="w-[120px]">Azioni</TableHead>
                         </TableRow>
@@ -801,7 +788,16 @@ export default async function AdminCatalog() {
                             <TableRow key={String(ingredient._id)}>
                                 <TableCell className="font-medium">{ingredient.name}</TableCell>
                                 <TableCell className="text-slate-600">{ingredient.shortName || "-"}</TableCell>
-                                <TableCell>{ingredient.sortOrder}</TableCell>
+                                <TableCell>
+                                    <span className={`rounded-full px-2 py-1 text-xs font-bold ${getStockStatus(ingredient.stockQuantity, false) === "OUT"
+                                        ? "bg-red-100 text-red-700"
+                                        : getStockStatus(ingredient.stockQuantity, false) === "LOW"
+                                            ? "bg-amber-100 text-amber-700"
+                                            : "bg-slate-100 text-slate-700"
+                                        }`}>
+                                        {getStockLabel(ingredient.stockQuantity, false)}
+                                    </span>
+                                </TableCell>
                                 <TableCell>
                                     <span className={`rounded-full px-2 py-1 text-xs font-bold ${ingredient.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
                                         {ingredient.active ? "Attivo" : "Inattivo"}
@@ -813,7 +809,7 @@ export default async function AdminCatalog() {
                                             id: String(ingredient._id),
                                             name: ingredient.name,
                                             shortName: ingredient.shortName || "",
-                                            sortOrder: ingredient.sortOrder,
+                                            stockQuantity: ingredient.stockQuantity ?? null,
                                             active: Boolean(ingredient.active),
                                         }}
                                         eventId={currentEventId}
