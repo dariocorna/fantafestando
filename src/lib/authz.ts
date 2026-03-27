@@ -77,6 +77,17 @@ export async function requireAdminPageSession(): Promise<SessionUser> {
     throw new Error("Redirect non riuscito");
 }
 
+export async function requireAuthenticatedPageSession(): Promise<SessionUser> {
+    const sessionCheck = await ensureAuthenticatedSession();
+    if (sessionCheck.ok) {
+        return sessionCheck.user;
+    }
+
+    const { redirect } = await import("next/navigation");
+    redirect("/login");
+    throw new Error("Redirect non riuscito");
+}
+
 export function adminUnauthorizedJson(sessionCheck: Extract<AdminSessionCheck, { ok: false }>) {
     return NextResponse.json(
         { error: sessionCheck.error },
