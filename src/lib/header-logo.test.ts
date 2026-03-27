@@ -1,4 +1,3 @@
-import path from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import {
@@ -30,20 +29,6 @@ async function createJpeg(width: number, height: number) {
             background: { r: 240, g: 245, b: 250 }
         }
     }).jpeg().toBuffer();
-}
-
-async function createPhotoLikeMenuJpeg(width: number, height: number) {
-    const source = path.join(
-        process.cwd(),
-        "public",
-        "uploads",
-        "WhatsApp Image 2026-03-15 at 15.56.45.jpeg"
-    );
-
-    return await sharp(source)
-        .resize(width, height, { fit: "cover", position: "attention" })
-        .jpeg({ quality: 100 })
-        .toBuffer();
 }
 
 describe("header-logo", () => {
@@ -81,7 +66,7 @@ describe("header-logo", () => {
     });
 
     it("recompresses large menu logo uploads before storing them", async () => {
-        const source = await createPhotoLikeMenuJpeg(2400, 960);
+        const source = await createJpeg(2400, 960);
 
         const result = await normalizeMenuHeaderLogoUpload(source, "image/jpeg");
         expect(result.success).toBe(true);
