@@ -71,10 +71,13 @@ vi.mock("@/models/Ingredient", () => ({
                 }
             }
         },
-        async updateOne(query: { _id: string }, update: { $inc?: { stockQuantity: number } }) {
+        async updateOne(query: { _id: string }, update: { $inc?: { stockQuantity: number }, $set?: { stockQuantity?: number | null } }) {
             const current = ingredientStore.get(query._id)
             if (!current) return { acknowledged: true, matchedCount: 0 }
             if (update.$inc?.stockQuantity) current.stockQuantity = (current.stockQuantity ?? 0) + update.$inc.stockQuantity
+            if (update.$set && Object.prototype.hasOwnProperty.call(update.$set, "stockQuantity")) {
+                current.stockQuantity = update.$set.stockQuantity ?? null
+            }
             ingredientStore.set(query._id, current)
             return { acknowledged: true, matchedCount: 1 }
         },
@@ -141,5 +144,41 @@ describe("stock operations", () => {
 
         await rollbackStockAdjustments("evt-1", result.appliedAdjustments || [])
         expect(ingredientStore.get("ing-1")?.stockQuantity).toBe(10)
+    })
+
+    test("clamps override decrements at zero for tracked ingredients", async () => {
+        productStore.set("prod-1", {
+            _id: "prod-1",
+            eventId: "evt-1",
+            name: "Fritto",
+            stockQuantity: null,
+            isSoldOut: false
+        })
+        ingredientStore.set("ing-1", {
+            _id: "ing-1",
+            eventId: "evt-1",
+            name: "Patatine",
+            stockQuantity: 2
+        })
+
+        const result = await applyStockForPaidOrder(
+            "evt-1",
+            [{
+                productId: "prod-1",
+                snapshotName: "Fritto",
+                quantity: 1
+            }],
+            "override",
+            [{
+                ingredientId: "ing-1",
+                quantity: 5
+            }]
+        )
+
+        expect(result.success).toBe(true)
+        expect(ingredientStore.get("ing-1")?.stockQuantity).toBe(0)
+
+        await rollbackStockAdjustments("evt-1", result.appliedAdjustments || [])
+        expect(ingredientStore.get("ing-1")?.stockQuantity).toBe(2)
     })
 })

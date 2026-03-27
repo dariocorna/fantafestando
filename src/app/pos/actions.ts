@@ -199,6 +199,38 @@ function sanitizeCartItems(
     return sanitized
 }
 
+function normalizeIngredientPlanRelevantCart(
+    cart: PosCartItemInput[]
+): Array<{
+    productId: string
+    snapshotName: string
+    quantity: number
+    menuSelections: Array<{ groupId: string, productId: string }>
+}> {
+    return cart.map((item) => ({
+        productId: item.productId,
+        snapshotName: item.snapshotName,
+        quantity: item.quantity,
+        menuSelections: [...item.menuSelections]
+            .map((entry) => ({
+                groupId: entry.groupId,
+                productId: entry.productId
+            }))
+            .sort((left, right) => (
+                left.groupId.localeCompare(right.groupId, "it")
+                || left.productId.localeCompare(right.productId, "it")
+            ))
+    }))
+}
+
+export function shouldReusePendingIngredientPlan(
+    currentCart: PosCartItemInput[],
+    persistedCart: PosCartItemInput[]
+) {
+    return JSON.stringify(normalizeIngredientPlanRelevantCart(currentCart))
+        === JSON.stringify(normalizeIngredientPlanRelevantCart(persistedCart))
+}
+
 async function buildPersistedIngredientPlan(
     eventId: string,
     cart: IngredientPlanCartPayload[]
@@ -1397,6 +1429,32 @@ export async function completePendingOrderPayment(data: {
             return { success: false, error: "Ordine non trovato o già chiuso" }
         }
 
+        const persistedOrderCartInput = sanitizeCartItems(
+            order.cart.map((item: {
+                productId: { toString(): string } | string
+                snapshotName: string
+                quantity: number
+                selectedOptions?: Array<{ name: string, priceVariation: number }>
+                includedComponents?: Array<{
+                    productId: { toString(): string } | string
+                    source?: "FIXED_ITEM" | "CHOICE_OPTION"
+                    groupId?: string
+                    groupName?: string
+                }>
+            }) => ({
+                productId: item.productId.toString(),
+                snapshotName: item.snapshotName,
+                quantity: item.quantity,
+                selectedOptions: item.selectedOptions || [],
+                menuSelections: (item.includedComponents || [])
+                    .filter((component) => component.source === "CHOICE_OPTION" && component.groupId)
+                    .map((component) => ({
+                        groupId: component.groupId || "",
+                        productId: component.productId.toString()
+                    }))
+            }))
+        ) || []
+
         let orderCartInput: PosCartItemInput[] = []
 
         if (data.cart) {
@@ -1406,31 +1464,7 @@ export async function completePendingOrderPayment(data: {
             }
             orderCartInput = sanitizedCart
         } else {
-            orderCartInput = sanitizeCartItems(
-                order.cart.map((item: {
-                    productId: { toString(): string } | string
-                    snapshotName: string
-                    quantity: number
-                    selectedOptions?: Array<{ name: string, priceVariation: number }>
-                    includedComponents?: Array<{
-                        productId: { toString(): string } | string
-                        source?: "FIXED_ITEM" | "CHOICE_OPTION"
-                        groupId?: string
-                        groupName?: string
-                    }>
-                }) => ({
-                    productId: item.productId.toString(),
-                    snapshotName: item.snapshotName,
-                    quantity: item.quantity,
-                    selectedOptions: item.selectedOptions || [],
-                    menuSelections: (item.includedComponents || [])
-                        .filter((component) => component.source === "CHOICE_OPTION" && component.groupId)
-                        .map((component) => ({
-                            groupId: component.groupId || "",
-                            productId: component.productId.toString()
-                        }))
-                }))
-            ) || []
+            orderCartInput = persistedOrderCartInput
         }
 
         if (orderCartInput.length === 0) {
@@ -1467,19 +1501,38 @@ export async function completePendingOrderPayment(data: {
             selectedOptions: item.selectedOptions,
             includedComponents: item.includedComponents
         }))
-        const ingredientPlan = await buildPersistedIngredientPlan(
-            data.eventId,
-            pricingResult.pricing.cartWithDiscounts.map((item) => ({
-                productId: item.productId,
-                snapshotName: item.snapshotName,
-                quantity: item.quantity,
-                includedComponents: item.includedComponents?.map((component) => ({
-                    productId: component.productId,
-                    snapshotName: component.snapshotName,
-                    quantity: component.quantity
-                }))
+        const shouldReusePersistedPlan = Array.isArray(order.ingredientPlan)
+            && order.ingredientPlan.length > 0
+            && shouldReusePendingIngredientPlan(orderCartInput, persistedOrderCartInput)
+        const ingredientPlan = shouldReusePersistedPlan
+            ? order.ingredientPlan.map((entry: {
+                ingredientId?: { toString(): string } | string
+                snapshotName: string
+                quantity: number
+                sourceProductId?: { toString(): string } | string
+                sourceProductName?: string
+                legacy?: boolean
+            }) => ({
+                ingredientId: entry.ingredientId?.toString(),
+                snapshotName: entry.snapshotName,
+                quantity: entry.quantity,
+                sourceProductId: entry.sourceProductId?.toString(),
+                sourceProductName: entry.sourceProductName,
+                legacy: Boolean(entry.legacy)
             }))
-        )
+            : await buildPersistedIngredientPlan(
+                data.eventId,
+                pricingResult.pricing.cartWithDiscounts.map((item) => ({
+                    productId: item.productId,
+                    snapshotName: item.snapshotName,
+                    quantity: item.quantity,
+                    includedComponents: item.includedComponents?.map((component) => ({
+                        productId: component.productId,
+                        snapshotName: component.snapshotName,
+                        quantity: component.quantity
+                    }))
+                }))
+            )
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
         const stockApplyResult = await applyStockForPaidOrder(data.eventId, currentCart, stockMode, ingredientPlan)
