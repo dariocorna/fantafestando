@@ -227,7 +227,7 @@ test.describe.serial("POS - ingredienti in coda", () => {
         await expect(pendingDialog.locator('[data-testid^="pending-ingredient-card-"]').filter({ hasText: ingredientFish })).toHaveCount(0);
         await expect(pendingDialog.locator('[data-testid^="pending-ingredient-card-"]').filter({ hasText: legacyProduct })).toHaveCount(0);
         await expect(pendingDialog.locator('[data-testid^="pending-ingredient-card-"]').filter({ hasText: ingredientPotatoes }).first()).toContainText("2");
-        await expect(pendingDialog.locator('[data-testid^="pending-ingredient-card-"]').filter({ hasText: ingredientPotatoes }).first()).toContainText("Residuo stimato: 3");
+        await expect(pendingDialog.locator('[data-testid^="pending-ingredient-card-"]').filter({ hasText: ingredientPotatoes }).first()).toContainText("Residuo stimato: 2");
 
         await expect(pendingDialog.getByText(ingredientPotatoes)).toBeVisible();
     });

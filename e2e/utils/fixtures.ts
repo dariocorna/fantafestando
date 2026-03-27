@@ -27,7 +27,8 @@ export interface CreateEventOptions {
     portalEasterEggEnabled?: boolean;
 }
 
-const ADMIN_COOKIE_URL = "http://127.0.0.1:3000";
+const PLAYWRIGHT_PORT = Number(process.env.PLAYWRIGHT_PORT ?? "3000");
+const ADMIN_COOKIE_URL = `http://127.0.0.1:${PLAYWRIGHT_PORT}`;
 
 export async function createActiveEventDirect(
     eventName: string,
