@@ -70,6 +70,12 @@ export function buildIngredientDemandMap(
     )
 }
 
+function normalizeRawTrackedStock(value: unknown): number | null {
+    return typeof value === "number" && Number.isFinite(value)
+        ? Math.floor(value)
+        : null
+}
+
 export async function loadProductStocks(eventId: string, productIds: string[]): Promise<Map<string, ProductStockInfo>> {
     const docs = await Product.find({
         eventId,
@@ -307,8 +313,8 @@ async function decrementTrackedStocksOverride(
         }
 
         // Clamp to 0 if stock went negative
-        const resultStock = normalizeStockQuantity(updated.stockQuantity ?? null)
-        if (isStockTracked(resultStock) && resultStock < 0) {
+        const resultStock = normalizeRawTrackedStock(updated.stockQuantity)
+        if (resultStock !== null && resultStock < 0) {
             await Product.updateOne(
                 { eventId, _id: productId },
                 { $set: { stockQuantity: 0 } }
@@ -399,6 +405,14 @@ async function decrementTrackedIngredientStocksOverride(
                 }],
                 appliedAdjustments: []
             }
+        }
+
+        const resultStock = normalizeRawTrackedStock(updated.stockQuantity)
+        if (resultStock !== null && resultStock < 0) {
+            await Ingredient.updateOne(
+                { eventId, _id: ingredientId },
+                { $set: { stockQuantity: 0 } }
+            )
         }
 
         const appliedQty = Math.min(requestedQuantity, isStockTracked(ingredient.stockQuantity) ? ingredient.stockQuantity : requestedQuantity)

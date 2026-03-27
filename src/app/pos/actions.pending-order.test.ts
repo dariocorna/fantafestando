@@ -40,7 +40,7 @@ vi.mock("@/lib/printer", () => ({ PrinterService: {} }));
 vi.mock("@/lib/sumup", () => ({ createSumUpCheckout: vi.fn() }));
 vi.mock("@/lib/secrets", () => ({ decryptSecret: vi.fn() }));
 
-import { loadPendingOrderByCode } from "@/app/pos/actions";
+import { loadPendingOrderByCode, shouldReusePendingIngredientPlan } from "@/app/pos/actions";
 
 const pendingOrderLookupProjection =
     "_id pickupNumber totalAmount customer cart easterEggAttachment.uploadedAt easterEggAttachment.printedAt";
@@ -155,5 +155,45 @@ describe("loadPendingOrderByCode", () => {
                 ]
             }
         });
+    });
+});
+
+describe("shouldReusePendingIngredientPlan", () => {
+    test("reuses the persisted plan when only selected option pricing differs", () => {
+        expect(shouldReusePendingIngredientPlan(
+            [{
+                productId: "prod-1",
+                snapshotName: "Burger",
+                quantity: 1,
+                selectedOptions: [{ name: "Senza cipolla", priceVariation: 0 }],
+                menuSelections: []
+            }],
+            [{
+                productId: "prod-1",
+                snapshotName: "Burger",
+                quantity: 1,
+                selectedOptions: [{ name: "Senza cipolla", priceVariation: 1.5 }],
+                menuSelections: []
+            }]
+        )).toBe(true);
+    });
+
+    test("does not reuse the persisted plan when menu selections changed", () => {
+        expect(shouldReusePendingIngredientPlan(
+            [{
+                productId: "menu-1",
+                snapshotName: "Menu",
+                quantity: 1,
+                selectedOptions: [],
+                menuSelections: [{ groupId: "side", productId: "prod-fries" }]
+            }],
+            [{
+                productId: "menu-1",
+                snapshotName: "Menu",
+                quantity: 1,
+                selectedOptions: [],
+                menuSelections: [{ groupId: "side", productId: "prod-salad" }]
+            }]
+        )).toBe(false);
     });
 });
