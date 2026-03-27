@@ -40,7 +40,8 @@ vi.mock("@/lib/printer", () => ({ PrinterService: {} }));
 vi.mock("@/lib/sumup", () => ({ createSumUpCheckout: vi.fn() }));
 vi.mock("@/lib/secrets", () => ({ decryptSecret: vi.fn() }));
 
-import { loadPendingOrderByCode, shouldReusePendingIngredientPlan } from "@/app/pos/actions";
+import { loadPendingOrderByCode } from "@/app/pos/actions";
+import { shouldReusePendingIngredientPlan } from "@/lib/pending-ingredient-plan";
 
 const pendingOrderLookupProjection =
     "_id pickupNumber totalAmount customer cart easterEggAttachment.uploadedAt easterEggAttachment.printedAt";
