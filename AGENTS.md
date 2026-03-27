@@ -7,7 +7,7 @@ scope: project
 ---
 
 ## Obiettivo del Progetto
-FantaFestando è un sistema gestionale per le feste di Bonate Sotto.
+FantaFestando è un sistema gestionale per feste locali.
 
 > **📋 Stato del Progetto**: Per una mappa dettagliata di tutte le epiche completate e pianificate, consultare **[`docs/EPICS.md`](docs/EPICS.md)** prima di iniziare qualsiasi lavoro.
 

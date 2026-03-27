@@ -1,6 +1,6 @@
 # FantaFestando
 
-Gestionale per feste locali (Bonate Sotto) con:
+Gestionale per feste locali con:
 - pannello admin per catalogo/eventi/hardware
 - dashboard admin con metriche vendite e sezione sessioni cassa
 - autenticazione RBAC per backoffice (`ADMIN`/`CASHIER`) con blocco accesso `/admin` ai soli `ADMIN`
@@ -12,6 +12,7 @@ Gestionale per feste locali (Bonate Sotto) con:
 - storno sicuro ordine pagato da admin con ripristino contabile/scorte
 - web app pubblica per ordini cliente
 - PWA dedicata per `menu` (pubblico), installabile e online-first
+- flusso pizza con numerazione dedicata, console cucina e monitor pubblico pizze pronte
 - integrazione pagamenti elettronici SumUp
 - rimborso SumUp in caso di storno ordine pagato con carta
 - stampa comande su stampanti termiche di rete
@@ -68,12 +69,33 @@ App disponibile su `http://localhost:3000`.
 - `GET /admin`: pannello amministrazione
 - `GET /pos`: interfaccia punto cassa
 - `GET /menu`: web app ordini pubblica
+- `GET /pizza-console`: console operativa cucina per gestione ticket pizza
+- `GET /pizza-monitor`: monitor pubblico delle pizze pronte
 - `GET /manifest-menu.webmanifest`: manifest PWA menu
 - `GET /login`: login admin
 
 Accesso backoffice:
 - ambienti standard: utenti letti da MongoDB collection `User` (`username`, `passwordHash`, `role`) con verifica password `bcrypt`;
 - sviluppo locale: fallback `admin / admin` attivo solo fuori produzione (disattivabile con `AUTH_ALLOW_DEV_CREDENTIALS=false`).
+
+Note accesso flusso pizza:
+- `/pizza-console` e le API `/api/pizza-console/*` sono pensate per uso operativo interno e richiedono sessione autenticata;
+- `/pizza-monitor` usa la route pubblica `/api/public/pizza-monitor` ed e` pensato per essere mostrato su monitor/schermo cliente.
+
+## Flusso pizza
+
+1. In Admin Catalogo, marca come `Categoria pizza` la categoria che deve entrare nel flusso dedicato.
+2. Quando un ordine contiene almeno un prodotto appartenente a una categoria pizza, il sistema assegna un `numero pizza` dedicato.
+3. Dopo il pagamento, la stampa reparto cucina include il numero pizza e il barcode `PZ:<orderId>`.
+4. La console cucina su `/pizza-console` mostra la coda delle pizze da preparare e permette di:
+   - segnare una pizza come pronta scansionando il barcode;
+   - rimettere in coda una pizza gia` pronta.
+5. Il monitor pubblico su `/pizza-monitor` mostra solo i numeri pizza nello stato `READY`.
+
+Dettagli utili:
+- la console cucina e` una route separata, non e` annidata sotto `/admin`;
+- il monitor pubblico e` anch'esso separato dal backoffice, per poter essere esposto su uno schermo dedicato;
+- nel riepilogo ordine pubblico (`/menu/success` e summary ordine) viene mostrato anche il numero pizza quando presente.
 
 ## Script principali
 
