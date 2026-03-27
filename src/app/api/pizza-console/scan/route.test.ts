@@ -1,15 +1,24 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const {
+    ensureAuthenticatedSessionMock,
+    adminUnauthorizedJsonMock,
     getActiveEventIdMock,
     dbConnectMock,
     orderFindOneMock,
     orderUpdateOneMock
 } = vi.hoisted(() => ({
+    ensureAuthenticatedSessionMock: vi.fn(),
+    adminUnauthorizedJsonMock: vi.fn(),
     getActiveEventIdMock: vi.fn(),
     dbConnectMock: vi.fn(),
     orderFindOneMock: vi.fn(),
     orderUpdateOneMock: vi.fn()
+}));
+
+vi.mock("@/lib/authz", () => ({
+    ensureAuthenticatedSession: ensureAuthenticatedSessionMock,
+    adminUnauthorizedJson: adminUnauthorizedJsonMock
 }));
 
 vi.mock("@/lib/events", () => ({
@@ -29,6 +38,8 @@ vi.mock("@/models/Order", () => ({
 
 import { POST } from "./route";
 
+const ORDER_ID = "507f1f77bcf86cd799439011";
+
 function mockOrder(order: unknown) {
     orderFindOneMock.mockReturnValue({
         select: vi.fn().mockReturnValue({
@@ -40,13 +51,20 @@ function mockOrder(order: unknown) {
 describe("POST /api/pizza-console/scan", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        ensureAuthenticatedSessionMock.mockResolvedValue({
+            ok: true,
+            user: { id: "user-1", username: "kitchen", role: "CASHIER" }
+        });
+        adminUnauthorizedJsonMock.mockImplementation((sessionCheck) =>
+            Response.json({ error: sessionCheck.error }, { status: sessionCheck.status })
+        );
         getActiveEventIdMock.mockResolvedValue("evt-1");
         orderUpdateOneMock.mockResolvedValue({ acknowledged: true, matchedCount: 1 });
     });
 
     test("marks a queued pizza ticket as ready from a valid barcode", async () => {
         mockOrder({
-            _id: "order-1",
+            _id: ORDER_ID,
             pizzaTicket: {
                 pizzaNumber: 42,
                 state: "QUEUED"
@@ -55,7 +73,7 @@ describe("POST /api/pizza-console/scan", () => {
 
         const response = await POST(new Request("http://localhost/api/pizza-console/scan", {
             method: "POST",
-            body: JSON.stringify({ barcode: "PZ:order-1" }),
+            body: JSON.stringify({ barcode: `PZ:${ORDER_ID}` }),
             headers: { "Content-Type": "application/json" }
         }) as unknown as import("next/server").NextRequest);
         const payload = await response.json();
@@ -64,7 +82,7 @@ describe("POST /api/pizza-console/scan", () => {
         expect(payload.status).toBe("ready");
         expect(orderUpdateOneMock).toHaveBeenCalledWith(
             {
-                _id: "order-1",
+                _id: ORDER_ID,
                 eventId: "evt-1",
                 status: "PAID",
                 "pizzaTicket.pizzaNumber": 42
@@ -79,7 +97,7 @@ describe("POST /api/pizza-console/scan", () => {
 
     test("returns already_ready without updating again", async () => {
         mockOrder({
-            _id: "order-1",
+            _id: ORDER_ID,
             pizzaTicket: {
                 pizzaNumber: 42,
                 state: "READY",
@@ -89,7 +107,7 @@ describe("POST /api/pizza-console/scan", () => {
 
         const response = await POST(new Request("http://localhost/api/pizza-console/scan", {
             method: "POST",
-            body: JSON.stringify({ barcode: "PZ:order-1" }),
+            body: JSON.stringify({ barcode: `PZ:${ORDER_ID}` }),
             headers: { "Content-Type": "application/json" }
         }) as unknown as import("next/server").NextRequest);
         const payload = await response.json();
@@ -99,10 +117,28 @@ describe("POST /api/pizza-console/scan", () => {
         expect(orderUpdateOneMock).not.toHaveBeenCalled();
     });
 
-    test("rejects invalid barcodes", async () => {
+    test("rejects unauthenticated requests before touching the database", async () => {
+        ensureAuthenticatedSessionMock.mockResolvedValueOnce({
+            ok: false,
+            status: 401,
+            error: "Autenticazione richiesta"
+        });
+
         const response = await POST(new Request("http://localhost/api/pizza-console/scan", {
             method: "POST",
-            body: JSON.stringify({ barcode: "BAD:order-1" }),
+            body: JSON.stringify({ barcode: `PZ:${ORDER_ID}` }),
+            headers: { "Content-Type": "application/json" }
+        }) as unknown as import("next/server").NextRequest);
+
+        expect(response.status).toBe(401);
+        expect(orderFindOneMock).not.toHaveBeenCalled();
+        expect(getActiveEventIdMock).not.toHaveBeenCalled();
+    });
+
+    test("rejects malformed barcode payloads", async () => {
+        const response = await POST(new Request("http://localhost/api/pizza-console/scan", {
+            method: "POST",
+            body: JSON.stringify({ barcode: "PZ:abc" }),
             headers: { "Content-Type": "application/json" }
         }) as unknown as import("next/server").NextRequest);
         const payload = await response.json();

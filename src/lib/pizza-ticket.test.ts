@@ -37,6 +37,7 @@ import {
     getPizzaBarcodeValue,
     normalizePizzaTicket,
     parsePizzaBarcodeValue,
+    parsePizzaOrderIdValue,
     resolvePizzaEligibleProductIds,
     resolvePizzaTicketForCart
 } from "./pizza-ticket";
@@ -179,9 +180,14 @@ describe("pizza-ticket helpers", () => {
             readyAt: undefined
         });
         expect(getPizzaBarcodeValue("507f1f77bcf86cd799439011")).toBe("PZ:507f1f77bcf86cd799439011");
+        expect(parsePizzaOrderIdValue("507f1f77bcf86cd799439011")).toEqual({
+            orderId: "507f1f77bcf86cd799439011"
+        });
         expect(parsePizzaBarcodeValue("PZ:507f1f77bcf86cd799439011")).toEqual({
             orderId: "507f1f77bcf86cd799439011"
         });
+        expect(parsePizzaOrderIdValue("abc")).toBeNull();
+        expect(parsePizzaBarcodeValue("PZ:abc")).toBeNull();
         expect(parsePizzaBarcodeValue("ABC")).toBeNull();
     });
 });
