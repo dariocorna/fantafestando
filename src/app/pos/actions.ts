@@ -986,7 +986,7 @@ export async function createOrder(data: {
         const requiresPendingState = computeRequiresPendingState(data.paymentMethod, capabilitiesResult.capabilities)
 
         if (requiresPendingState) {
-            const stockCheckResult = await validateStockForPendingOrder(data.eventId, stockPayload, stockMode)
+            const stockCheckResult = await validateStockForPendingOrder(data.eventId, stockPayload, stockMode, ingredientPlan)
             if (!stockCheckResult.success) {
                 return {
                     success: false,
