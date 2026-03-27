@@ -10,13 +10,7 @@ import { getNextPublicOrderNumber, getOrderCodeFromOrder } from "@/lib/order-cod
 import { getCurrentDayCode, isProductAvailableToday } from "@/lib/product-availability"
 import { createEasterEggUploadToken } from "@/lib/easter-egg-order"
 import { buildPublicOrderSummary } from "@/lib/public-order-summary"
-import {
-    aggregateCartQuantities,
-    collectStockShortages,
-    normalizeStockQuantity,
-    type ProductStockInfo,
-    type StockShortage
-} from "@/lib/inventory"
+import { type StockShortage } from "@/lib/inventory"
 import {
     collectReferencedProductIds,
     getProductUnitBasePrice,
@@ -29,6 +23,7 @@ import {
     buildIngredientPlanForCart,
     normalizeRecipeItems,
 } from "@/lib/ingredient-plan"
+import { validateStockForPendingOrder } from "@/lib/stock-operations"
 
 interface IngredientPlanCartSource {
     productId: string
@@ -297,47 +292,17 @@ export async function createPublicOrder(data: {
             }
         }
 
-        const demands = aggregateCartQuantities(
-            normalizedCart.flatMap((item) => {
-                if (Array.isArray(item.includedComponents) && item.includedComponents.length > 0) {
-                    return item.includedComponents.map((component) => ({
-                        productId: component.productId,
-                        quantity: component.quantity * item.quantity,
-                        snapshotName: component.snapshotName
-                    }))
-                }
-
-                return [{
-                    productId: item.productId,
-                    quantity: item.quantity,
-                    snapshotName: item.snapshotName
-                }]
-            })
-        )
-        const productStockMap = new Map<string, ProductStockInfo>(
-            [...productById.values()].map((product) => [
-                String(product._id),
-                {
-                    id: String(product._id),
-                    name: product.name,
-                    stockQuantity: normalizeStockQuantity(product.stockQuantity ?? null),
-                    isSoldOut: Boolean(product.isSoldOut)
-                }
-            ])
-        )
-        const stockShortages = collectStockShortages(demands, productStockMap)
-        if (stockShortages.length > 0) {
-            return {
-                success: false,
-                error: formatShortagesError(stockShortages),
-                stockShortages
-            }
-        }
-
-        const pickupNumber = await getNextPublicOrderNumber(data.eventId)
-        const easterEggUpload = event.settings?.portalEasterEggEnabled
-            ? createEasterEggUploadToken()
-            : null
+        const stockPayload = normalizedCart.map((item) => ({
+            productId: item.productId,
+            snapshotName: item.snapshotName,
+            quantity: item.quantity,
+            selectedOptions: item.selectedOptions,
+            includedComponents: item.includedComponents?.map((component) => ({
+                productId: component.productId,
+                snapshotName: component.snapshotName,
+                quantity: component.quantity
+            }))
+        }))
         const ingredientPlan = await buildPersistedIngredientPlan(
             data.eventId,
             normalizedCart.map((item) => ({
@@ -351,6 +316,23 @@ export async function createPublicOrder(data: {
                 }))
             }))
         )
+        const stockCheckResult = await validateStockForPendingOrder(data.eventId, stockPayload, "strict", ingredientPlan)
+        if (!stockCheckResult.success) {
+            const stockShortages = stockCheckResult.stockShortages || []
+            const hasMissingEntries = stockShortages.some((entry) => /non trovato$/i.test(entry.productName))
+            return {
+                success: false,
+                error: hasMissingEntries
+                    ? (stockCheckResult.error || "Alcuni articoli di magazzino non sono più disponibili.")
+                    : formatShortagesError(stockShortages),
+                stockShortages
+            }
+        }
+
+        const pickupNumber = await getNextPublicOrderNumber(data.eventId)
+        const easterEggUpload = event.settings?.portalEasterEggEnabled
+            ? createEasterEggUploadToken()
+            : null
 
         // Create the order with PENDING status
         const order = await Order.create({
