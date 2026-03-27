@@ -86,10 +86,13 @@ Note accesso flusso pizza:
 
 1. In Admin Catalogo, marca come `Categoria pizza` la categoria che deve entrare nel flusso dedicato.
 2. Quando un ordine contiene almeno un prodotto appartenente a una categoria pizza, il sistema assegna un `numero pizza` dedicato.
-3. Dopo il pagamento, la stampa reparto cucina include il numero pizza e il barcode `PZ:<orderId>`.
+3. Dopo il pagamento:
+   - se la categoria pizza ha una stampante reparto, la comanda cucina include numero pizza e barcode `EAN-8` numerico corto, derivato dal numero pizza;
+   - se non ha una stampante reparto, il flusso resta valido e la pizza stampa solo in cassa sulla copia cliente, con lo stesso barcode `EAN-8` sulla comanda cliente.
 4. La console cucina su `/pizza-console` mostra la coda delle pizze da preparare e permette di:
    - segnare una pizza come pronta scansionando il barcode;
-   - rimettere in coda una pizza gia` pronta.
+   - rimettere in coda una pizza gia` pronta;
+   - rimuovere manualmente un ticket sia dalla coda di preparazione sia dalla lista delle pizze pronte.
 5. Il monitor pubblico su `/pizza-monitor` mostra solo i numeri pizza nello stato `READY`.
 
 Dettagli utili:

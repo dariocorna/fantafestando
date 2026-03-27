@@ -9,11 +9,11 @@ describe("validatePizzaCategoryConfiguration", () => {
         })).toBeNull();
     });
 
-    test("blocca le categorie pizza senza stampante kitchen", () => {
+    test("accetta le categorie pizza anche senza stampante kitchen dedicata", () => {
         expect(validatePizzaCategoryConfiguration({
             pizzaFlowEnabled: true,
             skipKitchenPrint: false
-        })).toBe("Una categoria pizza richiede una stampante reparto kitchen");
+        })).toBeNull();
     });
 
     test("blocca le categorie pizza che disattivano la stampa comanda", () => {

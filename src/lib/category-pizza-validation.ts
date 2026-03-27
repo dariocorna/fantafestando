@@ -7,8 +7,5 @@ export function validatePizzaCategoryConfiguration(input: {
     if (input.skipKitchenPrint) {
         return "Una categoria pizza non può disattivare la stampa comanda";
     }
-    if (!input.printerId) {
-        return "Una categoria pizza richiede una stampante reparto kitchen";
-    }
     return null;
 }

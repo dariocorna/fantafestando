@@ -157,7 +157,7 @@ export function EditCategoryDialog({
                         </label>
                         {pizzaFlowEnabled ? (
                             <p className="text-xs font-semibold text-amber-700">
-                                Le categorie pizza devono stampare su una stampante reparto kitchen.
+                                La stampante reparto e` opzionale: senza stampante dedicata la comanda pizza esce solo in cassa sulla copia cliente.
                             </p>
                         ) : null}
                     </div>

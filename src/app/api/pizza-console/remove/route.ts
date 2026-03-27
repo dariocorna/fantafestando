@@ -44,9 +44,9 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ status: "not_found" }, { status: 404 });
         }
 
-        if (order.pizzaTicket.state === "QUEUED") {
+        if (order.pizzaTicket.state === "REMOVED") {
             return NextResponse.json({
-                status: "already_queued",
+                status: "already_removed",
                 ticket: {
                     orderId: order._id.toString(),
                     pizzaNumber: order.pizzaTicket.pizzaNumber
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
             },
             {
                 $set: {
-                    "pizzaTicket.state": "QUEUED"
+                    "pizzaTicket.state": "REMOVED"
                 },
                 $unset: {
                     "pizzaTicket.readyAt": 1
@@ -72,14 +72,14 @@ export async function POST(request: NextRequest) {
         );
 
         return NextResponse.json({
-            status: "requeued",
+            status: "removed",
             ticket: {
                 orderId: order._id.toString(),
                 pizzaNumber: order.pizzaTicket.pizzaNumber
             }
         });
     } catch (error) {
-        console.error("Pizza console requeue API error:", error);
+        console.error("Pizza console remove API error:", error);
         return NextResponse.json({ error: "Errore interno" }, { status: 500 });
     }
 }
