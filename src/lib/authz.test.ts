@@ -18,7 +18,8 @@ import {
     adminUnauthorizedJson,
     ensureAdminSession,
     getCurrentSessionUser,
-    requireAdminPageSession
+    requireAdminPageSession,
+    requireAuthenticatedPageSession
 } from "@/lib/authz";
 
 describe("authz helpers", () => {
@@ -114,6 +115,26 @@ describe("authz helpers", () => {
 
         await expect(requireAdminPageSession()).rejects.toThrow("Redirect non riuscito");
         expect(redirectMock).toHaveBeenCalledWith("/pos");
+    });
+
+    it("returns current cashier user without redirect for authenticated staff pages", async () => {
+        authMock.mockResolvedValue({
+            user: { id: "cashier-id", username: "cashier", role: "CASHIER" }
+        });
+
+        await expect(requireAuthenticatedPageSession()).resolves.toEqual({
+            id: "cashier-id",
+            username: "cashier",
+            role: "CASHIER"
+        });
+        expect(redirectMock).not.toHaveBeenCalled();
+    });
+
+    it("redirects to /login when authenticated staff page access is unauthenticated", async () => {
+        authMock.mockResolvedValue(null);
+
+        await expect(requireAuthenticatedPageSession()).rejects.toThrow("Redirect non riuscito");
+        expect(redirectMock).toHaveBeenCalledWith("/login");
     });
 
     it("creates unauthorized json response with expected status", async () => {
