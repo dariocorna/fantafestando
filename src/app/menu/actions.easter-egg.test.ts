@@ -4,6 +4,7 @@ const {
     dbConnectMock,
     eventFindByIdMock,
     productFindMock,
+    ingredientFindMock,
     orderCreateMock,
     routeOrderToPrintersMock,
     getNextPublicOrderNumberMock,
@@ -13,6 +14,7 @@ const {
     dbConnectMock: vi.fn(),
     eventFindByIdMock: vi.fn(),
     productFindMock: vi.fn(),
+    ingredientFindMock: vi.fn(),
     orderCreateMock: vi.fn(),
     routeOrderToPrintersMock: vi.fn(),
     getNextPublicOrderNumberMock: vi.fn(),
@@ -23,6 +25,7 @@ const {
 vi.mock("@/lib/mongoose", () => ({ default: dbConnectMock }));
 vi.mock("@/models/Event", () => ({ default: { findById: eventFindByIdMock } }));
 vi.mock("@/models/Product", () => ({ default: { find: productFindMock } }));
+vi.mock("@/models/Ingredient", () => ({ default: { find: ingredientFindMock } }));
 vi.mock("@/models/Order", () => ({ default: { create: orderCreateMock } }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/printer", () => ({
@@ -67,32 +70,33 @@ function mockProducts() {
 }
 
 function mockProductsWithFixedMenuCollision() {
+    const collisionProducts = [
+        {
+            _id: "prod-main",
+            name: "Panino",
+            basePrice: 7,
+            kind: "STANDARD",
+            salesChannels: ["POS", "MENU"],
+            availableDays: [],
+            stockQuantity: 0,
+            isSoldOut: true,
+        },
+        {
+            _id: "menu-1",
+            name: "Menu panino",
+            basePrice: 12,
+            kind: "FIXED_MENU",
+            salesChannels: ["POS", "MENU"],
+            availableDays: [],
+            stockQuantity: null,
+            isSoldOut: false,
+            menuComponents: [{ productId: "prod-main", quantity: 1 }]
+        }
+    ];
     productFindMock
         .mockReturnValueOnce({
             select: vi.fn().mockReturnValue({
-                lean: vi.fn().mockResolvedValue([
-                    {
-                        _id: "prod-main",
-                        name: "Panino",
-                        basePrice: 7,
-                        kind: "STANDARD",
-                        salesChannels: ["POS", "MENU"],
-                        availableDays: [],
-                        stockQuantity: 0,
-                        isSoldOut: true,
-                    },
-                    {
-                        _id: "menu-1",
-                        name: "Menu panino",
-                        basePrice: 12,
-                        kind: "FIXED_MENU",
-                        salesChannels: ["POS", "MENU"],
-                        availableDays: [],
-                        stockQuantity: null,
-                        isSoldOut: false,
-                        menuComponents: [{ productId: "prod-main", quantity: 1 }]
-                    }
-                ])
+                lean: vi.fn().mockResolvedValue(collisionProducts)
             })
         })
         .mockReturnValueOnce({
@@ -104,12 +108,22 @@ function mockProductsWithFixedMenuCollision() {
                     }
                 ])
             })
+        })
+        .mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue(collisionProducts)
+            })
         });
 }
 
 describe("createPublicOrder menu flow", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        ingredientFindMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue([])
+            })
+        });
         getNextPublicOrderNumberMock.mockResolvedValue(42);
         getOrderCodeFromOrderMock.mockReturnValue("W-0042");
         orderCreateMock.mockResolvedValue({
@@ -217,6 +231,69 @@ describe("createPublicOrder menu flow", () => {
         expect(result.success).toBe(false);
         if (!result.success) {
             expect(result.error).toContain("Scorte insufficienti");
+        }
+        expect(orderCreateMock).not.toHaveBeenCalled();
+        expect(routeOrderToPrintersMock).not.toHaveBeenCalled();
+    });
+
+    test("rejects pending menu orders when tracked ingredient stock is insufficient", async () => {
+        mockEvent(false);
+        productFindMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue([
+                    {
+                        _id: "prod-1",
+                        name: "Panino",
+                        basePrice: 7,
+                        kind: "STANDARD",
+                        salesChannels: ["POS", "MENU"],
+                        availableDays: [],
+                        stockQuantity: null,
+                        isSoldOut: false,
+                        recipeItems: [{ ingredientId: "ing-1", quantity: 2 }]
+                    }
+                ])
+            })
+        });
+        ingredientFindMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue([
+                    {
+                        _id: "ing-1",
+                        name: "Pane",
+                        shortName: "Pane",
+                        active: true,
+                        stockQuantity: 1
+                    }
+                ])
+            })
+        });
+
+        const result = await createPublicOrder({
+            eventId: "event-1",
+            customer: { name: "Mario" },
+            totalAmount: 7,
+            cart: [
+                {
+                    productId: "prod-1",
+                    snapshotName: "Panino",
+                    quantity: 1,
+                    selectedOptions: []
+                }
+            ]
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.error).toContain("Scorte insufficienti");
+            expect(result.stockShortages).toEqual([
+                expect.objectContaining({
+                    productId: "ing-1",
+                    productName: "Pane",
+                    requestedQuantity: 2,
+                    availableQuantity: 1
+                })
+            ]);
         }
         expect(orderCreateMock).not.toHaveBeenCalled();
         expect(routeOrderToPrintersMock).not.toHaveBeenCalled();

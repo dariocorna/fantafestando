@@ -102,7 +102,7 @@ vi.mock("@/models/Ingredient", () => ({
     }
 }))
 
-import { applyStockForPaidOrder, rollbackStockAdjustments } from "@/lib/stock-operations"
+import { applyStockForPaidOrder, rollbackStockAdjustments, validateStockForPendingOrder } from "@/lib/stock-operations"
 
 describe("stock operations", () => {
     beforeEach(() => {
@@ -180,5 +180,45 @@ describe("stock operations", () => {
 
         await rollbackStockAdjustments("evt-1", result.appliedAdjustments || [])
         expect(ingredientStore.get("ing-1")?.stockQuantity).toBe(2)
+    })
+
+    test("rejects pending orders when tracked ingredient stock is insufficient", async () => {
+        productStore.set("prod-1", {
+            _id: "prod-1",
+            eventId: "evt-1",
+            name: "Fritto",
+            stockQuantity: null,
+            isSoldOut: false
+        })
+        ingredientStore.set("ing-1", {
+            _id: "ing-1",
+            eventId: "evt-1",
+            name: "Patatine",
+            stockQuantity: 1
+        })
+
+        const result = await validateStockForPendingOrder(
+            "evt-1",
+            [{
+                productId: "prod-1",
+                snapshotName: "Fritto",
+                quantity: 1
+            }],
+            "strict",
+            [{
+                ingredientId: "ing-1",
+                quantity: 2
+            }]
+        )
+
+        expect(result.success).toBe(false)
+        expect(result.error).toBe("Scorte non sufficienti per completare l'operazione")
+        expect(result.stockShortages).toEqual([{
+            productId: "ing-1",
+            productName: "Patatine",
+            requestedQuantity: 2,
+            availableQuantity: 1
+        }])
+        expect(ingredientStore.get("ing-1")?.stockQuantity).toBe(1)
     })
 })

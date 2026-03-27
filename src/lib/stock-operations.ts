@@ -503,19 +503,32 @@ export async function applyStockForPaidOrder(
 export async function validateStockForPendingOrder(
     eventId: string,
     cart: OrderCartPayloadItem[],
-    mode: StockMode
+    mode: StockMode,
+    ingredientPlan: Array<{ ingredientId?: string, quantity: number }> = []
 ): Promise<StockOperationResult> {
     const demands = buildDemandMap(cart)
-    if (demands.size === 0) return { success: true }
+    const ingredientDemands = buildIngredientDemandMap(ingredientPlan)
+    if (demands.size === 0 && ingredientDemands.size === 0) return { success: true }
 
-    const productStocks = await loadProductStocks(eventId, [...demands.keys()])
-    const shortages = collectStockShortages(demands, productStocks)
+    const productStocks = demands.size > 0
+        ? await loadProductStocks(eventId, [...demands.keys()])
+        : new Map<string, ProductStockInfo>()
+    const ingredientStocks = ingredientDemands.size > 0
+        ? await loadIngredientStocks(eventId, [...ingredientDemands.keys()])
+        : new Map<string, ProductStockInfo>()
+    const shortages = [
+        ...collectStockShortages(demands, productStocks),
+        ...collectStockShortages(ingredientDemands, ingredientStocks).map((entry) => ({
+            ...entry,
+            productName: entry.productName === "Prodotto non trovato" ? "Ingrediente non trovato" : entry.productName
+        }))
+    ]
     const { missing, stock } = splitMissingShortages(shortages)
 
     if (missing.length > 0) {
         return {
             success: false,
-            error: "Alcuni prodotti non sono più disponibili",
+            error: "Alcuni articoli di magazzino non sono più disponibili",
             stockShortages: shortages
         }
     }
