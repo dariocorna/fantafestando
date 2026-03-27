@@ -15,6 +15,10 @@ function isAdminPath(pathname: string): boolean {
     return pathname === '/admin' || pathname.startsWith('/admin/');
 }
 
+function isAuthenticatedStaffPath(pathname: string): boolean {
+    return pathname === '/pizza-console' || pathname.startsWith('/pizza-console/');
+}
+
 export const proxy = auth((request) => {
     const { pathname, search } = request.nextUrl;
     if (shouldSkipPath(pathname)) {
@@ -38,6 +42,13 @@ export const proxy = auth((request) => {
                 posUrl.search = '';
                 return NextResponse.redirect(posUrl);
             }
+        }
+
+        if (isAuthenticatedStaffPath(pathname) && !request.auth?.user) {
+            const loginUrl = request.nextUrl.clone();
+            loginUrl.pathname = '/login';
+            loginUrl.searchParams.set('callbackUrl', `${pathname}${search}`);
+            return NextResponse.redirect(loginUrl);
         }
 
         return NextResponse.next();

@@ -56,4 +56,25 @@ test.describe("RBAC accesso admin senza sessione iniziale", () => {
 
         await expect(page).toHaveURL(/\/pos(?:$|\/|\?)/);
     });
+
+    test("utente non autenticato su /pizza-console viene rediretto a /login", async ({ page }) => {
+        await page.goto("/pizza-console", { waitUntil: "domcontentloaded" });
+
+        await expect(page).toHaveURL(/\/login\?/);
+        const url = new URL(page.url());
+        expect(url.pathname).toBe("/login");
+        expect(url.searchParams.get("callbackUrl")).toBe("/pizza-console");
+        await expect(page.getByTestId("login-form")).toBeVisible();
+    });
+
+    test("utente CASHIER autenticato puo accedere a /pizza-console", async ({ page }) => {
+        await loginWithCredentials(page, {
+            username: credentials.cashier.username,
+            password: credentials.cashier.password,
+            targetPath: "/pizza-console",
+            expectedPathPrefix: "/pizza-console"
+        });
+
+        await expect(page.getByTestId("pizza-console-scanner-input")).toBeVisible();
+    });
 });
