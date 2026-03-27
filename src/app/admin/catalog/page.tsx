@@ -141,6 +141,12 @@ function formatRecipeSummary(
         .join(" · ");
 }
 
+function revalidateCatalogSurfaces() {
+    revalidatePath("/admin/catalog");
+    revalidatePath("/menu");
+    revalidatePath("/pos");
+}
+
 async function parseProductPayload(
     formData: FormData,
     currentEventId: string | null,
@@ -319,6 +325,7 @@ export default async function AdminCatalog() {
             shortName: ingredient.shortName || undefined
         }])
     );
+
     async function createIngredient(formData: FormData) {
         "use server"
         const sessionCheck = await ensureAdminSession();
@@ -364,7 +371,7 @@ export default async function AdminCatalog() {
             stockQuantity,
             active
         });
-        revalidatePath("/admin/catalog");
+        revalidateCatalogSurfaces();
         return { success: true };
     }
 
@@ -421,7 +428,7 @@ export default async function AdminCatalog() {
             skipKitchenPrint,
             pizzaFlowEnabled
         });
-        revalidatePath("/admin/catalog");
+        revalidateCatalogSurfaces();
         return { success: true };
     }
 
@@ -441,7 +448,7 @@ export default async function AdminCatalog() {
             eventId: currentEventId,
             variants: []
         });
-        revalidatePath("/admin/catalog");
+        revalidateCatalogSurfaces();
         return { success: true };
     }
 
@@ -506,7 +513,7 @@ export default async function AdminCatalog() {
                 ...(Object.keys(updateUnset).length > 0 ? { $unset: updateUnset } : {})
             }
         );
-        revalidatePath("/admin/catalog");
+        revalidateCatalogSurfaces();
         return { success: true };
     }
 
@@ -532,7 +539,7 @@ export default async function AdminCatalog() {
         }));
 
         await Category.bulkWrite(bulkOps);
-        revalidatePath("/admin/catalog");
+        revalidateCatalogSurfaces();
     }
 
     async function deleteCategory(formData: FormData) {
@@ -551,7 +558,7 @@ export default async function AdminCatalog() {
         if (!deletedCategory) return;
         // Also delete products in this category to keep consistency
         await Product.deleteMany({ eventId: scopedEventId, categoryId: id });
-        revalidatePath("/admin/catalog");
+        revalidateCatalogSurfaces();
     }
 
     async function deleteIngredient(formData: FormData) {
@@ -574,7 +581,7 @@ export default async function AdminCatalog() {
             { eventId: scopedEventId },
             { $pull: { recipeItems: { ingredientId: id } } }
         );
-        revalidatePath("/admin/catalog");
+        revalidateCatalogSurfaces();
     }
 
     async function updateCategory(formData: FormData) {
@@ -612,7 +619,7 @@ export default async function AdminCatalog() {
             { _id: id, eventId: scopedEventId },
             { name, uiColor, printerId: printerId || null, skipKitchenPrint, pizzaFlowEnabled }
         );
-        revalidatePath("/admin/catalog");
+        revalidateCatalogSurfaces();
         return { success: true };
     }
 
@@ -629,7 +636,7 @@ export default async function AdminCatalog() {
         if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
         await dbConnect();
         await Product.findOneAndDelete({ _id: id, eventId: scopedEventId });
-        revalidatePath("/admin/catalog");
+        revalidateCatalogSurfaces();
     }
 
     async function updateProduct(formData: FormData) {
@@ -684,7 +691,7 @@ export default async function AdminCatalog() {
                 ...(Object.keys(updateUnset).length > 0 ? { $unset: updateUnset } : {})
             }
         );
-        revalidatePath("/admin/catalog");
+        revalidateCatalogSurfaces();
         return { success: true };
     }
 
@@ -711,7 +718,7 @@ export default async function AdminCatalog() {
         await Product.findOneAndUpdate({ _id: productId, eventId: scopedEventId }, {
             $push: { variants: { optionName, priceVariation, stockQuantity } }
         });
-        revalidatePath("/admin/catalog");
+        revalidateCatalogSurfaces();
     }
 
     async function removeVariant(formData: FormData) {
@@ -732,7 +739,7 @@ export default async function AdminCatalog() {
         await Product.findOneAndUpdate({ _id: productId, eventId: scopedEventId }, {
             $pull: { variants: { optionName } }
         });
-        revalidatePath("/admin/catalog");
+        revalidateCatalogSurfaces();
     }
 
     return (
