@@ -193,7 +193,7 @@ test.describe.serial("Pizza monitor flow", () => {
         const customerJob = orderJobs.find((job) => job.printType === "CUSTOMER_ORDER");
 
         expect(kitchenJob?.document?.pizzaNumber).toBe(pizzaNumber);
-        expect(kitchenJob?.document?.pizzaBarcodeValue).toBe(`PZ:${orderId}`);
+        expect(kitchenJob?.document?.pizzaBarcodeValue).toBe(String(pizzaNumber).padStart(8, "0"));
         expect(cashierJob?.document?.pizzaNumber).toBe(pizzaNumber);
         expect(cashierJob?.document?.pizzaBarcodeValue).toBeUndefined();
         expect(customerJob?.document?.pizzaNumber).toBe(pizzaNumber);
@@ -201,11 +201,170 @@ test.describe.serial("Pizza monitor flow", () => {
 
         await page.goto("/pizza-console");
         await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
-        await page.getByTestId("pizza-console-scanner-input").fill(`PZ:${orderId}`);
+        await page.getByTestId("pizza-console-scanner-input").fill(String(pizzaNumber).padStart(8, "0"));
         await page.getByTestId("pizza-console-scanner-input").press("Enter");
 
         await expect(page.getByTestId(`pizza-console-ready-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toHaveCount(0);
+
+        await page.goto("/pizza-monitor");
+        await expect(page.getByTestId(`pizza-monitor-number-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
+    });
+
+    test("permette di rimuovere manualmente ticket in coda e ticket pronti", async ({ page, isMobile }) => {
+        test.skip(isMobile, "Flusso validato su desktop.");
+        test.setTimeout(120000);
+
+        const suffix = uniqueSuffix();
+        const eventName = `Pizza Remove ${suffix}`;
+        const cashierPrinterName = `Cashier ${suffix}`;
+        const kitchenPrinterName = `Forno ${suffix}`;
+        const cashBoxName = `CashBox ${suffix}`;
+        const posName = `POS ${suffix}`;
+        const pizzaCategoryName = `Pizze ${suffix}`;
+        const pizzaProductName = `Margherita ${suffix}`;
+        const pizzaShortName = `PZ${suffix.slice(-4)}`;
+
+        await ensureAdminAuthenticated(page, "/admin");
+        await createAndActivateEvent(page, eventName);
+        createdEvents.push(eventName);
+        await configureCashPos(page, cashierPrinterName, localPrinterIp(), cashBoxName, posName);
+        await createPrinter(page, kitchenPrinterName, localPrinterIp(), {
+            printerType: "KITCHEN",
+            printerPort: "19101"
+        });
+        await createCategory(page, pizzaCategoryName, {
+            kitchenPrinterName,
+            pizzaFlowEnabled: true
+        });
+        await createProduct(page, pizzaCategoryName, {
+            name: pizzaProductName,
+            shortName: pizzaShortName,
+            price: "8.00"
+        });
+
+        const { code, orderId } = await createWebOrderAndGetOrderData(page, [
+            { name: pizzaProductName, quantity: 1 }
+        ]);
+
+        const summaryResponse = await page.request.get(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(code)}`);
+        expect(summaryResponse.ok()).toBe(true);
+        const summaryPayload = await summaryResponse.json() as { summary?: { pizzaNumber?: number } };
+        const pizzaNumber = summaryPayload.summary?.pizzaNumber;
+        expect(pizzaNumber).toBeTruthy();
+
+        await openPosAndSelectDevice(page, posName);
+        await openCashSessionIfRequired(page);
+        await page.getByRole("button", { name: /Carica ordine da codice/i }).click();
+        const pendingDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i }).first();
+        await expect(pendingDialog).toBeVisible();
+        await pendingDialog.getByRole("textbox").fill(code);
+        await pendingDialog.getByRole("button", { name: "Carica", exact: true }).click();
+
+        await expect(page.getByText(new RegExp(`^Codice ${code}$`, "i"))).toBeVisible({ timeout: 15000 });
+        await page.getByRole("button", { name: "PAGA ORA", exact: true }).click();
+        const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i }).first();
+        await expect(checkoutDialog).toBeVisible();
+        await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click();
+        await expect(checkoutDialog).toBeHidden({ timeout: 15000 });
+        await dismissFeedbackModal(page);
+
+        await page.goto("/pizza-console");
+        await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
+        await page.getByTestId(`pizza-console-remove-queued-${pizzaNumber}`).click();
+        await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toHaveCount(0);
+
+        await page.getByTestId("pizza-console-scanner-input").fill(String(pizzaNumber).padStart(8, "0"));
+        await page.getByTestId("pizza-console-scanner-input").press("Enter");
+        await expect(page.getByTestId(`pizza-console-ready-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
+
+        await page.goto("/pizza-monitor");
+        await expect(page.getByTestId(`pizza-monitor-number-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
+
+        await page.goto("/pizza-console");
+        await page.getByTestId(`pizza-console-remove-ready-${pizzaNumber}`).click();
+        await expect(page.getByTestId(`pizza-console-ready-${pizzaNumber}`)).toHaveCount(0);
+
+        await page.goto("/pizza-monitor");
+        await expect(page.getByTestId(`pizza-monitor-number-${pizzaNumber}`)).toHaveCount(0);
+    });
+
+    test("gestisce il flusso pizza anche senza stampante reparto dedicata", async ({ page, isMobile }) => {
+        test.skip(isMobile, "Flusso validato su desktop.");
+        test.setTimeout(120000);
+
+        const suffix = uniqueSuffix();
+        const eventName = `Pizza Cliente ${suffix}`;
+        const cashierPrinterName = `Cashier ${suffix}`;
+        const cashBoxName = `CashBox ${suffix}`;
+        const posName = `POS ${suffix}`;
+        const pizzaCategoryName = `Pizze ${suffix}`;
+        const pizzaProductName = `Margherita ${suffix}`;
+        const pizzaShortName = `PZ${suffix.slice(-4)}`;
+
+        await ensureAdminAuthenticated(page, "/admin");
+        await createAndActivateEvent(page, eventName);
+        createdEvents.push(eventName);
+        await configureCashPos(page, cashierPrinterName, localPrinterIp(), cashBoxName, posName);
+        await createCategory(page, pizzaCategoryName, {
+            pizzaFlowEnabled: true
+        });
+        await createProduct(page, pizzaCategoryName, {
+            name: pizzaProductName,
+            shortName: pizzaShortName,
+            price: "8.00"
+        });
+
+        const { code, orderId } = await createWebOrderAndGetOrderData(page, [
+            { name: pizzaProductName, quantity: 1 }
+        ]);
+
+        const summaryResponse = await page.request.get(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(code)}`);
+        expect(summaryResponse.ok()).toBe(true);
+        const summaryPayload = await summaryResponse.json() as { summary?: { pizzaNumber?: number } };
+        const pizzaNumber = summaryPayload.summary?.pizzaNumber;
+        expect(pizzaNumber).toBeTruthy();
+
+        await openPosAndSelectDevice(page, posName);
+        await openCashSessionIfRequired(page);
+        await page.getByRole("button", { name: /Carica ordine da codice/i }).click();
+        const pendingDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i }).first();
+        await expect(pendingDialog).toBeVisible();
+        await pendingDialog.getByRole("textbox").fill(code);
+        await pendingDialog.getByRole("button", { name: "Carica", exact: true }).click();
+
+        await expect(page.getByText(new RegExp(`^Codice ${code}$`, "i"))).toBeVisible({ timeout: 15000 });
+        await page.getByRole("button", { name: "PAGA ORA", exact: true }).click();
+        const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i }).first();
+        await expect(checkoutDialog).toBeVisible();
+        await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click();
+        await expect(checkoutDialog).toBeHidden({ timeout: 15000 });
+        await dismissFeedbackModal(page);
+
+        await expect.poll(async () => {
+            const response = await page.request.get("/api/admin/print-jobs?limit=20");
+            if (!response.ok()) return 0;
+            const payload = await response.json() as PrintJobsPayload;
+            return (payload.jobs || []).filter((job) => job.document?.orderId === orderId).length;
+        }, { timeout: 20000 }).toBeGreaterThanOrEqual(2);
+
+        const printJobsResponse = await page.request.get("/api/admin/print-jobs?limit=20");
+        const printJobsPayload = await printJobsResponse.json() as PrintJobsPayload;
+        const orderJobs = (printJobsPayload.jobs || []).filter((job) => job.document?.orderId === orderId);
+        const kitchenJob = orderJobs.find((job) => job.printType === "KITCHEN_ORDER");
+        const cashierJob = orderJobs.find((job) => job.printType === "CASHIER_SUMMARY");
+        const customerJob = orderJobs.find((job) => job.printType === "CUSTOMER_ORDER");
+
+        expect(kitchenJob).toBeUndefined();
+        expect(cashierJob?.document?.pizzaNumber).toBe(pizzaNumber);
+        expect(cashierJob?.document?.pizzaBarcodeValue).toBeUndefined();
+        expect(customerJob?.document?.pizzaNumber).toBe(pizzaNumber);
+        expect(customerJob?.document?.pizzaBarcodeValue).toBe(String(pizzaNumber).padStart(8, "0"));
+
+        await page.goto("/pizza-console");
+        await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
+        await page.getByRole("button", { name: "Segna pronta", exact: true }).click();
+        await expect(page.getByTestId(`pizza-console-ready-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
 
         await page.goto("/pizza-monitor");
         await expect(page.getByTestId(`pizza-monitor-number-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
