@@ -14,6 +14,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import {
+    ensureAuthenticatedSession,
     adminUnauthorizedJson,
     ensureAdminSession,
     getCurrentSessionUser,
@@ -47,6 +48,11 @@ describe("authz helpers", () => {
     it("returns 401 when no authenticated user is present", async () => {
         authMock.mockResolvedValue(null);
 
+        await expect(ensureAuthenticatedSession()).resolves.toEqual({
+            ok: false,
+            status: 401,
+            error: "Autenticazione richiesta"
+        });
         await expect(ensureAdminSession()).resolves.toEqual({
             ok: false,
             status: 401,
@@ -71,6 +77,10 @@ describe("authz helpers", () => {
             user: { id: "admin-id", username: "admin", role: "ADMIN" }
         });
 
+        await expect(ensureAuthenticatedSession()).resolves.toEqual({
+            ok: true,
+            user: { id: "admin-id", username: "admin", role: "ADMIN" }
+        });
         await expect(ensureAdminSession()).resolves.toEqual({
             ok: true,
             user: { id: "admin-id", username: "admin", role: "ADMIN" }

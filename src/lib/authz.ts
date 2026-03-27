@@ -11,6 +11,9 @@ export interface SessionUser {
 export type AdminSessionCheck =
     | { ok: true; user: SessionUser }
     | { ok: false; status: 401 | 403; error: string };
+export type AuthenticatedSessionCheck =
+    | { ok: true; user: SessionUser }
+    | { ok: false; status: 401; error: string };
 
 function resolveSessionUser(session: Session | null): SessionUser | null {
     const user = session?.user;
@@ -44,6 +47,19 @@ export async function ensureAdminSession(): Promise<AdminSessionCheck> {
             ok: false,
             status: 403,
             error: "Accesso riservato agli amministratori"
+        };
+    }
+
+    return { ok: true, user };
+}
+
+export async function ensureAuthenticatedSession(): Promise<AuthenticatedSessionCheck> {
+    const user = await getCurrentSessionUser();
+    if (!user) {
+        return {
+            ok: false,
+            status: 401,
+            error: "Autenticazione richiesta"
         };
     }
 
