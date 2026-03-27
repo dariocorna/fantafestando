@@ -3,6 +3,8 @@ import Category from "@/models/Category";
 import Product from "@/models/Product";
 import { getNextPizzaOrderNumber } from "@/lib/order-code";
 
+const MONGO_OBJECT_ID_PATTERN = /^[a-fA-F0-9]{24}$/;
+
 export interface PizzaCartComponentInput {
     productId: string;
     snapshotName?: string;
@@ -32,14 +34,18 @@ export function getPizzaBarcodeValue(orderId: string): string {
     return `PZ:${orderId}`;
 }
 
+export function parsePizzaOrderIdValue(rawValue: string): { orderId: string } | null {
+    const orderId = rawValue.trim();
+    if (!MONGO_OBJECT_ID_PATTERN.test(orderId)) return null;
+
+    return { orderId };
+}
+
 export function parsePizzaBarcodeValue(rawValue: string): { orderId: string } | null {
     const normalized = rawValue.trim();
     if (!normalized.startsWith("PZ:")) return null;
 
-    const orderId = normalized.slice(3).trim();
-    if (!orderId) return null;
-
-    return { orderId };
+    return parsePizzaOrderIdValue(normalized.slice(3));
 }
 
 export function normalizePizzaTicket(
@@ -118,7 +124,8 @@ export async function resolvePizzaEligibleProductIds(
         products
             .filter((product) => {
                 const categoryId = product.categoryId?.toString();
-                return Boolean(categoryId) && pizzaCategoryIds.has(categoryId);
+                if (!categoryId) return false;
+                return pizzaCategoryIds.has(categoryId);
             })
             .map((product) => product._id.toString())
     );

@@ -1,26 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
+import { adminUnauthorizedJson, ensureAuthenticatedSession } from "@/lib/authz";
 import dbConnect from "@/lib/mongoose";
 import { getActiveEventId } from "@/lib/events";
 import Order from "@/models/Order";
+import { parsePizzaOrderIdValue } from "@/lib/pizza-ticket";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
     try {
+        const sessionCheck = await ensureAuthenticatedSession();
+        if (!sessionCheck.ok) {
+            return adminUnauthorizedJson(sessionCheck);
+        }
+
         const activeEventId = await getActiveEventId();
         if (!activeEventId) {
             return NextResponse.json({ status: "not_found" }, { status: 404 });
         }
 
         const payload = await request.json().catch(() => ({} as { orderId?: string }));
-        const orderId = typeof payload.orderId === "string" ? payload.orderId.trim() : "";
-        if (!orderId) {
-            return NextResponse.json({ status: "not_found" }, { status: 404 });
+        const parsedOrderId = typeof payload.orderId === "string"
+            ? parsePizzaOrderIdValue(payload.orderId)
+            : null;
+        if (!parsedOrderId) {
+            return NextResponse.json({ status: "invalid" }, { status: 400 });
         }
 
         await dbConnect();
         const order = await Order.findOne({
-            _id: orderId,
+            _id: parsedOrderId.orderId,
             eventId: activeEventId,
             status: "PAID"
         }).select("_id pizzaTicket").lean() as ({

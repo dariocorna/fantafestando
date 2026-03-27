@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { adminUnauthorizedJson, ensureAuthenticatedSession } from "@/lib/authz";
 import dbConnect from "@/lib/mongoose";
 import { getActiveEventId } from "@/lib/events";
 import Order from "@/models/Order";
@@ -8,6 +9,11 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
     try {
+        const sessionCheck = await ensureAuthenticatedSession();
+        if (!sessionCheck.ok) {
+            return adminUnauthorizedJson(sessionCheck);
+        }
+
         const activeEventId = await getActiveEventId();
         if (!activeEventId) {
             return NextResponse.json({ status: "invalid", error: "Nessuna festa attiva" }, { status: 400 });

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { adminUnauthorizedJson, ensureAuthenticatedSession } from "@/lib/authz";
 import dbConnect from "@/lib/mongoose";
 import { getActiveEvent } from "@/lib/events";
 import Order from "@/models/Order";
@@ -8,6 +9,11 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
     try {
+        const sessionCheck = await ensureAuthenticatedSession();
+        if (!sessionCheck.ok) {
+            return adminUnauthorizedJson(sessionCheck);
+        }
+
         const activeEvent = await getActiveEvent() as ({ _id?: { toString(): string }, name?: string } | null);
         if (!activeEvent?._id) {
             return NextResponse.json({
@@ -68,8 +74,12 @@ export async function GET() {
                             pickupNumber: order.pickupNumber,
                             _id: order._id
                         }),
-                        customerName: order.customer?.name?.trim() || undefined,
-                        table: order.customer?.table?.trim() || undefined,
+                        ...(order.customer?.name?.trim()
+                            ? { customerName: order.customer.name.trim() }
+                            : {}),
+                        ...(order.customer?.table?.trim()
+                            ? { table: order.customer.table.trim() }
+                            : {}),
                         createdAt: order.createdAt ? new Date(order.createdAt).toISOString() : new Date(0).toISOString()
                     };
                 })
