@@ -48,7 +48,7 @@ function mockOrder(order: unknown) {
     });
 }
 
-describe("POST /api/pizza-console/requeue", () => {
+describe("POST /api/pizza-console/remove", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         ensureAuthenticatedSessionMock.mockResolvedValue({
@@ -69,7 +69,7 @@ describe("POST /api/pizza-console/requeue", () => {
             error: "Autenticazione richiesta"
         });
 
-        const response = await POST(new Request("http://localhost/api/pizza-console/requeue", {
+        const response = await POST(new Request("http://localhost/api/pizza-console/remove", {
             method: "POST",
             body: JSON.stringify({ orderId: ORDER_ID }),
             headers: { "Content-Type": "application/json" }
@@ -81,7 +81,7 @@ describe("POST /api/pizza-console/requeue", () => {
     });
 
     test("rejects malformed order ids", async () => {
-        const response = await POST(new Request("http://localhost/api/pizza-console/requeue", {
+        const response = await POST(new Request("http://localhost/api/pizza-console/remove", {
             method: "POST",
             body: JSON.stringify({ orderId: "abc" }),
             headers: { "Content-Type": "application/json" }
@@ -93,16 +93,16 @@ describe("POST /api/pizza-console/requeue", () => {
         expect(orderFindOneMock).not.toHaveBeenCalled();
     });
 
-    test("requeues a ready pizza ticket", async () => {
+    test("removes a queued pizza ticket from the active console", async () => {
         mockOrder({
             _id: ORDER_ID,
             pizzaTicket: {
                 pizzaNumber: 42,
-                state: "READY"
+                state: "QUEUED"
             }
         });
 
-        const response = await POST(new Request("http://localhost/api/pizza-console/requeue", {
+        const response = await POST(new Request("http://localhost/api/pizza-console/remove", {
             method: "POST",
             body: JSON.stringify({ orderId: ORDER_ID }),
             headers: { "Content-Type": "application/json" }
@@ -110,7 +110,7 @@ describe("POST /api/pizza-console/requeue", () => {
         const payload = await response.json();
 
         expect(response.status).toBe(200);
-        expect(payload.status).toBe("requeued");
+        expect(payload.status).toBe("removed");
         expect(orderUpdateOneMock).toHaveBeenCalledWith(
             {
                 _id: ORDER_ID,
@@ -120,7 +120,7 @@ describe("POST /api/pizza-console/requeue", () => {
             },
             expect.objectContaining({
                 $set: expect.objectContaining({
-                    "pizzaTicket.state": "QUEUED"
+                    "pizzaTicket.state": "REMOVED"
                 }),
                 $unset: expect.objectContaining({
                     "pizzaTicket.readyAt": 1
@@ -129,7 +129,7 @@ describe("POST /api/pizza-console/requeue", () => {
         );
     });
 
-    test("restores a manually removed pizza ticket to the queue", async () => {
+    test("returns already_removed without updating again", async () => {
         mockOrder({
             _id: ORDER_ID,
             pizzaTicket: {
@@ -138,7 +138,7 @@ describe("POST /api/pizza-console/requeue", () => {
             }
         });
 
-        const response = await POST(new Request("http://localhost/api/pizza-console/requeue", {
+        const response = await POST(new Request("http://localhost/api/pizza-console/remove", {
             method: "POST",
             body: JSON.stringify({ orderId: ORDER_ID }),
             headers: { "Content-Type": "application/json" }
@@ -146,22 +146,7 @@ describe("POST /api/pizza-console/requeue", () => {
         const payload = await response.json();
 
         expect(response.status).toBe(200);
-        expect(payload.status).toBe("requeued");
-        expect(orderUpdateOneMock).toHaveBeenCalledWith(
-            {
-                _id: ORDER_ID,
-                eventId: "evt-1",
-                status: "PAID",
-                "pizzaTicket.pizzaNumber": 42
-            },
-            expect.objectContaining({
-                $set: expect.objectContaining({
-                    "pizzaTicket.state": "QUEUED"
-                }),
-                $unset: expect.objectContaining({
-                    "pizzaTicket.readyAt": 1
-                })
-            })
-        );
+        expect(payload.status).toBe("already_removed");
+        expect(orderUpdateOneMock).not.toHaveBeenCalled();
     });
 });

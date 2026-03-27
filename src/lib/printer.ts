@@ -12,7 +12,7 @@ import PrintJobModel, { type PrintJobSource, type PrintJobType } from "@/models/
 import mongoose from "mongoose";
 import dbConnect from "./mongoose";
 import { getOrderCodeFromOrder } from "./order-code";
-import { getPizzaBarcodeValue } from "./pizza-ticket";
+import { getPizzaBarcodeValue } from "./pizza-barcode";
 import {
     DEFAULT_PRINTER_PORT,
     getPrinterCharacterSet,
@@ -218,6 +218,8 @@ const PRINTER_LOCAL_CAPTURE_MAX_AGE_MS = readEnvNumber(
     "PRINTER_LOCAL_CAPTURE_MAX_AGE_MS",
     1000 * 60 * 60 * 24 * 3
 );
+const EPSON_BARCODE_EAN8 = 68;
+const PIZZA_EAN8_PATTERN = /^\d{8}$/;
 const RECEIPT_SEPARATOR = "--------------------------------";
 const PRINTER_EMULATOR_OUTPUT_DIR = process.env.PRINTER_EMULATOR_OUTPUT_DIR || "/tmp/fantafestando-printer-emulator";
 // Keep the normal flow as a single image send for typical easter-egg photos.
@@ -631,31 +633,41 @@ export class PrinterService {
         printer.alignLeft();
     }
 
-    private static printPizzaTicketHighlight(printer: ThermalPrinter, document: PrintDocumentV2) {
+    private static async printPizzaTicketHighlight(printer: ThermalPrinter, document: PrintDocumentV2) {
         if (!document.pizzaNumber) return;
 
         const rowWidth = 40;
         printer.alignCenter();
+
+        if (document.pizzaBarcodeValue) {
+            printer.println(" ");
+            if (PIZZA_EAN8_PATTERN.test(document.pizzaBarcodeValue)) {
+                printer.printBarcode(document.pizzaBarcodeValue, EPSON_BARCODE_EAN8, {
+                    hriPos: 2,
+                    width: 5,
+                    height: 96
+                });
+                printer.println(" ");
+            } else {
+                printer.code128(document.pizzaBarcodeValue, {
+                    height: 60,
+                    text: 2
+                });
+                printer.println(" ");
+            }
+        }
+
         printer.bold(true);
-        printer.setTextDoubleWidth();
-        printer.setTextDoubleHeight();
         splitByLength("PIZZA N°", rowWidth).forEach((line) => printer.println(line));
+        printer.setTextQuadArea();
         splitByLength(String(document.pizzaNumber), rowWidth).forEach((line) => printer.println(line));
         printer.setTextNormal();
         printer.bold(false);
 
-        if (document.printType === "KITCHEN_ORDER" && document.pizzaBarcodeValue) {
-            printer.println(" ");
-            printer.code128(document.pizzaBarcodeValue, {
-                height: 60,
-                text: 1
-            });
-        }
-
         printer.println(RECEIPT_SEPARATOR);
     }
 
-    private static printHeader(printer: ThermalPrinter, document: PrintDocumentV2, withLargeEventTitle: boolean) {
+    private static async printHeader(printer: ThermalPrinter, document: PrintDocumentV2, withLargeEventTitle: boolean) {
         const rowWidth = 40;
 
         printer.alignCenter();
@@ -696,7 +708,7 @@ export class PrinterService {
         printer.setTextNormal();
         printer.println(document.copyLabel.toUpperCase());
         printer.println(RECEIPT_SEPARATOR);
-        this.printPizzaTicketHighlight(printer, document);
+        await this.printPizzaTicketHighlight(printer, document);
 
         const isOrderComanda = document.printType === "CUSTOMER_ORDER" || document.printType === "KITCHEN_ORDER";
         if (isOrderComanda) {
@@ -908,8 +920,8 @@ export class PrinterService {
         printer.cut();
     }
 
-    private static renderPrintDocument(printer: ThermalPrinter, document: PrintDocumentV2, withLargeEventTitle: boolean) {
-        this.printHeader(printer, document, withLargeEventTitle);
+    private static async renderPrintDocument(printer: ThermalPrinter, document: PrintDocumentV2, withLargeEventTitle: boolean) {
+        await this.printHeader(printer, document, withLargeEventTitle);
         this.printItems(printer, document);
         this.printTotals(printer, document);
         this.printFooter(printer, document);
@@ -1023,17 +1035,23 @@ export class PrinterService {
         }
 
         const hasLogo = await this.tryPrintLogo(printer, params.document, params.printType);
-        this.renderPrintDocument(printer, params.document, !hasLogo);
+        await this.renderPrintDocument(printer, params.document, !hasLogo);
 
         try {
             const executeStartedAt = new Date();
+            const bufferedRaw = typeof (printer as unknown as { getBuffer?: () => unknown }).getBuffer === "function"
+                ? (printer as unknown as { getBuffer: () => unknown }).getBuffer()
+                : undefined;
+            const localRawCapturePath = !params.isVirtual && Buffer.isBuffer(bufferedRaw)
+                ? await this.persistLocalRawCapture(Buffer.from(bufferedRaw), executeStartedAt, "document")
+                : undefined;
             for (let i = 0; i < params.copies; i += 1) {
                 await this.executeWithConnectionRetry(printer, PRINTER_EXECUTE_TIMEOUT_MS);
             }
             console.log(`Print job sent to ${params.destinationLabel} (${params.copies} copies) successfully`);
             const rawCapturePath = params.isVirtual
                 ? await this.resolveVirtualRawCapturePath(params.destinationPort, executeStartedAt)
-                : undefined;
+                : localRawCapturePath;
             return { success: true, rawCapturePath, automaticRetryCount: 0 };
         } catch (error) {
             console.error(`Printer execution error at ${params.destinationLabel}:`, error);
@@ -1415,7 +1433,7 @@ export class PrinterService {
             pickupNumber?: number;
             pizzaTicket?: {
                 pizzaNumber?: number;
-                state?: "QUEUED" | "READY";
+                state?: "QUEUED" | "READY" | "REMOVED";
                 readyAt?: Date | string;
             };
             status?: string;
@@ -1602,9 +1620,11 @@ export class PrinterService {
             const categoryName = category?.name?.trim();
             const printerName = kitchenPrinter?.name?.trim();
             const isPizzaItem = Boolean(category?.pizzaFlowEnabled) && typeof order.pizzaTicket?.pizzaNumber === "number";
-            const groupKey = kitchenPrinter?._id
+            const printFlowKey = isPizzaItem ? "pizza" : "standard";
+            const customerGroupKey = kitchenPrinter?._id
                 ? `printer:${String(kitchenPrinter._id)}`
                 : `category:${categoryId}`;
+            const kitchenGroupKey = `${customerGroupKey}:${printFlowKey}`;
             const departmentLabel = printerName || categoryName || resolvePrintName(item.productId, item.snapshotName);
             if (departmentLabel) involvedDepartments.add(departmentLabel);
 
@@ -1620,7 +1640,7 @@ export class PrinterService {
 
             const departmentFooterLines = departmentLabel ? [`REPARTO: ${departmentLabel}`] : undefined;
 
-            let kitchenJob = kitchenJobsByGroup.get(groupKey);
+            let kitchenJob = kitchenJobsByGroup.get(kitchenGroupKey);
             if (!kitchenJob && destination?.ip) {
                 kitchenJob = {
                     ip: destination.ip,
@@ -1642,12 +1662,12 @@ export class PrinterService {
                     shortCode: cashierJob.shortCode,
                     footerLines: departmentFooterLines
                 };
-                kitchenJobsByGroup.set(groupKey, kitchenJob);
+                kitchenJobsByGroup.set(kitchenGroupKey, kitchenJob);
             }
 
             if (isPizzaItem && kitchenJob) {
                 kitchenJob.pizzaNumber = order.pizzaTicket?.pizzaNumber;
-                kitchenJob.pizzaBarcodeValue = getPizzaBarcodeValue(order._id.toString());
+                kitchenJob.pizzaBarcodeValue = getPizzaBarcodeValue(order.pizzaTicket!.pizzaNumber);
             }
 
             kitchenJob?.items.push({
@@ -1656,7 +1676,10 @@ export class PrinterService {
                 notes: item.notes
             });
 
-            const customerJob = ensureCustomerJob(groupKey, departmentFooterLines);
+            const customerJob = ensureCustomerJob(customerGroupKey, departmentFooterLines);
+            if (isPizzaItem && customerJob && !kitchenJob) {
+                customerJob.pizzaBarcodeValue = getPizzaBarcodeValue(order.pizzaTicket!.pizzaNumber);
+            }
             customerJob?.items.push({
                 name: resolvePrintName(item.productId, item.snapshotName),
                 quantity: item.quantity,
@@ -1888,7 +1911,7 @@ export class PrinterService {
 
         const normalizedDocument = normalizeLegacyPrintDocument(document as unknown as Record<string, unknown>);
         const hasLogo = await this.tryPrintLogo(printer, normalizedDocument, "CASH_SESSION_SUMMARY");
-        this.renderPrintDocument(printer, normalizedDocument, !hasLogo);
+        await this.renderPrintDocument(printer, normalizedDocument, !hasLogo);
 
         try {
             const executeStartedAt = new Date();

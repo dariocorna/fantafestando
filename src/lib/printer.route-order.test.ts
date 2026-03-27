@@ -721,10 +721,166 @@ describe("PrinterService.routeOrderToPrinters", () => {
         expect(kitchenJob).toEqual(expect.objectContaining({
             printType: "KITCHEN_ORDER",
             pizzaNumber: 81,
-            pizzaBarcodeValue: "PZ:order-pizza"
+            pizzaBarcodeValue: "00000819"
         }));
         expect(customerJob).toEqual(expect.objectContaining({
             printType: "CUSTOMER_ORDER",
+            pizzaNumber: 81
+        }));
+        expect(customerJob?.pizzaBarcodeValue).toBeUndefined();
+    });
+
+    test("keeps pizza numbering on cashier and customer copies even without a department printer", async () => {
+        mockOrder(buildOrder("order-pizza-cashier-only", {
+            pizzaTicket: {
+                pizzaNumber: 81,
+                state: "QUEUED"
+            }
+        }));
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([
+            {
+                _id: { toString: () => "prod-1" },
+                categoryId: { toString: () => "cat-pizza" },
+                basePrice: 7,
+                shortName: "PIZ"
+            }
+        ]);
+        mockCategories([
+            {
+                _id: { toString: () => "cat-pizza" },
+                name: "Pizze",
+                pizzaFlowEnabled: true
+            }
+        ]);
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters("order-pizza-cashier-only", "pos-1");
+        const printedJobs = printComandaSpy.mock.calls.map(([job]) => job);
+        const cashierJob = printedJobs.find((job) => job.printType === "CASHIER_SUMMARY");
+        const kitchenJob = printedJobs.find((job) => job.printType === "KITCHEN_ORDER");
+        const customerJob = printedJobs.find((job) => job.printType === "CUSTOMER_ORDER");
+
+        expect(result).toEqual([true, true]);
+        expect(printComandaSpy).toHaveBeenCalledTimes(2);
+        expect(kitchenJob).toBeUndefined();
+        expect(cashierJob).toEqual(expect.objectContaining({
+            printType: "CASHIER_SUMMARY",
+            pizzaNumber: 81
+        }));
+        expect(cashierJob?.pizzaBarcodeValue).toBeUndefined();
+        expect(customerJob).toEqual(expect.objectContaining({
+            printType: "CUSTOMER_ORDER",
+            pizzaNumber: 81,
+            pizzaBarcodeValue: "00000819"
+        }));
+    });
+
+    test("splits pizza and non-pizza kitchen jobs when they share the same printer", async () => {
+        mockOrder(buildOrder("order-mixed-pizza", {
+            cart: [
+                {
+                    productId: "prod-pizza",
+                    snapshotName: "Margherita",
+                    quantity: 1,
+                    selectedOptions: []
+                },
+                {
+                    productId: "prod-drink",
+                    snapshotName: "Birra",
+                    quantity: 1,
+                    selectedOptions: []
+                }
+            ],
+            pizzaTicket: {
+                pizzaNumber: 81,
+                state: "QUEUED"
+            }
+        }));
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([
+            {
+                _id: { toString: () => "prod-pizza" },
+                categoryId: { toString: () => "cat-pizza" },
+                basePrice: 7
+            },
+            {
+                _id: { toString: () => "prod-drink" },
+                categoryId: { toString: () => "cat-bar" },
+                basePrice: 4
+            }
+        ]);
+        mockCategories([
+            {
+                _id: { toString: () => "cat-pizza" },
+                name: "Pizze",
+                pizzaFlowEnabled: true,
+                printerId: {
+                    _id: "shared-kitchen-printer",
+                    name: "Stampante Cucina",
+                    ip: "192.168.178.210",
+                    port: 9100,
+                    isVirtual: false
+                }
+            },
+            {
+                _id: { toString: () => "cat-bar" },
+                name: "Bar",
+                printerId: {
+                    _id: "shared-kitchen-printer",
+                    name: "Stampante Cucina",
+                    ip: "192.168.178.210",
+                    port: 9100,
+                    isVirtual: false
+                }
+            }
+        ]);
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters("order-mixed-pizza", "pos-1");
+        const printedJobs = printComandaSpy.mock.calls.map(([job]) => job);
+        const kitchenJobs = printedJobs.filter((job) => job.printType === "KITCHEN_ORDER");
+        const customerJobs = printedJobs.filter((job) => job.printType === "CUSTOMER_ORDER");
+        const pizzaKitchenJob = kitchenJobs.find((job) => getPrintedItemNames(job).includes("Margherita"));
+        const standardKitchenJob = kitchenJobs.find((job) => getPrintedItemNames(job).includes("Birra"));
+        const customerJob = customerJobs[0];
+
+        expect(result).toEqual([true, true, true, true]);
+        expect(kitchenJobs).toHaveLength(2);
+        expect(customerJobs).toHaveLength(1);
+        expect(pizzaKitchenJob).toEqual(expect.objectContaining({
+            items: [expect.objectContaining({ name: "Margherita" })],
+            pizzaNumber: 81,
+            pizzaBarcodeValue: "00000819"
+        }));
+        expect(standardKitchenJob).toEqual(expect.objectContaining({
+            items: [expect.objectContaining({ name: "Birra" })]
+        }));
+        expect(standardKitchenJob?.pizzaNumber).toBeUndefined();
+        expect(standardKitchenJob?.pizzaBarcodeValue).toBeUndefined();
+        expect(customerJob).toEqual(expect.objectContaining({
+            items: [
+                expect.objectContaining({ name: "Margherita" }),
+                expect.objectContaining({ name: "Birra" })
+            ],
             pizzaNumber: 81
         }));
         expect(customerJob?.pizzaBarcodeValue).toBeUndefined();

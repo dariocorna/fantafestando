@@ -95,6 +95,56 @@ describe("POST /api/pizza-console/scan", () => {
         );
     });
 
+    test("marks a queued pizza ticket as ready from an EAN-8 pizza barcode", async () => {
+        mockOrder({
+            _id: ORDER_ID,
+            pizzaTicket: {
+                pizzaNumber: 42,
+                state: "QUEUED"
+            }
+        });
+
+        const response = await POST(new Request("http://localhost/api/pizza-console/scan", {
+            method: "POST",
+            body: JSON.stringify({ barcode: "00000420" }),
+            headers: { "Content-Type": "application/json" }
+        }) as unknown as import("next/server").NextRequest);
+        const payload = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(payload.status).toBe("ready");
+        expect(orderFindOneMock).toHaveBeenCalledWith({
+            eventId: "evt-1",
+            status: "PAID",
+            "pizzaTicket.pizzaNumber": 42
+        });
+    });
+
+    test("accepts manual pizza numbers shorter than the printed barcode", async () => {
+        mockOrder({
+            _id: ORDER_ID,
+            pizzaTicket: {
+                pizzaNumber: 42,
+                state: "QUEUED"
+            }
+        });
+
+        const response = await POST(new Request("http://localhost/api/pizza-console/scan", {
+            method: "POST",
+            body: JSON.stringify({ barcode: "42" }),
+            headers: { "Content-Type": "application/json" }
+        }) as unknown as import("next/server").NextRequest);
+        const payload = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(payload.status).toBe("ready");
+        expect(orderFindOneMock).toHaveBeenCalledWith({
+            eventId: "evt-1",
+            status: "PAID",
+            "pizzaTicket.pizzaNumber": 42
+        });
+    });
+
     test("returns already_ready without updating again", async () => {
         mockOrder({
             _id: ORDER_ID,
@@ -138,7 +188,7 @@ describe("POST /api/pizza-console/scan", () => {
     test("rejects malformed barcode payloads", async () => {
         const response = await POST(new Request("http://localhost/api/pizza-console/scan", {
             method: "POST",
-            body: JSON.stringify({ barcode: "PZ:abc" }),
+            body: JSON.stringify({ barcode: "00000042" }),
             headers: { "Content-Type": "application/json" }
         }) as unknown as import("next/server").NextRequest);
         const payload = await response.json();

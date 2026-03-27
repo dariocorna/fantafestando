@@ -2,6 +2,12 @@ import dbConnect from "@/lib/mongoose";
 import Category from "@/models/Category";
 import Product from "@/models/Product";
 import { getNextPizzaOrderNumber } from "@/lib/order-code";
+export {
+    getPizzaBarcodeValue,
+    parsePizzaBarcodeValue,
+    parsePizzaOrderIdValue,
+    type ParsedPizzaBarcode
+} from "./pizza-barcode";
 
 const MONGO_OBJECT_ID_PATTERN = /^[a-fA-F0-9]{24}$/;
 
@@ -20,7 +26,7 @@ export interface PizzaCartItemInput {
 
 export interface PizzaTicketSnapshot {
     pizzaNumber: number;
-    state: "QUEUED" | "READY";
+    state: "QUEUED" | "READY" | "REMOVED";
     readyAt?: Date;
 }
 
@@ -30,31 +36,17 @@ interface PersistedPizzaTicketSource {
     readyAt?: Date | string | null;
 }
 
-export function getPizzaBarcodeValue(orderId: string): string {
-    return `PZ:${orderId}`;
-}
-
-export function parsePizzaOrderIdValue(rawValue: string): { orderId: string } | null {
-    const orderId = rawValue.trim();
-    if (!MONGO_OBJECT_ID_PATTERN.test(orderId)) return null;
-
-    return { orderId };
-}
-
-export function parsePizzaBarcodeValue(rawValue: string): { orderId: string } | null {
-    const normalized = rawValue.trim();
-    if (!normalized.startsWith("PZ:")) return null;
-
-    return parsePizzaOrderIdValue(normalized.slice(3));
-}
-
 export function normalizePizzaTicket(
     value?: PersistedPizzaTicketSource | null
 ): PizzaTicketSnapshot | undefined {
     const pizzaNumber = Number(value?.pizzaNumber);
     if (!Number.isInteger(pizzaNumber) || pizzaNumber <= 0) return undefined;
 
-    const state = value?.state === "READY" ? "READY" : "QUEUED";
+    const state = value?.state === "READY"
+        ? "READY"
+        : value?.state === "REMOVED"
+            ? "REMOVED"
+            : "QUEUED";
     const parsedReadyAt = value?.readyAt ? new Date(value.readyAt) : null;
     const readyAt = state === "READY" && parsedReadyAt && !Number.isNaN(parsedReadyAt.getTime())
         ? parsedReadyAt
@@ -87,7 +79,7 @@ export async function resolvePizzaEligibleProductIds(
     cartItems: PizzaCartItemInput[]
 ): Promise<Set<string>> {
     const productionProductIds = extractProductionProductIds(cartItems);
-    if (!eventId || productionProductIds.length === 0) {
+    if (!MONGO_OBJECT_ID_PATTERN.test(eventId) || productionProductIds.length === 0) {
         return new Set<string>();
     }
 

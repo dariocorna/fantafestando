@@ -3,7 +3,7 @@ import { adminUnauthorizedJson, ensureAuthenticatedSession } from "@/lib/authz";
 import dbConnect from "@/lib/mongoose";
 import { getActiveEventId } from "@/lib/events";
 import Order from "@/models/Order";
-import { parsePizzaBarcodeValue } from "@/lib/pizza-ticket";
+import { parsePizzaBarcodeValue } from "@/lib/pizza-barcode";
 
 export const dynamic = "force-dynamic";
 
@@ -26,15 +26,23 @@ export async function POST(request: NextRequest) {
         }
 
         await dbConnect();
-        const order = await Order.findOne({
-            _id: parsed.orderId,
-            eventId: activeEventId,
-            status: "PAID"
-        }).select("_id pizzaTicket").lean() as ({
+        const orderLookupFilter = "orderId" in parsed
+            ? {
+                _id: parsed.orderId,
+                eventId: activeEventId,
+                status: "PAID"
+            }
+            : {
+                eventId: activeEventId,
+                status: "PAID",
+                "pizzaTicket.pizzaNumber": parsed.pizzaNumber
+            };
+
+        const order = await Order.findOne(orderLookupFilter).select("_id pizzaTicket").lean() as ({
             _id: string | { toString(): string };
             pizzaTicket?: {
                 pizzaNumber?: number;
-                state?: "QUEUED" | "READY";
+                state?: "QUEUED" | "READY" | "REMOVED";
                 readyAt?: Date | string;
             };
         } | null);
