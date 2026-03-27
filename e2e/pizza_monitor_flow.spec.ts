@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { getPizzaBarcodeValue } from "@/lib/pizza-barcode";
 import { ensureAdminAuthenticated } from "./utils/auth";
 import {
     configureCashPos,
@@ -191,9 +192,10 @@ test.describe.serial("Pizza monitor flow", () => {
         const kitchenJob = orderJobs.find((job) => job.printType === "KITCHEN_ORDER");
         const cashierJob = orderJobs.find((job) => job.printType === "CASHIER_SUMMARY");
         const customerJob = orderJobs.find((job) => job.printType === "CUSTOMER_ORDER");
+        const pizzaBarcodeValue = getPizzaBarcodeValue(pizzaNumber);
 
         expect(kitchenJob?.document?.pizzaNumber).toBe(pizzaNumber);
-        expect(kitchenJob?.document?.pizzaBarcodeValue).toBe(String(pizzaNumber).padStart(8, "0"));
+        expect(kitchenJob?.document?.pizzaBarcodeValue).toBe(pizzaBarcodeValue);
         expect(cashierJob?.document?.pizzaNumber).toBe(pizzaNumber);
         expect(cashierJob?.document?.pizzaBarcodeValue).toBeUndefined();
         expect(customerJob?.document?.pizzaNumber).toBe(pizzaNumber);
@@ -201,7 +203,7 @@ test.describe.serial("Pizza monitor flow", () => {
 
         await page.goto("/pizza-console");
         await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
-        await page.getByTestId("pizza-console-scanner-input").fill(String(pizzaNumber).padStart(8, "0"));
+        await page.getByTestId("pizza-console-scanner-input").fill(pizzaBarcodeValue);
         await page.getByTestId("pizza-console-scanner-input").press("Enter");
 
         await expect(page.getByTestId(`pizza-console-ready-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
@@ -274,7 +276,7 @@ test.describe.serial("Pizza monitor flow", () => {
         await page.getByTestId(`pizza-console-remove-queued-${pizzaNumber}`).click();
         await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toHaveCount(0);
 
-        await page.getByTestId("pizza-console-scanner-input").fill(String(pizzaNumber).padStart(8, "0"));
+        await page.getByTestId("pizza-console-scanner-input").fill(getPizzaBarcodeValue(pizzaNumber));
         await page.getByTestId("pizza-console-scanner-input").press("Enter");
         await expect(page.getByTestId(`pizza-console-ready-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
 
@@ -359,7 +361,7 @@ test.describe.serial("Pizza monitor flow", () => {
         expect(cashierJob?.document?.pizzaNumber).toBe(pizzaNumber);
         expect(cashierJob?.document?.pizzaBarcodeValue).toBeUndefined();
         expect(customerJob?.document?.pizzaNumber).toBe(pizzaNumber);
-        expect(customerJob?.document?.pizzaBarcodeValue).toBe(String(pizzaNumber).padStart(8, "0"));
+        expect(customerJob?.document?.pizzaBarcodeValue).toBe(getPizzaBarcodeValue(pizzaNumber));
 
         await page.goto("/pizza-console");
         await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
