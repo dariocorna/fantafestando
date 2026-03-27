@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { CheckCircle2, Loader2, RotateCcw, ScanLine } from "lucide-react";
+import { CheckCircle2, Loader2, RotateCcw, ScanLine, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { getPizzaBarcodeValue } from "@/lib/pizza-barcode";
 
 interface PizzaConsolePayload {
     eventName: string | null;
@@ -137,6 +138,31 @@ export function PizzaConsoleClient() {
         setFeedback("Ticket rimesso in coda.");
     };
 
+    const removeTicket = async (orderId: string, source: "queued" | "ready") => {
+        const response = await fetch("/api/pizza-console/remove", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ orderId })
+        });
+        const result = await response.json().catch(() => ({} as { status?: string }));
+        if (!response.ok && result.status !== "already_removed") {
+            throw new Error("Impossibile rimuovere il ticket.");
+        }
+
+        if (result.status === "already_removed") {
+            setFeedback("Ticket già rimosso dalla console.");
+            return;
+        }
+
+        setFeedback(
+            source === "queued"
+                ? "Pizza rimossa dalla coda di preparazione."
+                : "Pizza rimossa dalla lista delle pronte."
+        );
+    };
+
     const submitScanner = (barcode: string) => {
         const normalized = barcode.trim();
         if (!normalized) return;
@@ -171,17 +197,32 @@ export function PizzaConsoleClient() {
         });
     };
 
+    const handleRemove = (orderId: string, source: "queued" | "ready") => {
+        startTransition(async () => {
+            try {
+                setError(null);
+                await removeTicket(orderId, source);
+                await refreshTickets();
+            } catch (removeError) {
+                console.error("Pizza remove failed", removeError);
+                setError(removeError instanceof Error ? removeError.message : "Errore rimozione");
+            } finally {
+                inputRef.current?.focus();
+            }
+        });
+    };
+
     return (
-        <div className="min-h-screen bg-[linear-gradient(180deg,#fff8ea_0%,#fff4dc_14%,#f7fafc_60%,#edf2f7_100%)] px-4 py-6 md:px-6">
+        <div className="min-h-screen bg-[linear-gradient(180deg,#f4f8ff_0%,#eef6ff_32%,#f8fbff_100%)] px-4 py-6 md:px-6">
             <div className="mx-auto max-w-7xl space-y-6">
-                <header className="rounded-[34px] border border-[#ffd39a] bg-white/85 p-6 shadow-[0_18px_42px_rgba(198,124,18,0.12)]">
+                <header className="rounded-[34px] border border-[#d9e6f8] bg-white/95 p-6 shadow-[var(--brand-shadow-soft)]">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                         <div>
-                            <p className="inline-flex items-center gap-2 rounded-full bg-[#fff1d2] px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-[#9a4d00]">
+                            <p className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-slate-700">
                                 <ScanLine className="h-4 w-4" />
                                 Console pizza
                             </p>
-                            <h1 className="mt-4 font-brand-display text-4xl font-black tracking-[-0.05em] text-[#7a2d00] md:text-5xl">
+                            <h1 className="mt-4 font-brand-display text-4xl font-black tracking-[-0.05em] text-slate-900 md:text-5xl">
                                 {payload?.eventName || "Nessuna festa attiva"}
                             </h1>
                             <p className="mt-2 text-sm font-semibold text-slate-600">
@@ -190,7 +231,7 @@ export function PizzaConsoleClient() {
                         </div>
 
                         <form
-                            className="rounded-[28px] border border-[#ffd39a] bg-[#fffaf0] p-4 shadow-sm lg:w-[360px]"
+                            className="rounded-[28px] border border-[#d9e6f8] bg-[linear-gradient(135deg,#ffffff_0%,#f7fbff_100%)] p-4 shadow-[var(--brand-shadow-soft)] lg:w-[360px]"
                             onSubmit={(event) => {
                                 event.preventDefault();
                                 submitScanner(scannerValue);
@@ -204,10 +245,10 @@ export function PizzaConsoleClient() {
                                 id="pizza-scanner-input"
                                 value={scannerValue}
                                 onChange={(event) => setScannerValue(event.target.value)}
-                                placeholder="PZ:..."
+                                placeholder="00000420"
                                 autoComplete="off"
                                 spellCheck={false}
-                                className="mt-3 h-14 w-full rounded-2xl border border-[#f2c27b] bg-white px-4 text-lg font-black tracking-wide text-slate-900 outline-none ring-0 placeholder:text-slate-300"
+                                className="mt-3 h-14 w-full rounded-2xl border border-[#d9e6f8] bg-white px-4 text-lg font-black tracking-wide text-slate-900 outline-none ring-0 placeholder:text-slate-300"
                                 data-testid="pizza-console-scanner-input"
                             />
                             <div className="mt-3 flex items-center justify-between gap-3">
@@ -216,7 +257,7 @@ export function PizzaConsoleClient() {
                                 </p>
                                 <Button
                                     type="submit"
-                                    className="rounded-2xl bg-[#a24d00] text-white hover:bg-[#8b4200]"
+                                    className="rounded-2xl bg-slate-900 text-white hover:bg-slate-800"
                                     disabled={isPending}
                                 >
                                     {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Invia"}
@@ -226,25 +267,25 @@ export function PizzaConsoleClient() {
                     </div>
 
                     {feedback ? (
-                        <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
+                        <p className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
                             {feedback}
                         </p>
                     ) : null}
                     {error ? (
-                        <p className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
+                        <p className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
                             {error}
                         </p>
                     ) : null}
                 </header>
 
                 <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-                    <section className="rounded-[34px] border border-slate-200 bg-white/90 p-6 shadow-sm">
+                    <section className="rounded-[34px] border border-[#d9e6f8] bg-white/95 p-6 shadow-[var(--brand-shadow-soft)]">
                         <div className="flex items-center justify-between gap-3">
                             <div>
                                 <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">In preparazione</p>
                                 <h2 className="mt-2 text-2xl font-black text-slate-900">Coda pizza</h2>
                             </div>
-                            <div className="rounded-full bg-[#fff1d2] px-4 py-2 text-sm font-black text-[#9a4d00]">
+                            <div className="rounded-full bg-slate-100 px-4 py-2 text-sm font-black text-slate-700">
                                 {payload?.queuedTickets.length || 0}
                             </div>
                         </div>
@@ -258,15 +299,15 @@ export function PizzaConsoleClient() {
                                 {payload.queuedTickets.map((ticket) => (
                                     <article
                                         key={ticket.orderId}
-                                        className="rounded-[28px] border border-[#ffd39a] bg-[linear-gradient(160deg,#fffef9_0%,#fff4db_55%,#ffe3ba_100%)] p-5"
+                                        className="rounded-[28px] border border-[#d9e6f8] bg-[linear-gradient(135deg,#ffffff_0%,#f7fbff_52%,#eef6ff_100%)] p-5 shadow-[var(--brand-shadow-soft)]"
                                         data-testid={`pizza-console-queued-${ticket.pizzaNumber}`}
                                     >
                                         <div className="flex items-start justify-between gap-4">
                                             <div>
-                                                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-[#9a4d00]">
+                                                <p className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-amber-700">
                                                     Pizza in coda
                                                 </p>
-                                                <p className="font-brand-display mt-2 text-5xl font-black tracking-[-0.07em] text-[#832400]">
+                                                <p className="font-brand-display mt-3 text-5xl font-black tracking-[-0.07em] text-slate-900">
                                                     {ticket.pizzaNumber}
                                                 </p>
                                                 <p className="mt-2 text-sm font-bold text-slate-700">
@@ -278,13 +319,27 @@ export function PizzaConsoleClient() {
                                                     Creato alle {formatTime(ticket.createdAt)}
                                                 </p>
                                             </div>
-                                            <Button
-                                                type="button"
-                                                className="rounded-2xl bg-[#a24d00] text-white hover:bg-[#8b4200]"
-                                                onClick={() => submitScanner(`PZ:${ticket.orderId}`)}
-                                            >
-                                                Segna pronta
-                                            </Button>
+                                            <div className="flex flex-col gap-2">
+                                                <Button
+                                                    type="button"
+                                                    className="rounded-2xl bg-slate-900 text-white hover:bg-slate-800"
+                                                    onClick={() => submitScanner(getPizzaBarcodeValue(ticket.pizzaNumber))}
+                                                    disabled={isPending}
+                                                >
+                                                    Segna pronta
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    className="rounded-2xl border-rose-200 bg-white/85 text-rose-700 hover:bg-rose-50"
+                                                    onClick={() => handleRemove(ticket.orderId, "queued")}
+                                                    disabled={isPending}
+                                                    data-testid={`pizza-console-remove-queued-${ticket.pizzaNumber}`}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                    Rimuovi
+                                                </Button>
+                                            </div>
                                         </div>
                                     </article>
                                 ))}
@@ -296,7 +351,7 @@ export function PizzaConsoleClient() {
                         )}
                     </section>
 
-                    <section className="rounded-[34px] border border-slate-200 bg-white/90 p-6 shadow-sm">
+                    <section className="rounded-[34px] border border-[#d9e6f8] bg-white/95 p-6 shadow-[var(--brand-shadow-soft)]">
                         <div className="flex items-center justify-between gap-3">
                             <div>
                                 <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Ultime pronte</p>
@@ -316,31 +371,45 @@ export function PizzaConsoleClient() {
                                 {payload.readyTickets.map((ticket) => (
                                     <article
                                         key={`${ticket.orderId}-${ticket.readyAt}`}
-                                        className="rounded-[28px] border border-emerald-200 bg-[linear-gradient(160deg,#f7fff9_0%,#e8fff0_60%,#d6f6e1_100%)] p-5"
+                                        className="rounded-[28px] border border-[#d9e6f8] bg-[linear-gradient(135deg,#ffffff_0%,#f5fffa_48%,#ebfff3_100%)] p-5 shadow-[var(--brand-shadow-soft)]"
                                         data-testid={`pizza-console-ready-${ticket.pizzaNumber}`}
                                     >
                                         <div className="flex items-start justify-between gap-4">
                                             <div>
-                                                <p className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.16em] text-emerald-700">
+                                                <p className="inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-emerald-700">
                                                     <CheckCircle2 className="h-4 w-4" />
                                                     Pronta
                                                 </p>
-                                                <p className="font-brand-display mt-2 text-5xl font-black tracking-[-0.07em] text-emerald-800">
+                                                <p className="font-brand-display mt-3 text-5xl font-black tracking-[-0.07em] text-slate-900">
                                                     {ticket.pizzaNumber}
                                                 </p>
                                                 <p className="mt-2 text-xs font-semibold text-emerald-700">
                                                     Pubblicata alle {formatTime(ticket.readyAt)}
                                                 </p>
                                             </div>
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                className="rounded-2xl border-emerald-300 bg-white/80 text-emerald-700 hover:bg-white"
-                                                onClick={() => handleRequeue(ticket.orderId)}
-                                            >
-                                                <RotateCcw className="h-4 w-4" />
-                                                Rimetti in coda
-                                            </Button>
+                                            <div className="flex flex-col gap-2">
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    className="rounded-2xl border-emerald-300 bg-white/80 text-emerald-700 hover:bg-white"
+                                                    onClick={() => handleRequeue(ticket.orderId)}
+                                                    disabled={isPending}
+                                                >
+                                                    <RotateCcw className="h-4 w-4" />
+                                                    Rimetti in coda
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    className="rounded-2xl border-rose-200 bg-white/85 text-rose-700 hover:bg-rose-50"
+                                                    onClick={() => handleRemove(ticket.orderId, "ready")}
+                                                    disabled={isPending}
+                                                    data-testid={`pizza-console-remove-ready-${ticket.pizzaNumber}`}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                    Rimuovi
+                                                </Button>
+                                            </div>
                                         </div>
                                     </article>
                                 ))}
