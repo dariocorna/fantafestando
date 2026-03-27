@@ -6,6 +6,7 @@ import { constants, createWriteStream } from "node:fs";
 import { access, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { IndexDescription, IndexDirection } from "mongodb";
 import mongoose from "mongoose";
 import { EJSON } from "bson";
 import { getAppVersion, getAppVersionLabel } from "@/lib/app-version";
@@ -733,7 +734,7 @@ function sanitizeCollectionOptions(options: Record<string, unknown> | undefined)
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
-function sanitizeIndexSpecification(index: Record<string, unknown>) {
+function sanitizeIndexSpecification(index: Record<string, unknown>): IndexDescription | null {
   const { key, name, ...rest } = index;
 
   if (!key || typeof key !== "object" || typeof name !== "string") {
@@ -745,7 +746,7 @@ function sanitizeIndexSpecification(index: Record<string, unknown>) {
   delete rest.background;
 
   return {
-    key,
+    key: key as Record<string, IndexDirection> | Map<string, IndexDirection>,
     name,
     ...rest,
   };
@@ -759,8 +760,11 @@ async function createRestoreTempCollection(
   const sourceMetadata = await getCollectionMetadata(db, sourceCollectionName);
   await dropCollectionIfExists(db, tempCollectionName);
 
+  const sourceOptions = sourceMetadata && "options" in sourceMetadata
+    ? sourceMetadata.options as Record<string, unknown> | undefined
+    : undefined;
   const createOptions = sanitizeCollectionOptions(
-    sourceMetadata?.options as Record<string, unknown> | undefined
+    sourceOptions
   );
   if (createOptions) {
     await db.createCollection(tempCollectionName, createOptions);

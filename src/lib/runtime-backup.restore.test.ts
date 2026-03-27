@@ -164,6 +164,7 @@ const {
       user: makeModel("users"),
       event: makeModel("events"),
       category: makeModel("categories"),
+      ingredient: makeModel("ingredients"),
       product: makeModel("products"),
       printer: makeModel("printers"),
       peripheral: makeModel("peripherals"),
@@ -198,6 +199,7 @@ vi.mock("@/models/SystemSettings", () => ({
 vi.mock("@/models/User", () => ({ default: modelMocks.user }));
 vi.mock("@/models/Event", () => ({ default: modelMocks.event }));
 vi.mock("@/models/Category", () => ({ default: modelMocks.category }));
+vi.mock("@/models/Ingredient", () => ({ default: modelMocks.ingredient }));
 vi.mock("@/models/Product", () => ({ default: modelMocks.product }));
 vi.mock("@/models/Printer", () => ({ default: modelMocks.printer }));
 vi.mock("@/models/Peripheral", () => ({ default: modelMocks.peripheral }));
