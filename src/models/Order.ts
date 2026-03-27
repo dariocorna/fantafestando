@@ -57,7 +57,7 @@ export interface IOrder extends Document {
     }>;
     pizzaTicket?: {
         pizzaNumber: number;
-        state: "QUEUED" | "READY";
+        state: "QUEUED" | "READY" | "REMOVED";
         readyAt?: Date;
     };
     paymentMethod: "CASH" | "CARD" | "OTHER";
@@ -161,7 +161,7 @@ const OrderSchema = new Schema<IOrder>({
         pizzaNumber: { type: Number, min: 1 },
         state: {
             type: String,
-            enum: ["QUEUED", "READY"]
+            enum: ["QUEUED", "READY", "REMOVED"]
         },
         readyAt: { type: Date }
     },

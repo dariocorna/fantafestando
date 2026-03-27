@@ -34,13 +34,17 @@ vi.mock("@/lib/order-code", () => ({
 
 import {
     extractProductionProductIds,
-    getPizzaBarcodeValue,
     normalizePizzaTicket,
-    parsePizzaBarcodeValue,
-    parsePizzaOrderIdValue,
     resolvePizzaEligibleProductIds,
     resolvePizzaTicketForCart
 } from "./pizza-ticket";
+import {
+    getPizzaBarcodeValue,
+    parsePizzaBarcodeValue,
+    parsePizzaOrderIdValue
+} from "./pizza-barcode";
+
+const EVENT_ID = "507f1f77bcf86cd799439099";
 
 function mockProducts(products: unknown[]) {
     productFindMock.mockReturnValue({
@@ -88,13 +92,24 @@ describe("pizza-ticket helpers", () => {
             { _id: "cat-pizza" }
         ]);
 
-        const result = await resolvePizzaEligibleProductIds("evt-1", [
+        const result = await resolvePizzaEligibleProductIds(EVENT_ID, [
             { productId: "prod-pizza" },
             { productId: "prod-drink" }
         ]);
 
         expect(dbConnectMock).toHaveBeenCalledTimes(1);
         expect(result).toEqual(new Set(["prod-pizza"]));
+    });
+
+    test("returns no pizza products and skips db lookups when eventId is not a Mongo ObjectId", async () => {
+        const result = await resolvePizzaEligibleProductIds("event-1", [
+            { productId: "prod-pizza" }
+        ]);
+
+        expect(result).toEqual(new Set());
+        expect(dbConnectMock).not.toHaveBeenCalled();
+        expect(productFindMock).not.toHaveBeenCalled();
+        expect(categoryFindMock).not.toHaveBeenCalled();
     });
 
     test("allocates a single pizza ticket for orders with pizza products", async () => {
@@ -104,7 +119,7 @@ describe("pizza-ticket helpers", () => {
         ]);
         mockCategories([{ _id: "cat-pizza" }]);
 
-        const result = await resolvePizzaTicketForCart("evt-1", [
+        const result = await resolvePizzaTicketForCart(EVENT_ID, [
             { productId: "prod-pizza-a" },
             { productId: "prod-pizza-b" }
         ]);
@@ -122,7 +137,7 @@ describe("pizza-ticket helpers", () => {
         ]);
         mockCategories([]);
 
-        await expect(resolvePizzaTicketForCart("evt-1", [
+        await expect(resolvePizzaTicketForCart(EVENT_ID, [
             { productId: "prod-burger" }
         ])).resolves.toBeUndefined();
         expect(getNextPizzaOrderNumberMock).not.toHaveBeenCalled();
@@ -134,7 +149,7 @@ describe("pizza-ticket helpers", () => {
         ]);
         mockCategories([{ _id: "cat-pizza" }]);
 
-        const result = await resolvePizzaTicketForCart("evt-1", [
+        const result = await resolvePizzaTicketForCart(EVENT_ID, [
             {
                 productId: "menu-1",
                 includedComponents: [
@@ -156,7 +171,7 @@ describe("pizza-ticket helpers", () => {
         mockCategories([{ _id: "cat-pizza" }]);
 
         const result = await resolvePizzaTicketForCart(
-            "evt-1",
+            EVENT_ID,
             [{ productId: "prod-pizza" }],
             {
                 pizzaNumber: 13,
@@ -173,16 +188,51 @@ describe("pizza-ticket helpers", () => {
         expect(getNextPizzaOrderNumberMock).not.toHaveBeenCalled();
     });
 
+    test("preserves manually removed pizza tickets without reallocating a number", async () => {
+        mockProducts([
+            { _id: "prod-pizza", categoryId: "cat-pizza" }
+        ]);
+        mockCategories([{ _id: "cat-pizza" }]);
+
+        const result = await resolvePizzaTicketForCart(
+            EVENT_ID,
+            [{ productId: "prod-pizza" }],
+            {
+                pizzaNumber: 13,
+                state: "REMOVED"
+            }
+        );
+
+        expect(result).toEqual({
+            pizzaNumber: 13,
+            state: "REMOVED",
+            readyAt: undefined
+        });
+        expect(getNextPizzaOrderNumberMock).not.toHaveBeenCalled();
+    });
+
     test("normalizes, formats and parses pizza barcode values", () => {
         expect(normalizePizzaTicket({ pizzaNumber: 8, state: "QUEUED" })).toEqual({
             pizzaNumber: 8,
             state: "QUEUED",
             readyAt: undefined
         });
-        expect(getPizzaBarcodeValue("507f1f77bcf86cd799439011")).toBe("PZ:507f1f77bcf86cd799439011");
+        expect(normalizePizzaTicket({ pizzaNumber: 8, state: "REMOVED" })).toEqual({
+            pizzaNumber: 8,
+            state: "REMOVED",
+            readyAt: undefined
+        });
+        expect(getPizzaBarcodeValue(42)).toBe("00000420");
         expect(parsePizzaOrderIdValue("507f1f77bcf86cd799439011")).toEqual({
             orderId: "507f1f77bcf86cd799439011"
         });
+        expect(parsePizzaBarcodeValue("42")).toEqual({
+            pizzaNumber: 42
+        });
+        expect(parsePizzaBarcodeValue("00000420")).toEqual({
+            pizzaNumber: 42
+        });
+        expect(parsePizzaBarcodeValue("00000042")).toBeNull();
         expect(parsePizzaBarcodeValue("PZ:507f1f77bcf86cd799439011")).toEqual({
             orderId: "507f1f77bcf86cd799439011"
         });
