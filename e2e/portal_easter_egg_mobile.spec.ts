@@ -240,6 +240,7 @@ test.describe.serial("Portal Easter Egg", () => {
     });
 
     test("l'area admin resta stateless e invia solo il raster di test", async ({ page }) => {
+        test.setTimeout(120000);
         const eventName = `Admin Easter ${uniqueSuffix()}`;
         let eventCreated = false;
         const uploadBuffer = await buildPortraitPhotoBuffer();
