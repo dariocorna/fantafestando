@@ -39,6 +39,8 @@ import { FixedMenuConfigDialog, type FixedMenuChoiceGroupDto, type FixedMenuComp
 import { buildMenuConfigurationKey, type MenuSelectionInput } from "@/lib/fixed-menu"
 import { useIsMobile } from "@/hooks/use-mobile"
 
+const POS_TOUCH_BREAKPOINT = 1024
+
 interface ICategory {
     _id: string
     name: string
@@ -237,6 +239,7 @@ export default function PosPage() {
     const [isCartSheetOpen, setIsCartSheetOpen] = useState(false)
     const [isCashStatusSheetOpen, setIsCashStatusSheetOpen] = useState(false)
     const [orderCode, setOrderCode] = useState("")
+    const [pendingOrderLoadRequest, setPendingOrderLoadRequest] = useState<{ code: string } | null>(null)
     const [isCodeLoading, setIsCodeLoading] = useState(false)
     const [loadedPendingOrder, setLoadedPendingOrder] = useState<LoadedPendingOrder | null>(null)
     const [recentPendingOrders, setRecentPendingOrders] = useState<RecentPendingOrder[]>([])
@@ -265,7 +268,7 @@ export default function PosPage() {
     const [isRetryingFailedPrints, setIsRetryingFailedPrints] = useState(false)
     const [retryPrintsFeedback, setRetryPrintsFeedback] = useState<string | null>(null)
     const [configuringProduct, setConfiguringProduct] = useState<IProduct | null>(null)
-    const isMobilePos = useIsMobile()
+    const isMobilePos = useIsMobile(POS_TOUCH_BREAKPOINT)
 
     // Info Cliente
     const [customerName, setCustomerName] = useState("")
@@ -372,8 +375,20 @@ export default function PosPage() {
 
         return Number(Math.min(normalizedBase, preset.value).toFixed(2))
     }
+
+    const isSameDiscountPreset = (item: CartItem, preset: QuickDiscountPreset) =>
+        item.isDiscount
+        && item.discountPreset?.label === preset.label
+        && item.discountPreset?.type === preset.type
+        && item.discountPreset?.value === preset.value
+
     const normalizedTableValue = normalizeTableValue(tableNumber)
     const tableValueValid = isTableValueValid(tableNumber)
+    const isTableRequiredInvalid = Boolean(activeEvent?.settings?.askTable) && !tableValueValid
+    const hasActiveCheckoutDraft = cart.length > 0
+        || Boolean(customerName.trim())
+        || Boolean(normalizedTableValue)
+        || Boolean(loadedPendingOrder)
     const predefinedTables = activeEvent?.predefinedTables || []
     const categoryColumnsCount = Math.max(categories.length, 1)
     const isModernCatalogLayout = normalizePosCatalogLayout(activeEvent?.settings?.posCatalogLayout) === "MODERN_TABS"
@@ -446,23 +461,30 @@ export default function PosPage() {
             return
         }
 
+        if (discountCartItems.some((item) => isSameDiscountPreset(item, preset))) {
+            showFeedbackModal("Questo sconto è già applicato al carrello", "info")
+            return
+        }
+
         const discountAmount = computePresetDiscountAmount(preset, discountBaseAmount)
         if (discountAmount <= 0) {
             showFeedbackModal("Nessun importo disponibile da scontare")
             return
         }
 
-        setCart((prev: CartItem[]) => ([
-            ...prev,
-            (() => {
-                const nextDiscountSequence = prev.reduce((max, item) => {
-                    if (!item.isDiscount) return max
-                    const match = item.lineId.match(/^discount-line-(\d+)$/)
-                    return match ? Math.max(max, Number(match[1])) : max
-                }, 0) + 1
-                const lineId = `discount-line-${nextDiscountSequence}`
+        setCart((prev: CartItem[]) => {
+            if (prev.some((item) => isSameDiscountPreset(item, preset))) return prev
 
-                return {
+            const nextDiscountSequence = prev.reduce((max, item) => {
+                if (!item.isDiscount) return max
+                const match = item.lineId.match(/^discount-line-(\d+)$/)
+                return match ? Math.max(max, Number(match[1])) : max
+            }, 0) + 1
+            const lineId = `discount-line-${nextDiscountSequence}`
+
+            return [
+                ...prev,
+                {
                     lineId,
                     productId: lineId,
                     name: `Sconto ${preset.label}`,
@@ -477,12 +499,28 @@ export default function PosPage() {
                         baseAmount: discountBaseAmount
                     }
                 }
-            })()
-        ]))
+            ]
+        })
     }
 
     const removeFromCart = (lineId: string) => {
         setCart((prev: CartItem[]) => prev.filter((i: CartItem) => i.lineId !== lineId))
+    }
+
+    const increaseCartItemQuantity = (lineId: string) => {
+        setCart((prev: CartItem[]) => prev.map((item) => (
+            item.lineId === lineId && !item.isDiscount
+                ? { ...item, quantity: item.quantity + 1 }
+                : item
+        )))
+    }
+
+    const decreaseCartItemQuantity = (lineId: string) => {
+        setCart((prev: CartItem[]) => prev.map((item) => {
+            if (item.lineId !== lineId || item.isDiscount) return item
+            if (item.quantity <= 1) return item
+            return { ...item, quantity: item.quantity - 1 }
+        }))
     }
 
     const resetPendingOrder = () => {
@@ -734,7 +772,10 @@ export default function PosPage() {
         setTableNumber("")
     }
 
-    const handleLoadOrderByCode = async (rawCode?: string) => {
+    const handleLoadOrderByCode = async (
+        rawCode?: string,
+        options?: { skipDraftConfirmation?: boolean }
+    ) => {
         if (!activeEvent?._id) {
             showFeedbackModal("Evento non disponibile")
             return
@@ -747,6 +788,15 @@ export default function PosPage() {
         }
 
         setOrderCode(codeToLoad)
+        if (
+            !options?.skipDraftConfirmation
+            && hasActiveCheckoutDraft
+            && loadedPendingOrder?.code !== codeToLoad
+        ) {
+            setPendingOrderLoadRequest({ code: codeToLoad })
+            return
+        }
+
         setIsCodeLoading(true)
         const result = await loadPendingOrderByCode({
             eventId: activeEvent._id,
@@ -809,7 +859,7 @@ export default function PosPage() {
             return
         }
 
-        if (activeEvent?.settings?.askTable && !tableValueValid) {
+        if (isTableRequiredInvalid) {
             showFeedbackModal("Inserisci il tavolo oppure selezionalo dalla lista")
             return
         }
@@ -936,21 +986,85 @@ export default function PosPage() {
         || !cashSession
         || productCartItems.length === 0
         || (!cashAvailable && !cardAvailable)
-        || (Boolean(activeEvent?.settings?.askTable) && !tableValueValid)
+        || isTableRequiredInvalid
 
     const oneHourAgo = (recentPendingOrdersReferenceTime ?? 0) - 60 * 60 * 1000
     const sortedRecentPendingOrders = [
         ...recentPendingOrders
             .filter((order) => order.createdAt && new Date(order.createdAt).getTime() >= oneHourAgo)
-            .sort((a, b) => new Date(a.createdAt!).getTime() - new Date(b.createdAt!).getTime()),
+            .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()),
         ...recentPendingOrders
             .filter((order) => !order.createdAt || new Date(order.createdAt).getTime() < oneHourAgo)
             .sort((a, b) => {
                 if (!a.createdAt) return 1
                 if (!b.createdAt) return -1
-                return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+                return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
             })
     ]
+
+    const renderCartItem = (item: CartItem) => {
+        const lineTotal = Number((item.quantity * item.price).toFixed(2))
+        return (
+            <div key={item.lineId} className="flex items-center justify-between gap-3 rounded-md border bg-white p-2.5">
+                <div className="min-w-0 flex flex-col">
+                    <span className={`line-clamp-2 text-sm font-bold ${item.isDiscount ? "text-emerald-700" : "text-slate-800 dark:text-slate-100"}`}>{item.name}</span>
+                    {item.isDiscount ? (
+                        <span className="text-[11px] font-semibold text-emerald-600">
+                            {item.discountPreset?.type === "PERCENT"
+                                ? `${item.discountPreset.value}% su ${item.discountPreset.baseAmount.toFixed(2)} €`
+                                : `Sconto fisso ${item.discountPreset?.value.toFixed(2)} €`}
+                        </span>
+                    ) : (
+                        <div className="space-y-1">
+                            <span className="text-xs text-slate-500">{item.quantity} x {item.price.toFixed(2)} €</span>
+                            {Array.isArray(item.selectedOptions) && item.selectedOptions.length > 0 ? (
+                                <p className="line-clamp-2 text-[11px] font-semibold text-slate-500">
+                                    {item.selectedOptions.join(" • ")}
+                                </p>
+                            ) : null}
+                        </div>
+                    )}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                    {!item.isDiscount ? (
+                        <div className="inline-flex h-11 items-center rounded-md border border-slate-200 bg-slate-50">
+                            <button
+                                type="button"
+                                aria-label={`Diminuisci quantità ${item.name}`}
+                                disabled={item.quantity <= 1}
+                                className="flex h-11 w-11 items-center justify-center text-lg font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-35"
+                                onClick={() => decreaseCartItemQuantity(item.lineId)}
+                            >
+                                -
+                            </button>
+                            <span className="min-w-8 text-center text-sm font-black text-slate-800" aria-live="polite">
+                                {item.quantity}
+                            </span>
+                            <button
+                                type="button"
+                                aria-label={`Aumenta quantità ${item.name}`}
+                                className="flex h-11 w-11 items-center justify-center text-lg font-black text-slate-700"
+                                onClick={() => increaseCartItemQuantity(item.lineId)}
+                            >
+                                +
+                            </button>
+                        </div>
+                    ) : null}
+                    <div className="min-w-[72px] text-right">
+                        <span className={`text-sm font-black ${item.isDiscount ? "text-emerald-700" : ""}`}>{lineTotal.toFixed(2)} €</span>
+                    </div>
+                    <button
+                        type="button"
+                        aria-label={`Rimuovi ${item.name} dal carrello`}
+                        onClick={() => removeFromCart(item.lineId)}
+                        className="flex h-11 w-11 items-center justify-center rounded-md text-red-500 hover:bg-red-50"
+                    >
+                        <Trash2 size={18} />
+                    </button>
+                </div>
+            </div>
+        )
+    }
 
     const loadedPendingOrderBanner = loadedPendingOrder ? (
         <div className="space-y-2 rounded-md border border-indigo-200 bg-indigo-50 p-3">
@@ -968,7 +1082,9 @@ export default function PosPage() {
                     ) : null}
                 </div>
                 <button
-                    className="text-indigo-500 hover:text-indigo-700"
+                    type="button"
+                    aria-label="Rimuovi ordine caricato"
+                    className="flex h-11 w-11 items-center justify-center rounded-md text-indigo-500 hover:bg-indigo-100 hover:text-indigo-700"
                     onClick={resetPendingOrder}
                     title="Rimuovi ordine caricato"
                 >
@@ -994,17 +1110,20 @@ export default function PosPage() {
                 <div className="flex flex-wrap gap-1.5">
                     {quickDiscountPresets.map((preset, index) => {
                         const previewAmount = computePresetDiscountAmount(preset, discountBaseAmount)
+                        const isPresetApplied = discountCartItems.some((item) => isSameDiscountPreset(item, preset))
                         return (
                             <button
+                                type="button"
                                 key={`discount-preset-card-${preset.label}-${preset.type}-${preset.value}-${index}`}
                                 id={`discount-preset-card-${index}`}
+                                aria-pressed={isPresetApplied}
                                 onClick={() => {
                                     addDiscountPresetToCart(preset)
-                                    if (isMobilePos) {
+                                    if (isMobilePos && !isPresetApplied) {
                                         setIsDiscountSheetOpen(false)
                                     }
                                 }}
-                                disabled={productCartItems.length === 0}
+                                disabled={productCartItems.length === 0 || isPresetApplied}
                                 className="inline-flex min-h-11 min-w-[200px] items-center gap-1.5 border border-emerald-200 bg-emerald-50 px-2 py-1 text-left transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                                 <span className="max-w-[120px] truncate text-xs font-black leading-tight text-emerald-800">
@@ -1014,7 +1133,7 @@ export default function PosPage() {
                                     {preset.type === "PERCENT" ? `${preset.value}%` : `${preset.value.toFixed(2)} €`}
                                 </span>
                                 <span className="ml-auto whitespace-nowrap text-xs font-black text-emerald-700">
-                                    -{previewAmount.toFixed(2)} €
+                                    {isPresetApplied ? "Applicato" : `-${previewAmount.toFixed(2)} €`}
                                 </span>
                             </button>
                         )
@@ -1140,40 +1259,7 @@ export default function PosPage() {
                     <p className="font-bold">Il carrello è vuoto</p>
                 </div>
             ) : (
-                cart.map((item) => {
-                    const lineTotal = Number((item.quantity * item.price).toFixed(2))
-                    return (
-                        <div key={item.lineId} className="flex items-center justify-between rounded-md border bg-white p-2.5">
-                            <div className="flex flex-col">
-                                <span className={`text-sm font-bold ${item.isDiscount ? "text-emerald-700" : "text-slate-800 dark:text-slate-100"}`}>{item.name}</span>
-                                {item.isDiscount ? (
-                                    <span className="text-[11px] font-semibold text-emerald-600">
-                                        {item.discountPreset?.type === "PERCENT"
-                                            ? `${item.discountPreset.value}% su ${item.discountPreset.baseAmount.toFixed(2)} €`
-                                            : `Sconto fisso ${item.discountPreset?.value.toFixed(2)} €`}
-                                    </span>
-                                ) : (
-                                    <div className="space-y-1">
-                                        <span className="text-xs text-slate-500">{item.quantity} x {item.price.toFixed(2)} €</span>
-                                        {Array.isArray(item.selectedOptions) && item.selectedOptions.length > 0 ? (
-                                            <p className="text-[11px] font-semibold text-slate-500">
-                                                {item.selectedOptions.join(" • ")}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                )}
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <div className="text-right">
-                                    <span className={`text-sm font-black ${item.isDiscount ? "text-emerald-700" : ""}`}>{lineTotal.toFixed(2)} €</span>
-                                </div>
-                                <button onClick={() => removeFromCart(item.lineId)} className="p-1.5 text-red-500">
-                                    <Trash2 size={18} />
-                                </button>
-                            </div>
-                        </div>
-                    )
-                })
+                cart.map(renderCartItem)
             )}
         </>
     )
@@ -1190,6 +1276,7 @@ export default function PosPage() {
                                 key={cat._id}
                                 type="button"
                                 onClick={() => setActiveCategory(cat._id)}
+                                aria-pressed={isActive}
                                 className="inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.04em] transition-all"
                                 style={isActive
                                     ? {
@@ -1437,12 +1524,15 @@ export default function PosPage() {
                                     <div className="flex flex-wrap gap-1.5">
                                         {quickDiscountPresets.map((preset, index) => {
                                             const previewAmount = computePresetDiscountAmount(preset, discountBaseAmount)
+                                            const isPresetApplied = discountCartItems.some((item) => isSameDiscountPreset(item, preset))
                                             return (
                                                 <button
+                                                    type="button"
                                                     key={`discount-preset-card-${preset.label}-${preset.type}-${preset.value}-${index}`}
                                                     id={`discount-preset-card-${index}`}
+                                                    aria-pressed={isPresetApplied}
                                                     onClick={() => addDiscountPresetToCart(preset)}
-                                                    disabled={productCartItems.length === 0}
+                                                    disabled={productCartItems.length === 0 || isPresetApplied}
                                                     className="inline-flex h-10 min-w-[200px] items-center gap-1.5 border border-emerald-200 bg-emerald-50 px-2 py-1 text-left transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
                                                     <span className="max-w-[120px] truncate text-xs font-black leading-tight text-emerald-800">
@@ -1452,7 +1542,7 @@ export default function PosPage() {
                                                         {preset.type === "PERCENT" ? `${preset.value}%` : `${preset.value.toFixed(2)} €`}
                                                     </span>
                                                     <span className="ml-auto whitespace-nowrap text-xs font-black text-emerald-700">
-                                                        -{previewAmount.toFixed(2)} €
+                                                        {isPresetApplied ? "Applicato" : `-${previewAmount.toFixed(2)} €`}
                                                     </span>
                                                 </button>
                                             )
@@ -1474,6 +1564,7 @@ export default function PosPage() {
                                                     key={cat._id}
                                                     type="button"
                                                     onClick={() => setActiveCategory(cat._id)}
+                                                    aria-pressed={isActive}
                                                     className="inline-flex min-h-11 items-center gap-1.5 border px-3.5 py-2 text-sm font-black uppercase tracking-[0.04em] transition-all"
                                                     style={isActive
                                                         ? {
@@ -1787,7 +1878,8 @@ export default function PosPage() {
                         <div className="flex items-center gap-2 rounded-md border bg-white p-2">
                             <User size={18} className="text-slate-400" />
                             <input
-                                className="bg-transparent border-none focus:outline-none text-sm font-bold w-full"
+                                aria-label="Nome cliente"
+                                className="w-full border-none bg-transparent text-sm font-bold outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-blue-700)]"
                                 placeholder="Nome..."
                                 value={customerName}
                                 onChange={(e) => setCustomerName(e.target.value)}
@@ -1820,7 +1912,9 @@ export default function PosPage() {
                                     ) : null}
                                 </div>
                                 <button
-                                    className="text-indigo-500 hover:text-indigo-700"
+                                    type="button"
+                                    aria-label="Rimuovi ordine caricato"
+                                    className="flex h-11 w-11 items-center justify-center rounded-md text-indigo-500 hover:bg-indigo-100 hover:text-indigo-700"
                                     onClick={resetPendingOrder}
                                     title="Rimuovi ordine caricato"
                                 >
@@ -1836,40 +1930,7 @@ export default function PosPage() {
                             <p className="font-bold">Il carrello è vuoto</p>
                         </div>
                     ) : (
-                        cart.map((item) => {
-                            const lineTotal = Number((item.quantity * item.price).toFixed(2))
-                            return (
-                                <div key={item.lineId} className="flex items-center justify-between rounded-md border bg-white p-2.5">
-                                    <div className="flex flex-col">
-                                        <span className={`text-sm font-bold ${item.isDiscount ? "text-emerald-700" : "text-slate-800 dark:text-slate-100"}`}>{item.name}</span>
-                                        {item.isDiscount ? (
-                                            <span className="text-[11px] font-semibold text-emerald-600">
-                                                {item.discountPreset?.type === "PERCENT"
-                                                    ? `${item.discountPreset.value}% su ${item.discountPreset.baseAmount.toFixed(2)} €`
-                                                    : `Sconto fisso ${item.discountPreset?.value.toFixed(2)} €`}
-                                            </span>
-                                        ) : (
-                                            <div className="space-y-1">
-                                                <span className="text-xs text-slate-500">{item.quantity} x {item.price.toFixed(2)} €</span>
-                                                {Array.isArray(item.selectedOptions) && item.selectedOptions.length > 0 ? (
-                                                    <p className="text-[11px] font-semibold text-slate-500">
-                                                        {item.selectedOptions.join(" • ")}
-                                                    </p>
-                                                ) : null}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <div className="text-right">
-                                            <span className={`text-sm font-black ${item.isDiscount ? "text-emerald-700" : ""}`}>{lineTotal.toFixed(2)} €</span>
-                                        </div>
-                                        <button onClick={() => removeFromCart(item.lineId)} className="p-1.5 text-red-500">
-                                            <Trash2 size={18} />
-                                        </button>
-                                    </div>
-                                </div>
-                            )
-                        })
+                        cart.map(renderCartItem)
                     )}
                 </div>
 
@@ -1928,7 +1989,7 @@ export default function PosPage() {
             ) : null}
 
             <Sheet open={isCartSheetOpen} onOpenChange={setIsCartSheetOpen}>
-                <SheetContent side="bottom" className="max-h-[88dvh] rounded-t-3xl px-0 pb-0 md:hidden">
+                <SheetContent side="bottom" className="max-h-[88dvh] rounded-t-3xl px-0 pb-0 lg:hidden">
                     <SheetHeader className="border-b border-[#d9e6f8] px-4 pb-3">
                         <SheetTitle className="text-xl font-black text-[var(--brand-ink)]">Carrello</SheetTitle>
                         <SheetDescription>
@@ -1966,7 +2027,7 @@ export default function PosPage() {
             </Sheet>
 
             <Sheet open={isDiscountSheetOpen} onOpenChange={setIsDiscountSheetOpen}>
-                <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-3xl px-0 pb-0 md:hidden">
+                <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-3xl px-0 pb-0 lg:hidden">
                     <SheetHeader className="border-b border-[#d9e6f8] px-4 pb-3">
                         <SheetTitle className="text-xl font-black text-[var(--brand-ink)]">Sconti</SheetTitle>
                         <SheetDescription>Preset rapidi applicabili al carrello corrente.</SheetDescription>
@@ -1983,7 +2044,7 @@ export default function PosPage() {
                     void loadRecentPendingOrdersForDialog()
                 }
             }}>
-                <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-3xl px-0 pb-0 md:hidden">
+                <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-3xl px-0 pb-0 lg:hidden">
                     <SheetHeader className="border-b border-[#d9e6f8] px-4 pb-3">
                         <SheetTitle className="text-xl font-black text-[var(--brand-ink)]">Ordini pendenti</SheetTitle>
                         <SheetDescription>Ordini recenti caricabili senza uscire dal POS.</SheetDescription>
@@ -1995,7 +2056,7 @@ export default function PosPage() {
             </Sheet>
 
             <Sheet open={isCashStatusSheetOpen} onOpenChange={setIsCashStatusSheetOpen}>
-                <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-3xl px-0 pb-0 md:hidden">
+                <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-3xl px-0 pb-0 lg:hidden">
                     <SheetHeader className="border-b border-[#d9e6f8] px-4 pb-3">
                         <SheetTitle className="text-xl font-black text-[var(--brand-ink)]">Stato cassa</SheetTitle>
                         <SheetDescription>
@@ -2097,7 +2158,7 @@ export default function PosPage() {
 
                             {activeEvent?.settings?.askTable && (
                                 <div className="space-y-3">
-                                    <Label className="text-base font-bold">Tavolo</Label>
+                                    <Label htmlFor="checkout-table-number" className="text-base font-bold">Tavolo</Label>
                                     <div className="rounded-lg bg-slate-100 py-1.5 text-center dark:bg-slate-800">
                                         <span className="text-3xl font-black text-blue-600 sm:text-4xl">{normalizedTableValue || "---"}</span>
                                     </div>
@@ -2110,6 +2171,7 @@ export default function PosPage() {
                                                         key={table}
                                                         type="button"
                                                         onClick={() => setTableNumber(table)}
+                                                        aria-pressed={isActive}
                                                         className={`rounded-md border-2 px-2.5 py-1.5 text-xs font-black transition-colors ${isActive ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}
                                                     >
                                                         {table}
@@ -2119,11 +2181,19 @@ export default function PosPage() {
                                         </div>
                                     ) : null}
                                     <Input
+                                        id="checkout-table-number"
                                         value={tableNumber}
                                         onChange={(e) => setTableNumber(e.target.value)}
                                         placeholder="Es: B02 oppure VIP TERRAZZA"
+                                        aria-invalid={isTableRequiredInvalid}
+                                        aria-describedby={isTableRequiredInvalid ? "checkout-table-error" : undefined}
                                         className="h-10 rounded-md border-2 font-semibold"
                                     />
+                                    {isTableRequiredInvalid ? (
+                                        <p id="checkout-table-error" className="text-sm font-semibold text-rose-600">
+                                            Seleziona o inserisci il tavolo per confermare l&apos;ordine.
+                                        </p>
+                                    ) : null}
                                     <div className="flex items-center justify-between">
                                         <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
                                             Tavolo selezionato: <span className="text-slate-800">{normalizedTableValue || "---"}</span>
@@ -2136,12 +2206,14 @@ export default function PosPage() {
                             )}
 
                             <div className="space-y-2">
-                                <Label className="text-base font-bold">Metodo di Pagamento</Label>
+                                <Label id="checkout-payment-method-label" className="text-base font-bold">Metodo di Pagamento</Label>
                                 {(cashAvailable || cardAvailable) ? (
-                                    <div className="flex gap-2">
+                                    <div className="flex gap-2" role="group" aria-labelledby="checkout-payment-method-label">
                                         {cashAvailable && (
                                             <button
+                                                type="button"
                                                 onClick={() => setPaymentMethod("CASH")}
+                                                aria-pressed={effectivePaymentMethod === "CASH"}
                                                 className={`flex flex-1 flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${effectivePaymentMethod === "CASH" ? "border-green-600 bg-green-50 text-green-700" : "border-slate-200"}`}
                                             >
                                                 <Banknote size={26} />
@@ -2150,7 +2222,9 @@ export default function PosPage() {
                                         )}
                                         {cardAvailable && (
                                             <button
+                                                type="button"
                                                 onClick={() => setPaymentMethod("CARD")}
+                                                aria-pressed={effectivePaymentMethod === "CARD"}
                                                 className={`flex flex-1 flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${effectivePaymentMethod === "CARD" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200"}`}
                                             >
                                                 <Wallet size={26} />
@@ -2213,7 +2287,7 @@ export default function PosPage() {
 
             {/* Modal Apertura Cassa */}
             <Dialog open={isOpenCashDialogOpen} onOpenChange={setIsOpenCashDialogOpen}>
-                <DialogContent className="max-w-[480px] rounded-3xl p-0 overflow-hidden">
+                <DialogContent className="max-h-[92dvh] max-w-[480px] overflow-y-auto rounded-3xl p-0">
                     <DialogHeader className="border-b bg-rose-50 px-8 py-6">
                         <DialogTitle className="flex items-center gap-3 text-2xl font-black text-rose-700">
                             <Wallet className="h-6 w-6" />
@@ -2274,7 +2348,7 @@ export default function PosPage() {
 
             {/* Modal Chiusura Cassa */}
             <Dialog open={isCloseCashDialogOpen} onOpenChange={setIsCloseCashDialogOpen}>
-                <DialogContent className="max-w-[560px] rounded-3xl p-0 overflow-hidden">
+                <DialogContent className="max-h-[92dvh] max-w-[560px] overflow-y-auto rounded-3xl p-0">
                     <DialogHeader className="border-b bg-emerald-50 px-8 py-6">
                         <DialogTitle className="flex items-center gap-3 text-2xl font-black text-emerald-700">
                             <Wallet className="h-6 w-6" />
@@ -2426,10 +2500,58 @@ export default function PosPage() {
                 </DialogContent>
             </Dialog>
 
+            <Dialog
+                open={Boolean(pendingOrderLoadRequest)}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setPendingOrderLoadRequest(null)
+                    }
+                }}
+            >
+                <DialogContent className="max-w-[460px] rounded-3xl p-0">
+                    <DialogHeader className="border-b bg-amber-50 px-6 py-5">
+                        <DialogTitle className="text-xl font-black text-amber-800">
+                            Sostituire il carrello corrente?
+                        </DialogTitle>
+                        <p className="text-sm font-semibold text-amber-700">
+                            L&apos;ordine pendente sostituirà prodotti, cliente e tavolo già inseriti nel POS.
+                        </p>
+                    </DialogHeader>
+                    <div className="space-y-4 p-6">
+                        <p className="text-sm font-semibold text-slate-700">
+                            Codice da caricare: <span className="font-black">{pendingOrderLoadRequest?.code}</span>
+                        </p>
+                        <div className="flex gap-3">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="flex-1 rounded-xl py-5 font-bold"
+                                onClick={() => setPendingOrderLoadRequest(null)}
+                            >
+                                ANNULLA
+                            </Button>
+                            <Button
+                                type="button"
+                                className="flex-1 rounded-xl bg-amber-600 py-5 font-black hover:bg-amber-700"
+                                onClick={() => {
+                                    const code = pendingOrderLoadRequest?.code
+                                    setPendingOrderLoadRequest(null)
+                                    if (code) {
+                                        void handleLoadOrderByCode(code, { skipDraftConfirmation: true })
+                                    }
+                                }}
+                            >
+                                SOSTITUISCI
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
             {/* Modal Carica Ordine da Codice */}
             {isMobilePos ? (
                 <Sheet open={isCodeDialogOpen} onOpenChange={handleCodeDialogOpenChange}>
-                    <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-3xl px-0 pb-0 md:hidden">
+                    <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-3xl px-0 pb-0 lg:hidden">
                         <SheetHeader className="border-b border-[#d9e6f8] px-4 pb-3">
                             <SheetTitle className="flex items-center gap-3 text-xl font-black">
                                 <Search className="h-5 w-5 text-indigo-600" />
@@ -2441,8 +2563,10 @@ export default function PosPage() {
                         </SheetHeader>
                         <div className="space-y-4 overflow-y-auto px-4 py-4">
                             <div className="flex items-center gap-2">
+                                <Label htmlFor="order-code" className="sr-only">Numero ordine</Label>
                                 <Input
                                     id="order-code"
+                                    aria-label="Numero ordine"
                                     value={orderCode}
                                     inputMode="numeric"
                                     onChange={(e) => setOrderCode(e.target.value.toUpperCase())}
@@ -2481,8 +2605,10 @@ export default function PosPage() {
                         </DialogHeader>
                         <div className="space-y-4 p-5">
                             <div className="flex items-center gap-2">
+                                <Label htmlFor="order-code" className="sr-only">Numero ordine</Label>
                                 <Input
                                     id="order-code"
+                                    aria-label="Numero ordine"
                                     value={orderCode}
                                     inputMode="numeric"
                                     onChange={(e) => setOrderCode(e.target.value.toUpperCase())}
@@ -2532,8 +2658,10 @@ export default function PosPage() {
                                 const isSelected = device._id === selectedPosDeviceId
                                 return (
                                     <button
+                                        type="button"
                                         key={device._id}
                                         onClick={() => selectPosDevice(device._id)}
+                                        aria-pressed={isSelected}
                                         className={`w-full p-6 rounded-2xl border-2 text-left transition-all flex items-center justify-between group ${isSelected ? 'border-blue-600 bg-blue-50' : 'border-slate-100 hover:border-blue-200'
                                             }`}
                                     >
