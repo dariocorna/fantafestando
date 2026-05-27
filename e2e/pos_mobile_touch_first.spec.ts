@@ -125,7 +125,7 @@ test.describe("POS mobile touch-first", () => {
 
             await page.getByRole("button", { name: /Sconti/i }).click();
             await expect(page.getByTestId("pos-mobile-discount-presets")).toBeVisible();
-            await page.getByRole("button", { name: /Promo 20%/i }).click();
+            await page.getByRole("dialog", { name: /Sconti/i }).getByRole("button", { name: /Promo 20%/i }).click();
 
             await page.getByTestId("pos-mobile-cart-bar").click();
             const cartSheetDialog = page.getByRole("dialog", { name: /Carrello/i });
@@ -190,6 +190,9 @@ test.describe("POS mobile touch-first", () => {
             await page.getByRole("button", { name: /Codice/i }).click();
             await page.locator("#order-code").fill("22");
             await page.getByRole("button", { name: "Carica", exact: true }).click();
+            const replaceCartDialog = page.getByRole("dialog", { name: /Sostituire il carrello corrente/i });
+            await expect(replaceCartDialog).toBeVisible();
+            await replaceCartDialog.getByRole("button", { name: "SOSTITUISCI", exact: true }).click();
             await expect(page.getByText(/Ordine caricato: codice 22/i)).toBeVisible({ timeout: 15000 });
         } finally {
             await cleanupEventArtifactsByName(eventName);
