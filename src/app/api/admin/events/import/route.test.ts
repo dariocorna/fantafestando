@@ -1,3 +1,4 @@
+import { Blob as NodeBlob } from "node:buffer";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const {
@@ -27,11 +28,23 @@ vi.mock("next/cache", () => ({
 
 import { POST } from "@/app/api/admin/events/import/route";
 
-function buildRequest(formData: FormData) {
-  return new Request("http://localhost/api/admin/events/import", {
-    method: "POST",
-    body: formData,
-  });
+function buildUpload() {
+  const blob = new NodeBlob(["bundle"], { type: "application/gzip" });
+  return {
+    name: "event.tar.gz",
+    size: blob.size,
+    stream: () => blob.stream(),
+  } as Blob & { name: string };
+}
+
+function buildRequest(fields: Record<string, unknown>) {
+  const formData = {
+    get: (name: string) => fields[name] ?? null,
+  } as FormData;
+
+  return {
+    formData: async () => formData,
+  } as Request;
 }
 
 describe("POST /api/admin/events/import", () => {
@@ -47,10 +60,7 @@ describe("POST /api/admin/events/import", () => {
   });
 
   test("rejects requests without a new event name", async () => {
-    const formData = new FormData();
-    formData.set("bundleFile", new File(["bundle"], "event.tar.gz", { type: "application/gzip" }));
-
-    const response = await POST(buildRequest(formData));
+    const response = await POST(buildRequest({ bundleFile: buildUpload() }));
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
@@ -73,11 +83,10 @@ describe("POST /api/admin/events/import", () => {
       },
     });
 
-    const formData = new FormData();
-    formData.set("newEventName", "Sagra 2027");
-    formData.set("bundleFile", new File(["bundle"], "event.tar.gz", { type: "application/gzip" }));
-
-    const response = await POST(buildRequest(formData));
+    const response = await POST(buildRequest({
+      newEventName: "Sagra 2027",
+      bundleFile: buildUpload(),
+    }));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
