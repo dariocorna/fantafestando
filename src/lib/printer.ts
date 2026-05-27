@@ -1593,6 +1593,10 @@ export class PrinterService {
             }));
         });
 
+        const pizzaNumber = typeof order.pizzaTicket?.pizzaNumber === "number"
+            ? order.pizzaTicket.pizzaNumber
+            : undefined;
+
         const cashierJob: PrinterCommandJob = {
             ip: cashierPrinter?.ip || "",
             port: cashierPrinter?.port || DEFAULT_PRINTER_PORT,
@@ -1611,7 +1615,7 @@ export class PrinterService {
             tableNumber: order.customer?.table,
             orderId: order._id.toString(),
             shortCode: orderCode || undefined,
-            pizzaNumber: typeof order.pizzaTicket?.pizzaNumber === "number" ? order.pizzaTicket.pizzaNumber : undefined
+            pizzaNumber
         };
 
         const ensureCustomerJob = (groupKey: string, footerLines?: string[]) => {
@@ -1640,7 +1644,7 @@ export class PrinterService {
             const categoryId = category?._id.toString() || product.categoryId.toString();
             const categoryName = category?.name?.trim();
             const printerName = kitchenPrinter?.name?.trim();
-            const isPizzaItem = Boolean(category?.pizzaFlowEnabled) && typeof order.pizzaTicket?.pizzaNumber === "number";
+            const isPizzaItem = Boolean(category?.pizzaFlowEnabled) && typeof pizzaNumber === "number";
             const printFlowKey = isPizzaItem ? "pizza" : "standard";
             const baseGroupKey = kitchenPrinter?._id
                 ? `printer:${String(kitchenPrinter._id)}`
@@ -1690,8 +1694,8 @@ export class PrinterService {
             }
 
             if (isPizzaItem && kitchenJob) {
-                kitchenJob.pizzaNumber = order.pizzaTicket?.pizzaNumber;
-                kitchenJob.pizzaBarcodeValue = getPizzaBarcodeValue(order.pizzaTicket!.pizzaNumber);
+                kitchenJob.pizzaNumber = pizzaNumber;
+                kitchenJob.pizzaBarcodeValue = getPizzaBarcodeValue(pizzaNumber);
             }
 
             kitchenJob?.items.push({
@@ -1702,7 +1706,7 @@ export class PrinterService {
 
             const customerJob = ensureCustomerJob(customerGroupKey, departmentFooterLines);
             if (isPizzaItem && customerJob && !kitchenJob) {
-                customerJob.pizzaBarcodeValue = getPizzaBarcodeValue(order.pizzaTicket!.pizzaNumber);
+                customerJob.pizzaBarcodeValue = getPizzaBarcodeValue(pizzaNumber);
             }
             customerJob?.items.push({
                 name: resolvePrintName(item.productId, item.snapshotName),
