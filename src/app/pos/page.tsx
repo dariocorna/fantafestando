@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { ShoppingCart, User, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X, RefreshCw, Clock3, Wallet, Check } from "lucide-react"
+import { useState, useEffect, useMemo, type KeyboardEvent, type MouseEvent } from "react"
+import { ShoppingCart, User, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X, RefreshCw, Clock3, Wallet, Check, Minus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -38,6 +38,7 @@ import { normalizePosCatalogLayout } from "@/lib/pos-catalog-layout"
 import { FixedMenuConfigDialog, type FixedMenuChoiceGroupDto, type FixedMenuComponentDto } from "@/components/fixed-menu-config-dialog"
 import { buildMenuConfigurationKey, type MenuSelectionInput } from "@/lib/fixed-menu"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { buildProductQuantityMap, decrementProductQuantityInCart } from "@/lib/pos-cart"
 
 const POS_TOUCH_BREAKPOINT = 1024
 
@@ -219,6 +220,260 @@ function getPeripheralRef(value: IPosDevice["paymentTerminalId"] | IPosDevice["c
     return value
 }
 
+type ProductCardVariant = "mobile" | "modern" | "compact"
+
+interface PosProductCardProps {
+    product: IProduct
+    displayName: string
+    quantity: number
+    stockStatus: "UNLIMITED" | "OK" | "LOW" | "OUT"
+    stockLabel: string
+    showStockPill: boolean
+    variant: ProductCardVariant
+    showTouchDecrement: boolean
+    borderColor: string
+    backgroundColor: string
+    minHeight?: string
+    boxShadow?: string
+    onAdd: (product: IProduct) => void
+    onDecrement: (product: IProduct) => void
+}
+
+function PosProductCard({
+    product,
+    displayName,
+    quantity,
+    stockStatus,
+    stockLabel,
+    showStockPill,
+    variant,
+    showTouchDecrement,
+    borderColor,
+    backgroundColor,
+    minHeight,
+    boxShadow,
+    onAdd,
+    onDecrement,
+}: PosProductCardProps) {
+    const hasQuantity = quantity > 0
+    const shouldShowTouchDecrement = showTouchDecrement && hasQuantity
+    const priceLabel = `${product.basePrice.toFixed(2)} €`
+    const instructionsId = "pos-product-card-instructions"
+    const addLabel = `${displayName}, ${priceLabel}, quantita nel carrello ${quantity}. Aggiungi una unita`
+    const decrementLabel = `Rimuovi una unita di ${displayName}`
+    const stockPillClass = `inline-flex w-fit rounded-sm px-1.5 py-0.5 text-[10px] font-bold ${stockStatus === "OUT"
+        ? "bg-red-100 text-red-700"
+        : "bg-amber-100 text-amber-700"
+        }`
+    const badge = hasQuantity ? (
+        <span
+            className={`absolute right-2 top-2 z-10 inline-flex min-h-8 min-w-8 items-center justify-center rounded-full border-2 border-white bg-[var(--brand-blue-700)] px-2 text-sm font-black leading-none text-white shadow-md ${variant === "compact" ? "text-xs" : ""}`}
+            data-testid={`pos-product-quantity-${product._id}`}
+            aria-hidden="true"
+        >
+            {variant === "compact" ? quantity : `x${quantity}`}
+        </span>
+    ) : null
+
+    const handleContextMenu = (event: MouseEvent<HTMLButtonElement>) => {
+        if (!hasQuantity) return
+        event.preventDefault()
+        const pointerType = (event.nativeEvent as globalThis.MouseEvent & { pointerType?: string }).pointerType
+        if (pointerType === "touch") return
+        onDecrement(product)
+    }
+
+    const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+        if (!hasQuantity) return
+        if (event.key !== "Delete" && event.key !== "-") return
+        event.preventDefault()
+        onDecrement(product)
+    }
+
+    const decrementButton = shouldShowTouchDecrement ? (
+        <button
+            type="button"
+            aria-label={decrementLabel}
+            title={decrementLabel}
+            data-testid={`pos-product-decrement-${product._id}`}
+            onClick={(event) => {
+                event.stopPropagation()
+                onDecrement(product)
+            }}
+            className={`absolute z-20 inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-xl border-2 border-white bg-white px-2 text-sm font-black text-red-700 shadow-lg ring-1 ring-red-200 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 ${variant === "mobile"
+                ? "bottom-3 right-3"
+                : "left-2 top-2"
+                }`}
+        >
+            <Minus size={18} strokeWidth={3} />
+            <span className={variant === "mobile" ? "text-xs" : "sr-only"}>-1</span>
+        </button>
+    ) : null
+
+    if (variant === "mobile") {
+        return (
+            <div className="relative">
+                <button
+                    type="button"
+                    aria-label={addLabel}
+                    aria-describedby={instructionsId}
+                    onClick={() => onAdd(product)}
+                    onContextMenu={handleContextMenu}
+                    onKeyDown={handleKeyDown}
+                    data-testid={`pos-product-${product._id}`}
+                    className="flex w-full flex-col gap-3 overflow-hidden rounded-3xl border-2 px-4 py-4 text-left shadow-sm transition-all active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-blue-700)]"
+                    style={{
+                        borderColor,
+                        backgroundColor,
+                    }}
+                >
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <p className="line-clamp-3 text-lg font-black uppercase leading-tight text-slate-900">
+                                {displayName}
+                            </p>
+                            {product.requiresConfiguration ? (
+                                <span className="mt-2 inline-flex w-fit rounded-sm bg-white/85 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-slate-600">
+                                    Configura
+                                </span>
+                            ) : null}
+                        </div>
+                        <span
+                            className="inline-flex min-w-[88px] shrink-0 justify-center rounded-xl border bg-white/90 px-3 py-2 text-lg font-black leading-none"
+                            style={{
+                                color: borderColor,
+                                borderColor,
+                            }}
+                        >
+                            {priceLabel}
+                        </span>
+                    </div>
+                    <div className={`flex min-h-11 items-center justify-between gap-2 ${shouldShowTouchDecrement ? "pr-14" : ""}`}>
+                        {showStockPill ? (
+                            <span
+                                className={`inline-flex w-fit rounded-full px-2 py-1 text-[10px] font-bold ${stockStatus === "OUT"
+                                    ? "bg-red-100 text-red-700"
+                                    : "bg-amber-100 text-amber-700"
+                                    }`}
+                            >
+                                {stockLabel}
+                            </span>
+                        ) : (
+                            <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                                Tocca per aggiungere
+                            </span>
+                        )}
+                        {hasQuantity ? (
+                            <span
+                                className="ml-auto inline-flex min-h-8 items-center rounded-full bg-[var(--brand-blue-700)] px-3 text-sm font-black text-white"
+                                data-testid={`pos-product-quantity-${product._id}`}
+                            >
+                                Nel carrello: {quantity}
+                            </span>
+                        ) : (
+                            <span className="text-sm font-bold uppercase tracking-[0.08em] text-slate-600">
+                                Aggiungi
+                            </span>
+                        )}
+                    </div>
+                </button>
+                {decrementButton}
+            </div>
+        )
+    }
+
+    if (variant === "modern") {
+        return (
+            <div className="relative">
+                {badge}
+                <button
+                    type="button"
+                    aria-label={addLabel}
+                    aria-describedby={instructionsId}
+                    onClick={() => onAdd(product)}
+                    onContextMenu={handleContextMenu}
+                    onKeyDown={handleKeyDown}
+                    data-testid={`pos-product-${product._id}`}
+                    className="group relative flex min-h-[136px] w-full flex-col overflow-hidden border-2 text-left transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_20px_rgba(15,23,42,0.12)] active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-blue-700)]"
+                    style={{ borderColor }}
+                >
+                    <div
+                        className="flex flex-1 flex-col gap-2 px-2.5 py-2.5"
+                        style={{ backgroundColor }}
+                    >
+                        <p className={`line-clamp-3 text-[1.02rem] font-black uppercase leading-tight text-slate-900 ${hasQuantity ? "pr-10" : ""} ${shouldShowTouchDecrement ? "pl-12" : ""}`}>
+                            {displayName}
+                        </p>
+                        {product.requiresConfiguration ? (
+                            <span className="inline-flex w-fit rounded-sm bg-white/85 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-slate-600">
+                                Configura
+                            </span>
+                        ) : null}
+                        <div className="mt-auto flex items-end justify-between gap-2">
+                            {showStockPill ? (
+                                <span className={stockPillClass}>
+                                    {stockLabel}
+                                </span>
+                            ) : (
+                                <span />
+                            )}
+                            <span
+                                className="inline-flex min-w-[96px] justify-center border px-2 py-1 text-lg font-black leading-none"
+                                style={{
+                                    color: borderColor,
+                                    borderColor,
+                                    backgroundColor: "rgba(255, 255, 255, 0.88)",
+                                }}
+                            >
+                                {priceLabel}
+                            </span>
+                        </div>
+                    </div>
+                </button>
+                {decrementButton}
+            </div>
+        )
+    }
+
+    return (
+        <div className="relative">
+            {badge}
+            <button
+                type="button"
+                aria-label={addLabel}
+                aria-describedby={instructionsId}
+                onClick={() => onAdd(product)}
+                onContextMenu={handleContextMenu}
+                onKeyDown={handleKeyDown}
+                data-testid={`pos-product-${product._id}`}
+                className="flex w-full flex-col items-center justify-center border px-1.5 py-1 text-center transition-all hover:brightness-90 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-blue-700)]"
+                style={{
+                    borderColor,
+                    borderWidth: "2px",
+                    minHeight,
+                    backgroundColor,
+                    boxShadow,
+                }}
+            >
+                <p className={`mx-auto w-full max-w-[96%] truncate text-center text-[clamp(14px,0.95vw,20px)] font-black uppercase leading-tight text-slate-800 ${hasQuantity ? "pr-7" : ""} ${shouldShowTouchDecrement ? "pl-11" : ""}`}>
+                    {displayName}
+                </p>
+                {product.requiresConfiguration ? (
+                    <span className="mx-auto inline-flex w-fit rounded-sm bg-white/85 px-1 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-slate-600">
+                        Configura
+                    </span>
+                ) : null}
+                {showStockPill ? (
+                    <span className={stockPillClass}>
+                        {stockLabel}
+                    </span>
+                ) : null}
+            </button>
+            {decrementButton}
+        </div>
+    )
+}
+
 export default function PosPage() {
     const [cart, setCart] = useState<CartItem[]>([])
     const [categories, setCategories] = useState<ICategory[]>([])
@@ -268,6 +523,8 @@ export default function PosPage() {
     const [isRetryingFailedPrints, setIsRetryingFailedPrints] = useState(false)
     const [retryPrintsFeedback, setRetryPrintsFeedback] = useState<string | null>(null)
     const [configuringProduct, setConfiguringProduct] = useState<IProduct | null>(null)
+    const [hasCoarsePointer, setHasCoarsePointer] = useState(false)
+    const [cartAnnouncement, setCartAnnouncement] = useState("")
     const isMobilePos = useIsMobile(POS_TOUCH_BREAKPOINT)
 
     // Info Cliente
@@ -314,6 +571,17 @@ export default function PosPage() {
             }
         }
         loadInitialData()
+    }, [])
+
+    useEffect(() => {
+        if (typeof window === "undefined" || !window.matchMedia) return
+
+        const query = window.matchMedia("(pointer: coarse)")
+        const updatePointerMode = () => setHasCoarsePointer(query.matches)
+        updatePointerMode()
+        query.addEventListener("change", updatePointerMode)
+
+        return () => query.removeEventListener("change", updatePointerMode)
     }, [])
 
     const selectPosDevice = (id: string) => {
@@ -406,6 +674,8 @@ export default function PosPage() {
         ? productsByCategory[selectedModernCategoryId] || []
         : []
     const selectedModernCategoryTheme = getCategoryTheme(selectedModernCategory?.uiColor)
+    const productQuantityById = useMemo(() => buildProductQuantityMap(cart), [cart])
+    const showTouchDecrementControls = Boolean(isMobilePos) || hasCoarsePointer
     const resolveProductDisplayName = (product: IProduct) => product.shortName?.trim() || product.name
     const getAdaptiveProductRowMinHeight = (productsCount: number): string => {
         const safeCount = Math.max(productsCount, 1)
@@ -426,6 +696,8 @@ export default function PosPage() {
             selectedOptionLabels?: string[]
         }
     ) => {
+        const displayName = resolveProductDisplayName(product)
+        const nextQuantity = (productQuantityById.get(product._id) ?? 0) + 1
         setCart((prev: CartItem[]) => {
             const configurationKey = buildMenuConfigurationKey(options?.menuSelections || [])
             const lineId = configurationKey ? `${product._id}:${configurationKey}` : product._id
@@ -445,6 +717,7 @@ export default function PosPage() {
                 menuSelections: options?.menuSelections || [],
             }]
         })
+        setCartAnnouncement(`Aggiunto ${displayName}, quantita ${nextQuantity}`)
     }
 
     const addToCart = (product: IProduct) => {
@@ -453,6 +726,16 @@ export default function PosPage() {
             return
         }
         addConfiguredToCart(product)
+    }
+
+    const decrementProductFromCatalog = (product: IProduct) => {
+        const currentQuantity = productQuantityById.get(product._id) ?? 0
+        if (currentQuantity <= 0) return
+
+        const nextQuantity = Math.max(0, currentQuantity - 1)
+        const displayName = resolveProductDisplayName(product)
+        setCart((prev: CartItem[]) => decrementProductQuantityInCart(prev, product._id))
+        setCartAnnouncement(`Rimosso ${displayName}, quantita ${nextQuantity}`)
     }
 
     const addDiscountPresetToCart = (preset: QuickDiscountPreset) => {
@@ -1319,58 +1602,21 @@ export default function PosPage() {
                         const cardBorderColor = stockStatus === "OUT" ? "#dc2626" : selectedModernCategoryTheme.base
 
                         return (
-                            <button
+                            <PosProductCard
                                 key={product._id}
-                                type="button"
-                                onClick={() => addToCart(product)}
-                                data-testid={`pos-product-${product._id}`}
-                                className="flex w-full flex-col gap-3 overflow-hidden rounded-3xl border-2 px-4 py-4 text-left shadow-sm transition-all active:scale-[0.99]"
-                                style={{
-                                    borderColor: cardBorderColor,
-                                    backgroundColor: cardBackground,
-                                }}
-                            >
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <p className="line-clamp-3 text-lg font-black uppercase leading-tight text-slate-900">
-                                            {resolveProductDisplayName(product)}
-                                        </p>
-                                        {product.requiresConfiguration ? (
-                                            <span className="mt-2 inline-flex w-fit rounded-sm bg-white/85 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-slate-600">
-                                                Configura
-                                            </span>
-                                        ) : null}
-                                    </div>
-                                    <span
-                                        className="inline-flex min-w-[88px] shrink-0 justify-center rounded-xl border bg-white/90 px-3 py-2 text-lg font-black leading-none"
-                                        style={{
-                                            color: cardBorderColor,
-                                            borderColor: cardBorderColor,
-                                        }}
-                                    >
-                                        {product.basePrice.toFixed(2)} €
-                                    </span>
-                                </div>
-                                <div className="flex items-center justify-between gap-2">
-                                    {showStockPill ? (
-                                        <span
-                                            className={`inline-flex w-fit rounded-full px-2 py-1 text-[10px] font-bold ${stockStatus === "OUT"
-                                                ? "bg-red-100 text-red-700"
-                                                : "bg-amber-100 text-amber-700"
-                                                }`}
-                                        >
-                                            {stockLabel}
-                                        </span>
-                                    ) : (
-                                        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
-                                            Tocca per aggiungere
-                                        </span>
-                                    )}
-                                    <span className="text-sm font-bold uppercase tracking-[0.08em] text-slate-600">
-                                        Aggiungi
-                                    </span>
-                                </div>
-                            </button>
+                                product={product}
+                                displayName={resolveProductDisplayName(product)}
+                                quantity={productQuantityById.get(product._id) ?? 0}
+                                stockStatus={stockStatus}
+                                stockLabel={stockLabel}
+                                showStockPill={showStockPill}
+                                variant="mobile"
+                                showTouchDecrement={showTouchDecrementControls}
+                                borderColor={cardBorderColor}
+                                backgroundColor={cardBackground}
+                                onAdd={addToCart}
+                                onDecrement={decrementProductFromCatalog}
+                            />
                         )
                     })}
                 </div>
@@ -1390,6 +1636,12 @@ export default function PosPage() {
 
     return (
         <div className="brand-surface-pos h-screen w-screen overflow-hidden" data-testid="pos-brand-shell">
+            <p id="pos-product-card-instructions" className="sr-only">
+                Click, tap, Invio o Spazio aggiungono una unita. Tasto destro, Canc o meno rimuovono una unita quando il prodotto e nel carrello. Su touch usa il pulsante meno nella card.
+            </p>
+            <div className="sr-only" aria-live="polite" aria-atomic="true">
+                {cartAnnouncement}
+            </div>
             {isMobilePos ? (
             <div className="flex h-full flex-col bg-[#f7fbff]">
                 <header className="sticky top-0 z-30 border-b border-[#d9e6f8] bg-white/95 px-3 py-3 backdrop-blur">
@@ -1636,55 +1888,23 @@ export default function PosPage() {
                                                     const cardBorderColor = stockStatus === "OUT" ? "#dc2626" : selectedModernCategoryTheme.base
 
                                                     return (
-                                                        <button
+                                                        <PosProductCard
                                                             key={p._id}
-                                                            onClick={() => addToCart(p)}
-                                                            data-testid={`pos-product-${p._id}`}
-                                                            className="group relative flex min-h-[136px] flex-col overflow-hidden border-2 text-left transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_20px_rgba(15,23,42,0.12)] active:translate-y-0"
-                                                            style={{ borderColor: cardBorderColor }}
-                                                        >
-                                                            <div
-                                                                className="flex flex-1 flex-col gap-2 px-2.5 py-2.5"
-                                                                style={{
-                                                                    backgroundColor: stockStatus === "OUT"
-                                                                        ? "rgba(254, 226, 226, 0.88)"
-                                                                        : stripedBackground,
-                                                                }}
-                                                            >
-                                                                <p className="line-clamp-3 text-[1.02rem] font-black uppercase leading-tight text-slate-900">
-                                                                    {resolveProductDisplayName(p)}
-                                                                </p>
-                                                                {p.requiresConfiguration ? (
-                                                                    <span className="inline-flex w-fit rounded-sm bg-white/85 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-slate-600">
-                                                                        Configura
-                                                                    </span>
-                                                                ) : null}
-                                                                <div className="mt-auto flex items-end justify-between gap-2">
-                                                                    {showStockPill ? (
-                                                                        <span
-                                                                            className={`inline-flex w-fit rounded-sm px-1.5 py-0.5 text-[10px] font-bold ${stockStatus === "OUT"
-                                                                                ? "bg-red-100 text-red-700"
-                                                                                : "bg-amber-100 text-amber-700"
-                                                                                }`}
-                                                                        >
-                                                                            {stockLabel}
-                                                                        </span>
-                                                                    ) : (
-                                                                        <span />
-                                                                    )}
-                                                                    <span
-                                                                        className="inline-flex min-w-[96px] justify-center border px-2 py-1 text-lg font-black leading-none"
-                                                                        style={{
-                                                                            color: cardBorderColor,
-                                                                            borderColor: cardBorderColor,
-                                                                            backgroundColor: "rgba(255, 255, 255, 0.88)",
-                                                                        }}
-                                                                    >
-                                                                        {p.basePrice.toFixed(2)} €
-                                                                    </span>
-                                                                </div>
-                                                            </div>
-                                                        </button>
+                                                            product={p}
+                                                            displayName={resolveProductDisplayName(p)}
+                                                            quantity={productQuantityById.get(p._id) ?? 0}
+                                                            stockStatus={stockStatus}
+                                                            stockLabel={stockLabel}
+                                                            showStockPill={showStockPill}
+                                                            variant="modern"
+                                                            showTouchDecrement={showTouchDecrementControls}
+                                                            borderColor={cardBorderColor}
+                                                            backgroundColor={stockStatus === "OUT"
+                                                                ? "rgba(254, 226, 226, 0.88)"
+                                                                : stripedBackground}
+                                                            onAdd={addToCart}
+                                                            onDecrement={decrementProductFromCatalog}
+                                                        />
                                                     )
                                                 })}
                                             </div>
@@ -1746,44 +1966,32 @@ export default function PosPage() {
                                                                 ? categoryColorWithAlpha(cat.uiColor, 0.62)
                                                                 : categoryColorWithAlpha(cat.uiColor, 0.18)
                                                             const strongInset = categoryColorWithAlpha(cat.uiColor, 0.5)
+                                                            const cardBorderColor = stockStatus === "OUT" ? "#dc2626" : catTheme.base
+                                                            const cardBackground = stockStatus === "OUT"
+                                                                ? "rgba(239, 68, 68, 0.24)"
+                                                                : stripedBackground
+                                                            const cardBoxShadow = stockStatus === "OUT"
+                                                                ? "inset 0 0 0 1px rgba(185, 28, 28, 0.5)"
+                                                                : `inset 0 0 0 1px ${strongInset}`
 
                                                             return (
-                                                                <button
+                                                                <PosProductCard
                                                                     key={p._id}
-                                                                    onClick={() => addToCart(p)}
-                                                                    data-testid={`pos-product-${p._id}`}
-                                                                    className="flex w-full flex-col items-center justify-center border px-1.5 py-1 text-center transition-all hover:brightness-90 active:scale-[0.99]"
-                                                                    style={{
-                                                                        borderColor: stockStatus === "OUT" ? "#dc2626" : catTheme.base,
-                                                                        borderWidth: "2px",
-                                                                        minHeight: categoryRowMinHeight,
-                                                                        backgroundColor: stockStatus === "OUT"
-                                                                            ? "rgba(239, 68, 68, 0.24)"
-                                                                            : stripedBackground,
-                                                                        boxShadow: stockStatus === "OUT"
-                                                                            ? "inset 0 0 0 1px rgba(185, 28, 28, 0.5)"
-                                                                            : `inset 0 0 0 1px ${strongInset}`,
-                                                                    }}
-                                                                >
-                                                                    <p className="mx-auto w-full max-w-[96%] truncate text-center text-[clamp(14px,0.95vw,20px)] font-black uppercase leading-tight text-slate-800">
-                                                                        {resolveProductDisplayName(p)}
-                                                                    </p>
-                                                                    {p.requiresConfiguration ? (
-                                                                        <span className="mx-auto inline-flex w-fit rounded-sm bg-white/85 px-1 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-slate-600">
-                                                                            Configura
-                                                                        </span>
-                                                                    ) : null}
-                                                                    {showStockPill ? (
-                                                                        <span
-                                                                            className={`mx-auto inline-flex w-fit rounded-sm px-1 py-0.5 text-[10px] font-bold ${stockStatus === "OUT"
-                                                                                ? "bg-red-100 text-red-700"
-                                                                                : "bg-amber-100 text-amber-700"
-                                                                                }`}
-                                                                        >
-                                                                            {stockLabel}
-                                                                        </span>
-                                                                    ) : null}
-                                                                </button>
+                                                                    product={p}
+                                                                    displayName={resolveProductDisplayName(p)}
+                                                                    quantity={productQuantityById.get(p._id) ?? 0}
+                                                                    stockStatus={stockStatus}
+                                                                    stockLabel={stockLabel}
+                                                                    showStockPill={showStockPill}
+                                                                    variant="compact"
+                                                                    showTouchDecrement={showTouchDecrementControls}
+                                                                    borderColor={cardBorderColor}
+                                                                    backgroundColor={cardBackground}
+                                                                    minHeight={categoryRowMinHeight}
+                                                                    boxShadow={cardBoxShadow}
+                                                                    onAdd={addToCart}
+                                                                    onDecrement={decrementProductFromCatalog}
+                                                                />
                                                             )
                                                         })}
                                                     </div>
