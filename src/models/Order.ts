@@ -19,6 +19,7 @@ export interface IOrder extends Document {
         baseAmount?: number;
         scope?: "ORDER";
     };
+    pricingMode?: "STANDARD" | "VOLUNTEER";
     cart: Array<{
         productId: Types.ObjectId;
         snapshotName: string;
@@ -111,6 +112,7 @@ const OrderSchema = new Schema<IOrder>({
             enum: ["ORDER"]
         }
     },
+    pricingMode: { type: String, enum: ["STANDARD", "VOLUNTEER"], default: "STANDARD" },
     cart: [{
         productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
         snapshotName: { type: String, required: true },

@@ -68,6 +68,7 @@ export function EditProductDialog({
         description?: string,
         categoryId: string,
         basePrice: number,
+        volunteerPrice?: number | null,
         stockQuantity?: number | null,
         availableDays?: string[],
         kind?: ProductKind,
@@ -330,6 +331,18 @@ export function EditProductDialog({
                                 step="0.01"
                                 defaultValue={product.basePrice}
                                 required={kind === "FIXED_MENU" || !availableOnlyInMenus}
+                            />
+                        </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="volunteerPrice">Prezzo volontari (€)</Label>
+                            <Input
+                                id="volunteerPrice"
+                                name="volunteerPrice"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                defaultValue={product.volunteerPrice ?? ""}
+                                placeholder="Lascia vuoto"
                             />
                         </div>
                         <div className="grid gap-2">

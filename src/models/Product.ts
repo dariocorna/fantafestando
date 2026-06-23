@@ -10,6 +10,7 @@ export interface IProduct extends Document {
     shortName?: string;
     description?: string;
     basePrice: number;
+    volunteerPrice?: number | null;
     kind: ProductKind;
     availableOnlyInMenus: boolean;
     salesChannels: SalesChannel[];
@@ -49,6 +50,7 @@ const ProductSchema = new Schema<IProduct>({
     shortName: { type: String, trim: true, maxlength: 24 },
     description: { type: String, trim: true },
     basePrice: { type: Number, required: true },
+    volunteerPrice: { type: Number, default: null, min: 0 },
     kind: { type: String, enum: ["STANDARD", "FIXED_MENU"], default: "STANDARD" },
     availableOnlyInMenus: { type: Boolean, default: false },
     salesChannels: {
@@ -88,6 +90,12 @@ const ProductSchema = new Schema<IProduct>({
 });
 
 ProductSchema.index({ eventId: 1, shortName: 1 });
+
+ProductSchema.pre("validate", function () {
+    if (this.volunteerPrice != null && this.volunteerPrice > Number(this.basePrice || 0)) {
+        this.invalidate("volunteerPrice", "Il prezzo volontari non può superare il prezzo base");
+    }
+});
 
 if (process.env.NODE_ENV === "development") {
     delete mongoose.models.Product;

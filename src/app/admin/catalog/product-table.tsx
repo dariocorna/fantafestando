@@ -72,6 +72,7 @@ interface SerializedProduct {
     categoryId: string;
     categoryName: string;
     basePrice: number;
+    volunteerPrice?: number | null;
     stockQuantity?: number | null;
     isSoldOut: boolean;
     availableDays: string[];
@@ -300,7 +301,7 @@ export function ProductTable({
                         <TableHead>Categoria</TableHead>
                         <TableHead>Tipo</TableHead>
                         <TableHead>Canali</TableHead>
-                        <TableHead>Prezzo</TableHead>
+                        <TableHead>Prezzo / Volontari</TableHead>
                         <TableHead>Scorte</TableHead>
                         <TableHead>Disponibilità</TableHead>
                         <TableHead>Stampa comanda</TableHead>
@@ -419,6 +420,7 @@ export function ProductTable({
                                             description: product.description,
                                             categoryId: product.categoryId,
                                             basePrice: product.basePrice,
+                                            volunteerPrice: product.volunteerPrice,
                                             stockQuantity: product.stockQuantity ?? null,
                                             availableDays: product.availableDays,
                                             kind: product.kind,
