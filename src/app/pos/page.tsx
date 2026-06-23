@@ -677,7 +677,6 @@ export default function PosPage() {
         || Boolean(normalizedTableValue)
         || Boolean(loadedPendingOrder)
     const predefinedTables = activeEvent?.predefinedTables || []
-    const categoryColumnsCount = Math.max(categories.length, 1)
     const isModernCatalogLayout = normalizePosCatalogLayout(activeEvent?.settings?.posCatalogLayout) === "MODERN_TABS"
     const selectedModernCategoryId = activeCategory && categories.some((category) => category._id === activeCategory)
         ? activeCategory
@@ -686,6 +685,34 @@ export default function PosPage() {
         acc[category._id] = products.filter((product) => product.categoryId === category._id)
         return acc
     }, {})
+    const compactCategoryGroups = useMemo(() => {
+        const maxProductsPerCombinedColumn = 8
+        const shortCategoryProductLimit = 3
+        const groups: ICategory[][] = []
+
+        for (let index = 0; index < categories.length; index += 1) {
+            const category = categories[index]
+            const categoryProductsCount = products.filter((product) => product.categoryId === category._id).length
+            const nextCategory = categories[index + 1]
+            const nextCategoryProductsCount = nextCategory
+                ? products.filter((product) => product.categoryId === nextCategory._id).length
+                : 0
+
+            if (
+                nextCategory
+                && categoryProductsCount <= shortCategoryProductLimit
+                && categoryProductsCount + nextCategoryProductsCount <= maxProductsPerCombinedColumn
+            ) {
+                groups.push([category, nextCategory])
+                index += 1
+            } else {
+                groups.push([category])
+            }
+        }
+
+        return groups
+    }, [categories, products])
+    const categoryColumnsCount = Math.max(compactCategoryGroups.length, 1)
     const selectedModernCategory = selectedModernCategoryId
         ? categories.find((category) => category._id === selectedModernCategoryId) || null
         : null
@@ -1951,89 +1978,97 @@ export default function PosPage() {
                                     className="grid content-start gap-1"
                                     style={{ gridTemplateColumns: `repeat(${categoryColumnsCount}, minmax(0, 1fr))` }}
                                 >
-                                    {categories.map((cat) => {
-                                        const catTheme = getCategoryTheme(cat.uiColor)
-                                        const categoryProducts = productsByCategory[cat._id] || []
-                                        const categoryRowMinHeight = getAdaptiveProductRowMinHeight(categoryProducts.length)
+                                    {compactCategoryGroups.map((categoryGroup) => {
+                                        const groupProductCount = categoryGroup.reduce((count, category) => count + (productsByCategory[category._id] || []).length, 0)
+                                        const categoryRowMinHeight = getAdaptiveProductRowMinHeight(groupProductCount)
 
                                         return (
-                                            <article
-                                                key={cat._id}
-                                                className="min-w-0"
-                                                style={{ backgroundColor: categoryColorWithAlpha(cat.uiColor, 0.12) }}
-                                            >
-                                                <header
-                                                    className="mb-1 flex items-center justify-between border-b px-0 py-0.5"
-                                                    style={{
-                                                        backgroundColor: catTheme.softBg,
-                                                        borderColor: catTheme.border,
-                                                    }}
-                                                >
-                                                    <h4
-                                                        className="truncate text-sm font-black uppercase tracking-[0.04em]"
-                                                        style={{ color: catTheme.base }}
-                                                    >
-                                                        {cat.name}
-                                                    </h4>
-                                                    <span
-                                                        className="rounded-sm border px-1.5 py-0.5 text-[10px] font-black"
-                                                        style={{
-                                                            color: catTheme.base,
-                                                            borderColor: catTheme.border,
-                                                            backgroundColor: "white",
-                                                        }}
-                                                    >
-                                                        {categoryProducts.length}
-                                                    </span>
-                                                </header>
+                                            <div key={categoryGroup.map((category) => category._id).join("-")} className="min-w-0 space-y-1">
+                                                {categoryGroup.map((cat) => {
+                                                    const catTheme = getCategoryTheme(cat.uiColor)
+                                                    const categoryProducts = productsByCategory[cat._id] || []
 
-                                                {categoryProducts.length === 0 ? (
-                                                    <div className="border border-dashed border-slate-200 bg-slate-50 px-1 py-2 text-center text-xs font-semibold text-slate-500">
-                                                        Nessun prodotto in categoria
-                                                    </div>
-                                                ) : (
-                                                    <div className="space-y-1.5">
-                                                        {categoryProducts.map((p, productIndex) => {
-                                                            const stockStatus = p.stockStatus || getStockStatus(p.stockQuantity ?? null, Boolean(p.isSoldOut))
-                                                            const stockLabel = getStockLabel(p.stockQuantity ?? null, Boolean(p.isSoldOut))
-                                                            const showStockPill = stockStatus === "LOW" || stockStatus === "OUT"
-                                                            const productQuantity = productQuantityById.get(p._id) ?? 0
-                                                            const stripedBackground = productIndex % 2 === 0
-                                                                ? categoryColorWithAlpha(cat.uiColor, 0.62)
-                                                                : categoryColorWithAlpha(cat.uiColor, 0.18)
-                                                            const strongInset = categoryColorWithAlpha(cat.uiColor, 0.5)
-                                                            const cardBorderColor = stockStatus === "OUT" ? "#dc2626" : catTheme.base
-                                                            const cardBackground = stockStatus === "OUT"
-                                                                ? "rgba(239, 68, 68, 0.24)"
-                                                                : stripedBackground
-                                                            const cardBoxShadow = stockStatus === "OUT"
-                                                                ? "inset 0 0 0 1px rgba(185, 28, 28, 0.5)"
-                                                                : `inset 0 0 0 1px ${strongInset}`
+                                                    return (
+                                                        <article
+                                                            key={cat._id}
+                                                            className="min-w-0"
+                                                            style={{ backgroundColor: categoryColorWithAlpha(cat.uiColor, 0.12) }}
+                                                        >
+                                                            <header
+                                                                className="mb-1 flex items-center justify-between border-b px-0 py-0.5"
+                                                                style={{
+                                                                    backgroundColor: catTheme.softBg,
+                                                                    borderColor: catTheme.border,
+                                                                }}
+                                                            >
+                                                                <h4
+                                                                    className="truncate text-sm font-black uppercase tracking-[0.04em]"
+                                                                    style={{ color: catTheme.base }}
+                                                                >
+                                                                    {cat.name}
+                                                                </h4>
+                                                                <span
+                                                                    className="rounded-sm border px-1.5 py-0.5 text-[10px] font-black"
+                                                                    style={{
+                                                                        color: catTheme.base,
+                                                                        borderColor: catTheme.border,
+                                                                        backgroundColor: "white",
+                                                                    }}
+                                                                >
+                                                                    {categoryProducts.length}
+                                                                </span>
+                                                            </header>
 
-                                                            return (
-                                                                <PosProductCard
-                                                                    key={p._id}
-                                                                    product={p}
-                                                                    displayName={resolveProductDisplayName(p)}
-                                                                    quantity={productQuantity}
-                                                                    stockStatus={stockStatus}
-                                                                    stockLabel={stockLabel}
-                                                                    showStockPill={showStockPill}
-                                                                    variant="compact"
-                                                                    showTouchDecrement={showTouchDecrementControls}
-                                                                    useVolunteerPrice={isVolunteerMode}
-                                                                    borderColor={cardBorderColor}
-                                                                    backgroundColor={cardBackground}
-                                                                    minHeight={productQuantity > 0 || showTouchDecrementControls || showStockPill ? `max(${categoryRowMinHeight}, 56px)` : categoryRowMinHeight}
-                                                                    boxShadow={cardBoxShadow}
-                                                                    onAdd={addToCart}
-                                                                    onDecrement={decrementProductFromCatalog}
-                                                                />
-                                                            )
-                                                        })}
-                                                    </div>
-                                                )}
-                                            </article>
+                                                            {categoryProducts.length === 0 ? (
+                                                                <div className="border border-dashed border-slate-200 bg-slate-50 px-1 py-2 text-center text-xs font-semibold text-slate-500">
+                                                                    Nessun prodotto in categoria
+                                                                </div>
+                                                            ) : (
+                                                                <div className="space-y-1.5">
+                                                                    {categoryProducts.map((p, productIndex) => {
+                                                                        const stockStatus = p.stockStatus || getStockStatus(p.stockQuantity ?? null, Boolean(p.isSoldOut))
+                                                                        const stockLabel = getStockLabel(p.stockQuantity ?? null, Boolean(p.isSoldOut))
+                                                                        const showStockPill = stockStatus === "LOW" || stockStatus === "OUT"
+                                                                        const productQuantity = productQuantityById.get(p._id) ?? 0
+                                                                        const stripedBackground = productIndex % 2 === 0
+                                                                            ? categoryColorWithAlpha(cat.uiColor, 0.62)
+                                                                            : categoryColorWithAlpha(cat.uiColor, 0.18)
+                                                                        const strongInset = categoryColorWithAlpha(cat.uiColor, 0.5)
+                                                                        const cardBorderColor = stockStatus === "OUT" ? "#dc2626" : catTheme.base
+                                                                        const cardBackground = stockStatus === "OUT"
+                                                                            ? "rgba(239, 68, 68, 0.24)"
+                                                                            : stripedBackground
+                                                                        const cardBoxShadow = stockStatus === "OUT"
+                                                                            ? "inset 0 0 0 1px rgba(185, 28, 28, 0.5)"
+                                                                            : `inset 0 0 0 1px ${strongInset}`
+
+                                                                        return (
+                                                                            <PosProductCard
+                                                                                key={p._id}
+                                                                                product={p}
+                                                                                displayName={resolveProductDisplayName(p)}
+                                                                                quantity={productQuantity}
+                                                                                stockStatus={stockStatus}
+                                                                                stockLabel={stockLabel}
+                                                                                showStockPill={showStockPill}
+                                                                                variant="compact"
+                                                                                showTouchDecrement={showTouchDecrementControls}
+                                                                                useVolunteerPrice={isVolunteerMode}
+                                                                                borderColor={cardBorderColor}
+                                                                                backgroundColor={cardBackground}
+                                                                                minHeight={productQuantity > 0 || showTouchDecrementControls || showStockPill ? `max(${categoryRowMinHeight}, 56px)` : categoryRowMinHeight}
+                                                                                boxShadow={cardBoxShadow}
+                                                                                onAdd={addToCart}
+                                                                                onDecrement={decrementProductFromCatalog}
+                                                                            />
+                                                                        )
+                                                                    })}
+                                                                </div>
+                                                            )}
+                                                        </article>
+                                                    )
+                                                })}
+                                            </div>
                                         )
                                     })}
                                 </div>
