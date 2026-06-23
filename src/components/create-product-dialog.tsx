@@ -303,6 +303,17 @@ export function CreateProductDialog({
                             ) : null}
                         </div>
                         <div className="grid gap-2">
+                            <Label htmlFor="volunteerPrice">Prezzo volontari (€)</Label>
+                            <Input
+                                id="volunteerPrice"
+                                name="volunteerPrice"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                placeholder="Lascia vuoto"
+                            />
+                        </div>
+                        <div className="grid gap-2">
                             <Label htmlFor="prod-stock-quantity">Scorte</Label>
                             <Input
                                 id="prod-stock-quantity"
