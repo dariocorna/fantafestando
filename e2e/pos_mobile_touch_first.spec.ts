@@ -78,6 +78,18 @@ async function createPendingOrder(eventName: string, productName: string, pickup
     });
 }
 
+async function getProductId(eventName: string, productName: string) {
+    await ensureDbConnection();
+    const db = mongoose.connection.db;
+    if (!db) throw new Error("DB non disponibile");
+
+    const event = await db.collection("events").findOne({ name: eventName });
+    const product = await db.collection("products").findOne({ eventId: event?._id, name: productName });
+    if (!product?._id) throw new Error(`Prodotto ${productName} non trovato`);
+
+    return String(product._id);
+}
+
 async function openCashSessionMobile(page: Page, openingFloatAmount = "0") {
     await page.getByRole("button", { name: /Cassa chiusa|Cassa aperta/i }).click();
     await page.getByRole("button", { name: /Apri Cassa/i }).click();
@@ -120,7 +132,18 @@ test.describe("POS mobile touch-first", () => {
 
             await openCashSessionMobile(page);
 
-            await page.getByRole("button", { name: new RegExp(burgerName) }).click();
+            const burgerId = await getProductId(eventName, burgerName);
+            const burgerCard = page.getByTestId(`pos-product-${burgerId}`);
+            const burgerQuantity = page.getByTestId(`pos-product-quantity-${burgerId}`);
+            const burgerDecrement = page.getByTestId(`pos-product-decrement-${burgerId}`);
+
+            await burgerCard.click();
+            await expect(burgerQuantity).toContainText(/Nel carrello:\s*1/i);
+            await burgerCard.click();
+            await expect(burgerQuantity).toContainText(/Nel carrello:\s*2/i);
+            await burgerDecrement.click();
+            await expect(burgerQuantity).toContainText(/Nel carrello:\s*1/i);
+
             await page.getByRole("button", { name: new RegExp(friesName) }).click();
 
             await page.getByRole("button", { name: /Sconti/i }).click();

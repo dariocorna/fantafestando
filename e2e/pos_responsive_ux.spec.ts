@@ -117,8 +117,9 @@ test.describe("POS responsive UX", () => {
 
             await page.getByRole("button", { name: /Pendenti/i }).click();
             const pendingSheet = page.getByTestId("pos-mobile-pending-sheet");
-            await expect(pendingSheet.getByText("31")).toBeVisible();
-            await pendingSheet.getByRole("button", { name: /31/ }).click();
+            const pendingOrderButton = pendingSheet.getByRole("button", { name: /^Ordine 31\b/ });
+            await expect(pendingOrderButton).toBeVisible();
+            await pendingOrderButton.click();
             const confirmDialog = page.getByRole("dialog", { name: /Sostituire il carrello corrente/i });
             await expect(confirmDialog).toBeVisible();
             await confirmDialog.getByRole("button", { name: "ANNULLA", exact: true }).click();
@@ -130,8 +131,8 @@ test.describe("POS responsive UX", () => {
             await closeVisibleDialog(page, /Carrello/i);
 
             await page.getByRole("button", { name: /Pendenti/i }).click();
-            await expect(pendingSheet.getByText("31")).toBeVisible();
-            await pendingSheet.getByRole("button", { name: /31/ }).click();
+            await expect(pendingOrderButton).toBeVisible();
+            await pendingOrderButton.click();
             await expect(confirmDialog).toBeVisible();
             await confirmDialog.getByRole("button", { name: "SOSTITUISCI", exact: true }).click();
             await expect(page.getByText(/Ordine caricato: codice 31/i)).toBeVisible({ timeout: 15000 });
