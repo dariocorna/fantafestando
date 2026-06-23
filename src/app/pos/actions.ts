@@ -49,12 +49,21 @@ import {
     normalizeRecipeItems,
 } from "@/lib/ingredient-plan"
 import { shouldReusePendingIngredientPlan } from "@/lib/pending-ingredient-plan"
+import { ensureAuthenticatedSession } from "@/lib/authz"
 
 interface PrintDispatchSummary {
     attempted: number
     succeeded: number
     failed: number
     allSuccessful: boolean
+}
+
+async function ensurePosActionSession() {
+    const sessionCheck = await ensureAuthenticatedSession()
+    if (!sessionCheck.ok) {
+        return { success: false as const, error: sessionCheck.error }
+    }
+    return { success: true as const }
 }
 
 interface OpenCashSessionDto {
@@ -98,6 +107,8 @@ interface PosCartItemInput {
     selectedOptions: PosCartSelectedOption[]
     menuSelections: PosCartMenuSelection[]
 }
+
+type PosPricingMode = "STANDARD" | "VOLUNTEER"
 
 interface PosOrderPricingResult {
     baseAmount: number
@@ -259,6 +270,7 @@ async function computePricingForCart(data: {
     declaredTotalAmount?: number
     orderDiscount?: DiscountInput
     lineDiscounts?: LineDiscountInput[]
+    pricingMode?: PosPricingMode
 }): Promise<
     { success: true, pricing: PosOrderPricingResult }
     | { success: false, error: string }
@@ -267,10 +279,11 @@ async function computePricingForCart(data: {
     const productDocs = await Product.find({
         eventId: data.eventId,
         _id: { $in: productIds }
-    }).select("_id name basePrice kind availableOnlyInMenus salesChannels menuComponents menuChoiceGroups").lean() as Array<{
+    }).select("_id name basePrice volunteerPrice kind availableOnlyInMenus salesChannels menuComponents menuChoiceGroups").lean() as Array<{
         _id: string | { toString(): string }
         name?: string
         basePrice?: number | null
+        volunteerPrice?: number | null
         kind?: string
         availableOnlyInMenus?: boolean
         salesChannels?: string[]
@@ -300,6 +313,7 @@ async function computePricingForCart(data: {
         _id: string | { toString(): string }
         name?: string
         basePrice?: number | null
+        volunteerPrice?: number | null
         kind?: string
         availableOnlyInMenus?: boolean
         salesChannels?: string[]
@@ -389,6 +403,87 @@ async function computePricingForCart(data: {
     const normalizedCart = resolvedCart
         .filter((entry): entry is Extract<typeof entry, { success: true }> => entry.success)
         .map((entry) => entry.item)
+
+    const pricingMode = data.pricingMode === "VOLUNTEER" ? "VOLUNTEER" : "STANDARD"
+    if (pricingMode === "VOLUNTEER" && (data.orderDiscount || (data.lineDiscounts && data.lineDiscounts.length > 0))) {
+        return { success: false, error: "La modalità volontari non può essere combinata con altri sconti" }
+    }
+
+    if (pricingMode === "VOLUNTEER") {
+        let baseAmount = 0
+        let discountApplied = 0
+        const invalidVolunteerPrice = normalizedCart.some((item) => {
+            const product = productById.get(item.productId)
+            const optionsDelta = item.selectedOptions.reduce((sum, option) =>
+                sum + normalizeCurrencyAmount(option.priceVariation), 0
+            )
+            const standardUnitAmount = normalizeCurrencyAmount(item.unitBasePrice + optionsDelta)
+            const volunteerUnitAmount = typeof product?.volunteerPrice === "number"
+                ? normalizeCurrencyAmount(product.volunteerPrice + optionsDelta)
+                : standardUnitAmount
+            return volunteerUnitAmount > standardUnitAmount
+        })
+        if (invalidVolunteerPrice) {
+            return { success: false, error: "Prezzo volontari non valido: supera il prezzo standard" }
+        }
+
+        const cartWithDiscounts = normalizedCart.map((item) => {
+            const product = productById.get(item.productId)
+            const optionsDelta = item.selectedOptions.reduce((sum, option) =>
+                sum + normalizeCurrencyAmount(option.priceVariation), 0
+            )
+            const standardUnitAmount = normalizeCurrencyAmount(item.unitBasePrice + optionsDelta)
+            const volunteerUnitAmount = typeof product?.volunteerPrice === "number"
+                ? normalizeCurrencyAmount(product.volunteerPrice + optionsDelta)
+                : standardUnitAmount
+            const baseLineTotal = normalizeCurrencyAmount(standardUnitAmount * item.quantity)
+            const lineTotal = normalizeCurrencyAmount(volunteerUnitAmount * item.quantity)
+            const lineDiscountApplied = normalizeCurrencyAmount(Math.max(0, baseLineTotal - lineTotal))
+
+            baseAmount = normalizeCurrencyAmount(baseAmount + baseLineTotal)
+            discountApplied = normalizeCurrencyAmount(discountApplied + lineDiscountApplied)
+
+            return {
+                productId: item.productId,
+                snapshotName: item.snapshotName,
+                quantity: item.quantity,
+                productKind: item.productKind,
+                unitBasePrice: item.unitBasePrice,
+                lineTotal,
+                selectedOptions: item.selectedOptions,
+                includedComponents: item.includedComponents,
+                discountApplied: lineDiscountApplied,
+                discountMeta: lineDiscountApplied > 0
+                    ? {
+                        type: "FIXED" as const,
+                        value: normalizeCurrencyAmount(standardUnitAmount - volunteerUnitAmount),
+                        label: "Volontari",
+                        baseUnitAmount: standardUnitAmount
+                    }
+                    : undefined
+            }
+        })
+
+        const finalAmount = normalizeCurrencyAmount(baseAmount - discountApplied)
+
+        if (
+            typeof data.declaredTotalAmount === "number"
+            && Number.isFinite(data.declaredTotalAmount)
+            && !amountsAreEquivalent(finalAmount, normalizeCurrencyAmount(data.declaredTotalAmount))
+        ) {
+            return { success: false, error: "Totale ordine non coerente con la modalità volontari" }
+        }
+
+        return {
+            success: true,
+            pricing: {
+                baseAmount,
+                discountApplied,
+                finalAmount,
+                cartWithDiscounts
+            }
+        }
+    }
 
     const computedDiscounts = computeOrderDiscounts({
         lines: normalizedCart.map((item) => {
@@ -584,6 +679,9 @@ export async function getCashSessionStatus(data: {
     | { success: false, error: string }
 > {
     try {
+        const sessionCheck = await ensurePosActionSession()
+        if (!sessionCheck.success) return sessionCheck
+
         if (!data.eventId) {
             return { success: false, error: "Evento non valido" }
         }
@@ -615,6 +713,9 @@ export async function openCashSession(data: {
     | { success: false, error: string }
 > {
     try {
+        const sessionCheck = await ensurePosActionSession()
+        if (!sessionCheck.success) return sessionCheck
+
         if (!data.eventId || !data.posDeviceId) {
             return { success: false, error: "Seleziona una cassa valida prima di aprire la sessione" }
         }
@@ -663,6 +764,9 @@ export async function getCashSessionClosurePreview(data: {
     | { success: false, error: string }
 > {
     try {
+        const sessionCheck = await ensurePosActionSession()
+        if (!sessionCheck.success) return sessionCheck
+
         if (!data.eventId || !data.posDeviceId) {
             return { success: false, error: "Seleziona una cassa valida" }
         }
@@ -743,6 +847,9 @@ export async function closeCashSession(data: {
     | { success: false, error: string }
 > {
     try {
+        const sessionCheck = await ensurePosActionSession()
+        if (!sessionCheck.success) return sessionCheck
+
         if (!data.eventId || !data.posDeviceId) {
             return { success: false, error: "Seleziona una cassa valida prima di chiudere la sessione" }
         }
@@ -891,6 +998,7 @@ export async function createOrder(data: {
     }>,
     orderDiscount?: DiscountInput,
     lineDiscounts?: LineDiscountInput[],
+    pricingMode?: PosPricingMode,
     paymentMethod: "CASH" | "CARD" | "OTHER",
     sumupCheckoutId?: string,
     posDeviceId?: string,
@@ -898,6 +1006,9 @@ export async function createOrder(data: {
 }) {
     let stockAdjustmentsToRollback: StockAdjustment[] = []
     try {
+        const sessionCheck = await ensurePosActionSession()
+        if (!sessionCheck.success) return sessionCheck
+
         const sanitizedCart = sanitizeCartItems(data.cart)
         if (!sanitizedCart) {
             return { success: false, error: "Dati carrello non validi" }
@@ -924,7 +1035,8 @@ export async function createOrder(data: {
             cart: sanitizedCart,
             declaredTotalAmount: data.totalAmount,
             orderDiscount: data.orderDiscount,
-            lineDiscounts: data.lineDiscounts
+            lineDiscounts: data.lineDiscounts,
+            pricingMode: data.pricingMode
         })
         if (!pricingResult.success) {
             return { success: false, error: pricingResult.error }
@@ -996,6 +1108,7 @@ export async function createOrder(data: {
             totalAmount: payableAmount,
             discountApplied: pricingResult.pricing.discountApplied,
             discountMeta: pricingResult.pricing.orderDiscountMeta,
+            pricingMode: data.pricingMode === "VOLUNTEER" ? "VOLUNTEER" : "STANDARD",
             cart: pricingResult.pricing.cartWithDiscounts,
             ingredientPlan,
             pizzaTicket,
@@ -1076,6 +1189,9 @@ export async function createOrder(data: {
 
 export async function triggerSumUpPayment(amount: number, eventId: string, posDeviceId?: string) {
     try {
+        const sessionCheck = await ensurePosActionSession()
+        if (!sessionCheck.success) return sessionCheck
+
         const capabilitiesResult = await getPosPaymentCapabilities(eventId, posDeviceId)
         if (!capabilitiesResult.success) {
             return { success: false, error: capabilitiesResult.error }
@@ -1136,8 +1252,11 @@ export async function loadPendingOrderByCode(data: {
     code: string
 }) {
     try {
+        const sessionCheck = await ensurePosActionSession()
+        if (!sessionCheck.success) return sessionCheck
+
         const pendingOrderLookupProjection =
-            "_id pickupNumber totalAmount customer cart easterEggAttachment.uploadedAt easterEggAttachment.printedAt"
+            "_id pickupNumber totalAmount customer pricingMode cart easterEggAttachment.uploadedAt easterEggAttachment.printedAt"
         const normalizedCode = data.code.trim().toUpperCase()
         if (!data.eventId) {
             return { success: false, error: "Evento non valido" }
@@ -1154,6 +1273,7 @@ export async function loadPendingOrderByCode(data: {
             _id: string | { toString(): string }
             pickupNumber?: number
             totalAmount: number
+            pricingMode?: PosPricingMode
             customer?: { name?: string, table?: string }
             cart: Array<{
                 productId: string | { toString(): string }
@@ -1214,12 +1334,15 @@ export async function loadPendingOrderByCode(data: {
             ? Number((foundOrder.totalAmount / totalQuantity).toFixed(2))
             : 0
 
+        const resolvedPricingMode: PosPricingMode = foundOrder.pricingMode === "VOLUNTEER" ? "VOLUNTEER" : "STANDARD"
+
         return {
             success: true,
             order: {
                 id: foundOrder._id.toString(),
                 code: resolvedCode,
                 totalAmount: foundOrder.totalAmount,
+                pricingMode: resolvedPricingMode,
                 customer: {
                     name: foundOrder.customer?.name,
                     table: foundOrder.customer?.table
@@ -1237,6 +1360,9 @@ export async function loadPendingOrderByCode(data: {
                         : (Number.isFinite(item.lineTotal) && item.quantity > 0
                             ? Number((Number(item.lineTotal) / item.quantity).toFixed(2))
                             : (priceByProductId.get(item.productId.toString()) ?? fallbackUnitPrice)),
+                    volunteerPrice: resolvedPricingMode === "VOLUNTEER" && Number.isFinite(item.lineTotal) && item.quantity > 0
+                        ? Number((Number(item.lineTotal) / item.quantity).toFixed(2))
+                        : undefined,
                     selectedOptions: item.selectedOptions || [],
                     menuSelections: (item.includedComponents || [])
                         .filter((component) => component.source === "CHOICE_OPTION" && component.groupId)
@@ -1261,6 +1387,9 @@ export async function listRecentPendingOrders(data: {
     | { success: false, error: string }
 > {
     try {
+        const sessionCheck = await ensurePosActionSession()
+        if (!sessionCheck.success) return sessionCheck
+
         if (!data.eventId) {
             return { success: false, error: "Evento non valido" }
         }
@@ -1308,6 +1437,9 @@ export async function listPendingIngredientQueue(data: {
     | { success: false, error: string }
 > {
     try {
+        const sessionCheck = await ensurePosActionSession()
+        if (!sessionCheck.success) return sessionCheck
+
         if (!data.eventId) {
             return { success: false, error: "Evento non valido" }
         }
@@ -1378,6 +1510,7 @@ export async function completePendingOrderPayment(data: {
     totalAmount?: number
     orderDiscount?: DiscountInput
     lineDiscounts?: LineDiscountInput[]
+    pricingMode?: PosPricingMode
     cart?: Array<{
         productId: string
         snapshotName: string
@@ -1388,6 +1521,9 @@ export async function completePendingOrderPayment(data: {
 }) {
     let stockAdjustmentsToRollback: StockAdjustment[] = []
     try {
+        const sessionCheck = await ensurePosActionSession()
+        if (!sessionCheck.success) return sessionCheck
+
         if (!data.eventId || !data.orderId) {
             return { success: false, error: "Dati ordine incompleti" }
         }
@@ -1466,13 +1602,79 @@ export async function completePendingOrderPayment(data: {
             return { success: false, error: "Totale ordine non valido" }
         }
 
-        const pricingResult = await computePricingForCart({
-            eventId: data.eventId,
-            cart: orderCartInput,
-            declaredTotalAmount: data.totalAmount,
-            orderDiscount: data.orderDiscount,
-            lineDiscounts: data.lineDiscounts
-        })
+        const pendingPricingMode = data.pricingMode || order.pricingMode
+        let pricingResult: Awaited<ReturnType<typeof computePricingForCart>>
+        if (
+            pendingPricingMode === "VOLUNTEER"
+            && order.pricingMode === "VOLUNTEER"
+            && !data.orderDiscount
+            && (!data.lineDiscounts || data.lineDiscounts.length === 0)
+            && shouldReusePendingIngredientPlan(orderCartInput, persistedOrderCartInput)
+        ) {
+            const persistedFinalAmount = normalizeCurrencyAmount(Number(order.totalAmount || 0))
+            if (
+                typeof data.totalAmount === "number"
+                && Number.isFinite(data.totalAmount)
+                && !amountsAreEquivalent(persistedFinalAmount, normalizeCurrencyAmount(data.totalAmount))
+            ) {
+                return { success: false, error: "Totale ordine non coerente con la modalità volontari" }
+            }
+
+            pricingResult = {
+                success: true,
+                pricing: {
+                    baseAmount: normalizeCurrencyAmount(persistedFinalAmount + Number(order.discountApplied || 0)),
+                    discountApplied: normalizeCurrencyAmount(Number(order.discountApplied || 0)),
+                    finalAmount: persistedFinalAmount,
+                    cartWithDiscounts: order.cart.map((item: {
+                        productId: { toString(): string } | string
+                        snapshotName: string
+                        quantity: number
+                        productKind?: "STANDARD" | "FIXED_MENU"
+                        unitBasePrice?: number
+                        lineTotal?: number
+                        selectedOptions?: Array<{ name: string, priceVariation: number }>
+                        includedComponents?: Array<{
+                            productId: { toString(): string } | string
+                            snapshotName: string
+                            quantity: number
+                            source: "FIXED_ITEM" | "CHOICE_OPTION"
+                            groupId?: string
+                            groupName?: string
+                        }>
+                        discountApplied?: number
+                        discountMeta?: LineDiscountMeta
+                    }) => ({
+                        productId: item.productId.toString(),
+                        snapshotName: item.snapshotName,
+                        quantity: item.quantity,
+                        productKind: item.productKind || "STANDARD",
+                        unitBasePrice: normalizeCurrencyAmount(Number(item.unitBasePrice || 0)),
+                        lineTotal: normalizeCurrencyAmount(Number(item.lineTotal || 0)),
+                        selectedOptions: item.selectedOptions || [],
+                        includedComponents: item.includedComponents?.map((component) => ({
+                            productId: component.productId.toString(),
+                            snapshotName: component.snapshotName,
+                            quantity: component.quantity,
+                            source: component.source,
+                            ...(component.groupId ? { groupId: component.groupId } : {}),
+                            ...(component.groupName ? { groupName: component.groupName } : {})
+                        })),
+                        discountApplied: normalizeCurrencyAmount(Number(item.discountApplied || 0)),
+                        discountMeta: item.discountMeta
+                    }))
+                }
+            }
+        } else {
+            pricingResult = await computePricingForCart({
+                eventId: data.eventId,
+                cart: orderCartInput,
+                declaredTotalAmount: data.totalAmount,
+                orderDiscount: data.orderDiscount,
+                lineDiscounts: data.lineDiscounts,
+                pricingMode: pendingPricingMode
+            })
+        }
         if (!pricingResult.success) {
             return { success: false, error: pricingResult.error }
         }
@@ -1549,6 +1751,7 @@ export async function completePendingOrderPayment(data: {
         order.totalAmount = payableAmount
         order.discountApplied = pricingResult.pricing.discountApplied
         order.set("discountMeta", pricingResult.pricing.orderDiscountMeta || undefined)
+        order.set("pricingMode", pendingPricingMode === "VOLUNTEER" ? "VOLUNTEER" : "STANDARD")
         order.status = "PAID"
         order.paymentMethod = data.paymentMethod
         order.set("posDeviceId", data.posDeviceId || undefined)
@@ -1594,6 +1797,9 @@ export async function retryFailedOrderPrintJobs(data: {
     | { success: false, error: string }
 > {
     try {
+        const sessionCheck = await ensurePosActionSession()
+        if (!sessionCheck.success) return sessionCheck
+
         if (!data.eventId || !data.orderId) {
             return { success: false, error: "Dati mancanti per il reinvio stampa" }
         }

@@ -157,6 +157,7 @@ interface ExportedProduct {
   shortName?: string;
   description?: string;
   basePrice: number;
+  volunteerPrice?: number | null;
   kind: "STANDARD" | "FIXED_MENU";
   availableOnlyInMenus: boolean;
   salesChannels: Array<"POS" | "MENU">;
@@ -535,6 +536,7 @@ export async function buildEventTransferBundle(eventId: string): Promise<Generat
       shortName: normalizeOptionalString(product.shortName),
       description: normalizeOptionalString(product.description),
       basePrice: typeof product.basePrice === "number" ? product.basePrice : 0,
+      volunteerPrice: typeof product.volunteerPrice === "number" ? product.volunteerPrice : null,
       kind: product.kind === "FIXED_MENU" ? "FIXED_MENU" : "STANDARD",
       availableOnlyInMenus: Boolean(product.availableOnlyInMenus),
       salesChannels: Array.isArray(product.salesChannels)
@@ -756,6 +758,7 @@ export async function importEventTransferBundle(
         shortName: product.shortName,
         description: product.description,
         basePrice: product.basePrice,
+        volunteerPrice: typeof product.volunteerPrice === "number" ? product.volunteerPrice : null,
         kind: product.kind,
         availableOnlyInMenus: Boolean(product.availableOnlyInMenus),
         salesChannels: Array.isArray(product.salesChannels) ? product.salesChannels : ["POS", "MENU"],

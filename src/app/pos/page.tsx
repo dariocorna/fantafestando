@@ -53,6 +53,7 @@ interface IProduct {
     name: string
     shortName?: string
     basePrice: number
+    volunteerPrice?: number | null
     categoryId: string
     kind?: "STANDARD" | "FIXED_MENU"
     requiresConfiguration?: boolean
@@ -102,6 +103,7 @@ interface CartItem {
     productId: string
     name: string
     price: number
+    volunteerPrice?: number | null
     quantity: number
     variants: string[]
     kind?: "STANDARD" | "FIXED_MENU"
@@ -120,6 +122,7 @@ interface LoadedPendingOrder {
     id: string
     code: string
     totalAmount: number
+    pricingMode?: "STANDARD" | "VOLUNTEER"
     easterEggAttached?: boolean
     customer?: {
         name?: string
@@ -130,6 +133,7 @@ interface LoadedPendingOrder {
         snapshotName: string
         quantity: number
         unitPrice: number
+        volunteerPrice?: number
         selectedOptions?: Array<{ name: string, priceVariation: number }>
         menuSelections?: Array<{ groupId: string, productId: string }>
     }>
@@ -231,6 +235,7 @@ interface PosProductCardProps {
     showStockPill: boolean
     variant: ProductCardVariant
     showTouchDecrement: boolean
+    useVolunteerPrice: boolean
     borderColor: string
     backgroundColor: string
     minHeight?: string
@@ -248,6 +253,7 @@ function PosProductCard({
     showStockPill,
     variant,
     showTouchDecrement,
+    useVolunteerPrice,
     borderColor,
     backgroundColor,
     minHeight,
@@ -257,7 +263,12 @@ function PosProductCard({
 }: PosProductCardProps) {
     const hasQuantity = quantity > 0
     const shouldShowTouchDecrement = showTouchDecrement && hasQuantity
-    const priceLabel = `${product.basePrice.toFixed(2)} €`
+    const effectivePrice = useVolunteerPrice && typeof product.volunteerPrice === "number"
+        ? product.volunteerPrice
+        : product.basePrice
+    const priceLabel = useVolunteerPrice && typeof product.volunteerPrice === "number"
+        ? `Vol. ${effectivePrice.toFixed(2)} €`
+        : `${effectivePrice.toFixed(2)} €`
     const instructionsId = "pos-product-card-instructions"
     const addLabel = `${displayName}, ${priceLabel}, quantita nel carrello ${quantity}. Aggiungi una unita`
     const decrementLabel = `Rimuovi una unita di ${displayName}`
@@ -525,6 +536,7 @@ export default function PosPage() {
     const [configuringProduct, setConfiguringProduct] = useState<IProduct | null>(null)
     const [hasCoarsePointer, setHasCoarsePointer] = useState(false)
     const [cartAnnouncement, setCartAnnouncement] = useState("")
+    const [isVolunteerMode, setIsVolunteerMode] = useState(false)
     const isMobilePos = useIsMobile(POS_TOUCH_BREAKPOINT)
 
     // Info Cliente
@@ -613,14 +625,21 @@ export default function PosPage() {
     const quickDiscountPresets = resolveQuickDiscountPresetsFromSettings(activeEvent?.settings)
     const productCartItems = cart.filter((item) => !item.isDiscount)
     const discountCartItems = cart.filter((item) => item.isDiscount)
-    const subtotal = Number(
+    const getCartItemUnitPrice = (item: CartItem) => (
+        isVolunteerMode && typeof item.volunteerPrice === "number" ? item.volunteerPrice : item.price
+    )
+    const standardSubtotal = Number(
         productCartItems.reduce((acc: number, item: CartItem) => acc + (item.price * item.quantity), 0).toFixed(2)
+    )
+    const subtotal = Number(
+        productCartItems.reduce((acc: number, item: CartItem) => acc + (getCartItemUnitPrice(item) * item.quantity), 0).toFixed(2)
     )
     const totalDiscountRequested = Number(
         Math.max(0, discountCartItems.reduce((acc: number, item: CartItem) => acc + (item.price * item.quantity), 0) * -1).toFixed(2)
     )
-    const totalDiscountApplied = Number(Math.min(subtotal, totalDiscountRequested).toFixed(2))
+    const totalDiscountApplied = isVolunteerMode ? 0 : Number(Math.min(subtotal, totalDiscountRequested).toFixed(2))
     const effectiveTotal = Number(Math.max(0, subtotal - totalDiscountApplied).toFixed(2))
+    const volunteerDiscountApplied = Number(Math.max(0, standardSubtotal - subtotal).toFixed(2))
     const discountLabels = discountCartItems
         .map((item) => item.discountPreset?.label?.trim())
         .filter((label): label is string => Boolean(label))
@@ -710,6 +729,7 @@ export default function PosPage() {
                 productId: product._id,
                 name: resolveProductDisplayName(product),
                 price: product.basePrice,
+                volunteerPrice: product.volunteerPrice ?? null,
                 quantity: 1,
                 variants: [],
                 kind: product.kind || "STANDARD",
@@ -739,6 +759,10 @@ export default function PosPage() {
     }
 
     const addDiscountPresetToCart = (preset: QuickDiscountPreset) => {
+        if (isVolunteerMode) {
+            showFeedbackModal("Disattiva la modalità volontari prima di applicare altri sconti", "info")
+            return
+        }
         if (productCartItems.length === 0) {
             showFeedbackModal("Aggiungi prima almeno un prodotto al carrello")
             return
@@ -816,6 +840,7 @@ export default function PosPage() {
         setCustomerName("")
         setTableNumber("")
         setPaymentMethod(cashAvailable ? "CASH" : "CARD")
+        setIsVolunteerMode(false)
     }
 
     const loadRecentPendingOrdersForDialog = async () => {
@@ -1093,13 +1118,15 @@ export default function PosPage() {
         }
 
         setLoadedPendingOrder(result.order)
+        setIsVolunteerMode(result.order.pricingMode === "VOLUNTEER")
         setCustomerName(result.order.customer?.name || "")
         setTableNumber(normalizeTableValue(result.order.customer?.table || ""))
         setCart(result.order.items.map((item, index) => ({
             lineId: `${item.productId}-${index}`,
             productId: item.productId,
             name: item.snapshotName,
-            price: item.unitPrice,
+            price: products.find((product) => product._id === item.productId)?.basePrice ?? item.unitPrice,
+            volunteerPrice: item.volunteerPrice ?? products.find((product) => product._id === item.productId)?.volunteerPrice ?? null,
             quantity: item.quantity,
             variants: [],
             selectedOptions: (item.selectedOptions || []).map((option) => option.name),
@@ -1168,6 +1195,7 @@ export default function PosPage() {
                 totalAmount: effectiveTotal,
                 orderDiscount: orderDiscountPayload,
                 lineDiscounts: [],
+                pricingMode: isVolunteerMode ? "VOLUNTEER" : "STANDARD",
                 cart: productCartItems.map((item) => ({
                     productId: item.productId,
                     snapshotName: item.name,
@@ -1220,6 +1248,7 @@ export default function PosPage() {
             totalAmount: effectiveTotal,
             orderDiscount: orderDiscountPayload,
             lineDiscounts: [],
+            pricingMode: isVolunteerMode ? "VOLUNTEER" as const : "STANDARD" as const,
             cart: productCartItems.map(item => ({
                 productId: item.productId,
                 snapshotName: item.name,
@@ -1286,7 +1315,8 @@ export default function PosPage() {
     ]
 
     const renderCartItem = (item: CartItem) => {
-        const lineTotal = Number((item.quantity * item.price).toFixed(2))
+        const unitPrice = getCartItemUnitPrice(item)
+        const lineTotal = Number((item.quantity * unitPrice).toFixed(2))
         return (
             <div key={item.lineId} className="flex items-center justify-between gap-3 rounded-md border bg-white p-2.5">
                 <div className="min-w-0 flex flex-col">
@@ -1299,7 +1329,10 @@ export default function PosPage() {
                         </span>
                     ) : (
                         <div className="space-y-1">
-                            <span className="text-xs text-slate-500">{item.quantity} x {item.price.toFixed(2)} €</span>
+                            <span className="text-xs text-slate-500">
+                                {item.quantity} x {unitPrice.toFixed(2)} €
+                                {isVolunteerMode && typeof item.volunteerPrice === "number" ? " · Volontari" : ""}
+                            </span>
                             {Array.isArray(item.selectedOptions) && item.selectedOptions.length > 0 ? (
                                 <p className="line-clamp-2 text-[11px] font-semibold text-slate-500">
                                     {item.selectedOptions.join(" • ")}
@@ -1406,7 +1439,7 @@ export default function PosPage() {
                                         setIsDiscountSheetOpen(false)
                                     }
                                 }}
-                                disabled={productCartItems.length === 0 || isPresetApplied}
+                                disabled={isVolunteerMode || productCartItems.length === 0 || isPresetApplied}
                                 className="inline-flex min-h-11 min-w-[200px] items-center gap-1.5 border border-emerald-200 bg-emerald-50 px-2 py-1 text-left transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                                 <span className="max-w-[120px] truncate text-xs font-black leading-tight text-emerald-800">
@@ -1612,6 +1645,7 @@ export default function PosPage() {
                                 showStockPill={showStockPill}
                                 variant="mobile"
                                 showTouchDecrement={showTouchDecrementControls}
+                                useVolunteerPrice={isVolunteerMode}
                                 borderColor={cardBorderColor}
                                 backgroundColor={cardBackground}
                                 onAdd={addToCart}
@@ -1784,7 +1818,7 @@ export default function PosPage() {
                                                     id={`discount-preset-card-${index}`}
                                                     aria-pressed={isPresetApplied}
                                                     onClick={() => addDiscountPresetToCart(preset)}
-                                                    disabled={productCartItems.length === 0 || isPresetApplied}
+                                                    disabled={isVolunteerMode || productCartItems.length === 0 || isPresetApplied}
                                                     className="inline-flex h-10 min-w-[200px] items-center gap-1.5 border border-emerald-200 bg-emerald-50 px-2 py-1 text-left transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
                                                     <span className="max-w-[120px] truncate text-xs font-black leading-tight text-emerald-800">
@@ -1898,6 +1932,7 @@ export default function PosPage() {
                                                             showStockPill={showStockPill}
                                                             variant="modern"
                                                             showTouchDecrement={showTouchDecrementControls}
+                                                            useVolunteerPrice={isVolunteerMode}
                                                             borderColor={cardBorderColor}
                                                             backgroundColor={stockStatus === "OUT"
                                                                 ? "rgba(254, 226, 226, 0.88)"
@@ -1986,6 +2021,7 @@ export default function PosPage() {
                                                                     showStockPill={showStockPill}
                                                                     variant="compact"
                                                                     showTouchDecrement={showTouchDecrementControls}
+                                                                    useVolunteerPrice={isVolunteerMode}
                                                                     borderColor={cardBorderColor}
                                                                     backgroundColor={cardBackground}
                                                                     minHeight={productQuantity > 0 || showTouchDecrementControls || showStockPill ? `max(${categoryRowMinHeight}, 56px)` : categoryRowMinHeight}
@@ -2151,8 +2187,24 @@ export default function PosPage() {
                     </div>
                     <div className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-semibold text-slate-600">
                         <p>Subtotale prodotti: {subtotal.toFixed(2)} €</p>
+                        {isVolunteerMode ? (
+                            <p>Prezzi volontari: -{volunteerDiscountApplied.toFixed(2)} €</p>
+                        ) : null}
                         <p>Sconti applicati: -{totalDiscountApplied.toFixed(2)} €</p>
                     </div>
+                    <label className="flex items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-800">
+                        <span>Modalità volontari</span>
+                        <input
+                            type="checkbox"
+                            checked={isVolunteerMode}
+                            onChange={(event) => {
+                                setIsVolunteerMode(event.target.checked)
+                                if (event.target.checked) {
+                                    setCart((prev) => prev.filter((item) => !item.isDiscount))
+                                }
+                            }}
+                        />
+                    </label>
 
                     <button
                         onClick={() => setIsCheckoutOpen(true)}
@@ -2182,7 +2234,9 @@ export default function PosPage() {
                     product={{
                         _id: configuringProduct._id,
                         name: resolveProductDisplayName(configuringProduct),
-                        basePrice: configuringProduct.basePrice,
+                        basePrice: isVolunteerMode && typeof configuringProduct.volunteerPrice === "number"
+                            ? configuringProduct.volunteerPrice
+                            : configuringProduct.basePrice,
                         menuComponents: configuringProduct.menuComponents || [],
                         menuChoiceGroups: configuringProduct.menuChoiceGroups || []
                     }}
@@ -2211,8 +2265,24 @@ export default function PosPage() {
                     <div className="space-y-3 border-t border-[#d9e6f8] bg-white px-4 py-4">
                         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
                             <p>Subtotale prodotti: {subtotal.toFixed(2)} €</p>
+                            {isVolunteerMode ? (
+                                <p>Prezzi volontari: -{volunteerDiscountApplied.toFixed(2)} €</p>
+                            ) : null}
                             <p>Sconti applicati: -{totalDiscountApplied.toFixed(2)} €</p>
                         </div>
+                        <label className="flex items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-800">
+                            <span>Modalità volontari</span>
+                            <input
+                                type="checkbox"
+                                checked={isVolunteerMode}
+                                onChange={(event) => {
+                                    setIsVolunteerMode(event.target.checked)
+                                    if (event.target.checked) {
+                                        setCart((prev) => prev.filter((item) => !item.isDiscount))
+                                    }
+                                }}
+                            />
+                        </label>
                         <Button
                             type="button"
                             className="brand-cta-primary h-14 w-full text-lg font-black"
