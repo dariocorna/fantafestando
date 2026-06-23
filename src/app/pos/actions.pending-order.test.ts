@@ -4,12 +4,14 @@ const {
     dbConnectMock,
     orderFindOneMock,
     orderFindMock,
-    productFindMock
+    productFindMock,
+    ensureAuthenticatedSessionMock
 } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     orderFindOneMock: vi.fn(),
     orderFindMock: vi.fn(),
-    productFindMock: vi.fn()
+    productFindMock: vi.fn(),
+    ensureAuthenticatedSessionMock: vi.fn()
 }));
 
 vi.mock("next/cache", () => ({
@@ -18,6 +20,10 @@ vi.mock("next/cache", () => ({
 
 vi.mock("@/lib/mongoose", () => ({
     default: dbConnectMock
+}));
+
+vi.mock("@/lib/authz", () => ({
+    ensureAuthenticatedSession: ensureAuthenticatedSessionMock
 }));
 
 vi.mock("@/models/Order", () => ({
@@ -44,11 +50,15 @@ import { loadPendingOrderByCode } from "@/app/pos/actions";
 import { shouldReusePendingIngredientPlan } from "@/lib/pending-ingredient-plan";
 
 const pendingOrderLookupProjection =
-    "_id pickupNumber totalAmount customer cart easterEggAttachment.uploadedAt easterEggAttachment.printedAt";
+    "_id pickupNumber totalAmount customer pricingMode cart easterEggAttachment.uploadedAt easterEggAttachment.printedAt";
 
 describe("loadPendingOrderByCode", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        ensureAuthenticatedSessionMock.mockResolvedValue({
+            ok: true,
+            user: { id: "user-1", username: "cashier", role: "CASHIER" }
+        });
         productFindMock.mockReturnValue({
             select: vi.fn().mockReturnValue({
                 lean: vi.fn().mockResolvedValue([
@@ -56,6 +66,20 @@ describe("loadPendingOrderByCode", () => {
                 ])
             })
         });
+    });
+
+    test("rejects unauthenticated lookup before reading pending orders", async () => {
+        ensureAuthenticatedSessionMock.mockResolvedValueOnce({
+            ok: false,
+            status: 401,
+            error: "Autenticazione richiesta"
+        });
+
+        const result = await loadPendingOrderByCode({ eventId: "evt-1", code: "15" });
+
+        expect(result).toEqual({ success: false, error: "Autenticazione richiesta" });
+        expect(dbConnectMock).not.toHaveBeenCalled();
+        expect(orderFindOneMock).not.toHaveBeenCalled();
     });
 
     test("uses a lightweight projection for numeric pickup code lookup", async () => {
@@ -89,6 +113,7 @@ describe("loadPendingOrderByCode", () => {
                 id: "order-1",
                 code: "15",
                 totalAmount: 7,
+                pricingMode: "STANDARD",
                 customer: { name: "Mario", table: "A1" },
                 easterEggAttached: true,
                 items: [
@@ -142,6 +167,7 @@ describe("loadPendingOrderByCode", () => {
                 id: "00000000000000000000ABCD",
                 code: "ABCD",
                 totalAmount: 5,
+                pricingMode: "STANDARD",
                 customer: { name: undefined, table: undefined },
                 easterEggAttached: false,
                 items: [
@@ -150,6 +176,51 @@ describe("loadPendingOrderByCode", () => {
                         snapshotName: "Patatine",
                         quantity: 1,
                         unitPrice: 7,
+                        selectedOptions: [],
+                        menuSelections: []
+                    }
+                ]
+            }
+        });
+    });
+
+    test("returns volunteer mode and persisted volunteer unit price for pending POS orders", async () => {
+        const leanMock = vi.fn().mockResolvedValue({
+            _id: "order-1",
+            pickupNumber: 16,
+            totalAmount: 14,
+            pricingMode: "VOLUNTEER",
+            cart: [
+                {
+                    productId: "prod-1",
+                    snapshotName: "Patatine",
+                    quantity: 2,
+                    unitBasePrice: 10,
+                    lineTotal: 14
+                }
+            ]
+        });
+        const selectMock = vi.fn().mockReturnValue({ lean: leanMock });
+        orderFindOneMock.mockReturnValue({ select: selectMock });
+
+        const result = await loadPendingOrderByCode({ eventId: "evt-1", code: "16" });
+
+        expect(result).toEqual({
+            success: true,
+            order: {
+                id: "order-1",
+                code: "16",
+                totalAmount: 14,
+                pricingMode: "VOLUNTEER",
+                customer: { name: undefined, table: undefined },
+                easterEggAttached: false,
+                items: [
+                    {
+                        productId: "prod-1",
+                        snapshotName: "Patatine",
+                        quantity: 2,
+                        unitPrice: 10,
+                        volunteerPrice: 7,
                         selectedOptions: [],
                         menuSelections: []
                     }
@@ -166,14 +237,12 @@ describe("shouldReusePendingIngredientPlan", () => {
                 productId: "prod-1",
                 snapshotName: "Burger",
                 quantity: 1,
-                selectedOptions: [{ name: "Senza cipolla", priceVariation: 0 }],
                 menuSelections: []
             }],
             [{
                 productId: "prod-1",
                 snapshotName: "Burger",
                 quantity: 1,
-                selectedOptions: [{ name: "Senza cipolla", priceVariation: 1.5 }],
                 menuSelections: []
             }]
         )).toBe(true);
@@ -185,14 +254,12 @@ describe("shouldReusePendingIngredientPlan", () => {
                 productId: "menu-1",
                 snapshotName: "Menu",
                 quantity: 1,
-                selectedOptions: [],
                 menuSelections: [{ groupId: "side", productId: "prod-fries" }]
             }],
             [{
                 productId: "menu-1",
                 snapshotName: "Menu",
                 quantity: 1,
-                selectedOptions: [],
                 menuSelections: [{ groupId: "side", productId: "prod-salad" }]
             }]
         )).toBe(false);
