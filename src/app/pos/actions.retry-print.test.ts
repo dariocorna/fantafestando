@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { dbConnectMock, printJobFindMock, retryPrintJobByIdMock } = vi.hoisted(() => ({
+const { dbConnectMock, printJobFindMock, retryPrintJobByIdMock, ensureAuthenticatedSessionMock } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     printJobFindMock: vi.fn(),
-    retryPrintJobByIdMock: vi.fn()
+    retryPrintJobByIdMock: vi.fn(),
+    ensureAuthenticatedSessionMock: vi.fn()
 }));
 
 vi.mock("next/cache", () => ({
@@ -12,6 +13,10 @@ vi.mock("next/cache", () => ({
 
 vi.mock("@/lib/mongoose", () => ({
     default: dbConnectMock
+}));
+
+vi.mock("@/lib/authz", () => ({
+    ensureAuthenticatedSession: ensureAuthenticatedSessionMock
 }));
 
 vi.mock("@/models/PrintJob", () => ({
@@ -46,6 +51,10 @@ function mockFindFailedJobs(rows: Array<{ _id: string }>) {
 describe("retryFailedOrderPrintJobs", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        ensureAuthenticatedSessionMock.mockResolvedValue({
+            ok: true,
+            user: { id: "user-1", username: "cashier", role: "CASHIER" }
+        });
     });
 
     test("returns error when event/order ids are missing", async () => {
