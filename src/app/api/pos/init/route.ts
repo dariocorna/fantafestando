@@ -18,14 +18,21 @@ import {
     normalizeSalesChannels,
     productRequiresMenuConfiguration,
 } from "@/lib/fixed-menu";
+import { ensureAuthenticatedSession } from "@/lib/authz";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
     try {
-        await dbConnect();
         const channel = request.nextUrl.searchParams.get("channel") === "pos" ? "pos" : "menu";
+        if (channel === "pos") {
+            const sessionCheck = await ensureAuthenticatedSession();
+            if (!sessionCheck.ok) {
+                return NextResponse.json({ error: sessionCheck.error }, { status: sessionCheck.status });
+            }
+        }
+        await dbConnect();
 
         // 1. Find active event (or the latest one as fallback)
         let event = await Event.findOne({ active: true, archived: { $ne: true } }).lean();
@@ -70,6 +77,9 @@ export async function GET(request: NextRequest) {
             })
             .map((product) => ({
                 ...product,
+                volunteerPrice: channel === "pos" && typeof (product as { volunteerPrice?: number }).volunteerPrice === "number"
+                    ? (product as { volunteerPrice?: number }).volunteerPrice
+                    : undefined,
                 kind: normalizeProductKind((product as { kind?: string }).kind),
                 salesChannels: normalizeSalesChannels((product as { salesChannels?: string[] }).salesChannels),
                 stockStatus: getStockStatus(
@@ -130,12 +140,14 @@ export async function GET(request: NextRequest) {
         );
         const availableCategories = categories.filter((category) => availableCategoryIds.has(String(category._id)));
 
-        // 4. Fetch POS Devices for this event
-        const posDevices = await PosDevice.find({ eventId: event._id })
-            .populate({ path: "printerId", select: "name ip port isVirtual emulatorSlot" })
-            .populate({ path: "paymentTerminalId", select: "name type" })
-            .populate({ path: "cashBoxId", select: "name type" })
-            .lean();
+        // 4. Fetch POS Devices for authenticated POS only
+        const posDevices = channel === "pos"
+            ? await PosDevice.find({ eventId: event._id })
+                .populate({ path: "printerId", select: "name ip port isVirtual emulatorSlot" })
+                .populate({ path: "paymentTerminalId", select: "name type" })
+                .populate({ path: "cashBoxId", select: "name type" })
+                .lean()
+            : [];
 
         const serializedPosDevices = posDevices.map((device) => ({
             _id: String(device._id),
@@ -176,11 +188,13 @@ export async function GET(request: NextRequest) {
                 askTable: event.settings?.askTable ?? false,
                 posCatalogLayout: normalizePosCatalogLayout(event.settings?.posCatalogLayout),
                 menuHeaderLogoUrl: event.settings?.menuHeaderLogoUrl || "",
-                quickDiscountPresets,
-                quickStaffDiscountEnabled: legacyQuickDiscount.quickStaffDiscountEnabled,
-                quickStaffDiscountLabel: legacyQuickDiscount.quickStaffDiscountLabel,
-                quickStaffDiscountType: legacyQuickDiscount.quickStaffDiscountType,
-                quickStaffDiscountValue: legacyQuickDiscount.quickStaffDiscountValue
+                ...(channel === "pos" ? {
+                    quickDiscountPresets,
+                    quickStaffDiscountEnabled: legacyQuickDiscount.quickStaffDiscountEnabled,
+                    quickStaffDiscountLabel: legacyQuickDiscount.quickStaffDiscountLabel,
+                    quickStaffDiscountType: legacyQuickDiscount.quickStaffDiscountType,
+                    quickStaffDiscountValue: legacyQuickDiscount.quickStaffDiscountValue
+                } : {})
             },
             predefinedTables: parsePredefinedTablesInput(
                 Array.isArray(event.predefinedTables) ? event.predefinedTables.join("\n") : "",
@@ -193,7 +207,7 @@ export async function GET(request: NextRequest) {
                 event: sanitizedEvent,
                 categories: availableCategories,
                 products: availableProducts,
-                posDevices: serializedPosDevices
+                posDevices: channel === "pos" ? serializedPosDevices : []
             },
             {
                 headers: {

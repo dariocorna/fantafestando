@@ -75,18 +75,36 @@ function parseBasePriceInput(rawValue: FormDataEntryValue | null) {
     return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : null;
 }
 
+type OptionalPriceParseResult =
+    | { ok: true; value: number | null }
+    | { ok: false; error: string };
+
+function parseOptionalPriceInput(rawValue: FormDataEntryValue | null): OptionalPriceParseResult {
+    if (typeof rawValue !== "string") return { ok: true, value: null };
+    const trimmed = rawValue.trim();
+    if (!trimmed) return { ok: true, value: null };
+    const parsed = Number(trimmed.replace(/,/g, "."));
+    if (!Number.isFinite(parsed) || parsed < 0) {
+        return { ok: false, error: "Prezzo volontari non valido" };
+    }
+    return { ok: true, value: Number(parsed.toFixed(2)) };
+}
+
 function normalizeIngredientShortName(rawValue: FormDataEntryValue | null) {
     if (typeof rawValue !== "string") return undefined;
     const trimmed = rawValue.trim();
     return trimmed ? trimmed.slice(0, 24) : undefined;
 }
 
-function formatDirectPrice(product: Pick<IProduct, "kind" | "availableOnlyInMenus" | "basePrice">) {
+function formatDirectPrice(product: Pick<IProduct, "kind" | "availableOnlyInMenus" | "basePrice" | "volunteerPrice">) {
     const kind = normalizeProductKind(product.kind);
     if (kind === "STANDARD" && product.availableOnlyInMenus) {
         return "Solo menu";
     }
-    return `${Number(product.basePrice || 0).toFixed(2)} €`;
+    const baseLabel = `${Number(product.basePrice || 0).toFixed(2)} €`;
+    return typeof product.volunteerPrice === "number"
+        ? `${baseLabel} / Vol. ${product.volunteerPrice.toFixed(2)} €`
+        : baseLabel;
 }
 
 function formatSalesChannelsLabel(product: Pick<IProduct, "salesChannels">) {
@@ -160,9 +178,11 @@ async function parseProductPayload(
     );
     const recipeItems = parseRecipeItemsInput(formData.get("recipeItemsJson"));
     const parsedBasePrice = parseBasePriceInput(formData.get("basePrice"));
+    const parsedVolunteerPrice = parseOptionalPriceInput(formData.get("volunteerPrice"));
     const shortNameValidationError = validateProductShortName(shortName);
 
     if (shortNameValidationError) return { error: shortNameValidationError };
+    if (!parsedVolunteerPrice.ok) return { error: parsedVolunteerPrice.error };
     if (!name || !categoryId || !scopedEventId) return { error: "Dati prodotto non validi" };
     if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return { error: "Festa non valida" };
 
@@ -211,6 +231,10 @@ async function parseProductPayload(
 
     if (kind === "STANDARD" && !availableOnlyInMenus && parsedBasePrice === null) {
         return { error: "Prezzo base obbligatorio" };
+    }
+
+    if (parsedVolunteerPrice.value !== null && parsedVolunteerPrice.value > (parsedBasePrice || 0)) {
+        return { error: "Il prezzo volontari non può superare il prezzo base" };
     }
 
     if (kind === "STANDARD" && availableOnlyInMenus && choiceGroups.length > 0) {
@@ -283,6 +307,7 @@ async function parseProductPayload(
             basePrice: kind === "FIXED_MENU"
                 ? parsedBasePrice || 0
                 : (availableOnlyInMenus ? (parsedBasePrice || 0) : (parsedBasePrice || 0)),
+            volunteerPrice: parsedVolunteerPrice.value,
             availableOnlyInMenus: kind === "STANDARD" ? availableOnlyInMenus : false,
             splitKitchenPrintPerUnit: kind === "STANDARD" ? splitKitchenPrintPerUnit : false,
             salesChannels,
@@ -650,6 +675,7 @@ export default async function AdminCatalog() {
             name: parsed.payload.name,
             categoryId: parsed.payload.categoryId,
             basePrice: parsed.payload.basePrice,
+            volunteerPrice: parsed.payload.volunteerPrice,
             kind: parsed.payload.kind,
             availableOnlyInMenus: parsed.payload.availableOnlyInMenus,
             splitKitchenPrintPerUnit: parsed.payload.splitKitchenPrintPerUnit,
@@ -679,7 +705,8 @@ export default async function AdminCatalog() {
             {
                 $set: updateSet,
                 ...(Object.keys(updateUnset).length > 0 ? { $unset: updateUnset } : {})
-            }
+            },
+            { runValidators: true }
         );
         revalidateCatalogSurfaces();
         return { success: true };
@@ -809,6 +836,7 @@ export default async function AdminCatalog() {
         categoryId: getReferencedId(product.categoryId) || "",
         categoryName: (product.categoryId as unknown as ICategory)?.name || "N/A",
         basePrice: product.basePrice,
+        volunteerPrice: product.volunteerPrice ?? null,
         stockQuantity: product.stockQuantity ?? null,
         isSoldOut: Boolean(product.isSoldOut),
         availableDays: normalizeAvailableDays(product.availableDays),
