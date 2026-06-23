@@ -2,6 +2,16 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.13.1] - 2026-06-24
+
+### Changed
+
+- POS: il layout compatto raggruppa categorie brevi nella stessa colonna per una griglia piu' omogenea.
+
+### Fixed
+
+- L'endpoint `/api/health` ora legge i metadati release runtime invece di esporre valori prerenderizzati.
+
 ## [0.13.0] - 2026-06-23
 
 ### Added
