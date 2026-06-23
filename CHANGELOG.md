@@ -2,6 +2,12 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.13.0] - 2026-06-23
+
+### Added
+
+- POS: aggiunta modalità volontari con prezzi alternativi configurabili sulle voci di catalogo e audit dello sconto sulle righe ordine.
+
 ## [0.12.3] - 2026-06-23
 
 ### Added
