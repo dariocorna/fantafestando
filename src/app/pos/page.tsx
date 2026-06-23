@@ -300,13 +300,13 @@ function PosProductCard({
                 event.stopPropagation()
                 onDecrement(product)
             }}
-            className={`absolute z-20 inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-xl border-2 border-white bg-white px-2 text-sm font-black text-red-700 shadow-lg ring-1 ring-red-200 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 ${variant === "mobile"
+            className={`absolute z-20 inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-xl border-2 border-white bg-white px-2.5 text-sm font-black text-red-700 shadow-lg ring-1 ring-red-200 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 ${variant === "mobile"
                 ? "bottom-3 right-3"
                 : "left-2 top-2"
                 }`}
         >
             <Minus size={18} strokeWidth={3} />
-            <span className={variant === "mobile" ? "text-xs" : "sr-only"}>-1</span>
+            <span className="text-xs">-1</span>
         </button>
     ) : null
 
@@ -401,7 +401,7 @@ function PosProductCard({
                         className="flex flex-1 flex-col gap-2 px-2.5 py-2.5"
                         style={{ backgroundColor }}
                     >
-                        <p className={`line-clamp-3 text-[1.02rem] font-black uppercase leading-tight text-slate-900 ${hasQuantity ? "pr-10" : ""} ${shouldShowTouchDecrement ? "pl-12" : ""}`}>
+                        <p className={`line-clamp-3 text-[1.02rem] font-black uppercase leading-tight text-slate-900 ${hasQuantity ? "pr-10" : ""} ${shouldShowTouchDecrement ? "pl-16" : ""}`}>
                             {displayName}
                         </p>
                         {product.requiresConfiguration ? (
@@ -455,7 +455,7 @@ function PosProductCard({
                     boxShadow,
                 }}
             >
-                <p className={`mx-auto w-full max-w-[96%] truncate text-center text-[clamp(14px,0.95vw,20px)] font-black uppercase leading-tight text-slate-800 ${hasQuantity ? "pr-7" : ""} ${shouldShowTouchDecrement ? "pl-11" : ""}`}>
+                <p className={`mx-auto w-full max-w-[96%] truncate text-center text-[clamp(14px,0.95vw,20px)] font-black uppercase leading-tight text-slate-800 ${hasQuantity ? "pr-7" : ""} ${shouldShowTouchDecrement ? "pl-16" : ""}`}>
                     {displayName}
                 </p>
                 {product.requiresConfiguration ? (
@@ -1962,6 +1962,7 @@ export default function PosPage() {
                                                             const stockStatus = p.stockStatus || getStockStatus(p.stockQuantity ?? null, Boolean(p.isSoldOut))
                                                             const stockLabel = getStockLabel(p.stockQuantity ?? null, Boolean(p.isSoldOut))
                                                             const showStockPill = stockStatus === "LOW" || stockStatus === "OUT"
+                                                            const productQuantity = productQuantityById.get(p._id) ?? 0
                                                             const stripedBackground = productIndex % 2 === 0
                                                                 ? categoryColorWithAlpha(cat.uiColor, 0.62)
                                                                 : categoryColorWithAlpha(cat.uiColor, 0.18)
@@ -1979,7 +1980,7 @@ export default function PosPage() {
                                                                     key={p._id}
                                                                     product={p}
                                                                     displayName={resolveProductDisplayName(p)}
-                                                                    quantity={productQuantityById.get(p._id) ?? 0}
+                                                                    quantity={productQuantity}
                                                                     stockStatus={stockStatus}
                                                                     stockLabel={stockLabel}
                                                                     showStockPill={showStockPill}
@@ -1987,7 +1988,7 @@ export default function PosPage() {
                                                                     showTouchDecrement={showTouchDecrementControls}
                                                                     borderColor={cardBorderColor}
                                                                     backgroundColor={cardBackground}
-                                                                    minHeight={categoryRowMinHeight}
+                                                                    minHeight={productQuantity > 0 || showTouchDecrementControls || showStockPill ? `max(${categoryRowMinHeight}, 56px)` : categoryRowMinHeight}
                                                                     boxShadow={cardBoxShadow}
                                                                     onAdd={addToCart}
                                                                     onDecrement={decrementProductFromCatalog}
