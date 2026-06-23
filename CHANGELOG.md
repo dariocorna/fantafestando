@@ -2,6 +2,16 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.12.3] - 2026-06-23
+
+### Added
+
+- POS: le card prodotto mostrano la quantità già nel carrello e permettono di decrementare una unità con tasto destro, tastiera o controllo touch `-1`.
+
+### Changed
+
+- Migliorata la leggibilità delle card POS su touch e layout compatti quando quantità, scorte e controlli di decremento sono visibili insieme.
+
 ## [0.12.2] - 2026-05-27
 
 ### Changed
