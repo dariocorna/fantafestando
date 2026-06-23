@@ -3,6 +3,8 @@ import { getAppVersion, getAppVersionLabel } from "@/lib/app-version";
 import { ensureRuntimeBackupSchedulerStarted } from "@/lib/runtime-backup-scheduler";
 import { normalizeAppSurface } from "@/lib/runtime-surface";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   ensureRuntimeBackupSchedulerStarted();
 
