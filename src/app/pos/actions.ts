@@ -103,6 +103,8 @@ interface PosCartMenuSelection {
 interface PosCartItemInput {
     productId: string
     snapshotName: string
+    customKitchenNotes?: string
+    splitPrintPerUnit?: boolean
     quantity: number
     selectedOptions: PosCartSelectedOption[]
     menuSelections: PosCartMenuSelection[]
@@ -117,6 +119,8 @@ interface PosOrderPricingResult {
     cartWithDiscounts: Array<{
         productId: string
         snapshotName: string
+        customKitchenNotes?: string
+        splitPrintPerUnit?: boolean
         quantity: number
         productKind: "STANDARD" | "FIXED_MENU"
         unitBasePrice: number
@@ -166,6 +170,8 @@ function sanitizeCartItems(
         productId: string
         snapshotName: string
         quantity: number
+        customKitchenNotes?: string
+        splitPrintPerUnit?: boolean
         selectedOptions?: Array<{ name: string, priceVariation: number }>
         menuSelections?: Array<{ groupId: string, productId: string }>
     }>
@@ -195,6 +201,8 @@ function sanitizeCartItems(
         sanitized.push({
             productId,
             snapshotName,
+            customKitchenNotes: item.customKitchenNotes?.trim() || undefined,
+            splitPrintPerUnit: Boolean(item.splitPrintPerUnit),
             quantity: Math.floor(quantity),
             selectedOptions,
             menuSelections: Array.isArray(item.menuSelections)
@@ -354,6 +362,8 @@ async function computePricingForCart(data: {
                 item: {
                     productId: item.productId,
                     snapshotName: item.snapshotName,
+                    customKitchenNotes: item.customKitchenNotes,
+                    splitPrintPerUnit: item.splitPrintPerUnit,
                     quantity: item.quantity,
                     productKind,
                     unitBasePrice,
@@ -379,6 +389,8 @@ async function computePricingForCart(data: {
             item: {
                 productId: item.productId,
                 snapshotName: item.snapshotName,
+                customKitchenNotes: item.customKitchenNotes,
+                splitPrintPerUnit: item.splitPrintPerUnit,
                 quantity: item.quantity,
                 productKind,
                 unitBasePrice,
@@ -446,6 +458,8 @@ async function computePricingForCart(data: {
             return {
                 productId: item.productId,
                 snapshotName: item.snapshotName,
+                customKitchenNotes: item.customKitchenNotes,
+                splitPrintPerUnit: item.splitPrintPerUnit,
                 quantity: item.quantity,
                 productKind: item.productKind,
                 unitBasePrice: item.unitBasePrice,
@@ -528,6 +542,8 @@ async function computePricingForCart(data: {
                 return {
                     productId: item.productId,
                     snapshotName: item.snapshotName,
+                    customKitchenNotes: item.customKitchenNotes,
+                    splitPrintPerUnit: item.splitPrintPerUnit,
                     quantity: item.quantity,
                     productKind: item.productKind,
                     unitBasePrice: item.unitBasePrice,
@@ -992,6 +1008,8 @@ export async function createOrder(data: {
     cart: Array<{
         productId: string,
         snapshotName: string,
+        customKitchenNotes?: string,
+        splitPrintPerUnit?: boolean,
         quantity: number,
         selectedOptions: Array<{ name: string, priceVariation: number }>
         menuSelections?: Array<{ groupId: string, productId: string }>
@@ -1278,6 +1296,8 @@ export async function loadPendingOrderByCode(data: {
             cart: Array<{
                 productId: string | { toString(): string }
                 snapshotName: string
+                customKitchenNotes?: string
+                splitPrintPerUnit?: boolean
                 quantity: number
                 unitBasePrice?: number
                 lineTotal?: number
@@ -1354,6 +1374,8 @@ export async function loadPendingOrderByCode(data: {
                 items: foundOrder.cart.map((item) => ({
                     productId: item.productId.toString(),
                     snapshotName: item.snapshotName,
+                    customKitchenNotes: item.customKitchenNotes,
+                    splitPrintPerUnit: Boolean(item.splitPrintPerUnit),
                     quantity: item.quantity,
                     unitPrice: Number.isFinite(item.unitBasePrice)
                         ? Number(item.unitBasePrice)
@@ -1500,6 +1522,122 @@ export async function listPendingIngredientQueue(data: {
     }
 }
 
+export async function printProductIngredients(data: {
+    eventId: string
+    posDeviceId?: string
+    productId: string
+    removedIngredientIds?: string[]
+    addedIngredientIds?: string[]
+    customNote?: string
+}) {
+    try {
+        const sessionCheck = await ensurePosActionSession()
+        if (!sessionCheck.success) return sessionCheck
+
+        if (!data.eventId || !data.posDeviceId || !data.productId) {
+            return { success: false, error: "Dati stampa ingredienti incompleti" }
+        }
+
+        await dbConnect()
+        const [product, posDevice] = await Promise.all([
+            Product.findOne({ _id: data.productId, eventId: data.eventId })
+                .select("_id name shortName recipeItems")
+                .lean() as Promise<{
+                    _id: string | { toString(): string }
+                    name?: string
+                    shortName?: string
+                    recipeItems?: Array<{ ingredientId?: string | { toString(): string }, quantity?: number | null }>
+                } | null>,
+            PosDevice.findOne({ _id: data.posDeviceId, eventId: data.eventId })
+                .populate({ path: "printerId", select: "_id ip port isVirtual emulatorSlot" })
+                .lean() as Promise<{
+                    printerId?: {
+                        _id?: unknown
+                        ip?: string
+                        port?: number
+                        isVirtual?: boolean
+                        emulatorSlot?: number
+                    } | null
+                } | null>
+        ])
+
+        if (!product) {
+            return { success: false, error: "Prodotto non trovato" }
+        }
+        if (!posDevice?.printerId?.ip) {
+            return { success: false, error: "La cassa selezionata non ha una stampante configurata" }
+        }
+
+        const recipeIngredientIds = normalizeRecipeItems(product.recipeItems).map((entry) => entry.ingredientId)
+        const requestedIngredientIds = [
+            ...recipeIngredientIds,
+            ...(data.removedIngredientIds || []),
+            ...(data.addedIngredientIds || [])
+        ].filter((id, index, ids) => id && ids.indexOf(id) === index)
+        const ingredients = requestedIngredientIds.length > 0
+            ? await Ingredient.find({ eventId: data.eventId, _id: { $in: requestedIngredientIds } })
+                .select("_id name shortName active")
+                .lean() as Array<{ _id: string | { toString(): string }, name?: string, shortName?: string, active?: boolean }>
+            : []
+        const ingredientById = new Map(ingredients.map((ingredient) => [
+            ingredient._id.toString(),
+            {
+                label: ingredient.shortName?.trim() || ingredient.name?.trim() || "Ingrediente",
+                active: ingredient.active !== false
+            }
+        ]))
+        const removedIds = new Set(data.removedIngredientIds || [])
+        const recipeNames = recipeIngredientIds
+            .filter((id) => !removedIds.has(id))
+            .map((id) => ingredientById.get(id))
+            .map((ingredient) => ingredient?.label)
+            .filter((name): name is string => Boolean(name))
+        const addedNames = (data.addedIngredientIds || [])
+            .map((id) => ingredientById.get(id))
+            .filter((ingredient) => ingredient?.active)
+            .map((ingredient) => ingredient?.label)
+            .filter((name): name is string => Boolean(name))
+        const removedNames = (data.removedIngredientIds || [])
+            .map((id) => ingredientById.get(id))
+            .map((ingredient) => ingredient?.label)
+            .filter((name): name is string => Boolean(name))
+        const noteLines = [
+            recipeNames.length > 0 ? `Ingredienti: ${recipeNames.join(", ")}` : "Ingredienti: non configurati",
+            addedNames.length > 0 ? `Aggiunte: ${addedNames.join(", ")}` : "",
+            removedNames.length > 0 ? `Senza: ${removedNames.join(", ")}` : "",
+            data.customNote?.trim() ? `Nota: ${data.customNote.trim()}` : ""
+        ].filter(Boolean)
+
+        const printed = await PrinterService.printComanda({
+            ip: posDevice.printerId.ip,
+            port: posDevice.printerId.port,
+            emulatorSlot: posDevice.printerId.emulatorSlot,
+            printerId: posDevice.printerId._id ? String(posDevice.printerId._id) : undefined,
+            eventId: data.eventId,
+            source: "MANUAL_TEST",
+            printType: "MANUAL_TEST",
+            isVirtual: Boolean(posDevice.printerId.isVirtual),
+            title: "INGREDIENTI PIATTO",
+            copyLabel: "STAMPA INGREDIENTI",
+            orderId: `ingredienti-${Date.now()}`,
+            items: [{
+                name: product.shortName?.trim() || product.name?.trim() || "Prodotto",
+                quantity: 1,
+                notes: noteLines.join(" | ")
+            }]
+        }, 1)
+
+        if (!printed) {
+            return { success: false, error: "Invio stampa ingredienti fallito" }
+        }
+
+        return { success: true }
+    } catch (error) {
+        console.error("Print Product Ingredients Error:", error)
+        return { success: false, error: "Errore durante la stampa ingredienti" }
+    }
+}
+
 export async function completePendingOrderPayment(data: {
     eventId: string
     orderId: string
@@ -1514,6 +1652,8 @@ export async function completePendingOrderPayment(data: {
     cart?: Array<{
         productId: string
         snapshotName: string
+        customKitchenNotes?: string
+        splitPrintPerUnit?: boolean
         quantity: number
         selectedOptions?: Array<{ name: string, priceVariation: number }>
         menuSelections?: Array<{ groupId: string, productId: string }>
@@ -1553,6 +1693,8 @@ export async function completePendingOrderPayment(data: {
             order.cart.map((item: {
                 productId: { toString(): string } | string
                 snapshotName: string
+                customKitchenNotes?: string
+                splitPrintPerUnit?: boolean
                 quantity: number
                 selectedOptions?: Array<{ name: string, priceVariation: number }>
                 includedComponents?: Array<{
@@ -1564,6 +1706,8 @@ export async function completePendingOrderPayment(data: {
             }) => ({
                 productId: item.productId.toString(),
                 snapshotName: item.snapshotName,
+                customKitchenNotes: item.customKitchenNotes,
+                splitPrintPerUnit: Boolean(item.splitPrintPerUnit),
                 quantity: item.quantity,
                 selectedOptions: item.selectedOptions || [],
                 menuSelections: (item.includedComponents || [])
@@ -1629,6 +1773,8 @@ export async function completePendingOrderPayment(data: {
                     cartWithDiscounts: order.cart.map((item: {
                         productId: { toString(): string } | string
                         snapshotName: string
+                        customKitchenNotes?: string
+                        splitPrintPerUnit?: boolean
                         quantity: number
                         productKind?: "STANDARD" | "FIXED_MENU"
                         unitBasePrice?: number
@@ -1644,25 +1790,30 @@ export async function completePendingOrderPayment(data: {
                         }>
                         discountApplied?: number
                         discountMeta?: LineDiscountMeta
-                    }) => ({
-                        productId: item.productId.toString(),
-                        snapshotName: item.snapshotName,
-                        quantity: item.quantity,
-                        productKind: item.productKind || "STANDARD",
-                        unitBasePrice: normalizeCurrencyAmount(Number(item.unitBasePrice || 0)),
-                        lineTotal: normalizeCurrencyAmount(Number(item.lineTotal || 0)),
-                        selectedOptions: item.selectedOptions || [],
-                        includedComponents: item.includedComponents?.map((component) => ({
-                            productId: component.productId.toString(),
-                            snapshotName: component.snapshotName,
-                            quantity: component.quantity,
-                            source: component.source,
-                            ...(component.groupId ? { groupId: component.groupId } : {}),
-                            ...(component.groupName ? { groupName: component.groupName } : {})
-                        })),
-                        discountApplied: normalizeCurrencyAmount(Number(item.discountApplied || 0)),
-                        discountMeta: item.discountMeta
-                    }))
+                    }, index: number) => {
+                        const inputItem = orderCartInput[index]
+                        return {
+                            productId: item.productId.toString(),
+                            snapshotName: item.snapshotName,
+                            customKitchenNotes: inputItem?.customKitchenNotes ?? item.customKitchenNotes,
+                            splitPrintPerUnit: Boolean(inputItem?.splitPrintPerUnit ?? item.splitPrintPerUnit),
+                            quantity: item.quantity,
+                            productKind: item.productKind || "STANDARD",
+                            unitBasePrice: normalizeCurrencyAmount(Number(item.unitBasePrice || 0)),
+                            lineTotal: normalizeCurrencyAmount(Number(item.lineTotal || 0)),
+                            selectedOptions: item.selectedOptions || [],
+                            includedComponents: item.includedComponents?.map((component) => ({
+                                productId: component.productId.toString(),
+                                snapshotName: component.snapshotName,
+                                quantity: component.quantity,
+                                source: component.source,
+                                ...(component.groupId ? { groupId: component.groupId } : {}),
+                                ...(component.groupName ? { groupName: component.groupName } : {})
+                            })),
+                            discountApplied: normalizeCurrencyAmount(Number(item.discountApplied || 0)),
+                            discountMeta: item.discountMeta
+                        }
+                    })
                 }
             }
         } else {

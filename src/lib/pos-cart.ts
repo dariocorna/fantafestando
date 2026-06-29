@@ -43,3 +43,47 @@ export function decrementProductQuantityInCart<T extends PosCartLine>(cart: T[],
       : entry
   ))
 }
+
+export function replaceSingleCartUnit<T extends PosCartLine>(
+  cart: T[],
+  lineId: string,
+  editedItem: T,
+  getMergeKey: (item: T) => string
+): T[] {
+  const itemIndex = cart.findIndex((item) => item.lineId === lineId && !item.isDiscount)
+  if (itemIndex < 0) return cart
+
+  const item = cart[itemIndex]
+  const quantity = normalizeQuantity(item.quantity)
+  const replacement = { ...editedItem, quantity: 1 }
+  const splitCart = quantity > 1
+    ? cart.flatMap((entry, index) => (
+      index === itemIndex
+        ? [{ ...entry, quantity: quantity - 1 }, replacement]
+        : [entry]
+    ))
+    : cart.map((entry, index) => index === itemIndex ? replacement : entry)
+
+  const merged: T[] = []
+  for (const entry of splitCart) {
+    const entryQuantity = normalizeQuantity(entry.quantity)
+    if (entryQuantity <= 0) continue
+    if (entry.isDiscount) {
+      merged.push({ ...entry, quantity: entryQuantity })
+      continue
+    }
+
+    const mergeKey = getMergeKey(entry)
+    const existingIndex = merged.findIndex((candidate) => !candidate.isDiscount && getMergeKey(candidate) === mergeKey)
+    if (existingIndex >= 0) {
+      merged[existingIndex] = {
+        ...merged[existingIndex],
+        quantity: merged[existingIndex].quantity + entryQuantity
+      }
+    } else {
+      merged.push({ ...entry, quantity: entryQuantity })
+    }
+  }
+
+  return merged
+}

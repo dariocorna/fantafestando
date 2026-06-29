@@ -128,6 +128,7 @@ interface CartItem {
     snapshotName: string;
     quantity: number;
     customKitchenNotes?: string;
+    splitPrintPerUnit?: boolean;
     unitBasePrice?: number;
     lineTotal?: number;
     includedComponents?: Array<{
@@ -1549,6 +1550,7 @@ export class PrinterService {
             return {
                 name: resolvePrintName(item.productId, item.snapshotName),
                 quantity: item.quantity,
+                notes: item.customKitchenNotes,
                 unitPrice,
                 lineTotal,
                 selectedOptions: item.selectedOptions || []
@@ -1562,6 +1564,7 @@ export class PrinterService {
                     snapshotName: component.snapshotName,
                     quantity: component.quantity * item.quantity,
                     notes: item.customKitchenNotes,
+                    splitPrintPerUnit: item.splitPrintPerUnit,
                 }));
             }
 
@@ -1570,6 +1573,7 @@ export class PrinterService {
                 snapshotName: item.snapshotName,
                 quantity: item.quantity,
                 notes: item.customKitchenNotes,
+                splitPrintPerUnit: item.splitPrintPerUnit,
             }];
         });
         let splitSequence = 0;
@@ -1578,7 +1582,7 @@ export class PrinterService {
             if (!product) return [];
 
             const normalizedQuantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
-            if (!product.splitKitchenPrintPerUnit) {
+            if (!product.splitKitchenPrintPerUnit && !item.splitPrintPerUnit) {
                 return [{
                     ...item,
                     quantity: normalizedQuantity,
