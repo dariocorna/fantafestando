@@ -24,6 +24,7 @@ export interface IOrder extends Document {
         productId: Types.ObjectId;
         snapshotName: string;
         customKitchenNotes?: string;
+        splitPrintPerUnit?: boolean;
         quantity: number;
         productKind?: ProductKind;
         unitBasePrice?: number;
@@ -117,6 +118,7 @@ const OrderSchema = new Schema<IOrder>({
         productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
         snapshotName: { type: String, required: true },
         customKitchenNotes: { type: String },
+        splitPrintPerUnit: { type: Boolean, default: false },
         quantity: { type: Number, required: true, min: 1 },
         productKind: {
             type: String,

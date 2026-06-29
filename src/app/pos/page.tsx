@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect, useMemo, type KeyboardEvent, type MouseEvent } from "react"
-import { ShoppingCart, User, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X, RefreshCw, Clock3, Wallet, Check, Minus } from "lucide-react"
+import { useState, useEffect, useMemo, useRef, type KeyboardEvent, type MouseEvent } from "react"
+import { ShoppingCart, User, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X, RefreshCw, Clock3, Wallet, Check, Minus, Settings2, Printer } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -28,7 +28,8 @@ import {
     openCashSession,
     closeCashSession,
     getCashSessionClosurePreview,
-    retryFailedOrderPrintJobs
+    retryFailedOrderPrintJobs,
+    printProductIngredients
 } from "./actions"
 import { categoryColorWithAlpha, getCategoryTheme } from "@/lib/category-colors"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
@@ -38,7 +39,7 @@ import { normalizePosCatalogLayout } from "@/lib/pos-catalog-layout"
 import { FixedMenuConfigDialog, type FixedMenuChoiceGroupDto, type FixedMenuComponentDto } from "@/components/fixed-menu-config-dialog"
 import { buildMenuConfigurationKey, type MenuSelectionInput } from "@/lib/fixed-menu"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { buildProductQuantityMap, decrementProductQuantityInCart } from "@/lib/pos-cart"
+import { buildProductQuantityMap, decrementProductQuantityInCart, replaceSingleCartUnit } from "@/lib/pos-cart"
 
 const POS_TOUCH_BREAKPOINT = 1024
 
@@ -62,6 +63,18 @@ interface IProduct {
     stockQuantity?: number | null
     isSoldOut?: boolean
     stockStatus?: "UNLIMITED" | "OK" | "LOW" | "OUT"
+    recipeItems?: Array<{
+        ingredientId: string
+        name: string
+        shortName?: string
+        quantity: number
+    }>
+}
+
+interface IIngredient {
+    _id: string
+    name: string
+    shortName?: string
 }
 
 interface IEvent {
@@ -109,6 +122,11 @@ interface CartItem {
     kind?: "STANDARD" | "FIXED_MENU"
     selectedOptions?: string[]
     menuSelections?: MenuSelectionInput[]
+    customKitchenNotes?: string
+    contextCustomNote?: string
+    removedIngredientIds?: string[]
+    addedIngredientIds?: string[]
+    splitPrintPerUnit?: boolean
     isDiscount?: boolean
     discountPreset?: {
         label: string
@@ -134,9 +152,18 @@ interface LoadedPendingOrder {
         quantity: number
         unitPrice: number
         volunteerPrice?: number
+        customKitchenNotes?: string
+        splitPrintPerUnit?: boolean
         selectedOptions?: Array<{ name: string, priceVariation: number }>
         menuSelections?: Array<{ groupId: string, productId: string }>
     }>
+}
+
+interface CartContextDraft {
+    removedIngredientIds: string[]
+    addedIngredientIds: string[]
+    customNote: string
+    splitPrintPerUnit: boolean
 }
 
 interface RecentPendingOrder {
@@ -490,6 +517,7 @@ export default function PosPage() {
     const [categories, setCategories] = useState<ICategory[]>([])
     const [activeCategory, setActiveCategory] = useState<string | null>(null)
     const [products, setProducts] = useState<IProduct[]>([])
+    const [ingredients, setIngredients] = useState<IIngredient[]>([])
     const [activeEvent, setActiveEvent] = useState<IEvent | null>(null)
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
     const [isDiscountsExpanded, setIsDiscountsExpanded] = useState(false)
@@ -534,6 +562,16 @@ export default function PosPage() {
     const [isRetryingFailedPrints, setIsRetryingFailedPrints] = useState(false)
     const [retryPrintsFeedback, setRetryPrintsFeedback] = useState<string | null>(null)
     const [configuringProduct, setConfiguringProduct] = useState<IProduct | null>(null)
+    const [contextLineId, setContextLineId] = useState<string | null>(null)
+    const [contextDraft, setContextDraft] = useState<CartContextDraft>({
+        removedIngredientIds: [],
+        addedIngredientIds: [],
+        customNote: "",
+        splitPrintPerUnit: false
+    })
+    const [contextPrintFeedback, setContextPrintFeedback] = useState<string | null>(null)
+    const [isPrintingContextIngredients, setIsPrintingContextIngredients] = useState(false)
+    const contextLineSequenceRef = useRef(0)
     const [hasCoarsePointer, setHasCoarsePointer] = useState(false)
     const [cartAnnouncement, setCartAnnouncement] = useState("")
     const [isVolunteerMode, setIsVolunteerMode] = useState(false)
@@ -568,6 +606,7 @@ export default function PosPage() {
                 setCategories(data.categories)
                 setActiveCategory(data.categories?.[0]?._id ?? null)
                 setProducts(data.products)
+                setIngredients(data.ingredients || [])
                 setPosDevices(data.posDevices)
 
                 // Check localStorage for POS Device
@@ -723,6 +762,11 @@ export default function PosPage() {
     const productQuantityById = useMemo(() => buildProductQuantityMap(cart), [cart])
     const showTouchDecrementControls = Boolean(isMobilePos) || hasCoarsePointer
     const resolveProductDisplayName = (product: IProduct) => product.shortName?.trim() || product.name
+    const resolveIngredientLabel = (ingredient: { name: string, shortName?: string }) => ingredient.shortName?.trim() || ingredient.name
+    const contextItem = contextLineId ? cart.find((item) => item.lineId === contextLineId && !item.isDiscount) || null : null
+    const contextProduct = contextItem ? products.find((product) => product._id === contextItem.productId) || null : null
+    const contextRecipeIngredientIds = new Set((contextProduct?.recipeItems || []).map((entry) => entry.ingredientId))
+    const contextExtraIngredients = ingredients.filter((ingredient) => !contextRecipeIngredientIds.has(ingredient._id))
     const getAdaptiveProductRowMinHeight = (productsCount: number): string => {
         const safeCount = Math.max(productsCount, 1)
         const gapPx = 6 // space-y-1.5
@@ -733,6 +777,33 @@ export default function PosPage() {
         // - shrinks automatically on smaller heights
         // - never explodes or collapses thanks to clamp bounds.
         return `clamp(38px, calc((100dvh - ${reservedVerticalPx}px - ${(safeCount - 1) * gapPx}px) / ${safeCount}), 96px)`
+    }
+
+    const buildCartLineMergeKey = (item: CartItem) => JSON.stringify({
+        productId: item.productId,
+        price: item.price,
+        volunteerPrice: item.volunteerPrice ?? null,
+        kind: item.kind || "STANDARD",
+        selectedOptions: item.selectedOptions || [],
+        menuSelections: item.menuSelections || [],
+        customKitchenNotes: item.customKitchenNotes || "",
+        splitPrintPerUnit: Boolean(item.splitPrintPerUnit)
+    })
+
+    const buildContextKitchenNotes = (draft: CartContextDraft, product?: IProduct | null) => {
+        const recipeById = new Map((product?.recipeItems || []).map((entry) => [entry.ingredientId, resolveIngredientLabel(entry)]))
+        const ingredientById = new Map(ingredients.map((ingredient) => [ingredient._id, resolveIngredientLabel(ingredient)]))
+        const removedNames = draft.removedIngredientIds
+            .map((id) => recipeById.get(id) || ingredientById.get(id))
+            .filter((name): name is string => Boolean(name))
+        const addedNames = draft.addedIngredientIds
+            .map((id) => ingredientById.get(id))
+            .filter((name): name is string => Boolean(name))
+        return [
+            removedNames.length > 0 ? `Senza ${removedNames.join(", ")}` : "",
+            addedNames.length > 0 ? `Aggiungi ${addedNames.join(", ")}` : "",
+            draft.customNote.trim()
+        ].filter(Boolean).join(" · ")
     }
 
     const addConfiguredToCart = (
@@ -765,6 +836,70 @@ export default function PosPage() {
             }]
         })
         setCartAnnouncement(`Aggiunto ${displayName}, quantita ${nextQuantity}`)
+    }
+
+    const openCartItemContext = (item: CartItem) => {
+        setContextLineId(item.lineId)
+        setContextPrintFeedback(null)
+        setContextDraft({
+            removedIngredientIds: item.removedIngredientIds || [],
+            addedIngredientIds: item.addedIngredientIds || [],
+            customNote: item.contextCustomNote ?? item.customKitchenNotes ?? "",
+            splitPrintPerUnit: Boolean(item.splitPrintPerUnit)
+        })
+    }
+
+    const updateContextArray = (key: "removedIngredientIds" | "addedIngredientIds", ingredientId: string, checked: boolean) => {
+        setContextDraft((prev) => ({
+            ...prev,
+            [key]: checked
+                ? [...prev[key], ingredientId].filter((id, index, ids) => ids.indexOf(id) === index)
+                : prev[key].filter((id) => id !== ingredientId)
+        }))
+    }
+
+    const applyCartItemContext = () => {
+        if (!contextItem) return
+        const contextNotes = buildContextKitchenNotes(contextDraft, contextProduct)
+        contextLineSequenceRef.current += 1
+        const editedItem: CartItem = {
+            ...contextItem,
+            lineId: contextItem.quantity > 1 ? `${contextItem.lineId}:ctx-${contextLineSequenceRef.current}` : contextItem.lineId,
+            quantity: 1,
+            removedIngredientIds: contextDraft.removedIngredientIds,
+            addedIngredientIds: contextDraft.addedIngredientIds,
+            contextCustomNote: contextDraft.customNote.trim() || undefined,
+            customKitchenNotes: contextNotes || undefined,
+            splitPrintPerUnit: contextDraft.splitPrintPerUnit || undefined
+        }
+
+        setCart((prev) => replaceSingleCartUnit(prev, contextItem.lineId, editedItem, buildCartLineMergeKey))
+        setContextLineId(null)
+    }
+
+    const handlePrintContextIngredients = async () => {
+        if (!activeEventId || !selectedPosDeviceId || !contextItem) {
+            setContextPrintFeedback("Seleziona una cassa prima di stampare gli ingredienti")
+            return
+        }
+
+        setIsPrintingContextIngredients(true)
+        const result = await printProductIngredients({
+            eventId: activeEventId,
+            posDeviceId: selectedPosDeviceId,
+            productId: contextItem.productId,
+            removedIngredientIds: contextDraft.removedIngredientIds,
+            addedIngredientIds: contextDraft.addedIngredientIds,
+            customNote: contextDraft.customNote
+        })
+        setIsPrintingContextIngredients(false)
+
+        if (!result.success) {
+            setContextPrintFeedback(result.error || "Stampa ingredienti non riuscita")
+            return
+        }
+
+        setContextPrintFeedback("Ingredienti inviati alla stampante della cassa")
     }
 
     const addToCart = (product: IProduct) => {
@@ -1156,6 +1291,9 @@ export default function PosPage() {
             volunteerPrice: item.volunteerPrice ?? products.find((product) => product._id === item.productId)?.volunteerPrice ?? null,
             quantity: item.quantity,
             variants: [],
+            customKitchenNotes: item.customKitchenNotes,
+            contextCustomNote: item.customKitchenNotes,
+            splitPrintPerUnit: item.splitPrintPerUnit,
             selectedOptions: (item.selectedOptions || []).map((option) => option.name),
             menuSelections: item.menuSelections || [],
         })))
@@ -1226,6 +1364,8 @@ export default function PosPage() {
                 cart: productCartItems.map((item) => ({
                     productId: item.productId,
                     snapshotName: item.name,
+                    customKitchenNotes: item.customKitchenNotes,
+                    splitPrintPerUnit: item.splitPrintPerUnit,
                     quantity: item.quantity,
                     selectedOptions: (item.selectedOptions || []).map((option) => ({
                         name: option,
@@ -1279,6 +1419,8 @@ export default function PosPage() {
             cart: productCartItems.map(item => ({
                 productId: item.productId,
                 snapshotName: item.name,
+                customKitchenNotes: item.customKitchenNotes,
+                splitPrintPerUnit: item.splitPrintPerUnit,
                 quantity: item.quantity,
                 selectedOptions: (item.selectedOptions || []).map((option) => ({
                     name: option,
@@ -1365,10 +1507,30 @@ export default function PosPage() {
                                     {item.selectedOptions.join(" • ")}
                                 </p>
                             ) : null}
+                            {item.customKitchenNotes ? (
+                                <p className="line-clamp-2 text-[11px] font-black text-indigo-700" data-testid={`cart-item-notes-${item.lineId}`}>
+                                    {item.customKitchenNotes}
+                                </p>
+                            ) : null}
+                            {item.splitPrintPerUnit ? (
+                                <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">
+                                    Comanda singola
+                                </p>
+                            ) : null}
                         </div>
                     )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                    {!item.isDiscount ? (
+                        <button
+                            type="button"
+                            aria-label={`Modifica dettagli ${item.name}`}
+                            onClick={() => openCartItemContext(item)}
+                            className="flex h-11 w-11 items-center justify-center rounded-md text-indigo-600 hover:bg-indigo-50"
+                        >
+                            <Settings2 size={18} />
+                        </button>
+                    ) : null}
                     {!item.isDiscount ? (
                         <div className="inline-flex h-11 items-center rounded-md border border-slate-200 bg-slate-50">
                             <button
@@ -2433,6 +2595,145 @@ export default function PosPage() {
                     </div>
                 </SheetContent>
             </Sheet>
+
+            <Dialog open={Boolean(contextLineId)} onOpenChange={(open) => {
+                if (!open) setContextLineId(null)
+            }}>
+                <DialogContent className="max-h-[92dvh] max-w-[560px] overflow-y-auto rounded-2xl p-0 text-slate-800">
+                    <DialogHeader className="border-b bg-indigo-50 px-5 py-4">
+                        <DialogTitle className="text-xl font-black text-indigo-900">
+                            {contextItem?.name || "Dettagli riga"}
+                        </DialogTitle>
+                        <p className="text-sm font-semibold text-indigo-700">
+                            Stai modificando 1 unità su {contextItem?.quantity || 1}.
+                        </p>
+                    </DialogHeader>
+
+                    <div className="space-y-3 p-5">
+                        <fieldset className="space-y-1.5">
+                            <legend className="text-xs font-black uppercase tracking-widest text-slate-500">Rimuovi ingredienti</legend>
+                            {(contextProduct?.recipeItems || []).length === 0 ? (
+                                <p className="rounded-md border border-dashed p-3 text-sm font-semibold text-slate-500">
+                                    Ricetta non configurata per questo prodotto.
+                                </p>
+                            ) : (
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                    {(contextProduct?.recipeItems || []).map((entry) => {
+                                        const checked = contextDraft.removedIngredientIds.includes(entry.ingredientId)
+                                        return (
+                                            <label
+                                                key={entry.ingredientId}
+                                                className={`flex min-h-11 items-center gap-2 rounded-md border px-3 py-2 text-sm font-bold ${checked ? "border-rose-300 bg-rose-50 text-rose-800" : "border-slate-200 bg-white text-slate-800"}`}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={checked}
+                                                    onChange={(event) => updateContextArray("removedIngredientIds", entry.ingredientId, event.target.checked)}
+                                                    className="h-5 w-5"
+                                                />
+                                                <span>Togli {resolveIngredientLabel(entry)}</span>
+                                            </label>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </fieldset>
+
+                        <fieldset className="space-y-1.5">
+                            <legend className="text-xs font-black uppercase tracking-widest text-slate-500">Aggiungi ingredienti</legend>
+                            {contextExtraIngredients.length === 0 ? (
+                                <p className="rounded-md border border-dashed p-3 text-sm font-semibold text-slate-500">
+                                    Nessun ingrediente extra disponibile.
+                                </p>
+                            ) : (
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                    {contextExtraIngredients.map((ingredient) => {
+                                        const checked = contextDraft.addedIngredientIds.includes(ingredient._id)
+                                        return (
+                                            <label
+                                                key={ingredient._id}
+                                                className={`flex min-h-11 items-center gap-2 rounded-md border px-3 py-2 text-sm font-bold ${checked ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-800"}`}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={checked}
+                                                    onChange={(event) => updateContextArray("addedIngredientIds", ingredient._id, event.target.checked)}
+                                                    className="h-5 w-5"
+                                                />
+                                                <span>Aggiungi {resolveIngredientLabel(ingredient)}</span>
+                                            </label>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </fieldset>
+
+                        <div className="space-y-1.5">
+                            <Label htmlFor="cart-context-note" className="text-xs font-black uppercase tracking-widest text-slate-500">
+                                Nota libera
+                            </Label>
+                            <textarea
+                                id="cart-context-note"
+                                value={contextDraft.customNote}
+                                onChange={(event) => setContextDraft((prev) => ({ ...prev, customNote: event.target.value }))}
+                                className="min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                                placeholder="Es: ben cotte, poco sale..."
+                            />
+                        </div>
+
+                        <label className={`flex min-h-12 items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm font-black ${contextDraft.splitPrintPerUnit ? "border-amber-400 bg-amber-100 text-amber-900" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                            <span>Stampa comanda singola per questa unità</span>
+                            <input
+                                type="checkbox"
+                                checked={contextDraft.splitPrintPerUnit}
+                                onChange={(event) => setContextDraft((prev) => ({ ...prev, splitPrintPerUnit: event.target.checked }))}
+                                className="h-5 w-5"
+                            />
+                        </label>
+
+                        <div className="rounded-md border bg-slate-50 px-3 py-2">
+                            <p className="text-xs font-black uppercase tracking-widest text-slate-500">Sottotitolo stampa</p>
+                            <p className="mt-1 text-sm font-bold text-slate-800">
+                                {buildContextKitchenNotes(contextDraft, contextProduct) || "Nessuna nota"}
+                            </p>
+                        </div>
+                        {contextPrintFeedback ? (
+                            <p className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-800">
+                                {contextPrintFeedback}
+                            </p>
+                        ) : null}
+
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="h-11 w-full justify-center border-slate-300 font-bold text-slate-700"
+                            onClick={() => void handlePrintContextIngredients()}
+                            disabled={isPrintingContextIngredients}
+                        >
+                            {isPrintingContextIngredients ? <Loader2 className="animate-spin" /> : <Printer size={16} />}
+                            Stampa ingredienti
+                        </Button>
+
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="h-12 font-black"
+                                onClick={() => setContextLineId(null)}
+                            >
+                                Annulla
+                            </Button>
+                            <Button
+                                type="button"
+                                className="h-12 bg-indigo-700 font-black hover:bg-indigo-800"
+                                onClick={applyCartItemContext}
+                            >
+                                Applica a 1 unità
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             {/* Modal di Checkout */}
             <Dialog open={isCheckoutOpen} onOpenChange={handleCheckoutDialogOpenChange}>

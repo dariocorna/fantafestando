@@ -4,6 +4,7 @@ import Event from "@/models/Event";
 import Category from "@/models/Category";
 import Product from "@/models/Product";
 import PosDevice from "@/models/PosDevice";
+import Ingredient from "@/models/Ingredient";
 import "@/models/Printer"; // Import to register schema for .populate()
 import "@/models/Peripheral"; // Import to register schema for .populate()
 import { parsePredefinedTablesInput } from "@/lib/table-presets";
@@ -53,6 +54,27 @@ export async function GET(request: NextRequest) {
         const products = await Product.find({ eventId: event._id })
             .sort({ name: 1 })
             .lean();
+        const activeIngredients = channel === "pos"
+            ? await Ingredient.find({ eventId: event._id, active: true })
+                .sort({ name: 1 })
+                .select("_id name shortName")
+                .lean()
+            : [];
+        const recipeIngredientIds = channel === "pos"
+            ? [...new Set(products.flatMap((product) =>
+                Array.isArray((product as { recipeItems?: Array<{ ingredientId?: unknown }> }).recipeItems)
+                    ? ((product as { recipeItems?: Array<{ ingredientId?: unknown }> }).recipeItems || [])
+                        .map((entry) => String(entry.ingredientId || ""))
+                        .filter(Boolean)
+                    : []
+            ))]
+            : [];
+        const recipeIngredients = recipeIngredientIds.length > 0
+            ? await Ingredient.find({ eventId: event._id, _id: { $in: recipeIngredientIds } })
+                .select("_id name shortName")
+                .lean()
+            : [];
+        const ingredientById = new Map([...recipeIngredients, ...activeIngredients].map((ingredient) => [String(ingredient._id), ingredient]));
         const referencedProductIds = [...new Set(products.flatMap((product) => collectReferencedProductIds(product)))]
         const referencedProducts = referencedProductIds.length > 0
             ? await Product.find({
@@ -86,6 +108,22 @@ export async function GET(request: NextRequest) {
                     (product as { stockQuantity?: number | null }).stockQuantity ?? null,
                     Boolean((product as { isSoldOut?: boolean }).isSoldOut)
                 ),
+                recipeItems: channel === "pos" && Array.isArray((product as {
+                    recipeItems?: Array<{ ingredientId?: unknown, quantity?: number }>
+                }).recipeItems)
+                    ? ((product as {
+                        recipeItems?: Array<{ ingredientId?: unknown, quantity?: number }>
+                    }).recipeItems || []).map((entry) => {
+                        const ingredientId = String(entry.ingredientId || "");
+                        const ingredient = ingredientById.get(ingredientId) as ({ name?: string, shortName?: string } | undefined);
+                        return {
+                            ingredientId,
+                            name: ingredient?.name || "Ingrediente",
+                            shortName: ingredient?.shortName || undefined,
+                            quantity: Number(entry.quantity || 1)
+                        };
+                    }).filter((entry) => entry.ingredientId)
+                    : [],
                 requiresConfiguration: productRequiresMenuConfiguration(product),
                 menuComponents: Array.isArray((product as { menuComponents?: Array<{ productId?: unknown, quantity?: number }> }).menuComponents)
                     ? ((product as { menuComponents?: Array<{ productId?: unknown, quantity?: number }> }).menuComponents || [])
@@ -207,6 +245,13 @@ export async function GET(request: NextRequest) {
                 event: sanitizedEvent,
                 categories: availableCategories,
                 products: availableProducts,
+                ingredients: channel === "pos"
+                    ? activeIngredients.map((ingredient) => ({
+                        _id: String(ingredient._id),
+                        name: ingredient.name,
+                        shortName: ingredient.shortName || undefined
+                    }))
+                    : [],
                 posDevices: channel === "pos" ? serializedPosDevices : []
             },
             {
