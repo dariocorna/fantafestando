@@ -4,6 +4,7 @@ import {
   buildProductQuantityMap,
   decrementProductQuantityInCart,
   getProductQuantityInCart,
+  replaceSingleCartUnit,
   type PosCartLine,
 } from "./pos-cart"
 
@@ -67,5 +68,43 @@ describe("pos-cart", () => {
     const nextCart = decrementProductQuantityInCart(cart, "prod-missing")
 
     expect(nextCart).toBe(cart)
+  })
+
+  test("divide una singola unita quando si modifica una riga aggregata", () => {
+    type EditableLine = PosCartLine & { notes?: string }
+    const cart: EditableLine[] = [
+      { lineId: "p1", productId: "prod-1", quantity: 3 },
+    ]
+
+    const nextCart = replaceSingleCartUnit(
+      cart,
+      "p1",
+      { lineId: "p1-note", productId: "prod-1", quantity: 1, notes: "Senza cipolla" },
+      (item) => `${item.productId}:${item.notes || ""}`
+    )
+
+    expect(nextCart).toEqual([
+      { lineId: "p1", productId: "prod-1", quantity: 2 },
+      { lineId: "p1-note", productId: "prod-1", quantity: 1, notes: "Senza cipolla" },
+    ])
+  })
+
+  test("riaggrega righe tornate identiche dopo la modifica", () => {
+    type EditableLine = PosCartLine & { notes?: string }
+    const cart: EditableLine[] = [
+      { lineId: "p1", productId: "prod-1", quantity: 1 },
+      { lineId: "p1-note", productId: "prod-1", quantity: 1, notes: "Senza cipolla" },
+    ]
+
+    const nextCart = replaceSingleCartUnit(
+      cart,
+      "p1-note",
+      { lineId: "p1-note", productId: "prod-1", quantity: 1 },
+      (item) => `${item.productId}:${item.notes || ""}`
+    )
+
+    expect(nextCart).toEqual([
+      { lineId: "p1", productId: "prod-1", quantity: 2 },
+    ])
   })
 })
