@@ -2,6 +2,16 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.15.0] - 2026-06-30
+
+### Added
+
+- POS: aggiunto calcolo resto nel pagamento contanti con importo ricevuto, tasti rapidi e tastierino manuale espandibile.
+
+### Changed
+
+- Checkout POS ampliato su desktop con colonna laterale per il calcolo resto, riducendo lo scroll nel modal.
+
 ## [0.13.1] - 2026-06-24
 
 ### Changed
