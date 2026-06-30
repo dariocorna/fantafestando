@@ -42,6 +42,37 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { buildProductQuantityMap, decrementProductQuantityInCart, replaceSingleCartUnit } from "@/lib/pos-cart"
 
 const POS_TOUCH_BREAKPOINT = 1024
+const CASH_RECEIVED_COMMON_AMOUNTS_CENTS = [1000, 2000, 5000, 10000, 20000]
+
+function toCents(value: number) {
+    return Math.round(value * 100)
+}
+
+function formatCents(value: number) {
+    return `${(value / 100).toFixed(2)} €`
+}
+
+function normalizeCashReceivedInput(value: string) {
+    const normalized = value.replace(".", ",").replace(/[^\d,]/g, "")
+    const [integerRaw, ...decimalParts] = normalized.split(",")
+    const integer = integerRaw.replace(/^0+(?=\d)/, "")
+    if (decimalParts.length === 0) return integer
+
+    return `${integer || "0"},${decimalParts.join("").slice(0, 2)}`
+}
+
+function buildCashReceivedSuggestions(total: number) {
+    const totalCents = toCents(total)
+    if (totalCents <= 0) return []
+
+    const nextFiveCents = Math.ceil((totalCents + 1) / 500) * 500
+    return [...new Set([
+        nextFiveCents,
+        nextFiveCents + 500,
+        nextFiveCents + 1000,
+        ...CASH_RECEIVED_COMMON_AMOUNTS_CENTS.filter((amount) => amount > totalCents)
+    ])].sort((a, b) => a - b).slice(0, 5)
+}
 
 interface ICategory {
     _id: string
@@ -524,6 +555,8 @@ export default function PosPage() {
     const [isDiscountSheetOpen, setIsDiscountSheetOpen] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
     const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD">("CASH")
+    const [cashReceivedInput, setCashReceivedInput] = useState("")
+    const [isCashKeypadExpanded, setIsCashKeypadExpanded] = useState(false)
     const [posDevices, setPosDevices] = useState<IPosDevice[]>([])
     const [selectedPosDeviceId, setSelectedPosDeviceId] = useState<string | null>(null)
     const [isPosSelectorOpen, setIsPosSelectorOpen] = useState(false)
@@ -1002,6 +1035,8 @@ export default function PosPage() {
         setCustomerName("")
         setTableNumber("")
         setPaymentMethod(cashAvailable ? "CASH" : "CARD")
+        setCashReceivedInput("")
+        setIsCashKeypadExpanded(false)
         setIsVolunteerMode(false)
     }
 
@@ -1058,6 +1093,28 @@ export default function PosPage() {
         const parsed = Number(normalized)
         if (!Number.isFinite(parsed) || parsed < 0) return null
         return Number(parsed.toFixed(2))
+    }
+
+    const cashReceivedHasValue = cashReceivedInput.trim().length > 0
+    const cashReceivedAmount = cashReceivedHasValue ? parseAmountInput(cashReceivedInput) : null
+    const effectiveTotalCents = toCents(effectiveTotal)
+    const cashReceivedCents = cashReceivedAmount === null ? null : toCents(cashReceivedAmount)
+    const cashChangeCents = cashReceivedCents !== null && cashReceivedCents >= effectiveTotalCents
+        ? cashReceivedCents - effectiveTotalCents
+        : null
+    const cashMissingCents = cashReceivedCents !== null && cashReceivedCents < effectiveTotalCents
+        ? effectiveTotalCents - cashReceivedCents
+        : null
+    const cashReceivedError = cashReceivedHasValue && cashReceivedAmount === null
+        ? "Importo ricevuto non valido"
+        : cashMissingCents !== null
+            ? `Mancano ${formatCents(cashMissingCents)}`
+            : null
+    const cashPaymentBlocked = effectivePaymentMethod === "CASH" && Boolean(cashReceivedError)
+    const cashReceivedSuggestions = buildCashReceivedSuggestions(effectiveTotal)
+    const setCashReceivedFromCents = (amountCents: number) => setCashReceivedInput((amountCents / 100).toFixed(2).replace(".", ","))
+    const appendCashReceivedKey = (key: string) => {
+        setCashReceivedInput((current) => normalizeCashReceivedInput(`${current}${key}`))
     }
 
     const showFeedbackModal = (
@@ -1234,6 +1291,8 @@ export default function PosPage() {
         if (isProcessing) return
         setIsCheckoutOpen(open)
         if (!open) {
+            setCashReceivedInput("")
+            setIsCashKeypadExpanded(false)
             setStockShortages([])
         }
     }
@@ -1342,6 +1401,10 @@ export default function PosPage() {
             showFeedbackModal("Aggiungi almeno un prodotto prima di procedere al pagamento")
             return
         }
+        if (cashPaymentBlocked) {
+            showFeedbackModal(cashReceivedError || "Importo ricevuto non valido")
+            return
+        }
 
         setIsProcessing(true)
 
@@ -1395,6 +1458,7 @@ export default function PosPage() {
                     setStockShortages(completionResult.stockShortages)
                 } else if (completionResult.cashSessionRequired) {
                     setIsCheckoutOpen(false)
+                    setCashReceivedInput("")
                     setCashSession(null)
                     setIsOpenCashDialogOpen(true)
                 } else {
@@ -1452,6 +1516,7 @@ export default function PosPage() {
                 setStockShortages(result.stockShortages)
             } else if (result.cashSessionRequired) {
                 setIsCheckoutOpen(false)
+                setCashReceivedInput("")
                 setCashSession(null)
                 setIsOpenCashDialogOpen(true)
             } else {
@@ -1468,6 +1533,7 @@ export default function PosPage() {
         || productCartItems.length === 0
         || (!cashAvailable && !cardAvailable)
         || isTableRequiredInvalid
+        || cashPaymentBlocked
 
     const oneHourAgo = (recentPendingOrdersReferenceTime ?? 0) - 60 * 60 * 1000
     const sortedRecentPendingOrders = [
@@ -2737,7 +2803,7 @@ export default function PosPage() {
 
             {/* Modal di Checkout */}
             <Dialog open={isCheckoutOpen} onOpenChange={handleCheckoutDialogOpenChange}>
-                <DialogContent className="max-h-[96dvh] max-w-[560px] overflow-y-auto rounded-2xl border-none p-0 text-slate-800 dark:text-slate-100">
+                <DialogContent className="max-h-[96dvh] max-w-[980px] overflow-y-auto rounded-2xl border-none p-0 text-slate-800 dark:text-slate-100">
                     <DialogHeader className="sr-only">
                         <DialogTitle>Checkout ordine POS</DialogTitle>
                     </DialogHeader>
@@ -2756,8 +2822,8 @@ export default function PosPage() {
                         )}
                     </div>
 
-                    <div className="space-y-4 p-4 sm:space-y-5 sm:p-5">
-                        <>
+                    <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] lg:items-start">
+                        <div className="space-y-4 sm:space-y-5">
                             {activeEvent?.settings?.askName && (
                                 <div className="space-y-2">
                                     <Label htmlFor="checkout-customer-name" className="text-base font-bold">Nome Cliente</Label>
@@ -2854,7 +2920,137 @@ export default function PosPage() {
                                 )}
                             </div>
 
-                            <div className="flex gap-2 pt-2">
+                        </div>
+
+                        <div className="space-y-3">
+                            {effectivePaymentMethod === "CASH" ? (
+                                <div
+                                    className="space-y-3 rounded-xl border-2 border-green-200 bg-green-50 p-3"
+                                    data-testid="cash-change-card"
+                                >
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <p className="text-xs font-black uppercase tracking-widest text-green-700">Calcolo resto</p>
+                                            <p className="text-sm font-semibold text-green-900">Inserisci il contante ricevuto.</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-green-700">Totale</p>
+                                            <p className="text-xl font-black text-green-900">{formatCents(effectiveTotalCents)}</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="cash-received-input" className="text-xs font-black uppercase tracking-widest text-slate-600">
+                                            Ricevuto
+                                        </Label>
+                                        <div className="grid grid-cols-[1fr_auto_auto] gap-2">
+                                            <Input
+                                                id="cash-received-input"
+                                                data-testid="cash-received-input"
+                                                inputMode="decimal"
+                                                value={cashReceivedInput}
+                                                onChange={(event) => setCashReceivedInput(normalizeCashReceivedInput(event.target.value))}
+                                                placeholder="0,00"
+                                                aria-invalid={Boolean(cashReceivedError)}
+                                                aria-describedby={cashReceivedError ? "cash-change-status" : undefined}
+                                                className="h-12 rounded-lg border-2 bg-white text-right text-2xl font-black"
+                                            />
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="h-12 min-w-14 rounded-lg bg-white font-black"
+                                                onClick={() => setCashReceivedInput((current) => current.slice(0, -1))}
+                                                aria-label="Cancella ultima cifra"
+                                            >
+                                                DEL
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="h-12 min-w-12 rounded-lg bg-white font-black"
+                                                onClick={() => setCashReceivedInput("")}
+                                                aria-label="Cancella importo ricevuto"
+                                            >
+                                                C
+                                            </Button>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="h-11 rounded-lg bg-white text-sm font-black"
+                                            onClick={() => setCashReceivedFromCents(effectiveTotalCents)}
+                                        >
+                                            Esatto {formatCents(effectiveTotalCents)}
+                                        </Button>
+                                        {cashReceivedSuggestions.map((amountCents) => (
+                                            <Button
+                                                key={amountCents}
+                                                type="button"
+                                                variant="outline"
+                                                className="h-11 rounded-lg bg-white text-sm font-black"
+                                                onClick={() => setCashReceivedFromCents(amountCents)}
+                                            >
+                                                {formatCents(amountCents)}
+                                            </Button>
+                                        ))}
+                                    </div>
+
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="h-10 w-full rounded-lg bg-white text-sm font-black"
+                                        onClick={() => setIsCashKeypadExpanded((current) => !current)}
+                                        aria-expanded={isCashKeypadExpanded}
+                                    >
+                                        {isCashKeypadExpanded ? "Nascondi tastierino" : "Tastierino manuale"}
+                                    </Button>
+
+                                    {isCashKeypadExpanded ? (
+                                        <div className="grid grid-cols-3 gap-2" aria-label="Tastierino contante ricevuto">
+                                            {["1", "2", "3", "4", "5", "6", "7", "8", "9", ",", "0"].map((key) => (
+                                                <Button
+                                                    key={key}
+                                                    type="button"
+                                                    variant="outline"
+                                                    className="h-12 rounded-lg bg-white text-xl font-black"
+                                                    onClick={() => appendCashReceivedKey(key)}
+                                                >
+                                                    {key}
+                                                </Button>
+                                            ))}
+                                        </div>
+                                    ) : null}
+
+                                    {cashReceivedError ? (
+                                        <p
+                                            id="cash-change-status"
+                                            data-testid="cash-change-missing"
+                                            className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-center text-base font-black text-rose-700"
+                                        >
+                                            {cashReceivedError}
+                                        </p>
+                                    ) : cashChangeCents !== null ? (
+                                        <p
+                                            id="cash-change-status"
+                                            data-testid="cash-change-due"
+                                            className="rounded-lg border border-green-300 bg-white px-3 py-2 text-center text-base font-black text-green-800"
+                                        >
+                                            Resto {formatCents(cashChangeCents)}
+                                        </p>
+                                    ) : (
+                                        <p className="text-center text-xs font-bold text-green-800">
+                                            Puoi confermare anche senza usare il calcolo resto.
+                                        </p>
+                                    )}
+                                </div>
+                            ) : null}
+
+                        </div>
+
+                        <div className="flex gap-2 pt-2 lg:col-span-2">
                                 <Button
                                     variant="outline"
                                     className="flex-1 rounded-lg py-6 text-xl font-bold"
@@ -2871,8 +3067,8 @@ export default function PosPage() {
                                     {isProcessing ? <Loader2 className="animate-spin" /> : "CONFERMA"}
                                 </Button>
                             </div>
-                            {stockShortages.length > 0 ? (
-                                <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                        {stockShortages.length > 0 ? (
+                                <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 lg:col-span-2">
                                     <p className="text-sm font-black text-amber-800">
                                         Scorte insufficienti rilevate. Conferma per procedere comunque.
                                     </p>
@@ -2894,8 +3090,7 @@ export default function PosPage() {
                                         </Button>
                                     </div>
                                 </div>
-                            ) : null}
-                        </>
+                        ) : null}
                     </div>
                 </DialogContent>
             </Dialog>
