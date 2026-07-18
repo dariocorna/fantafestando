@@ -1341,8 +1341,8 @@ export default function PosPage() {
             quantity: item.quantity,
             variants: [],
             customKitchenNotes: item.customKitchenNotes,
-            // La struttura (ingredienti tolti/aggiunti) non è persistita: non pre-compilare la nota
-            // libera con la stringa già composta, altrimenti una ri-modifica la duplicherebbe.
+            // La struttura ingredienti non è persistita: conserva l'intera nota come testo libero.
+            contextCustomNote: item.customKitchenNotes,
             splitPrintPerUnit: item.splitPrintPerUnit,
             selectedOptions: (item.selectedOptions || []).map((option) => option.name),
             menuSelections: item.menuSelections || [],

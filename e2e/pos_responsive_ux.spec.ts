@@ -53,6 +53,7 @@ async function createPendingOrder(eventName: string, productName: string, pickup
             unitBasePrice: Number(product.basePrice ?? 0),
             lineTotal: Number(product.basePrice ?? 0),
             selectedOptions: [],
+            customKitchenNotes: "Poco sale",
         }],
         paymentMethod: "CASH",
         createdAt: new Date(),
@@ -140,6 +141,15 @@ test.describe("POS responsive UX", () => {
             await page.getByTestId("pos-mobile-cart-bar").click();
             await expect(cartSheet.getByText(pendingProductName)).toBeVisible();
             await expect(cartSheet.getByText(draftProductName)).toHaveCount(0);
+            await expect(cartSheet.getByText("Poco sale")).toBeVisible();
+
+            await cartSheet.getByRole("button", { name: new RegExp(`Modifica dettagli ${pendingProductName}`) }).click();
+            const contextDialog = page.getByRole("dialog").filter({ hasText: "Stai modificando 1 unità su 1" });
+            await expect(contextDialog.locator("#cart-context-note")).toHaveValue("Poco sale");
+            await contextDialog.getByText("Stampa comanda singola per questa unità").click();
+            await contextDialog.getByRole("button", { name: "Applica a 1 unità" }).click();
+            await expect(cartSheet.getByText("Poco sale")).toBeVisible();
+            await expect(cartSheet.getByText("Comanda singola")).toBeVisible();
         } finally {
             await cleanupEventArtifactsByName(eventName);
         }
