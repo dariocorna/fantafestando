@@ -148,7 +148,9 @@ test.describe("POS mobile touch-first", () => {
 
             await page.getByRole("button", { name: /Sconti/i }).click();
             await expect(page.getByTestId("pos-mobile-discount-presets")).toBeVisible();
-            await page.getByRole("dialog", { name: /Sconti/i }).getByRole("button", { name: /Promo 20%/i }).click();
+            const discountPreset = page.getByRole("dialog", { name: /Sconti/i }).getByRole("button", { name: /Promo 20%/i });
+            await discountPreset.focus();
+            await page.keyboard.press("Enter");
 
             await page.getByTestId("pos-mobile-cart-bar").click();
             const cartSheetDialog = page.getByRole("dialog", { name: /Carrello/i });
@@ -200,8 +202,8 @@ test.describe("POS mobile touch-first", () => {
             await page.getByRole("button", { name: /Pendenti/i }).click();
             const pendingSheet = page.getByTestId("pos-mobile-pending-sheet");
             await expect(pendingSheet).toBeVisible();
-            await expect(pendingSheet.getByText("21")).toBeVisible();
-            await pendingSheet.getByRole("button", { name: /21/ }).click();
+            await expect(pendingSheet.getByText("21", { exact: true })).toBeVisible();
+            await pendingSheet.getByRole("button", { name: /^Ordine 21\b/ }).click();
             await expect(page.getByText(/Ordine caricato: codice 21/i)).toBeVisible({ timeout: 15000 });
 
             await page.getByTestId("pos-mobile-cart-bar").click();

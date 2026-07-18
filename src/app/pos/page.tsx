@@ -40,39 +40,9 @@ import { FixedMenuConfigDialog, type FixedMenuChoiceGroupDto, type FixedMenuComp
 import { buildMenuConfigurationKey, type MenuSelectionInput } from "@/lib/fixed-menu"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { buildProductQuantityMap, decrementProductQuantityInCart, replaceSingleCartUnit } from "@/lib/pos-cart"
+import { buildCashReceivedSuggestions, formatCents, normalizeCashReceivedInput, toCents } from "@/lib/cash-change"
 
 const POS_TOUCH_BREAKPOINT = 1024
-const CASH_RECEIVED_COMMON_AMOUNTS_CENTS = [1000, 2000, 5000, 10000, 20000]
-
-function toCents(value: number) {
-    return Math.round(value * 100)
-}
-
-function formatCents(value: number) {
-    return `${(value / 100).toFixed(2)} €`
-}
-
-function normalizeCashReceivedInput(value: string) {
-    const normalized = value.replace(".", ",").replace(/[^\d,]/g, "")
-    const [integerRaw, ...decimalParts] = normalized.split(",")
-    const integer = integerRaw.replace(/^0+(?=\d)/, "")
-    if (decimalParts.length === 0) return integer
-
-    return `${integer || "0"},${decimalParts.join("").slice(0, 2)}`
-}
-
-function buildCashReceivedSuggestions(total: number) {
-    const totalCents = toCents(total)
-    if (totalCents <= 0) return []
-
-    const nextFiveCents = Math.ceil((totalCents + 1) / 500) * 500
-    return [...new Set([
-        nextFiveCents,
-        nextFiveCents + 500,
-        nextFiveCents + 1000,
-        ...CASH_RECEIVED_COMMON_AMOUNTS_CENTS.filter((amount) => amount > totalCents)
-    ])].sort((a, b) => a - b).slice(0, 5)
-}
 
 interface ICategory {
     _id: string
@@ -1553,76 +1523,39 @@ export default function PosPage() {
         const unitPrice = getCartItemUnitPrice(item)
         const lineTotal = Number((item.quantity * unitPrice).toFixed(2))
         return (
-            <div key={item.lineId} className="flex items-center justify-between gap-3 rounded-md border bg-white p-2.5">
-                <div className="min-w-0 flex flex-col">
-                    <span className={`line-clamp-2 text-sm font-bold ${item.isDiscount ? "text-emerald-700" : "text-slate-800 dark:text-slate-100"}`}>{item.name}</span>
-                    {item.isDiscount ? (
-                        <span className="text-[11px] font-semibold text-emerald-600">
-                            {item.discountPreset?.type === "PERCENT"
-                                ? `${item.discountPreset.value}% su ${item.discountPreset.baseAmount.toFixed(2)} €`
-                                : `Sconto fisso ${item.discountPreset?.value.toFixed(2)} €`}
-                        </span>
-                    ) : (
-                        <div className="space-y-1">
-                            <span className="text-xs text-slate-500">
-                                {item.quantity} x {unitPrice.toFixed(2)} €
-                                {isVolunteerMode && typeof item.volunteerPrice === "number" ? " · Volontari" : ""}
+            <div key={item.lineId} className="grid gap-2 rounded-md border bg-white p-2.5">
+                <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex flex-col">
+                        <span className={`line-clamp-2 text-sm font-bold ${item.isDiscount ? "text-emerald-700" : "text-slate-800 dark:text-slate-100"}`}>{item.name}</span>
+                        {item.isDiscount ? (
+                            <span className="text-[11px] font-semibold text-emerald-600">
+                                {item.discountPreset?.type === "PERCENT"
+                                    ? `${item.discountPreset.value}% su ${item.discountPreset.baseAmount.toFixed(2)} €`
+                                    : `Sconto fisso ${item.discountPreset?.value.toFixed(2)} €`}
                             </span>
-                            {Array.isArray(item.selectedOptions) && item.selectedOptions.length > 0 ? (
-                                <p className="line-clamp-2 text-[11px] font-semibold text-slate-500">
-                                    {item.selectedOptions.join(" • ")}
-                                </p>
-                            ) : null}
-                            {item.customKitchenNotes ? (
-                                <p className="line-clamp-2 text-[11px] font-black text-indigo-700" data-testid={`cart-item-notes-${item.lineId}`}>
-                                    {item.customKitchenNotes}
-                                </p>
-                            ) : null}
-                            {item.splitPrintPerUnit ? (
-                                <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">
-                                    Comanda singola
-                                </p>
-                            ) : null}
-                        </div>
-                    )}
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                    {!item.isDiscount ? (
-                        <button
-                            type="button"
-                            aria-label={`Modifica dettagli ${item.name}`}
-                            onClick={() => openCartItemContext(item)}
-                            className="flex h-11 w-11 items-center justify-center rounded-md text-indigo-600 hover:bg-indigo-50"
-                        >
-                            <Settings2 size={18} />
-                        </button>
-                    ) : null}
-                    {!item.isDiscount ? (
-                        <div className="inline-flex h-11 items-center rounded-md border border-slate-200 bg-slate-50">
-                            <button
-                                type="button"
-                                aria-label={`Diminuisci quantità ${item.name}`}
-                                disabled={item.quantity <= 1}
-                                className="flex h-11 w-11 items-center justify-center text-lg font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-35"
-                                onClick={() => decreaseCartItemQuantity(item.lineId)}
-                            >
-                                -
-                            </button>
-                            <span className="min-w-8 text-center text-sm font-black text-slate-800" aria-live="polite">
-                                {item.quantity}
-                            </span>
-                            <button
-                                type="button"
-                                aria-label={`Aumenta quantità ${item.name}`}
-                                className="flex h-11 w-11 items-center justify-center text-lg font-black text-slate-700"
-                                onClick={() => increaseCartItemQuantity(item.lineId)}
-                            >
-                                +
-                            </button>
-                        </div>
-                    ) : null}
-                    <div className="min-w-[72px] text-right">
-                        <span className={`text-sm font-black ${item.isDiscount ? "text-emerald-700" : ""}`}>{lineTotal.toFixed(2)} €</span>
+                        ) : (
+                            <div className="space-y-1">
+                                <span className="text-xs text-slate-500">
+                                    {item.quantity} x {unitPrice.toFixed(2)} €
+                                    {isVolunteerMode && typeof item.volunteerPrice === "number" ? " · Volontari" : ""}
+                                </span>
+                                {Array.isArray(item.selectedOptions) && item.selectedOptions.length > 0 ? (
+                                    <p className="line-clamp-2 text-[11px] font-semibold text-slate-500">
+                                        {item.selectedOptions.join(" • ")}
+                                    </p>
+                                ) : null}
+                                {item.customKitchenNotes ? (
+                                    <p className="line-clamp-2 text-[11px] font-black text-indigo-700" data-testid={`cart-item-notes-${item.lineId}`}>
+                                        {item.customKitchenNotes}
+                                    </p>
+                                ) : null}
+                                {item.splitPrintPerUnit ? (
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">
+                                        Comanda singola
+                                    </p>
+                                ) : null}
+                            </div>
+                        )}
                     </div>
                     <button
                         type="button"
@@ -1632,6 +1565,43 @@ export default function PosPage() {
                     >
                         <Trash2 size={18} />
                     </button>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                    <span className={`text-sm font-black ${item.isDiscount ? "text-emerald-700" : ""}`}>{lineTotal.toFixed(2)} €</span>
+                    {!item.isDiscount ? (
+                        <div className="flex shrink-0 items-center gap-2">
+                            <button
+                                type="button"
+                                aria-label={`Modifica dettagli ${item.name}`}
+                                onClick={() => openCartItemContext(item)}
+                                className={`flex items-center justify-center rounded-md text-indigo-600 hover:bg-indigo-50 ${isMobilePos ? "h-11 w-11" : "h-10 w-10"}`}
+                            >
+                                <Settings2 size={18} />
+                            </button>
+                            <div className={`inline-flex items-center rounded-md border border-slate-200 bg-slate-50 ${isMobilePos ? "h-11" : "h-10"}`}>
+                                <button
+                                    type="button"
+                                    aria-label={`Diminuisci quantità ${item.name}`}
+                                    disabled={item.quantity <= 1}
+                                    className={`flex items-center justify-center text-lg font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-35 ${isMobilePos ? "h-11 w-11" : "h-10 w-10"}`}
+                                    onClick={() => decreaseCartItemQuantity(item.lineId)}
+                                >
+                                    -
+                                </button>
+                                <span className="min-w-8 text-center text-sm font-black text-slate-800" aria-live="polite">
+                                    {item.quantity}
+                                </span>
+                                <button
+                                    type="button"
+                                    aria-label={`Aumenta quantità ${item.name}`}
+                                    className={`flex items-center justify-center text-lg font-black text-slate-700 ${isMobilePos ? "h-11 w-11" : "h-10 w-10"}`}
+                                    onClick={() => increaseCartItemQuantity(item.lineId)}
+                                >
+                                    +
+                                </button>
+                            </div>
+                        </div>
+                    ) : null}
                 </div>
             </div>
         )
@@ -2312,16 +2282,16 @@ export default function PosPage() {
                 style={{ width: "clamp(280px, 23vw, 380px)" }}
             >
                 {/* Info Intestazione */}
-                <div className="border-b border-[#d9e6f8] bg-white p-4">
-                    <h2 className="text-lg font-black uppercase tracking-tight text-[var(--brand-ink)]">
+                <div className="border-b border-[#d9e6f8] bg-white p-3">
+                    <h2 className="truncate text-base font-black uppercase tracking-tight text-[var(--brand-ink)]">
                         {activeEvent?.name || "Cassa FantaFestando"}
                     </h2>
                     <button
                         onClick={() => setIsPosSelectorOpen(true)}
-                        className="mt-1 flex items-center gap-1 text-xs font-bold text-[var(--brand-blue-700)] hover:underline"
+                        className="mt-1 flex w-full items-center gap-1 text-xs font-bold text-[var(--brand-blue-700)] hover:underline"
                     >
-                        <Monitor size={12} />
-                        {selectedPosDevice ? `Postazione: ${selectedPosDevice.name}` : "Seleziona Cassa"}
+                        <Monitor size={12} className="shrink-0" />
+                        <span className="truncate">{selectedPosDevice ? `Postazione: ${selectedPosDevice.name}` : "Seleziona Cassa"}</span>
                     </button>
                     <button
                         onClick={() => handleCodeDialogOpenChange(true)}
@@ -2382,7 +2352,7 @@ export default function PosPage() {
                             </p>
                         </div>
                     ) : null}
-                    <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="mt-2 grid grid-cols-2 gap-2">
                         <div className="flex items-center gap-2 rounded-md border bg-white p-2">
                             <User size={18} className="text-slate-400" />
                             <input
@@ -2443,10 +2413,10 @@ export default function PosPage() {
                 </div>
 
                 {/* Footer / Pulsante Pagamento */}
-                <div className="space-y-3 border-t border-[#d9e6f8] bg-white p-4">
-                    <div className="mb-1 flex items-center justify-between px-1">
-                        <span className="text-sm text-slate-500 font-bold uppercase tracking-widest">Totale da Pagare</span>
-                        <span className="text-3xl font-black leading-none text-[var(--brand-blue-700)]">{effectiveTotal.toFixed(2)} €</span>
+                <div className="space-y-2 border-t border-[#d9e6f8] bg-white p-3">
+                    <div className="flex items-center justify-between gap-2 px-1">
+                        <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Totale da Pagare</span>
+                        <span className="whitespace-nowrap text-2xl font-black leading-none text-[var(--brand-blue-700)]">{effectiveTotal.toFixed(2)} €</span>
                     </div>
                     <div className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-semibold text-slate-600">
                         <p>Subtotale prodotti: {subtotal.toFixed(2)} €</p>
@@ -2472,7 +2442,7 @@ export default function PosPage() {
                     <button
                         onClick={() => setIsCheckoutOpen(true)}
                         disabled={productCartItems.length === 0 || !selectedPosDeviceId || !cashSession || isProcessing || isCashSessionLoading}
-                        className="brand-cta-primary flex w-full items-center justify-center gap-2 rounded-md py-4 text-lg font-black transition-all active:scale-[0.98] hover:brightness-105 disabled:bg-slate-200 disabled:text-slate-400"
+                        className="brand-cta-primary flex w-full items-center justify-center gap-2 rounded-md py-3 text-base font-black transition-all active:scale-[0.98] hover:brightness-105 disabled:bg-slate-200 disabled:text-slate-400"
                         data-testid="pos-pay-cta"
                     >
                         <CheckCircle2 size={22} />
@@ -2803,13 +2773,13 @@ export default function PosPage() {
 
             {/* Modal di Checkout */}
             <Dialog open={isCheckoutOpen} onOpenChange={handleCheckoutDialogOpenChange}>
-                <DialogContent className="max-h-[96dvh] max-w-[980px] overflow-y-auto rounded-2xl border-none p-0 text-slate-800 dark:text-slate-100">
+                <DialogContent className="flex max-h-[96dvh] flex-col overflow-hidden rounded-2xl border-none p-0 text-slate-800 dark:text-slate-100 sm:max-w-[980px]">
                     <DialogHeader className="sr-only">
                         <DialogTitle>Checkout ordine POS</DialogTitle>
                     </DialogHeader>
-                    <div className="bg-blue-600 px-4 py-4 text-center text-white sm:px-6 sm:py-5">
+                    <div className="shrink-0 bg-blue-600 px-4 py-3 text-center text-white sm:px-6">
                         <span className="text-xs font-bold uppercase tracking-widest text-blue-200">Importo Dovuto</span>
-                        <h2 className="mt-1 text-5xl font-black sm:text-6xl">{effectiveTotal.toFixed(2)} €</h2>
+                        <h2 className="mt-1 text-4xl font-black sm:text-5xl">{effectiveTotal.toFixed(2)} €</h2>
                         {loadedPendingOrder && (
                             <div className="mt-1 space-y-1">
                                 <p className="text-xs font-semibold text-blue-100">Codice ordine: {loadedPendingOrder.code}</p>
@@ -2822,8 +2792,8 @@ export default function PosPage() {
                         )}
                     </div>
 
-                    <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] lg:items-start">
-                        <div className="space-y-4 sm:space-y-5">
+                    <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto p-3 sm:p-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] lg:items-start">
+                        <div className="space-y-3 sm:space-y-4">
                             {activeEvent?.settings?.askName && (
                                 <div className="space-y-2">
                                     <Label htmlFor="checkout-customer-name" className="text-base font-bold">Nome Cliente</Label>
@@ -2887,32 +2857,43 @@ export default function PosPage() {
                             )}
 
                             <div className="space-y-2">
-                                <Label id="checkout-payment-method-label" className="text-base font-bold">Metodo di Pagamento</Label>
-                                {(cashAvailable || cardAvailable) ? (
+                                <Label
+                                    id="checkout-payment-method-label"
+                                    className={cashAvailable !== cardAvailable ? "sr-only" : "text-base font-bold"}
+                                >
+                                    Metodo di Pagamento
+                                </Label>
+                                {cashAvailable && cardAvailable ? (
                                     <div className="flex gap-2" role="group" aria-labelledby="checkout-payment-method-label">
-                                        {cashAvailable && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setPaymentMethod("CASH")}
-                                                aria-pressed={effectivePaymentMethod === "CASH"}
-                                                className={`flex flex-1 flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${effectivePaymentMethod === "CASH" ? "border-green-600 bg-green-50 text-green-700" : "border-slate-200"}`}
-                                            >
-                                                <Banknote size={26} />
-                                                <span className="text-sm font-bold">CONTANTI</span>
-                                            </button>
-                                        )}
-                                        {cardAvailable && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setPaymentMethod("CARD")}
-                                                aria-pressed={effectivePaymentMethod === "CARD"}
-                                                className={`flex flex-1 flex-col items-center gap-1.5 rounded-lg border-2 p-3 transition-all ${effectivePaymentMethod === "CARD" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200"}`}
-                                            >
-                                                <Wallet size={26} />
-                                                <span className="text-sm font-bold">CARTA / POS</span>
-                                            </button>
-                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => setPaymentMethod("CASH")}
+                                            aria-pressed={effectivePaymentMethod === "CASH"}
+                                            className={`flex flex-1 flex-col items-center gap-1 rounded-lg border-2 p-2.5 transition-all ${effectivePaymentMethod === "CASH" ? "border-green-600 bg-green-50 text-green-700" : "border-slate-200"}`}
+                                        >
+                                            <Banknote size={22} />
+                                            <span className="text-sm font-bold">CONTANTI</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPaymentMethod("CARD")}
+                                            aria-pressed={effectivePaymentMethod === "CARD"}
+                                            className={`flex flex-1 flex-col items-center gap-1 rounded-lg border-2 p-2.5 transition-all ${effectivePaymentMethod === "CARD" ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200"}`}
+                                        >
+                                            <Wallet size={22} />
+                                            <span className="text-sm font-bold">CARTA / POS</span>
+                                        </button>
                                     </div>
+                                ) : cashAvailable || cardAvailable ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setPaymentMethod(cashAvailable ? "CASH" : "CARD")}
+                                        aria-pressed
+                                        className={`flex h-10 items-center justify-center gap-2 rounded-lg border-2 font-black ${cashAvailable ? "border-green-600 bg-green-50 text-green-700" : "border-blue-600 bg-blue-50 text-blue-700"}`}
+                                    >
+                                        {cashAvailable ? <Banknote size={20} /> : <Wallet size={20} />}
+                                        {cashAvailable ? "CONTANTI" : "CARTA / POS"}
+                                    </button>
                                 ) : (
                                     <p className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-sm font-semibold text-amber-800">
                                         La postazione selezionata non ha metodi di pagamento configurati. Associa terminale e/o cassetta in impostazioni hardware.
@@ -2925,17 +2906,17 @@ export default function PosPage() {
                         <div className="space-y-3">
                             {effectivePaymentMethod === "CASH" ? (
                                 <div
-                                    className="space-y-3 rounded-xl border-2 border-green-200 bg-green-50 p-3"
+                                    className="space-y-2 rounded-xl border-2 border-green-200 bg-green-50 p-2.5"
                                     data-testid="cash-change-card"
                                 >
                                     <div className="flex items-center justify-between gap-3">
-                                        <div>
+                                        <div className="min-w-0">
                                             <p className="text-xs font-black uppercase tracking-widest text-green-700">Calcolo resto</p>
-                                            <p className="text-sm font-semibold text-green-900">Inserisci il contante ricevuto.</p>
+                                            <p className="text-sm font-semibold text-green-900">Contante ricevuto (facoltativo).</p>
                                         </div>
-                                        <div className="text-right">
+                                        <div className="shrink-0 text-right">
                                             <p className="text-[10px] font-black uppercase tracking-widest text-green-700">Totale</p>
-                                            <p className="text-xl font-black text-green-900">{formatCents(effectiveTotalCents)}</p>
+                                            <p className="whitespace-nowrap text-lg font-black text-green-900 sm:text-xl">{formatCents(effectiveTotalCents)}</p>
                                         </div>
                                     </div>
 
@@ -2953,12 +2934,12 @@ export default function PosPage() {
                                                 placeholder="0,00"
                                                 aria-invalid={Boolean(cashReceivedError)}
                                                 aria-describedby={cashReceivedError ? "cash-change-status" : undefined}
-                                                className="h-12 rounded-lg border-2 bg-white text-right text-2xl font-black"
+                                                className="h-11 rounded-lg border-2 bg-white text-right text-2xl font-black"
                                             />
                                             <Button
                                                 type="button"
                                                 variant="outline"
-                                                className="h-12 min-w-14 rounded-lg bg-white font-black"
+                                                className="h-11 min-w-14 rounded-lg bg-white font-black"
                                                 onClick={() => setCashReceivedInput((current) => current.slice(0, -1))}
                                                 aria-label="Cancella ultima cifra"
                                             >
@@ -2967,7 +2948,7 @@ export default function PosPage() {
                                             <Button
                                                 type="button"
                                                 variant="outline"
-                                                className="h-12 min-w-12 rounded-lg bg-white font-black"
+                                                className="h-11 min-w-12 rounded-lg bg-white font-black"
                                                 onClick={() => setCashReceivedInput("")}
                                                 aria-label="Cancella importo ricevuto"
                                             >
@@ -2975,54 +2956,6 @@ export default function PosPage() {
                                             </Button>
                                         </div>
                                     </div>
-
-                                    <div className="grid grid-cols-3 gap-2">
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            className="h-11 rounded-lg bg-white text-sm font-black"
-                                            onClick={() => setCashReceivedFromCents(effectiveTotalCents)}
-                                        >
-                                            Esatto {formatCents(effectiveTotalCents)}
-                                        </Button>
-                                        {cashReceivedSuggestions.map((amountCents) => (
-                                            <Button
-                                                key={amountCents}
-                                                type="button"
-                                                variant="outline"
-                                                className="h-11 rounded-lg bg-white text-sm font-black"
-                                                onClick={() => setCashReceivedFromCents(amountCents)}
-                                            >
-                                                {formatCents(amountCents)}
-                                            </Button>
-                                        ))}
-                                    </div>
-
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        className="h-10 w-full rounded-lg bg-white text-sm font-black"
-                                        onClick={() => setIsCashKeypadExpanded((current) => !current)}
-                                        aria-expanded={isCashKeypadExpanded}
-                                    >
-                                        {isCashKeypadExpanded ? "Nascondi tastierino" : "Tastierino manuale"}
-                                    </Button>
-
-                                    {isCashKeypadExpanded ? (
-                                        <div className="grid grid-cols-3 gap-2" aria-label="Tastierino contante ricevuto">
-                                            {["1", "2", "3", "4", "5", "6", "7", "8", "9", ",", "0"].map((key) => (
-                                                <Button
-                                                    key={key}
-                                                    type="button"
-                                                    variant="outline"
-                                                    className="h-12 rounded-lg bg-white text-xl font-black"
-                                                    onClick={() => appendCashReceivedKey(key)}
-                                                >
-                                                    {key}
-                                                </Button>
-                                            ))}
-                                        </div>
-                                    ) : null}
 
                                     {cashReceivedError ? (
                                         <p
@@ -3040,33 +2973,63 @@ export default function PosPage() {
                                         >
                                             Resto {formatCents(cashChangeCents)}
                                         </p>
-                                    ) : (
-                                        <p className="text-center text-xs font-bold text-green-800">
-                                            Puoi confermare anche senza usare il calcolo resto.
-                                        </p>
-                                    )}
+                                    ) : null}
+
+                                    {!isCashKeypadExpanded ? (
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="h-10 rounded-lg bg-white text-sm font-black"
+                                                onClick={() => setCashReceivedFromCents(effectiveTotalCents)}
+                                            >
+                                                Esatto {formatCents(effectiveTotalCents)}
+                                            </Button>
+                                            {cashReceivedSuggestions.map((amountCents) => (
+                                                <Button
+                                                    key={amountCents}
+                                                    type="button"
+                                                    variant="outline"
+                                                    className="h-10 rounded-lg bg-white text-sm font-black"
+                                                    onClick={() => setCashReceivedFromCents(amountCents)}
+                                                >
+                                                    {formatCents(amountCents)}
+                                                </Button>
+                                            ))}
+                                        </div>
+                                    ) : null}
+
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="h-10 w-full rounded-lg bg-white text-sm font-black"
+                                        onClick={() => setIsCashKeypadExpanded((current) => !current)}
+                                        aria-expanded={isCashKeypadExpanded}
+                                    >
+                                        {isCashKeypadExpanded ? "Nascondi tastierino" : "Tastierino manuale"}
+                                    </Button>
+
+                                    {isCashKeypadExpanded ? (
+                                        <div className="grid grid-cols-3 gap-2" aria-label="Tastierino contante ricevuto">
+                                            {["1", "2", "3", "4", "5", "6", "7", "8", "9", ",", "0", "00"].map((key) => (
+                                                <Button
+                                                    key={key}
+                                                    type="button"
+                                                    variant="outline"
+                                                    className="h-10 rounded-lg bg-white text-xl font-black"
+                                                    onClick={() => appendCashReceivedKey(key)}
+                                                >
+                                                    {key}
+                                                </Button>
+                                            ))}
+                                        </div>
+                                    ) : null}
+
                                 </div>
                             ) : null}
 
                         </div>
 
-                        <div className="flex gap-2 pt-2 lg:col-span-2">
-                                <Button
-                                    variant="outline"
-                                    className="flex-1 rounded-lg py-6 text-xl font-bold"
-                                    onClick={() => handleCheckoutDialogOpenChange(false)}
-                                    disabled={isProcessing}
-                                >
-                                    ANNULLA
-                                </Button>
-                                <Button
-                                    className="flex-1 rounded-lg bg-green-600 py-6 text-xl font-bold hover:bg-green-700"
-                                    onClick={() => void handleCheckout()}
-                                    disabled={checkoutDisabled}
-                                >
-                                    {isProcessing ? <Loader2 className="animate-spin" /> : "CONFERMA"}
-                                </Button>
-                            </div>
                         {stockShortages.length > 0 ? (
                                 <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 lg:col-span-2">
                                     <p className="text-sm font-black text-amber-800">
@@ -3091,6 +3054,23 @@ export default function PosPage() {
                                     </div>
                                 </div>
                         ) : null}
+                    </div>
+                    <div className="flex shrink-0 gap-2 border-t bg-white p-3 dark:bg-slate-950 sm:px-4">
+                        <Button
+                            variant="outline"
+                            className="h-12 flex-1 rounded-lg text-lg font-bold"
+                            onClick={() => handleCheckoutDialogOpenChange(false)}
+                            disabled={isProcessing}
+                        >
+                            ANNULLA
+                        </Button>
+                        <Button
+                            className="h-12 flex-1 rounded-lg bg-green-600 text-lg font-bold hover:bg-green-700"
+                            onClick={() => void handleCheckout()}
+                            disabled={checkoutDisabled}
+                        >
+                            {isProcessing ? <Loader2 className="animate-spin" /> : "CONFERMA"}
+                        </Button>
                     </div>
                 </DialogContent>
             </Dialog>
