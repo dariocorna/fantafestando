@@ -12,6 +12,13 @@ Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
 - Checkout POS ampliato su desktop con colonna laterale per il calcolo resto, riducendo lo scroll nel modal.
 
+## [0.14.0] - 2026-06-29
+
+### Added
+
+- POS: aggiunto modal di contesto per personalizzare una singola unità del carrello con variazioni ingredienti, nota libera e stampa comanda separata.
+- POS: aggiunta stampa immediata degli ingredienti del prodotto sulla stampante della cassa.
+
 ## [0.13.1] - 2026-06-24
 
 ### Changed
