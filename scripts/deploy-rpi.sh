@@ -228,12 +228,15 @@ echo "[deploy-rpi] Loading images onto the Raspberry via SSH..."
 docker save "${local_images[@]}" | ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" 'sudo docker load'
 
 echo "[deploy-rpi] Restarting remote stack without remote builds..."
-ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" bash -s -- "${REMOTE_PATH}" "${BUILD_SHA}" "${PROFILE}" "${VERSION}" "${BUILD_DATE}" "${PROJECT_NAME}" "${PROJECT_IMAGE_NAME}" "${BACKOFFICE_PORT}" "${MENU_PORT}" "${REMOTE_ENV_FILE_NAME}" "${PRINTER_HOST:-__EMPTY__}" "${PRINTER_START_PORT:-__EMPTY__}" "${NO_PROFILE}" "${SKIP_CLEANUP}" <<'EOS'
+ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" bash -s -- "${REMOTE_PATH}" "${BUILD_SHA}" "${PROFILE:-__EMPTY__}" "${VERSION}" "${BUILD_DATE}" "${PROJECT_NAME}" "${PROJECT_IMAGE_NAME}" "${BACKOFFICE_PORT}" "${MENU_PORT}" "${REMOTE_ENV_FILE_NAME}" "${PRINTER_HOST:-__EMPTY__}" "${PRINTER_START_PORT:-__EMPTY__}" "${NO_PROFILE}" "${SKIP_CLEANUP}" <<'EOS'
 set -euo pipefail
 
 REMOTE_PATH="$1"
 BUILD_SHA="$2"
 PROFILE="$3"
+if [[ "${PROFILE}" == "__EMPTY__" ]]; then
+  PROFILE=""
+fi
 VERSION="$4"
 BUILD_DATE="$5"
 PROJECT_NAME="$6"
