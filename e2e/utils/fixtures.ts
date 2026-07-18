@@ -9,6 +9,8 @@ import PosDevice from "../../src/models/PosDevice";
 import Peripheral from "../../src/models/Peripheral";
 import Order from "../../src/models/Order";
 import OrderCounter from "../../src/models/OrderCounter";
+import CashSession from "../../src/models/CashSession";
+import PrintJob from "../../src/models/PrintJob";
 
 // ---------------------------------------------------------------------------
 // Unique suffix for test isolation
@@ -102,6 +104,8 @@ export async function deleteEvent(_page: Page, eventName: string) {
 
     const eventId = String(event._id);
 
+    await PrintJob.deleteMany({ eventId });
+    await CashSession.deleteMany({ eventId });
     await Order.deleteMany({ eventId });
     await OrderCounter.deleteMany({ eventId });
     await PosDevice.deleteMany({ eventId });
