@@ -676,8 +676,18 @@ export default function PosPage() {
     const subtotal = Number(
         productCartItems.reduce((acc: number, item: CartItem) => acc + (getCartItemUnitPrice(item) * item.quantity), 0).toFixed(2)
     )
+    // Lo sconto è ricalcolato in tempo reale sul subtotale corrente: una percentuale si applica
+    // a tutto il carrello (anche alle voci aggiunte dopo lo sconto), non solo a quelle già presenti.
+    const computeLiveDiscountAmount = (item: CartItem): number => {
+        const preset = item.discountPreset
+        if (!preset) return Number(Math.max(0, item.price * -1).toFixed(2))
+        if (preset.type === "PERCENT") {
+            return Number(Math.max(0, subtotal * (preset.value / 100)).toFixed(2))
+        }
+        return Number(Math.min(Math.max(0, subtotal), preset.value).toFixed(2))
+    }
     const totalDiscountRequested = Number(
-        Math.max(0, discountCartItems.reduce((acc: number, item: CartItem) => acc + (item.price * item.quantity), 0) * -1).toFixed(2)
+        Math.max(0, discountCartItems.reduce((acc: number, item: CartItem) => acc + computeLiveDiscountAmount(item), 0)).toFixed(2)
     )
     const totalDiscountApplied = isVolunteerMode ? 0 : Number(Math.min(subtotal, totalDiscountRequested).toFixed(2))
     const effectiveTotal = Number(Math.max(0, subtotal - totalDiscountApplied).toFixed(2))
@@ -1521,7 +1531,9 @@ export default function PosPage() {
 
     const renderCartItem = (item: CartItem) => {
         const unitPrice = getCartItemUnitPrice(item)
-        const lineTotal = Number((item.quantity * unitPrice).toFixed(2))
+        const lineTotal = item.isDiscount
+            ? Number((computeLiveDiscountAmount(item) * -1).toFixed(2))
+            : Number((item.quantity * unitPrice).toFixed(2))
         return (
             <div key={item.lineId} className="grid gap-2 rounded-md border bg-white p-2.5">
                 <div className="flex items-start justify-between gap-2">
@@ -1530,7 +1542,7 @@ export default function PosPage() {
                         {item.isDiscount ? (
                             <span className="text-[11px] font-semibold text-emerald-600">
                                 {item.discountPreset?.type === "PERCENT"
-                                    ? `${item.discountPreset.value}% su ${item.discountPreset.baseAmount.toFixed(2)} €`
+                                    ? `${item.discountPreset.value}% su ${subtotal.toFixed(2)} €`
                                     : `Sconto fisso ${item.discountPreset?.value.toFixed(2)} €`}
                             </span>
                         ) : (
