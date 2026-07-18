@@ -28,7 +28,7 @@ describe("order-code counters", () => {
         expect(findOneAndUpdateMock).toHaveBeenCalledWith(
             { eventId: "evt-1", scope: "PUBLIC_ORDER" },
             { $inc: { seq: 1 } },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
+            { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
         );
     });
 
@@ -43,7 +43,7 @@ describe("order-code counters", () => {
         expect(findOneAndUpdateMock).toHaveBeenCalledWith(
             { eventId: "evt-1", scope: "PIZZA_ORDER" },
             { $inc: { seq: 1 } },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
+            { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
         );
     });
 });

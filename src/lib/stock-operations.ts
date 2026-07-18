@@ -251,7 +251,7 @@ async function decrementTrackedStocksStrict(
                 stockQuantity: { $gte: requestedQuantity }
             },
             { $inc: { stockQuantity: -requestedQuantity } },
-            { new: true }
+            { returnDocument: "after" }
         ).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
 
         if (!updated) {
@@ -294,7 +294,7 @@ async function decrementTrackedStocksOverride(
         const updated = await Product.findOneAndUpdate(
             { eventId, _id: productId },
             { $inc: { stockQuantity: -requestedQuantity } },
-            { new: true }
+            { returnDocument: "after" }
         ).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
 
         if (!updated) {
@@ -350,7 +350,7 @@ async function decrementTrackedIngredientStocksStrict(
                 stockQuantity: { $gte: requestedQuantity }
             },
             { $inc: { stockQuantity: -requestedQuantity } },
-            { new: true }
+            { returnDocument: "after" }
         ).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
 
         if (!updated) {
@@ -389,7 +389,7 @@ async function decrementTrackedIngredientStocksOverride(
         const updated = await Ingredient.findOneAndUpdate(
             { eventId, _id: ingredientId },
             { $inc: { stockQuantity: -requestedQuantity } },
-            { new: true }
+            { returnDocument: "after" }
         ).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
 
         if (!updated) {

@@ -888,7 +888,7 @@ export async function updatePrinterAction(formData: FormData) {
             emulatorSlot: normalizedConfig.data.emulatorSlot,
             type
         },
-        { new: true }
+        { returnDocument: "after" }
     ).select("_id").lean();
 
     if (!updatedPrinter) {
@@ -1195,7 +1195,7 @@ export async function updatePosDeviceAction(formData: FormData) {
             paymentTerminalId: normalizedPaymentTerminalId || null,
             cashBoxId: normalizedCashBoxId || null
         },
-        { new: true }
+        { returnDocument: "after" }
     ).select("_id").lean();
 
     if (!updatedDevice) {
@@ -1321,7 +1321,7 @@ export async function updatePeripheralAction(formData: FormData) {
                     affiliateKey: storedAffiliateKey
                 }
             },
-            { new: true }
+            { returnDocument: "after" }
         );
     } else {
         await Peripheral.findOneAndUpdate(
@@ -1331,7 +1331,7 @@ export async function updatePeripheralAction(formData: FormData) {
                 type,
                 config: {}
             },
-            { new: true }
+            { returnDocument: "after" }
         );
     }
 

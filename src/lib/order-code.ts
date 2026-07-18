@@ -30,7 +30,7 @@ async function getNextScopedOrderNumber(eventId: string, scope: OrderCounterScop
     const counter = await OrderCounter.findOneAndUpdate(
         { eventId, scope },
         { $inc: { seq: 1 } },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
+        { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
     ).select("seq").lean();
 
     return counter?.seq ?? 1;

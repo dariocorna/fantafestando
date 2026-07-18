@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import {
     ArrowDownRight,
@@ -19,25 +19,37 @@ import { readRecentOrderSummary } from "@/app/menu/recent-order-storage"
 import { readPendingEasterEggUpload } from "@/app/menu/easter-egg-upload-storage"
 import { type PublicOrderSummary } from "@/lib/public-order-summary"
 
+const subscribeToClientReady = () => () => {}
+const getClientReadySnapshot = () => true
+const getServerReadySnapshot = () => false
+
 function SuccessContent() {
     const searchParams = useSearchParams()
     const router = useRouter()
     const code = searchParams.get("code")
     const orderId = searchParams.get("orderId")
-    const [summary, setSummary] = useState<PublicOrderSummary | null>(() => (
-        orderId ? readRecentOrderSummary(orderId) : null
-    ))
-    const [summaryFetchFailed, setSummaryFetchFailed] = useState(false)
-    const hasEasterEgg = useMemo(
-        () => (orderId ? Boolean(readPendingEasterEggUpload(orderId)) : false),
-        [orderId],
+    const clientReady = useSyncExternalStore(
+        subscribeToClientReady,
+        getClientReadySnapshot,
+        getServerReadySnapshot
     )
-    const shouldFetchSummary = Boolean(orderId && code && !summary)
+    const storedSummary = useMemo(
+        () => clientReady && orderId ? readRecentOrderSummary(orderId) : null,
+        [clientReady, orderId]
+    )
+    const [fetchedSummary, setFetchedSummary] = useState<PublicOrderSummary | null>(null)
+    const [summaryFetchFailed, setSummaryFetchFailed] = useState(false)
+    const summary = storedSummary ?? fetchedSummary
+    const hasEasterEgg = useMemo(
+        () => clientReady && orderId ? Boolean(readPendingEasterEggUpload(orderId)) : false,
+        [clientReady, orderId]
+    )
+    const shouldFetchSummary = Boolean(clientReady && orderId && code && !summary)
     const isLoadingSummary = shouldFetchSummary && !summaryFetchFailed
     const pizzaNumber = summary?.pizzaNumber
 
     useEffect(() => {
-        if (!orderId || !code || summary) return
+        if (!clientReady || !orderId || !code || summary) return
 
         let isCancelled = false
 
@@ -57,7 +69,7 @@ function SuccessContent() {
             .then((nextSummary) => {
                 if (isCancelled) return
                 setSummaryFetchFailed(false)
-                setSummary(nextSummary)
+                setFetchedSummary(nextSummary)
             })
             .catch((error) => {
                 if (isCancelled) return
@@ -68,7 +80,7 @@ function SuccessContent() {
         return () => {
             isCancelled = true
         }
-    }, [code, orderId, summary])
+    }, [clientReady, code, orderId, summary])
 
     return (
         <div className="brand-surface-menu min-h-screen pb-16">

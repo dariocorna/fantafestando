@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, createContext, useContext } from "react"
+import { useState, createContext, useContext, useSyncExternalStore } from "react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -16,6 +16,9 @@ interface HardwareDialogContextType {
 }
 
 const HardwareDialogContext = createContext<HardwareDialogContextType | undefined>(undefined)
+const subscribeToClientReady = () => () => {}
+const getClientReadySnapshot = () => true
+const getServerReadySnapshot = () => false
 
 export function useHardwareDialog() {
     const context = useContext(HardwareDialogContext)
@@ -33,12 +36,17 @@ interface HardwareDialogProps {
 
 export function HardwareDialog({ title, buttonText, children }: HardwareDialogProps) {
     const [open, setOpen] = useState(false)
+    const clientReady = useSyncExternalStore(
+        subscribeToClientReady,
+        getClientReadySnapshot,
+        getServerReadySnapshot
+    )
 
     return (
         <HardwareDialogContext.Provider value={{ close: () => setOpen(false) }}>
             <Dialog open={open} onOpenChange={setOpen}>
                 <DialogTrigger asChild>
-                    <Button className="gap-2">
+                    <Button className="gap-2" disabled={!clientReady}>
                         <Plus className="h-4 w-4" /> {buttonText}
                     </Button>
                 </DialogTrigger>
