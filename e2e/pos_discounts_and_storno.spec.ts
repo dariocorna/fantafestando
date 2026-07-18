@@ -132,4 +132,57 @@ test.describe("POS sconti e storno ordine", () => {
             await cleanupEventArtifactsByName(eventName)
         }
     })
+
+    test("lo sconto percentuale si applica anche alle voci aggiunte dopo", async ({ page, isMobile }) => {
+        test.skip(isMobile, "Flusso validato su desktop.")
+        test.setTimeout(90000)
+
+        const suffix = uniqueSuffix()
+        const eventName = `Discount Grow Event ${suffix}`
+        const printerName = `Grow Cashier ${suffix}`
+        const cashBoxName = `Grow CashBox ${suffix}`
+        const posName = `Grow POS ${suffix}`
+        const categoryName = `Grow Cat ${suffix}`
+        const productA = `Grow Product A ${suffix}`
+        const productB = `Grow Product B ${suffix}`
+
+        try {
+            await createEventWithDiscountPresets(eventName, categoryName, [
+                { name: productA, price: "10.00" },
+                { name: productB, price: "3.00" },
+            ])
+            await ensureAdminAuthenticated(page, "/admin/settings/hardware")
+            await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName)
+
+            await openPosAndSelectDevice(page, posName)
+            await openCashSession(page, "50")
+
+            // Applica 50% con il solo prodotto A (10€) -> totale 5€.
+            await addProductsToCart(page, [productA])
+            const panel = page.locator("#pos-discount-presets")
+            if (!(await panel.isVisible().catch(() => false))) {
+                await page.locator("#discounts-tab-trigger").click()
+            }
+            await expect(page.locator("#discount-preset-card-0")).toBeVisible()
+            await page.locator("#discount-preset-card-0").click()
+            await expect(page.getByText(/Totale da Pagare/i).locator("..")).toContainText(/5\.00\s*€/i)
+
+            // Aggiungi B (3€) DOPO lo sconto: subtotale 13€, 50% -> totale 6.50€
+            // (col bug lo sconto resterebbe congelato a 5€, dando 8€).
+            await addProductsToCart(page, [productB])
+            await expect(page.getByText(/Totale da Pagare/i).locator("..")).toContainText(/6\.50\s*€/i)
+
+            await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()
+            await completeCheckout(page)
+
+            await ensureDbConnection()
+            const db = mongoose.connection.db
+            if (!db) throw new Error("DB non disponibile")
+            const event = await db.collection("events").findOne({ name: eventName })
+            const order = await db.collection("orders").findOne({ eventId: event?._id, status: "PAID" })
+            expect(order?.totalAmount).toBeCloseTo(6.5, 2)
+        } finally {
+            await cleanupEventArtifactsByName(eventName)
+        }
+    })
 })
