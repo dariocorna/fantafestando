@@ -92,6 +92,9 @@ test.describe("POS calcolo resto contanti", () => {
             const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i })
             await expect(checkoutDialog).toBeVisible()
             await expect(checkoutDialog.getByTestId("cash-change-card")).toHaveCount(0)
+            await expect(checkoutDialog.getByTestId("card-payment-guide")).toContainText(
+                "Completa il pagamento sul terminale POS, poi premi Conferma.",
+            )
 
             await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click()
             await expect(checkoutDialog).toBeHidden({ timeout: 15000 })

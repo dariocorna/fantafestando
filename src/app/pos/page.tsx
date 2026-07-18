@@ -3038,6 +3038,17 @@ export default function PosPage() {
                                     ) : null}
 
                                 </div>
+                            ) : effectivePaymentMethod === "CARD" ? (
+                                <div
+                                    className="flex min-h-40 flex-col items-center justify-center rounded-xl border-2 border-blue-200 bg-blue-50 p-5 text-center"
+                                    data-testid="card-payment-guide"
+                                >
+                                    <Wallet className="mb-3 h-8 w-8 text-blue-600" />
+                                    <p className="text-base font-black text-blue-900">Pagamento con carta</p>
+                                    <p className="mt-1 max-w-xs text-sm font-semibold text-blue-800">
+                                        Completa il pagamento sul terminale POS, poi premi Conferma.
+                                    </p>
+                                </div>
                             ) : null}
 
                         </div>
