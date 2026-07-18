@@ -2,6 +2,12 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.15.1] - 2026-07-18
+
+### Fixed
+
+- POS: corretto il layout del riepilogo carrello e del checkout con tastierino su desktop, tablet e mobile.
+
 ## [0.15.0] - 2026-06-30
 
 ### Added
