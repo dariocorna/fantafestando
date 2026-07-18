@@ -14,7 +14,6 @@ import {
 
 test.describe("POS calcolo resto contanti", () => {
     test("calcola resto, blocca importi insufficienti e completa il pagamento contanti", async ({ page, isMobile }) => {
-        test.skip(isMobile, "Flusso validato su desktop.")
         test.setTimeout(90000)
 
         const suffix = uniqueSuffix()
@@ -34,7 +33,8 @@ test.describe("POS calcolo resto contanti", () => {
             await openCashSession(page, "50")
 
             await page.locator("button").filter({ hasText: new RegExp(productName) }).first().click()
-            await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()
+            if (isMobile) await page.getByTestId("pos-mobile-cart-bar").click()
+            await page.getByTestId("pos-pay-cta").click()
 
             const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i })
             await expect(checkoutDialog).toBeVisible()
@@ -47,6 +47,8 @@ test.describe("POS calcolo resto contanti", () => {
             await changeCard.getByRole("button", { name: "Cancella importo ricevuto" }).click()
             await expect(changeCard.getByRole("button", { name: "1", exact: true })).toHaveCount(0)
             await changeCard.getByRole("button", { name: "Tastierino manuale", exact: true }).click()
+            await expect(changeCard.getByRole("button", { name: "00", exact: true })).toBeVisible()
+            await expect(checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true })).toBeInViewport()
             await changeCard.getByRole("button", { name: "1", exact: true }).click()
             await changeCard.getByRole("button", { name: "0", exact: true }).click()
             await expect(changeCard.getByTestId("cash-change-missing")).toContainText("Mancano 8.50 €")
@@ -65,7 +67,6 @@ test.describe("POS calcolo resto contanti", () => {
     })
 
     test("non mostra il calcolo resto nel pagamento carta", async ({ page, isMobile }) => {
-        test.skip(isMobile, "Flusso validato su desktop.")
         test.setTimeout(90000)
 
         const suffix = uniqueSuffix()
@@ -85,7 +86,8 @@ test.describe("POS calcolo resto contanti", () => {
             await openCashSessionIfRequired(page, "50")
 
             await page.locator("button").filter({ hasText: new RegExp(productName) }).first().click()
-            await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()
+            if (isMobile) await page.getByTestId("pos-mobile-cart-bar").click()
+            await page.getByTestId("pos-pay-cta").click()
 
             const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i })
             await expect(checkoutDialog).toBeVisible()

@@ -120,8 +120,11 @@ describe("loadPendingOrderByCode", () => {
                     {
                         productId: "prod-1",
                         snapshotName: "Patatine",
+                        customKitchenNotes: undefined,
+                        splitPrintPerUnit: false,
                         quantity: 1,
                         unitPrice: 7,
+                        volunteerPrice: undefined,
                         selectedOptions: [],
                         menuSelections: []
                     }
@@ -174,8 +177,11 @@ describe("loadPendingOrderByCode", () => {
                     {
                         productId: "prod-1",
                         snapshotName: "Patatine",
+                        customKitchenNotes: undefined,
+                        splitPrintPerUnit: false,
                         quantity: 1,
                         unitPrice: 7,
+                        volunteerPrice: undefined,
                         selectedOptions: [],
                         menuSelections: []
                     }
@@ -218,6 +224,8 @@ describe("loadPendingOrderByCode", () => {
                     {
                         productId: "prod-1",
                         snapshotName: "Patatine",
+                        customKitchenNotes: undefined,
+                        splitPrintPerUnit: false,
                         quantity: 2,
                         unitPrice: 10,
                         volunteerPrice: 7,

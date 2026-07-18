@@ -440,18 +440,23 @@ export async function openPosAndSelectDevice(page: Page, posName: string) {
 }
 
 export async function openCashSession(page: Page, openingFloatAmount: string) {
-    await page.getByRole("button", { name: /Apri Cassa/i }).click();
+    const openButton = page.getByRole("button", { name: /Apri Cassa/i });
+    if (!(await openButton.isVisible())) {
+        await page.getByRole("button", { name: "Cassa chiusa", exact: true }).click();
+    }
+    await openButton.click();
     const openDialog = page.getByRole("dialog").filter({ hasText: /Apertura Cassa/i });
     await expect(openDialog).toBeVisible();
     await openDialog.locator("#opening-float-amount").fill(openingFloatAmount);
     await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click();
     await expect(openDialog).toBeHidden({ timeout: 15000 });
-    await expect(page.getByRole("button", { name: /Chiudi Cassa/i })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole("button", { name: /Chiudi Cassa|Cassa aperta/i })).toBeVisible({ timeout: 15000 });
 }
 
 export async function openCashSessionIfRequired(page: Page, openingFloatAmount = "0") {
     const openButton = page.getByRole("button", { name: /Apri Cassa/i });
-    if (!(await openButton.isVisible())) return;
+    const mobileClosedButton = page.getByRole("button", { name: "Cassa chiusa", exact: true });
+    if (!(await openButton.isVisible()) && !(await mobileClosedButton.isVisible())) return;
     await openCashSession(page, openingFloatAmount);
 }
 
