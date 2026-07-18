@@ -9,7 +9,11 @@ export function formatCents(value: number) {
 }
 
 export function normalizeCashReceivedInput(value: string) {
-  const normalized = value.replace(".", ",").replace(/[^\d,]/g, "")
+  // Locale IT: se c'è la virgola (separatore decimale) i punti sono raggruppamenti migliaia
+  // e vanno rimossi ("1.000,50" -> 1000,50); senza virgola un punto è trattato come decimale
+  // (tolleranza per incollaggi stile US, es. "12.34").
+  const unified = value.includes(",") ? value.replace(/\./g, "") : value.replace(".", ",")
+  const normalized = unified.replace(/[^\d,]/g, "")
   const [integerRaw, ...decimalParts] = normalized.split(",")
   const integer = integerRaw.replace(/^0+(?=\d)/, "")
   if (decimalParts.length === 0) return integer
