@@ -2,6 +2,14 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.15.2] - 2026-07-18
+
+### Fixed
+
+- POS: mantenuta la base residua corretta quando vengono applicati più sconti percentuali.
+- POS: preservate le note cucina quando si modificano i dettagli di un ordine pendente.
+- Test E2E: completata la pulizia di sessioni cassa e job di stampa.
+
 ## [0.15.1] - 2026-07-18
 
 ### Fixed
