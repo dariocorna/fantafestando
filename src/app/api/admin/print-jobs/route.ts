@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/mongoose";
 import { getAdminContextEventId } from "@/lib/events";
+import { adminUnauthorizedJson, ensureAdminSession } from "@/lib/authz";
 import PrintJob from "@/models/PrintJob";
 import "@/models/Printer"; // Import to register schema for .populate()
 
@@ -27,6 +28,9 @@ function resolvePrintType(
 
 export async function GET(request: NextRequest) {
     try {
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return adminUnauthorizedJson(sessionCheck);
+
         const contextEventId = await getAdminContextEventId();
         if (!contextEventId) {
             return NextResponse.json({ error: "Nessuna festa selezionata" }, { status: 400 });

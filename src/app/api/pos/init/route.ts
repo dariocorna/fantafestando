@@ -16,7 +16,6 @@ import {
     collectReferencedProductIds,
     isProductVisibleInChannel,
     normalizeProductKind,
-    normalizeSalesChannels,
     productRequiresMenuConfiguration,
 } from "@/lib/fixed-menu";
 import { ensureAuthenticatedSession } from "@/lib/authz";
@@ -98,32 +97,46 @@ export async function GET(request: NextRequest) {
                 return stockStatus !== "OUT";
             })
             .map((product) => ({
-                ...product,
-                volunteerPrice: channel === "pos" && typeof (product as { volunteerPrice?: number }).volunteerPrice === "number"
-                    ? (product as { volunteerPrice?: number }).volunteerPrice
-                    : undefined,
-                kind: normalizeProductKind((product as { kind?: string }).kind),
-                salesChannels: normalizeSalesChannels((product as { salesChannels?: string[] }).salesChannels),
-                stockStatus: getStockStatus(
-                    (product as { stockQuantity?: number | null }).stockQuantity ?? null,
-                    Boolean((product as { isSoldOut?: boolean }).isSoldOut)
-                ),
-                recipeItems: channel === "pos" && Array.isArray((product as {
-                    recipeItems?: Array<{ ingredientId?: unknown, quantity?: number }>
-                }).recipeItems)
-                    ? ((product as {
-                        recipeItems?: Array<{ ingredientId?: unknown, quantity?: number }>
-                    }).recipeItems || []).map((entry) => {
-                        const ingredientId = String(entry.ingredientId || "");
-                        const ingredient = ingredientById.get(ingredientId) as ({ name?: string, shortName?: string } | undefined);
-                        return {
-                            ingredientId,
-                            name: ingredient?.name || "Ingrediente",
-                            shortName: ingredient?.shortName || undefined,
-                            quantity: Number(entry.quantity || 1)
-                        };
-                    }).filter((entry) => entry.ingredientId)
+                _id: String(product._id),
+                categoryId: String(product.categoryId),
+                name: product.name,
+                shortName: product.shortName,
+                description: product.description,
+                basePrice: product.basePrice,
+                variants: Array.isArray((product as { variants?: Array<{ optionName?: string, priceVariation?: number }> }).variants)
+                    ? ((product as { variants: Array<{ optionName?: string, priceVariation?: number }> }).variants).map((variant) => ({
+                        optionName: variant.optionName,
+                        priceVariation: variant.priceVariation
+                    }))
                     : [],
+                kind: normalizeProductKind((product as { kind?: string }).kind),
+                ...(channel === "pos" ? {
+                    volunteerPrice: typeof (product as { volunteerPrice?: number }).volunteerPrice === "number"
+                        ? (product as { volunteerPrice?: number }).volunteerPrice
+                        : undefined,
+                    stockQuantity: (product as { stockQuantity?: number | null }).stockQuantity ?? null,
+                    isSoldOut: Boolean((product as { isSoldOut?: boolean }).isSoldOut),
+                    stockStatus: getStockStatus(
+                        (product as { stockQuantity?: number | null }).stockQuantity ?? null,
+                        Boolean((product as { isSoldOut?: boolean }).isSoldOut)
+                    ),
+                    recipeItems: Array.isArray((product as {
+                        recipeItems?: Array<{ ingredientId?: unknown, quantity?: number }>
+                    }).recipeItems)
+                        ? ((product as {
+                            recipeItems?: Array<{ ingredientId?: unknown, quantity?: number }>
+                        }).recipeItems || []).map((entry) => {
+                            const ingredientId = String(entry.ingredientId || "");
+                            const ingredient = ingredientById.get(ingredientId) as ({ name?: string, shortName?: string } | undefined);
+                            return {
+                                ingredientId,
+                                name: ingredient?.name || "Ingrediente",
+                                shortName: ingredient?.shortName || undefined,
+                                quantity: Number(entry.quantity || 1)
+                            };
+                        }).filter((entry) => entry.ingredientId)
+                        : []
+                } : {}),
                 requiresConfiguration: productRequiresMenuConfiguration(product),
                 menuComponents: Array.isArray((product as { menuComponents?: Array<{ productId?: unknown, quantity?: number }> }).menuComponents)
                     ? ((product as { menuComponents?: Array<{ productId?: unknown, quantity?: number }> }).menuComponents || [])
@@ -220,7 +233,8 @@ export async function GET(request: NextRequest) {
         const legacyQuickDiscount = toLegacyQuickDiscountSettings(quickDiscountPresets);
 
         const sanitizedEvent = {
-            ...event,
+            _id: String(event._id),
+            name: event.name,
             settings: {
                 askName: event.settings?.askName ?? false,
                 askTable: event.settings?.askTable ?? false,

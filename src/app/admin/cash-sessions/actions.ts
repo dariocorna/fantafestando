@@ -8,7 +8,10 @@ import { buildCashSessionPrintDocumentV2, PrintDocumentItemRow } from "@/lib/pri
 import { aggregateOrderProductConsumptions } from "@/lib/product-consumption";
 
 export async function getClosedCashSessionPrintDocumentAction(sessionId: string, posDeviceName?: string) {
-    await ensureAdminSession();
+    const sessionCheck = await ensureAdminSession();
+    if (!sessionCheck.ok) {
+        throw new Error(sessionCheck.error);
+    }
 
     const session = await CashSession.findById(sessionId).populate("eventId").lean();
     if (!session) {

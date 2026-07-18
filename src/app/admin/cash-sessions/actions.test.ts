@@ -45,6 +45,22 @@ import { getClosedCashSessionPrintDocumentAction } from "./actions";
 describe("getClosedCashSessionPrintDocumentAction", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        ensureAdminSessionMock.mockResolvedValue({
+            ok: true,
+            user: { id: "admin-1", username: "admin", role: "ADMIN" }
+        });
+    });
+
+    it("rejects non-admin sessions before reading financial data", async () => {
+        ensureAdminSessionMock.mockResolvedValue({
+            ok: false,
+            status: 403,
+            error: "Accesso riservato agli amministratori"
+        });
+
+        await expect(getClosedCashSessionPrintDocumentAction("session-1"))
+            .rejects.toThrow("Accesso riservato agli amministratori");
+        expect(cashSessionFindByIdMock).not.toHaveBeenCalled();
     });
 
     it("throws error if session is not found", async () => {

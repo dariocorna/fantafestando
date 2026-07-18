@@ -8,12 +8,16 @@ import {
     preparePrintableEasterEggRasterFromUrl,
     renderThermalRasterToPng
 } from "@/lib/easter-egg-image";
+import { adminUnauthorizedJson, ensureAdminSession } from "@/lib/authz";
 
 export async function GET(
     _request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return adminUnauthorizedJson(sessionCheck);
+
         const contextEventId = await getAdminContextEventId();
         if (!contextEventId) {
             return NextResponse.json({ error: "Nessuna festa selezionata" }, { status: 400 });

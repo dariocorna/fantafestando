@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const {
     dbConnectMock,
-    eventFindByIdMock,
+    eventFindOneMock,
     productFindMock,
     ingredientFindMock,
     orderCreateMock,
@@ -12,7 +12,7 @@ const {
     revalidatePathMock
 } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
-    eventFindByIdMock: vi.fn(),
+    eventFindOneMock: vi.fn(),
     productFindMock: vi.fn(),
     ingredientFindMock: vi.fn(),
     orderCreateMock: vi.fn(),
@@ -23,7 +23,7 @@ const {
 }));
 
 vi.mock("@/lib/mongoose", () => ({ default: dbConnectMock }));
-vi.mock("@/models/Event", () => ({ default: { findById: eventFindByIdMock } }));
+vi.mock("@/models/Event", () => ({ default: { findOne: eventFindOneMock } }));
 vi.mock("@/models/Product", () => ({ default: { find: productFindMock } }));
 vi.mock("@/models/Ingredient", () => ({ default: { find: ingredientFindMock } }));
 vi.mock("@/models/Order", () => ({ default: { create: orderCreateMock } }));
@@ -41,7 +41,7 @@ vi.mock("@/lib/order-code", () => ({
 import { createPublicOrder } from "@/app/menu/actions";
 
 function mockEvent(enabled: boolean) {
-    eventFindByIdMock.mockReturnValue({
+    eventFindOneMock.mockReturnValue({
         select: vi.fn().mockReturnValue({
             lean: vi.fn().mockResolvedValue({
                 settings: { portalEasterEggEnabled: enabled }
@@ -140,6 +140,33 @@ describe("createPublicOrder menu flow", () => {
             ]
         });
         routeOrderToPrintersMock.mockResolvedValue([true]);
+    });
+
+    test("rejects archived or missing events before reading the catalog", async () => {
+        eventFindOneMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue(null)
+            })
+        });
+
+        const result = await createPublicOrder({
+            eventId: "archived-event",
+            customer: {},
+            totalAmount: 7,
+            cart: [{
+                productId: "prod-1",
+                snapshotName: "Panino",
+                quantity: 1,
+                selectedOptions: []
+            }]
+        });
+
+        expect(result).toEqual({ success: false, error: "Evento non valido" });
+        expect(eventFindOneMock).toHaveBeenCalledWith({
+            _id: "archived-event",
+            archived: { $ne: true }
+        });
+        expect(productFindMock).not.toHaveBeenCalled();
     });
 
     test("returns an upload token when the feature is enabled on the event", async () => {

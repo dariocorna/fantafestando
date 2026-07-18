@@ -4,6 +4,7 @@ import { getAdminContextEventId } from "@/lib/events";
 import PrintJob from "@/models/PrintJob";
 import "@/models/Printer"; // Import to register schema for .populate()
 import { PrinterService } from "@/lib/printer";
+import { adminUnauthorizedJson, ensureAdminSession } from "@/lib/authz";
 
 const allowedPrintTypes = new Set(["CUSTOMER_ORDER", "KITCHEN_ORDER", "CASHIER_SUMMARY", "CASH_SESSION_SUMMARY", "EASTER_EGG_IMAGE", "MANUAL_TEST"]);
 
@@ -24,6 +25,9 @@ export async function GET(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return adminUnauthorizedJson(sessionCheck);
+
         const contextEventId = await getAdminContextEventId();
         if (!contextEventId) {
             return NextResponse.json({ error: "Nessuna festa selezionata" }, { status: 400 });
@@ -101,6 +105,9 @@ export async function POST(
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const sessionCheck = await ensureAdminSession();
+        if (!sessionCheck.ok) return adminUnauthorizedJson(sessionCheck);
+
         const contextEventId = await getAdminContextEventId();
         if (!contextEventId) {
             return NextResponse.json({ error: "Nessuna festa selezionata" }, { status: 400 });

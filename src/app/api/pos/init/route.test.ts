@@ -84,8 +84,11 @@ describe("GET /api/pos/init", () => {
                     volunteerPrice: 7,
                     salesChannels: ["MENU"],
                     availableDays: [],
-                    stockQuantity: null,
-                    isSoldOut: false
+                    stockQuantity: 12,
+                    isSoldOut: false,
+                    recipeItems: [{ ingredientId: "ingredient-1", quantity: 2 }],
+                    splitKitchenPrintPerUnit: true,
+                    variants: [{ optionName: "Grande", priceVariation: 2, stockQuantity: 4 }]
                 }])
             })
         });
@@ -98,6 +101,10 @@ describe("GET /api/pos/init", () => {
         expect(posDeviceFindMock).not.toHaveBeenCalled();
         expect(payload.posDevices).toEqual([]);
         expect(payload.products[0]).not.toHaveProperty("volunteerPrice");
+        expect(payload.products[0]).not.toHaveProperty("stockQuantity");
+        expect(payload.products[0]).not.toHaveProperty("recipeItems");
+        expect(payload.products[0]).not.toHaveProperty("splitKitchenPrintPerUnit");
+        expect(payload.products[0].variants[0]).not.toHaveProperty("stockQuantity");
         expect(payload.event.settings).not.toHaveProperty("quickDiscountPresets");
         expect(payload.event.settings).not.toHaveProperty("quickStaffDiscountValue");
     });

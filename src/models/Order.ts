@@ -65,6 +65,8 @@ export interface IOrder extends Document {
     paymentMethod: "CASH" | "CARD" | "OTHER";
     sumupCheckoutId?: string;
     sumupPaymentId?: string;
+    sumupWebhookClaimToken?: string;
+    sumupWebhookClaimedAt?: Date;
     posDeviceId?: Types.ObjectId;
     stockOverrideApproved?: boolean;
     stornoMeta?: {
@@ -172,6 +174,8 @@ const OrderSchema = new Schema<IOrder>({
     paymentMethod: { type: String, enum: ["CASH", "CARD", "OTHER"], default: "CASH" },
     sumupCheckoutId: { type: String },
     sumupPaymentId: { type: String },
+    sumupWebhookClaimToken: { type: String },
+    sumupWebhookClaimedAt: { type: Date },
     posDeviceId: { type: Schema.Types.ObjectId, ref: 'PosDevice' },
     cashSessionId: { type: Schema.Types.ObjectId, ref: 'CashSession' },
     stockOverrideApproved: { type: Boolean, default: false },

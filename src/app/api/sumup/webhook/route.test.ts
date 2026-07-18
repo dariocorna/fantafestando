@@ -1,0 +1,91 @@
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import { NextRequest } from "next/server";
+
+const {
+    orderFindOneAndUpdateMock,
+    orderFindOneMock,
+    orderUpdateOneMock,
+    applyStockForPaidOrderMock,
+    rollbackStockAdjustmentsMock,
+    routeOrderToPrintersMock
+} = vi.hoisted(() => ({
+    orderFindOneAndUpdateMock: vi.fn(),
+    orderFindOneMock: vi.fn(),
+    orderUpdateOneMock: vi.fn(),
+    applyStockForPaidOrderMock: vi.fn(),
+    rollbackStockAdjustmentsMock: vi.fn(),
+    routeOrderToPrintersMock: vi.fn()
+}));
+
+vi.mock("@/lib/mongoose", () => ({ default: vi.fn() }));
+vi.mock("@/models/Order", () => ({
+    default: {
+        findOneAndUpdate: orderFindOneAndUpdateMock,
+        findOne: orderFindOneMock,
+        updateOne: orderUpdateOneMock
+    }
+}));
+vi.mock("@/lib/stock-operations", () => ({
+    applyStockForPaidOrder: applyStockForPaidOrderMock,
+    rollbackStockAdjustments: rollbackStockAdjustmentsMock
+}));
+vi.mock("@/lib/printer", () => ({
+    PrinterService: { routeOrderToPrinters: routeOrderToPrintersMock }
+}));
+
+import { POST } from "./route";
+
+function webhookRequest() {
+    return new NextRequest("http://localhost/api/sumup/webhook", {
+        method: "POST",
+        body: JSON.stringify({ event_type: "checkout.succeeded", id: "checkout-1" })
+    });
+}
+
+describe("POST /api/sumup/webhook", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        delete process.env.SUMUP_WEBHOOK_SECRET;
+    });
+
+    test("does not process stock when another delivery owns the payment claim", async () => {
+        orderFindOneAndUpdateMock.mockResolvedValue(null);
+        orderFindOneMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue({ status: "PENDING" })
+            })
+        });
+
+        const response = await POST(webhookRequest());
+
+        await expect(response.json()).resolves.toMatchObject({ message: "Payment processing" });
+        expect(applyStockForPaidOrderMock).not.toHaveBeenCalled();
+    });
+
+    test("completes a claimed payment with one atomic status update", async () => {
+        orderFindOneAndUpdateMock.mockResolvedValue({
+            _id: "order-1",
+            eventId: { toString: () => "event-1" },
+            status: "PENDING",
+            cart: [],
+            ingredientPlan: []
+        });
+        applyStockForPaidOrderMock.mockResolvedValue({ success: true, appliedAdjustments: [] });
+        orderUpdateOneMock.mockResolvedValue({ acknowledged: true, matchedCount: 1 });
+
+        const response = await POST(webhookRequest());
+
+        expect(response.status).toBe(200);
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                _id: "order-1",
+                status: "PENDING",
+                sumupWebhookClaimToken: expect.any(String)
+            }),
+            expect.objectContaining({
+                $set: expect.objectContaining({ status: "PAID" })
+            })
+        );
+        expect(routeOrderToPrintersMock).toHaveBeenCalledOnce();
+    });
+});

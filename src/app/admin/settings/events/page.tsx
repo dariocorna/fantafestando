@@ -7,6 +7,10 @@ import Printer from "@/models/Printer";
 import PosDevice from "@/models/PosDevice";
 import Peripheral from "@/models/Peripheral";
 import Order from "@/models/Order";
+import Ingredient from "@/models/Ingredient";
+import CashSession from "@/models/CashSession";
+import PrintJob from "@/models/PrintJob";
+import OrderCounter from "@/models/OrderCounter";
 import { DeleteForm } from "@/components/delete-form";
 import { ArchiveForm } from "@/components/archive-form";
 import { revalidatePath } from "next/cache";
@@ -30,11 +34,15 @@ export default async function EventsPage() {
 
         await dbConnect();
         // Full cascade delete for all festa-bound data
+        await PrintJob.deleteMany({ eventId });
+        await CashSession.deleteMany({ eventId });
         await Order.deleteMany({ eventId });
+        await OrderCounter.deleteMany({ eventId });
         await PosDevice.deleteMany({ eventId });
         await Peripheral.deleteMany({ eventId });
         await Printer.deleteMany({ eventId });
         await Product.deleteMany({ eventId });
+        await Ingredient.deleteMany({ eventId });
         await Category.deleteMany({ eventId });
         await Event.findByIdAndDelete(eventId);
 

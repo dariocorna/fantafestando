@@ -134,7 +134,7 @@ export async function createPublicOrder(data: {
         }
 
         await dbConnect()
-        const event = await Event.findById(data.eventId)
+        const event = await Event.findOne({ _id: data.eventId, archived: { $ne: true } })
             .select("settings.portalEasterEggEnabled")
             .lean() as ({ settings?: { portalEasterEggEnabled?: boolean } } | null)
         if (!event) {

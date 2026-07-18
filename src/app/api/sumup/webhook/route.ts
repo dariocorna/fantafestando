@@ -10,6 +10,8 @@ import {
     type StockAdjustment,
 } from "@/lib/stock-operations";
 
+const WEBHOOK_CLAIM_TTL_MS = 5 * 60 * 1000;
+
 function safeEquals(a: string, b: string) {
     const aBuf = Buffer.from(a);
     const bBuf = Buffer.from(b);
@@ -53,7 +55,6 @@ export async function POST(req: NextRequest) {
     try {
         const rawBody = await req.text();
         const payload = JSON.parse(rawBody) as Record<string, unknown>;
-        console.log("[SumUp Webhook] Ricevuto payload:", JSON.stringify(payload));
 
         const webhookSecret = process.env.SUMUP_WEBHOOK_SECRET;
         const signatureHeader = req.headers.get("x-sumup-signature")
@@ -78,120 +79,164 @@ export async function POST(req: NextRequest) {
 
         const eventType = typeof payload.event_type === "string" ? payload.event_type : ""
         const checkoutId = typeof payload.id === "string" ? payload.id : ""
+        console.log(`[SumUp Webhook] event=${eventType || "unknown"} checkout=${checkoutId || "missing"}`);
 
         if (eventType === "checkout.succeeded" && checkoutId) {
             await dbConnect();
 
-            // Trova l'ordine associato a questo checkout
-            const order = await Order.findOne({ sumupCheckoutId: checkoutId });
+            const claimToken = crypto.randomUUID();
+            const order = await Order.findOneAndUpdate(
+                {
+                    sumupCheckoutId: checkoutId,
+                    status: "PENDING",
+                    $or: [
+                        { sumupWebhookClaimedAt: { $exists: false } },
+                        { sumupWebhookClaimedAt: { $lt: new Date(Date.now() - WEBHOOK_CLAIM_TTL_MS) } }
+                    ]
+                },
+                {
+                    $set: {
+                        sumupWebhookClaimToken: claimToken,
+                        sumupWebhookClaimedAt: new Date()
+                    }
+                },
+                { returnDocument: "after" }
+            );
 
             if (!order) {
+                const existingOrder = await Order.findOne({ sumupCheckoutId: checkoutId })
+                    .select("status")
+                    .lean() as ({ status?: string } | null);
+                if (existingOrder?.status === "PAID") {
+                    return NextResponse.json({ success: true, message: "Already paid" });
+                }
+                if (existingOrder?.status === "PENDING") {
+                    return NextResponse.json({ success: true, message: "Payment processing" });
+                }
                 console.warn(`[SumUp Webhook] Ordine non trovato per checkoutId: ${checkoutId}`);
                 return NextResponse.json({ error: "Order not found" }, { status: 404 });
             }
 
-            if (order.status === "PAID") {
-                return NextResponse.json({ success: true, message: "Already paid" });
-            }
-
             const preferredMode: StockMode = (order as { stockOverrideApproved?: boolean }).stockOverrideApproved ? "override" : "strict"
             let appliedAdjustmentsToRollback: StockAdjustment[] = []
+            let stockOverrideApproved = preferredMode === "override"
+            let paymentCompleted = false
 
-            const cartPayload = order.cart.map((item: {
-                productId: string | { toString(): string }
-                quantity: number
-                snapshotName: string
-                selectedOptions?: Array<{ name: string, priceVariation: number }>
-                includedComponents?: Array<{ productId: string | { toString(): string }, snapshotName: string, quantity: number }>
-            }) => ({
-                productId: item.productId.toString(),
-                snapshotName: item.snapshotName,
-                quantity: item.quantity,
-                selectedOptions: item.selectedOptions || [],
-                includedComponents: Array.isArray(item.includedComponents)
-                    ? item.includedComponents.map((component) => ({
-                        productId: component.productId.toString(),
-                        snapshotName: component.snapshotName,
-                        quantity: component.quantity
-                    }))
-                    : []
-            }))
+            try {
+                const cartPayload = order.cart.map((item: {
+                    productId: string | { toString(): string }
+                    quantity: number
+                    snapshotName: string
+                    selectedOptions?: Array<{ name: string, priceVariation: number }>
+                    includedComponents?: Array<{ productId: string | { toString(): string }, snapshotName: string, quantity: number }>
+                }) => ({
+                    productId: item.productId.toString(),
+                    snapshotName: item.snapshotName,
+                    quantity: item.quantity,
+                    selectedOptions: item.selectedOptions || [],
+                    includedComponents: Array.isArray(item.includedComponents)
+                        ? item.includedComponents.map((component) => ({
+                            productId: component.productId.toString(),
+                            snapshotName: component.snapshotName,
+                            quantity: component.quantity
+                        }))
+                        : []
+                }))
 
-            const stockResult = await applyStockForPaidOrder(
-                order.eventId.toString(),
-                cartPayload,
-                preferredMode,
-                Array.isArray(order.ingredientPlan)
-                    ? order.ingredientPlan.map((entry: {
-                        ingredientId?: string | { toString(): string }
-                        quantity?: number
-                    }) => ({
-                        ingredientId: entry.ingredientId?.toString(),
-                        quantity: Number(entry.quantity ?? 0)
-                    }))
-                    : []
-            )
+                const stockResult = await applyStockForPaidOrder(
+                    order.eventId.toString(),
+                    cartPayload,
+                    preferredMode,
+                    Array.isArray(order.ingredientPlan)
+                        ? order.ingredientPlan.map((entry: {
+                            ingredientId?: string | { toString(): string }
+                            quantity?: number
+                        }) => ({
+                            ingredientId: entry.ingredientId?.toString(),
+                            quantity: Number(entry.quantity ?? 0)
+                        }))
+                        : []
+                )
 
-            if (!stockResult.success) {
-                if (preferredMode === "strict") {
-                    console.warn("[SumUp Webhook] Stock shortage in strict mode, applying override fallback.", stockResult.stockShortages);
-                    const overrideResult = await applyStockForPaidOrder(
-                        order.eventId.toString(),
-                        cartPayload,
-                        "override",
-                        Array.isArray(order.ingredientPlan)
-                            ? order.ingredientPlan.map((entry: {
-                                ingredientId?: string | { toString(): string }
-                                quantity?: number
-                            }) => ({
-                                ingredientId: entry.ingredientId?.toString(),
-                                quantity: Number(entry.quantity ?? 0)
-                            }))
-                            : []
-                    )
-                    if (!overrideResult.success) {
-                        console.error("[SumUp Webhook] Override stock apply failed.", overrideResult.stockShortages)
+                if (!stockResult.success) {
+                    if (preferredMode === "strict") {
+                        console.warn("[SumUp Webhook] Stock shortage in strict mode, applying override fallback.", stockResult.stockShortages);
+                        const overrideResult = await applyStockForPaidOrder(
+                            order.eventId.toString(),
+                            cartPayload,
+                            "override",
+                            Array.isArray(order.ingredientPlan)
+                                ? order.ingredientPlan.map((entry: {
+                                    ingredientId?: string | { toString(): string }
+                                    quantity?: number
+                                }) => ({
+                                    ingredientId: entry.ingredientId?.toString(),
+                                    quantity: Number(entry.quantity ?? 0)
+                                }))
+                                : []
+                        )
+                        if (!overrideResult.success) {
+                            console.error("[SumUp Webhook] Override stock apply failed.", overrideResult.stockShortages)
+                            return NextResponse.json({ error: "Stock apply failed" }, { status: 409 })
+                        }
+                        appliedAdjustmentsToRollback = overrideResult.appliedAdjustments || []
+                        stockOverrideApproved = true
+                    } else {
+                        console.error("[SumUp Webhook] Stock apply failed in override mode.", stockResult.stockShortages)
                         return NextResponse.json({ error: "Stock apply failed" }, { status: 409 })
                     }
-                    appliedAdjustmentsToRollback = overrideResult.appliedAdjustments || []
-                    order.set("stockOverrideApproved", true)
                 } else {
-                    console.error("[SumUp Webhook] Stock apply failed in override mode.", stockResult.stockShortages)
-                    return NextResponse.json({ error: "Stock apply failed" }, { status: 409 })
+                    appliedAdjustmentsToRollback = stockResult.appliedAdjustments || []
                 }
-            } else {
-                appliedAdjustmentsToRollback = stockResult.appliedAdjustments || []
-            }
 
-            // Aggiorna lo stato dell'ordine
-            const sumupPaymentId = extractSumUpTransactionId(payload)
-            order.status = "PAID";
-            if (sumupPaymentId) {
-                order.set("sumupPaymentId", sumupPaymentId)
-            }
-            try {
-                await order.save();
-            } catch (saveError) {
-                if (appliedAdjustmentsToRollback.length > 0) {
-                    try {
-                        await rollbackStockAdjustments(order.eventId.toString(), appliedAdjustmentsToRollback)
-                    } catch (rollbackError) {
-                        console.error("[SumUp Webhook] Rollback error:", rollbackError)
+                const sumupPaymentId = extractSumUpTransactionId(payload)
+                const completedOrder = await Order.updateOne(
+                    {
+                        _id: order._id,
+                        status: "PENDING",
+                        sumupWebhookClaimToken: claimToken
+                    },
+                    {
+                        $set: {
+                            status: "PAID",
+                            stockOverrideApproved,
+                            ...(sumupPaymentId ? { sumupPaymentId } : {})
+                        },
+                        $unset: {
+                            sumupWebhookClaimToken: 1,
+                            sumupWebhookClaimedAt: 1
+                        }
                     }
+                );
+                if (!completedOrder.acknowledged || completedOrder.matchedCount !== 1) {
+                    throw new Error("Webhook claim lost before payment completion");
                 }
-                throw saveError
+                paymentCompleted = true
+
+                console.log(`[SumUp Webhook] Ordine ${order._id} marcato come PAGATO.`);
+
+                try {
+                    await PrinterService.routeOrderToPrinters(order._id.toString(), order.posDeviceId?.toString());
+                } catch (printError) {
+                    console.error("[SumUp Webhook] Errore durante il trigger delle stampe:", printError);
+                }
+
+                return NextResponse.json({ success: true });
+            } catch (error) {
+                if (appliedAdjustmentsToRollback.length > 0) {
+                    await rollbackStockAdjustments(order.eventId.toString(), appliedAdjustmentsToRollback)
+                }
+                throw error
+            } finally {
+                if (!paymentCompleted) {
+                    await Order.updateOne(
+                        { _id: order._id, sumupWebhookClaimToken: claimToken },
+                        { $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 } }
+                    ).catch((releaseError) => {
+                        console.error("[SumUp Webhook] Claim release error:", releaseError);
+                    });
+                }
             }
-
-            console.log(`[SumUp Webhook] Ordine ${order._id} marcato come PAGATO.`);
-
-            // Trigger delle stampe in rete
-            try {
-                await PrinterService.routeOrderToPrinters(order._id.toString(), order.posDeviceId?.toString());
-            } catch (printError) {
-                console.error("[SumUp Webhook] Errore durante il trigger delle stampe:", printError);
-            }
-
-            return NextResponse.json({ success: true });
         }
 
         return NextResponse.json({ success: true, message: "Event ignored" });
