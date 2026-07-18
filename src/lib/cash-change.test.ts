@@ -11,6 +11,9 @@ describe("cash change", () => {
     expect(normalizeCashReceivedInput("0012.345abc")).toBe("12,34")
     expect(normalizeCashReceivedInput(",5")).toBe("0,5")
     expect(normalizeCashReceivedInput("1,2,3")).toBe("1,23")
+    // Importo incollato con separatore migliaia: il punto non deve azzerare il valore
+    expect(normalizeCashReceivedInput("1.000,50")).toBe("1000,50")
+    expect(normalizeCashReceivedInput("2.500")).toBe("2,50")
   })
 
   test("converte e formatta i centesimi senza errori floating point", () => {

@@ -27,9 +27,21 @@ export function getProductQuantityInCart<T extends PosCartLine>(cart: T[], produ
   return buildProductQuantityMap(cart).get(productId) ?? 0
 }
 
-export function decrementProductQuantityInCart<T extends PosCartLine>(cart: T[], productId: string): T[] {
-  const itemIndex = cart.findLastIndex((item) => !item.isDiscount && item.productId === productId)
-  if (itemIndex < 0) return cart
+export function decrementProductQuantityInCart<T extends PosCartLine>(
+  cart: T[],
+  productId: string,
+  isCustomized?: (item: T) => boolean
+): T[] {
+  const matches = cart
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !item.isDiscount && item.productId === productId)
+  if (matches.length === 0) return cart
+
+  // Preferisci decrementare una riga non personalizzata: il pulsante del catalogo non deve
+  // cancellare in silenzio una unità con note/comanda singola quando esiste un'unità normale.
+  const plain = isCustomized ? matches.filter(({ item }) => !isCustomized(item)) : matches
+  const pool = plain.length > 0 ? plain : matches
+  const itemIndex = pool[pool.length - 1].index
 
   const item = cart[itemIndex]
   const quantity = normalizeQuantity(item.quantity)

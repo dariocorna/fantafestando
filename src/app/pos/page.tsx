@@ -847,7 +847,7 @@ export default function PosPage() {
         setContextDraft({
             removedIngredientIds: item.removedIngredientIds || [],
             addedIngredientIds: item.addedIngredientIds || [],
-            customNote: item.contextCustomNote ?? item.customKitchenNotes ?? "",
+            customNote: item.contextCustomNote ?? "",
             splitPrintPerUnit: Boolean(item.splitPrintPerUnit)
         })
     }
@@ -867,7 +867,9 @@ export default function PosPage() {
         contextLineSequenceRef.current += 1
         const editedItem: CartItem = {
             ...contextItem,
-            lineId: contextItem.quantity > 1 ? `${contextItem.lineId}:ctx-${contextLineSequenceRef.current}` : contextItem.lineId,
+            // Sempre un lineId dedicato: una riga personalizzata non deve poter essere ri-aggregata
+            // da un successivo tap sul prodotto (addConfiguredToCart fonde per lineId).
+            lineId: `${contextItem.productId}:ctx-${contextLineSequenceRef.current}`,
             quantity: 1,
             removedIngredientIds: contextDraft.removedIngredientIds,
             addedIngredientIds: contextDraft.addedIngredientIds,
@@ -919,7 +921,11 @@ export default function PosPage() {
 
         const nextQuantity = Math.max(0, currentQuantity - 1)
         const displayName = resolveProductDisplayName(product)
-        setCart((prev: CartItem[]) => decrementProductQuantityInCart(prev, product._id))
+        setCart((prev: CartItem[]) => decrementProductQuantityInCart(
+            prev,
+            product._id,
+            (item) => Boolean(item.customKitchenNotes) || Boolean(item.splitPrintPerUnit)
+        ))
         setCartAnnouncement(`Rimosso ${displayName}, quantita ${nextQuantity}`)
     }
 
@@ -1321,7 +1327,8 @@ export default function PosPage() {
             quantity: item.quantity,
             variants: [],
             customKitchenNotes: item.customKitchenNotes,
-            contextCustomNote: item.customKitchenNotes,
+            // La struttura (ingredienti tolti/aggiunti) non è persistita: non pre-compilare la nota
+            // libera con la stringa già composta, altrimenti una ri-modifica la duplicherebbe.
             splitPrintPerUnit: item.splitPrintPerUnit,
             selectedOptions: (item.selectedOptions || []).map((option) => option.name),
             menuSelections: item.menuSelections || [],
@@ -1378,6 +1385,19 @@ export default function PosPage() {
 
         setIsProcessing(true)
 
+        const cartPayload = productCartItems.map((item) => ({
+            productId: item.productId,
+            snapshotName: item.name,
+            customKitchenNotes: item.customKitchenNotes,
+            splitPrintPerUnit: item.splitPrintPerUnit,
+            quantity: item.quantity,
+            selectedOptions: (item.selectedOptions || []).map((option) => ({
+                name: option,
+                priceVariation: 0
+            })),
+            menuSelections: item.menuSelections || []
+        }))
+
         if (loadedPendingOrder) {
             const completedPendingOrderId = loadedPendingOrder.id
             const completionResult = await completePendingOrderPayment({
@@ -1394,18 +1414,7 @@ export default function PosPage() {
                 orderDiscount: orderDiscountPayload,
                 lineDiscounts: [],
                 pricingMode: isVolunteerMode ? "VOLUNTEER" : "STANDARD",
-                cart: productCartItems.map((item) => ({
-                    productId: item.productId,
-                    snapshotName: item.name,
-                    customKitchenNotes: item.customKitchenNotes,
-                    splitPrintPerUnit: item.splitPrintPerUnit,
-                    quantity: item.quantity,
-                    selectedOptions: (item.selectedOptions || []).map((option) => ({
-                        name: option,
-                        priceVariation: 0
-                    })),
-                    menuSelections: item.menuSelections || []
-                }))
+                cart: cartPayload
             })
 
             if (completionResult.success) {
@@ -1429,6 +1438,7 @@ export default function PosPage() {
                 } else if (completionResult.cashSessionRequired) {
                     setIsCheckoutOpen(false)
                     setCashReceivedInput("")
+                    setIsCashKeypadExpanded(false)
                     setCashSession(null)
                     setIsOpenCashDialogOpen(true)
                 } else {
@@ -1450,18 +1460,7 @@ export default function PosPage() {
             orderDiscount: orderDiscountPayload,
             lineDiscounts: [],
             pricingMode: isVolunteerMode ? "VOLUNTEER" as const : "STANDARD" as const,
-            cart: productCartItems.map(item => ({
-                productId: item.productId,
-                snapshotName: item.name,
-                customKitchenNotes: item.customKitchenNotes,
-                splitPrintPerUnit: item.splitPrintPerUnit,
-                quantity: item.quantity,
-                selectedOptions: (item.selectedOptions || []).map((option) => ({
-                    name: option,
-                    priceVariation: 0
-                })),
-                menuSelections: item.menuSelections || []
-            })),
+            cart: cartPayload,
             paymentMethod: effectivePaymentMethod,
             posDeviceId: selectedPosDeviceId,
             allowStockOverride
@@ -1487,6 +1486,7 @@ export default function PosPage() {
             } else if (result.cashSessionRequired) {
                 setIsCheckoutOpen(false)
                 setCashReceivedInput("")
+                setIsCashKeypadExpanded(false)
                 setCashSession(null)
                 setIsOpenCashDialogOpen(true)
             } else {

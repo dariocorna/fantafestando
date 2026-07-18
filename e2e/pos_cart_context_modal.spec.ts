@@ -191,4 +191,77 @@ test.describe("POS modal contesto riga", () => {
             await cleanupEventArtifactsByName(eventName);
         }
     });
+
+    test("una unità personalizzata resta separata da un successivo tap sul prodotto", async ({ page, isMobile }) => {
+        test.skip(isMobile, "Flusso validato sul POS desktop.");
+        test.setTimeout(120000);
+
+        const eventName = `POS Context Merge ${uniqueSuffix()}`;
+
+        try {
+            const seeded = await seedContextModalEvent(eventName);
+            await ensureAdminAuthenticated(page, "/admin");
+            await setAdminEventContextCookie(page, seeded.eventId);
+            await openPosAndSelectDevice(page, seeded.posName);
+            await openCashSessionIfRequired(page);
+
+            const productCard = page.getByTestId(`pos-product-${seeded.productId}`);
+            await productCard.click();
+            await expect(page.getByText("1 x 8.00 €")).toBeVisible();
+
+            await page.getByRole("button", { name: "Modifica dettagli Bardelle" }).click();
+            const dialog = page.getByRole("dialog").filter({ hasText: "Stai modificando 1 unità su 1" });
+            await expect(dialog).toBeVisible();
+            await dialog.getByText("CIPOLLA").click();
+            await dialog.getByRole("button", { name: "Applica a 1 unità" }).click();
+            await expect(dialog).toBeHidden();
+            await expect(page.locator('[data-testid^="cart-item-notes-"]').filter({ hasText: "Senza CIPOLLA" })).toHaveCount(1);
+
+            // Un nuovo tap deve creare una riga normale separata, non incrementare quella personalizzata.
+            await productCard.click();
+            await expect(page.getByText("1 x 8.00 €")).toHaveCount(2);
+            await expect(page.getByText("2 x 8.00 €")).toHaveCount(0);
+            await expect(page.locator('[data-testid^="cart-item-notes-"]').filter({ hasText: "Senza CIPOLLA" })).toHaveCount(1);
+        } finally {
+            await cleanupEventArtifactsByName(eventName);
+        }
+    });
+
+    test("riaprendo una riga personalizzata la nota non viene duplicata", async ({ page, isMobile }) => {
+        test.skip(isMobile, "Flusso validato sul POS desktop.");
+        test.setTimeout(120000);
+
+        const eventName = `POS Context Redup ${uniqueSuffix()}`;
+
+        try {
+            const seeded = await seedContextModalEvent(eventName);
+            await ensureAdminAuthenticated(page, "/admin");
+            await setAdminEventContextCookie(page, seeded.eventId);
+            await openPosAndSelectDevice(page, seeded.posName);
+            await openCashSessionIfRequired(page);
+
+            const productCard = page.getByTestId(`pos-product-${seeded.productId}`);
+            await productCard.click();
+            await expect(page.getByText("1 x 8.00 €")).toBeVisible();
+
+            await page.getByRole("button", { name: "Modifica dettagli Bardelle" }).click();
+            const dialog = page.getByRole("dialog").filter({ hasText: "Stai modificando 1 unità su 1" });
+            await dialog.getByText("CIPOLLA").click();
+            await dialog.getByRole("button", { name: "Applica a 1 unità" }).click();
+            await expect(dialog).toBeHidden();
+            await expect(page.locator('[data-testid^="cart-item-notes-"]').filter({ hasText: "Senza CIPOLLA" })).toHaveCount(1);
+
+            // Riaprendo, il campo nota libera deve essere vuoto: la stringa composta non va travasata.
+            await page.getByRole("button", { name: "Modifica dettagli Bardelle" }).click();
+            const reopen = page.getByRole("dialog").filter({ hasText: "Stai modificando 1 unità su 1" });
+            await expect(reopen.locator("#cart-context-note")).toHaveValue("");
+            await reopen.getByRole("button", { name: "Applica a 1 unità" }).click();
+            await expect(reopen).toBeHidden();
+
+            await expect(page.locator('[data-testid^="cart-item-notes-"]').filter({ hasText: "Senza CIPOLLA" })).toHaveCount(1);
+            await expect(page.locator('[data-testid^="cart-item-notes-"]').filter({ hasText: "Senza CIPOLLA · Senza CIPOLLA" })).toHaveCount(0);
+        } finally {
+            await cleanupEventArtifactsByName(eventName);
+        }
+    });
 });

@@ -54,12 +54,6 @@ export async function GET(request: NextRequest) {
         const products = await Product.find({ eventId: event._id })
             .sort({ name: 1 })
             .lean();
-        const activeIngredients = channel === "pos"
-            ? await Ingredient.find({ eventId: event._id, active: true })
-                .sort({ name: 1 })
-                .select("_id name shortName")
-                .lean()
-            : [];
         const recipeIngredientIds = channel === "pos"
             ? [...new Set(products.flatMap((product) =>
                 Array.isArray((product as { recipeItems?: Array<{ ingredientId?: unknown }> }).recipeItems)
@@ -69,12 +63,18 @@ export async function GET(request: NextRequest) {
                     : []
             ))]
             : [];
-        const recipeIngredients = recipeIngredientIds.length > 0
-            ? await Ingredient.find({ eventId: event._id, _id: { $in: recipeIngredientIds } })
-                .select("_id name shortName")
+        // Una sola query: gli ingredienti attivi e quelli referenziati dalle ricette (anche disattivati).
+        const allIngredients = channel === "pos"
+            ? await Ingredient.find({
+                eventId: event._id,
+                $or: [{ active: true }, { _id: { $in: recipeIngredientIds } }]
+            })
+                .sort({ name: 1 })
+                .select("_id name shortName active")
                 .lean()
             : [];
-        const ingredientById = new Map([...recipeIngredients, ...activeIngredients].map((ingredient) => [String(ingredient._id), ingredient]));
+        const activeIngredients = allIngredients.filter((ingredient) => (ingredient as { active?: boolean }).active !== false);
+        const ingredientById = new Map(allIngredients.map((ingredient) => [String(ingredient._id), ingredient]));
         const referencedProductIds = [...new Set(products.flatMap((product) => collectReferencedProductIds(product)))]
         const referencedProducts = referencedProductIds.length > 0
             ? await Product.find({

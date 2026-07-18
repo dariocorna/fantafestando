@@ -1795,7 +1795,9 @@ export async function completePendingOrderPayment(data: {
                         return {
                             productId: item.productId.toString(),
                             snapshotName: item.snapshotName,
-                            customKitchenNotes: inputItem?.customKitchenNotes ?? item.customKitchenNotes,
+                            // La guardia shouldReusePendingIngredientPlan garantisce l'allineamento per indice:
+                            // usa la nota del client così com'è (anche se svuotata), senza ripescare la persistita.
+                            customKitchenNotes: inputItem ? inputItem.customKitchenNotes : item.customKitchenNotes,
                             splitPrintPerUnit: Boolean(inputItem?.splitPrintPerUnit ?? item.splitPrintPerUnit),
                             quantity: item.quantity,
                             productKind: item.productKind || "STANDARD",

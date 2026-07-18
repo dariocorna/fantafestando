@@ -60,6 +60,40 @@ describe("pos-cart", () => {
     ])
   })
 
+  test("preferisce decrementare una riga non personalizzata rispetto a una con note", () => {
+    type EditableLine = PosCartLine & { customKitchenNotes?: string }
+    const cart: EditableLine[] = [
+      { lineId: "prod-1", productId: "prod-1", quantity: 2 },
+      { lineId: "prod-1:ctx-1", productId: "prod-1", quantity: 1, customKitchenNotes: "Senza cipolla" },
+    ]
+
+    const nextCart = decrementProductQuantityInCart(
+      cart,
+      "prod-1",
+      (item) => Boolean(item.customKitchenNotes)
+    )
+
+    expect(nextCart).toEqual([
+      { lineId: "prod-1", productId: "prod-1", quantity: 1 },
+      { lineId: "prod-1:ctx-1", productId: "prod-1", quantity: 1, customKitchenNotes: "Senza cipolla" },
+    ])
+  })
+
+  test("decrementa la riga personalizzata solo se non esistono righe normali", () => {
+    type EditableLine = PosCartLine & { customKitchenNotes?: string }
+    const cart: EditableLine[] = [
+      { lineId: "prod-1:ctx-1", productId: "prod-1", quantity: 1, customKitchenNotes: "Senza cipolla" },
+    ]
+
+    const nextCart = decrementProductQuantityInCart(
+      cart,
+      "prod-1",
+      (item) => Boolean(item.customKitchenNotes)
+    )
+
+    expect(nextCart).toEqual([])
+  })
+
   test("non modifica il carrello quando il prodotto non e presente", () => {
     const cart: PosCartLine[] = [
       { lineId: "p1", productId: "prod-1", quantity: 1 },
