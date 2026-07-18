@@ -676,16 +676,20 @@ export default function PosPage() {
     const subtotal = Number(
         productCartItems.reduce((acc: number, item: CartItem) => acc + (getCartItemUnitPrice(item) * item.quantity), 0).toFixed(2)
     )
-    // Lo sconto è ricalcolato in tempo reale sul subtotale corrente: una percentuale si applica
-    // a tutto il carrello (anche alle voci aggiunte dopo lo sconto), non solo a quelle già presenti.
-    const computeLiveDiscountAmount = (item: CartItem): number => {
+    const liveDiscountsByLineId = new Map<string, { amount: number, baseAmount: number }>()
+    let remainingDiscountBase = subtotal
+    discountCartItems.forEach((item) => {
         const preset = item.discountPreset
-        if (!preset) return Number(Math.max(0, item.price * -1).toFixed(2))
-        if (preset.type === "PERCENT") {
-            return Number(Math.max(0, subtotal * (preset.value / 100)).toFixed(2))
-        }
-        return Number(Math.min(Math.max(0, subtotal), preset.value).toFixed(2))
-    }
+        const requestedAmount = !preset
+            ? item.price * -1
+            : preset.type === "PERCENT"
+                ? remainingDiscountBase * (preset.value / 100)
+                : preset.value
+        const amount = Number(Math.min(remainingDiscountBase, Math.max(0, requestedAmount)).toFixed(2))
+        liveDiscountsByLineId.set(item.lineId, { amount, baseAmount: remainingDiscountBase })
+        remainingDiscountBase = Number(Math.max(0, remainingDiscountBase - amount).toFixed(2))
+    })
+    const computeLiveDiscountAmount = (item: CartItem) => liveDiscountsByLineId.get(item.lineId)?.amount ?? 0
     const totalDiscountRequested = Number(
         Math.max(0, discountCartItems.reduce((acc: number, item: CartItem) => acc + computeLiveDiscountAmount(item), 0)).toFixed(2)
     )
@@ -1542,7 +1546,7 @@ export default function PosPage() {
                         {item.isDiscount ? (
                             <span className="text-[11px] font-semibold text-emerald-600">
                                 {item.discountPreset?.type === "PERCENT"
-                                    ? `${item.discountPreset.value}% su ${subtotal.toFixed(2)} €`
+                                    ? `${item.discountPreset.value}% su ${(liveDiscountsByLineId.get(item.lineId)?.baseAmount ?? subtotal).toFixed(2)} €`
                                     : `Sconto fisso ${item.discountPreset?.value.toFixed(2)} €`}
                             </span>
                         ) : (

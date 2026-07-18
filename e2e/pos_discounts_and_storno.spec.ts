@@ -34,7 +34,8 @@ async function createEventWithDiscountPresets(
             $set: {
                 "settings.quickDiscountPresets": [
                     { label: "Staff", type: "PERCENT", value: 50 },
-                    { label: "Promo Cassa", type: "FIXED", value: 2 }
+                    { label: "Promo Cassa", type: "FIXED", value: 2 },
+                    { label: "Tesserati", type: "PERCENT", value: 20 }
                 ]
             }
         }
@@ -166,11 +167,12 @@ test.describe("POS sconti e storno ordine", () => {
             await expect(page.locator("#discount-preset-card-0")).toBeVisible()
             await page.locator("#discount-preset-card-0").click()
             await expect(page.getByText(/Totale da Pagare/i).locator("..")).toContainText(/5\.00\s*€/i)
+            await page.locator("#discount-preset-card-2").click()
+            await expect(page.getByText(/Totale da Pagare/i).locator("..")).toContainText(/4\.00\s*€/i)
 
-            // Aggiungi B (3€) DOPO lo sconto: subtotale 13€, 50% -> totale 6.50€
-            // (col bug lo sconto resterebbe congelato a 5€, dando 8€).
+            // Aggiungi B (3€) DOPO gli sconti: 50% di 13€ e poi 20% dei 6.50€ residui.
             await addProductsToCart(page, [productB])
-            await expect(page.getByText(/Totale da Pagare/i).locator("..")).toContainText(/6\.50\s*€/i)
+            await expect(page.getByText(/Totale da Pagare/i).locator("..")).toContainText(/5\.20\s*€/i)
 
             await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()
             await completeCheckout(page)
@@ -180,7 +182,7 @@ test.describe("POS sconti e storno ordine", () => {
             if (!db) throw new Error("DB non disponibile")
             const event = await db.collection("events").findOne({ name: eventName })
             const order = await db.collection("orders").findOne({ eventId: event?._id, status: "PAID" })
-            expect(order?.totalAmount).toBeCloseTo(6.5, 2)
+            expect(order?.totalAmount).toBeCloseTo(5.2, 2)
         } finally {
             await cleanupEventArtifactsByName(eventName)
         }
