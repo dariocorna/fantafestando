@@ -2,6 +2,21 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.15.3] - 2026-07-19
+
+### Security
+
+- Protetti gli endpoint amministrativi dei job di stampa e l'esportazione dei report cassa con verifica esplicita della sessione admin.
+- Limitati i dati esposti dall'inizializzazione del menu pubblico ai soli campi necessari.
+- Aggiornate Next.js e le dipendenze transitive vulnerabili.
+
+### Fixed
+
+- Resa atomica e idempotente la gestione dei webhook SumUp concorrenti, evitando doppie mutazioni delle scorte.
+- Impedita la creazione di ordini per feste archiviate e completata la cancellazione dei dati operativi collegati a una festa.
+- Eliminati mismatch di hydration nelle viste responsive e nel riepilogo ordine pubblico.
+- Stabilizzata l'apertura dei dialog hardware durante l'hydration e aggiornate le opzioni Mongoose deprecate.
+
 ## [0.15.2] - 2026-07-18
 
 ### Fixed
