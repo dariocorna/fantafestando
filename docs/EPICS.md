@@ -264,9 +264,9 @@ Allineamento visuale delle superfici `menu`, `admin` e `pos` con priorita' opera
 - Pacchettizzazione e rilascio del gestionale su VM dedicata.
 - Configurazione servizi runtime (app, database, reverse proxy) e persistenza dati.
 - Procedure operative di backup/ripristino e aggiornamento.
-- Deploy attivo su domini DDNS pubblici:
-  - `https://fantafestando.ddns.net` (Menu)
-  - `https://fantafestando-backoffice.ddns.net` (Admin/POS)
+- Configurazione documentata per domini pubblici distinti:
+  - `https://menu.example.com` (Menu)
+  - `https://backoffice.example.com` (Admin/POS)
 - HTTPS abilitato via Certbot + Apache reverse proxy.
 
 ---
@@ -303,3 +303,13 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
 - Export sessione cassa CSV/XLS con campi operativi estesi (`Totale incassi`, `Codice ordine`, `Sconto`, `Totale netto`).
 
 **Issue collegata**: `#24` (chiusa).
+
+---
+
+## 🔄 Epica 31: Preparazione repository pubblico
+
+- Esclusione di chiavi locali, directory runtime e backup dai Docker build context.
+- Esclusione degli stessi percorsi dai trasferimenti generici di deploy.
+- Neutralizzazione di IP, hostname e riferimenti macchina-specifici nel tree corrente.
+- Audit della cronologia Git e dei metadati GitHub prima del cambio di visibilità.
+- Hardening applicativo e infrastrutturale rinviato a issue dedicate.
