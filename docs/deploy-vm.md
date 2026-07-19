@@ -30,8 +30,8 @@ Per il backoffice puoi rendere configurabile anche l'host di bind:
 - `BACKOFFICE_BIND_HOST=<ip-lan>` per accesso privato in LAN
 
 Domini previsti:
-- `fantafestando-backoffice.ddns.net` -> admin + pos
-- `fantafestando.ddns.net` -> portale pubblico menu
+- `backoffice.example.com` -> admin + pos
+- `menu.example.com` -> portale pubblico menu
 
 ## 2. Prerequisiti VM
 
@@ -102,11 +102,11 @@ di default e disabilita `nginx` per evitare conflitti su `80/443`.
 Esempio `/etc/caddy/Caddyfile` con backoffice e menu pubblicati su host distinti:
 
 ```caddy
-fantafestando-backoffice.ddns.net {
+backoffice.example.com {
     reverse_proxy 127.0.0.1:3101
 }
 
-fantafestando.ddns.net {
+menu.example.com {
     reverse_proxy 127.0.0.1:3102
 }
 ```
@@ -114,7 +114,7 @@ fantafestando.ddns.net {
 Se vuoi esporre in pubblico solo il frontend utente del menu:
 
 ```caddy
-fantafestando.ddns.net {
+menu.example.com {
     reverse_proxy 127.0.0.1:3102
 }
 ```
@@ -142,7 +142,7 @@ In questo assetto il tunnel non punta piu' a `127.0.0.1:3102` sull'host Linux, m
 direttamente al servizio Docker `fantafestando-menu:3000` sulla rete Compose.
 
 In questo scenario:
-- `fantafestando.ddns.net` continua a puntare alla VM Oracle
+- `menu.example.com` continua a puntare alla VM Oracle
 - `Caddy` termina TLS sulla VM Oracle
 - il sidecar `oracle-menu-tunnel` apre `ssh -N -R 127.0.0.1:3302:fantafestando-menu:3000`
 - sulla VM Oracle il reverse proxy continua a inoltrare verso `127.0.0.1:3302`
@@ -150,10 +150,10 @@ In questo scenario:
 Configurazione `Caddy` sulla VM Oracle:
 
 ```bash
-ssh -i ~/.ssh/<chiave-oracle>.pem ubuntu@84.8.251.115
+ssh -i ~/.ssh/<chiave-oracle>.pem <oracle-admin-user>@<oracle-vm-host>
 sudo tee -a /etc/caddy/Caddyfile >/dev/null <<'EOF'
 
-fantafestando.ddns.net {
+menu.example.com {
     encode zstd gzip
     reverse_proxy 127.0.0.1:3302
 }
@@ -274,7 +274,7 @@ sudo systemctl enable --now fantafestando-menu-offline.service
 Blocco `Caddy` per il dominio pubblico del menu:
 
 ```caddy
-fantafestando.ddns.net {
+menu.example.com {
     encode zstd gzip
 
     reverse_proxy 127.0.0.1:3302 127.0.0.1:3303 {
@@ -292,10 +292,10 @@ Verifica:
 
 ```bash
 # tunnel down -> pagina offline
-curl -I https://fantafestando.ddns.net/
+curl -I https://menu.example.com/
 
 # tunnel up -> menu reale
-curl https://fantafestando.ddns.net/api/health
+curl https://menu.example.com/api/health
 ```
 
 Preparazione chiave sul Docker host remoto:
@@ -311,7 +311,7 @@ chmod 600 .secrets/oracle-menu-tunnel/id_ed25519
 Esempio env:
 
 ```bash
-ORACLE_TUNNEL_HOST=84.8.251.115
+ORACLE_TUNNEL_HOST=<oracle-vm-host>
 ORACLE_TUNNEL_USER=oracle-menu-tunnel
 ORACLE_TUNNEL_SSH_DIR_HOST=/opt/fantafestando/.secrets/oracle-menu-tunnel
 ORACLE_TUNNEL_KEY_FILENAME=id_ed25519
@@ -340,8 +340,8 @@ Verifiche consigliate:
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml ps
 docker compose --env-file .env.production -f docker-compose.prod.yml logs -f oracle-menu-tunnel
-ssh ubuntu@84.8.251.115 'curl -fsS http://127.0.0.1:3302/api/health'
-curl -I https://fantafestando.ddns.net/api/health
+ssh <oracle-admin-user>@<oracle-vm-host> 'curl -fsS http://127.0.0.1:3302/api/health'
+curl -I https://menu.example.com/api/health
 ```
 
 Note operative:
@@ -367,18 +367,18 @@ Esempio `/etc/apache2/sites-available/fantafestando-backoffice.conf`:
 
 ```apache
 <VirtualHost *:80>
-    ServerName fantafestando-backoffice.ddns.net
+    ServerName backoffice.example.com
     RewriteEngine On
     RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
     RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [R=301,L]
 </VirtualHost>
 
 <VirtualHost *:443>
-    ServerName fantafestando-backoffice.ddns.net
+    ServerName backoffice.example.com
 
     SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/fantafestando-backoffice.ddns.net/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/fantafestando-backoffice.ddns.net/privkey.pem
+    SSLCertificateFile /etc/letsencrypt/live/backoffice.example.com/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/backoffice.example.com/privkey.pem
 
     ProxyPreserveHost On
     RequestHeader set X-Forwarded-Proto "https"
@@ -393,18 +393,18 @@ Esempio `/etc/apache2/sites-available/menu-fantafestando.conf`:
 
 ```apache
 <VirtualHost *:80>
-    ServerName fantafestando.ddns.net
+    ServerName menu.example.com
     RewriteEngine On
     RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
     RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [R=301,L]
 </VirtualHost>
 
 <VirtualHost *:443>
-    ServerName fantafestando.ddns.net
+    ServerName menu.example.com
 
     SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/fantafestando.ddns.net/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/fantafestando.ddns.net/privkey.pem
+    SSLCertificateFile /etc/letsencrypt/live/menu.example.com/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/menu.example.com/privkey.pem
 
     ProxyPreserveHost On
     RequestHeader set X-Forwarded-Proto "https"
@@ -424,7 +424,7 @@ sudo systemctl reload apache2
 Emettere certificati (se non già emessi):
 
 ```bash
-sudo certbot --apache -d fantafestando-backoffice.ddns.net -d fantafestando.ddns.net
+sudo certbot --apache -d backoffice.example.com -d menu.example.com
 ```
 
 ## 6. Aggiornamento applicazione
@@ -442,8 +442,8 @@ Anche `update.sh` riesegue automaticamente la migrazione indice ordini.
 Verifica post update:
 
 ```bash
-curl -fsS https://fantafestando-backoffice.ddns.net/api/health
-curl -fsS https://fantafestando.ddns.net/api/health
+curl -fsS https://backoffice.example.com/api/health
+curl -fsS https://menu.example.com/api/health
 ```
 
 ### 6.2 Deploy locale LAN
@@ -524,8 +524,8 @@ docker compose --env-file .env.production -f docker-compose.prod.yml ps
 - Quando vedi codice vecchio dopo un deploy, esegui `build --no-cache` prima di `up -d`.
 - Il deploy fallisce se le route upload attese non compaiono nel manifest o se gli `URL` attivi per menu/scontrino tornano `404`.
 - Verifica asset PWA pubblicati:
-  - `https://fantafestando.ddns.net/manifest-menu.webmanifest`
-  - `https://fantafestando.ddns.net/sw-menu.js`
+  - `https://menu.example.com/manifest-menu.webmanifest`
+  - `https://menu.example.com/sw-menu.js`
 - Dopo ogni deploy verifica sempre:
   - stato container (`docker compose ... ps`)
   - endpoint health locali (`${BACKOFFICE_BIND_HOST:-127.0.0.1}:3101` e `127.0.0.1:3102`)
@@ -549,8 +549,8 @@ cp .env.production.example .env.production
 # compilare .env.production con i valori reali prima del primo deploy
 
 npm run deploy:oracle -- \
-  --host 84.8.251.115 \
-  --user ubuntu \
+  --host <oracle-vm-host> \
+  --user <oracle-admin-user> \
   --key ~/.ssh/<chiave-oracle>.pem \
   --profile demo
 ```
@@ -558,13 +558,13 @@ npm run deploy:oracle -- \
 Dopo il primo deploy, configura `Caddy` sull'host Oracle per pubblicare i servizi:
 
 ```bash
-ssh -i ~/.ssh/<chiave-oracle>.pem ubuntu@84.8.251.115
+ssh -i ~/.ssh/<chiave-oracle>.pem <oracle-admin-user>@<oracle-vm-host>
 sudo tee /etc/caddy/Caddyfile >/dev/null <<'EOF'
-fantafestando-backoffice.ddns.net {
+backoffice.example.com {
     reverse_proxy 127.0.0.1:3101
 }
 
-fantafestando.ddns.net {
+menu.example.com {
     reverse_proxy 127.0.0.1:3102
 }
 EOF
@@ -590,8 +590,8 @@ Note operative:
 
 ```bash
 npm run deploy:oracle -- \
-  --host 84.8.251.115 \
-  --user ubuntu \
+  --host <oracle-vm-host> \
+  --user <oracle-admin-user> \
   --key ~/.ssh/<chiave-oracle>.pem \
   --local-build
 ```
@@ -600,8 +600,8 @@ npm run deploy:oracle -- \
 
 ```bash
 npm run deploy:oracle -- \
-  --host 84.8.251.115 \
-  --user ubuntu \
+  --host <oracle-vm-host> \
+  --user <oracle-admin-user> \
   --key ~/.ssh/<chiave-oracle>.pem \
   --no-bootstrap
 ```
@@ -610,8 +610,8 @@ npm run deploy:oracle -- \
 
 ```bash
 npm run deploy:oracle -- \
-  --host 84.8.251.115 \
-  --user ubuntu \
+  --host <oracle-vm-host> \
+  --user <oracle-admin-user> \
   --key ~/.ssh/<chiave-oracle>.pem \
   --project-name fantafestando-sagra \
   --backoffice-port 3111 \
@@ -784,7 +784,7 @@ sudo journalctl -u caddy -n 100 --no-pager
 docker compose --env-file .env.production -f docker-compose.prod.yml ps
 docker compose --env-file .env.production -f docker-compose.prod.yml logs -f oracle-menu-tunnel
 curl -fsS http://127.0.0.1:3102/api/health
-ssh ubuntu@84.8.251.115 'curl -fsS http://127.0.0.1:3302/api/health'
+ssh <oracle-admin-user>@<oracle-vm-host> 'curl -fsS http://127.0.0.1:3302/api/health'
 ```
 
 - Verifica proxy Apache (solo se usi la configurazione alternativa):
