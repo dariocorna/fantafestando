@@ -12,3 +12,8 @@ e2e
 README.md
 AGENTS.md
 implementation_plan.md
+.secrets
+.docker/oracle-menu-tunnel
+backups
+*.pem
+*.key

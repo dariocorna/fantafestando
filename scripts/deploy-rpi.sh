@@ -216,7 +216,7 @@ ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "sudo mkdir -p '${REMOTE_PATH}' && sudo cho
 
 if [[ "${SKIP_RSYNC}" == "false" ]]; then
   echo "[deploy-rpi] Syncing project to ${SSH_TARGET}:${REMOTE_PATH}..."
-  rsync -rlz --delete     -e "ssh ${SSH_OPTS[*]}"     --exclude '.git'     --exclude '/node_modules'     --exclude '/public/uploads/'     --exclude '.next/cache'     --exclude '.next/dev'     --exclude 'playwright-report'     --exclude 'test-results'     --exclude '.env*'     ./ "${SSH_TARGET}:${REMOTE_PATH}/"
+  rsync -rlz --delete     -e "ssh ${SSH_OPTS[*]}"     --exclude '.git'     --exclude '/node_modules'     --exclude '/public/uploads/'     --exclude '.next/cache'     --exclude '.next/dev'     --exclude 'playwright-report'     --exclude 'test-results'     --exclude '.env*'     --exclude '/.secrets/'     --exclude '/.docker/oracle-menu-tunnel/'     --exclude '/backups/'     ./ "${SSH_TARGET}:${REMOTE_PATH}/"
 fi
 
 echo "[deploy-rpi] Preparing runtime directories and env file..."

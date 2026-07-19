@@ -175,6 +175,9 @@ if [[ "${SKIP_RSYNC}" == "false" ]]; then
     --exclude 'playwright-report' \
     --exclude 'test-results' \
     --exclude '.env*' \
+    --exclude '/.secrets/' \
+    --exclude '/.docker/oracle-menu-tunnel/' \
+    --exclude '/backups/' \
     ./ "${SSH_TARGET}:${REMOTE_PATH}/"
 fi
 
