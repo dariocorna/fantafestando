@@ -20,6 +20,7 @@ const webServerEnv = {
     ORACLE_TUNNEL_CONTROL_TOKEN: process.env.ORACLE_TUNNEL_CONTROL_TOKEN ?? "e2e-tunnel-control-token",
     REMOTE_POS_HOSTNAME: process.env.REMOTE_POS_HOSTNAME ?? "pos.remote.test",
     REMOTE_POS_MARKER_SECRET: process.env.REMOTE_POS_MARKER_SECRET ?? "e2e-pos-remote-marker",
+    POS_LAN_HOSTNAMES: process.env.POS_LAN_HOSTNAMES ?? "localhost,127.0.0.1",
 };
 
 export default defineConfig({
@@ -61,6 +62,7 @@ export default defineConfig({
                 `ORACLE_TUNNEL_CONTROL_TOKEN=${webServerEnv.ORACLE_TUNNEL_CONTROL_TOKEN}`,
                 `REMOTE_POS_HOSTNAME=${webServerEnv.REMOTE_POS_HOSTNAME}`,
                 `REMOTE_POS_MARKER_SECRET=${webServerEnv.REMOTE_POS_MARKER_SECRET}`,
+                `POS_LAN_HOSTNAMES=${webServerEnv.POS_LAN_HOSTNAMES}`,
                 `npx next dev --webpack --port ${playwrightPort}`
             ].join(" "),
             url: baseURL,

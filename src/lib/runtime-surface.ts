@@ -21,17 +21,44 @@ function isBackofficePath(pathname: string): boolean {
         || pathname.startsWith('/pos/');
 }
 
+// Static assets always carry an extension; pages and API routes never do.
+function isStaticAssetPath(pathname: string): boolean {
+    const lastSegment = pathname.slice(pathname.lastIndexOf('/') + 1);
+    return lastSegment.includes('.');
+}
+
+const MENU_SURFACE_ALLOWED_PREFIXES = [
+    '/menu',
+    '/api/public/',
+    '/api/health',
+    '/api/pos/init',
+    '/uploads/',
+    '/_next/',
+];
+
+/**
+ * Allow-list of everything the public menu surface legitimately serves.
+ * Anything else (login, backoffice pages, admin/pos/pizza APIs, internal
+ * endpoints) must never be reachable from the internet-facing container.
+ */
+export function isAllowedOnMenuSurface(pathname: string): boolean {
+    if (isStaticAssetPath(pathname)) return true;
+    return MENU_SURFACE_ALLOWED_PREFIXES.some(
+        (prefix) => pathname === prefix || pathname.startsWith(prefix.endsWith('/') ? prefix : `${prefix}/`)
+    );
+}
+
+export function isApiPath(pathname: string): boolean {
+    return pathname === '/api' || pathname.startsWith('/api/');
+}
+
 export function resolveSurfaceRedirect(surface: AppSurface, pathname: string): string | null {
     if (surface === 'all') {
         return null;
     }
 
     if (surface === 'menu') {
-        if (pathname === '/' || isBackofficePath(pathname)) {
-            return '/menu';
-        }
-
-        return null;
+        return isAllowedOnMenuSurface(pathname) ? null : '/menu';
     }
 
     if (pathname === '/' || isMenuPath(pathname)) {
@@ -40,3 +67,5 @@ export function resolveSurfaceRedirect(surface: AppSurface, pathname: string): s
 
     return null;
 }
+
+export { isBackofficePath };

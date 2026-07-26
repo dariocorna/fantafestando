@@ -32,6 +32,26 @@ describe('resolveSurfaceRedirect', () => {
         expect(resolveSurfaceRedirect('menu', '/menu/checkout')).toBeNull();
     });
 
+    test('menu surface blocks everything outside the public allow-list', () => {
+        expect(resolveSurfaceRedirect('menu', '/login')).toBe('/menu');
+        expect(resolveSurfaceRedirect('menu', '/pizza-console')).toBe('/menu');
+        expect(resolveSurfaceRedirect('menu', '/pizza-monitor')).toBe('/menu');
+        expect(resolveSurfaceRedirect('menu', '/api/admin/backups/download')).toBe('/menu');
+        expect(resolveSurfaceRedirect('menu', '/api/internal/remote-access')).toBe('/menu');
+        expect(resolveSurfaceRedirect('menu', '/api/pizza-console/tickets')).toBe('/menu');
+        expect(resolveSurfaceRedirect('menu', '/api/auth/callback/credentials')).toBe('/menu');
+    });
+
+    test('menu surface keeps serving what the public portal needs', () => {
+        expect(resolveSurfaceRedirect('menu', '/api/public/pizza-monitor')).toBeNull();
+        expect(resolveSurfaceRedirect('menu', '/api/health')).toBeNull();
+        expect(resolveSurfaceRedirect('menu', '/api/pos/init')).toBeNull();
+        expect(resolveSurfaceRedirect('menu', '/uploads/menu-headers/logo.png')).toBeNull();
+        expect(resolveSurfaceRedirect('menu', '/sw-menu.js')).toBeNull();
+        expect(resolveSurfaceRedirect('menu', '/manifest-menu.webmanifest')).toBeNull();
+        expect(resolveSurfaceRedirect('menu', '/icons/icon-192.png')).toBeNull();
+    });
+
     test('backoffice surface redirects root and menu routes to /admin', () => {
         expect(resolveSurfaceRedirect('backoffice', '/')).toBe('/admin');
         expect(resolveSurfaceRedirect('backoffice', '/menu')).toBe('/admin');
