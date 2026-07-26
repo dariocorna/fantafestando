@@ -1,8 +1,8 @@
-FROM alpine:3.20
+FROM node:20-alpine
 
-RUN apk add --no-cache bash openssh-client
+RUN apk add --no-cache openssh-client
 
-COPY scripts/oracle-menu-reverse-tunnel.sh /usr/local/bin/oracle-menu-reverse-tunnel.sh
-RUN chmod +x /usr/local/bin/oracle-menu-reverse-tunnel.sh
+COPY scripts/oracle-tunnel-controller.mjs /usr/local/bin/oracle-tunnel-controller.mjs
+RUN chmod +x /usr/local/bin/oracle-tunnel-controller.mjs
 
-CMD ["/usr/local/bin/oracle-menu-reverse-tunnel.sh"]
+CMD ["node", "/usr/local/bin/oracle-tunnel-controller.mjs"]

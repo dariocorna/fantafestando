@@ -49,7 +49,7 @@ import {
     normalizeRecipeItems,
 } from "@/lib/ingredient-plan"
 import { shouldReusePendingIngredientPlan } from "@/lib/pending-ingredient-plan"
-import { ensureAuthenticatedSession } from "@/lib/authz"
+import { ensurePosAccess } from "@/lib/pos-access"
 
 interface PrintDispatchSummary {
     attempted: number
@@ -59,7 +59,7 @@ interface PrintDispatchSummary {
 }
 
 async function ensurePosActionSession() {
-    const sessionCheck = await ensureAuthenticatedSession()
+    const sessionCheck = await ensurePosAccess()
     if (!sessionCheck.ok) {
         return { success: false as const, error: sessionCheck.error }
     }
