@@ -22,8 +22,8 @@ vi.mock("@/lib/mongoose", () => ({
     default: dbConnectMock
 }));
 
-vi.mock("@/lib/authz", () => ({
-    ensureAuthenticatedSession: ensureAuthenticatedSessionMock
+vi.mock("@/lib/pos-access", () => ({
+    ensurePosAccess: ensureAuthenticatedSessionMock
 }));
 
 vi.mock("@/models/Order", () => ({
