@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import sharp from "sharp";
+import sharp, { type Metadata } from "sharp";
 import {
     getThermalContentWidth,
     getThermalPaperWidth,
@@ -26,7 +26,7 @@ interface RenderThermalRasterToPngOptions {
     centerOnPaper?: boolean;
 }
 
-function getAutoOrientedDimensions(metadata: sharp.Metadata): { width: number; height: number } {
+function getAutoOrientedDimensions(metadata: Metadata): { width: number; height: number } {
     const autoOrientedWidth = Number(metadata.autoOrient?.width || 0);
     const autoOrientedHeight = Number(metadata.autoOrient?.height || 0);
     if (autoOrientedWidth > 0 && autoOrientedHeight > 0) {
@@ -202,7 +202,7 @@ export async function renderThermalRasterToStripePngBuffers(
             stripePixels.set(pixels.subarray(sourceStart, sourceEnd), targetStart);
         }
 
-        let png = await sharp(stripePixels, {
+        let png: Buffer = await sharp(stripePixels, {
             raw: {
                 width: raster.width,
                 height,

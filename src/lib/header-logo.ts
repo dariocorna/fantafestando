@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import sharp, { type Sharp } from "sharp";
 
 export const MENU_HEADER_LOGO_TARGET_RATIO = 10 / 4;
 export const MENU_HEADER_LOGO_RATIO_TOLERANCE = 0.12;
@@ -30,7 +30,7 @@ function isSupportedMimeType(mimeType: string) {
 }
 
 async function decodeAndNormalizeImage(buffer: Buffer): Promise<{
-    image: sharp.Sharp;
+    image: Sharp;
     width: number;
     height: number;
 } | null> {
