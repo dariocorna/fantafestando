@@ -2,6 +2,28 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.16.0] - 2026-07-26
+
+### Added
+
+- Accesso remoto selettivo (Menu, Admin, POS, SSH) governato da `/admin/settings/remote-access` e applicato dal controller del tunnel SSH.
+
+### Security
+
+- Superficie pubblica `menu` filtrata con allow-list: login, backoffice, console pizza, API admin/pizza/internal e endpoint di autenticazione non sono piu' raggiungibili dal container esposto su Internet.
+- Invertita la logica di fiducia del POS: l'esenzione dal login vale solo per gli hostname LAN dichiarati in `POS_LAN_HOSTNAMES`, mai per un `Host` sconosciuto o per l'hostname admin.
+- Bloccato `/admin` sull'hostname pubblico del POS, che raggiunge lo stesso container del backoffice.
+- Endpoint di controllo `/api/internal/*` limitato ai chiamanti della rete Docker.
+- Aggiunto controllo same-origin sulle chiamate API mutative autenticate via cookie.
+- Rate limiting sui tentativi di login falliti e sugli endpoint pubblici (ordine, riepilogo, upload immagine).
+- Riepilogo ordine pubblico protetto da token opaco per ordine invece del numero di ritiro sequenziale.
+- Prezzo delle opzioni di prodotto risolto sempre lato server dalle varianti, mai dal payload del client.
+- Aggiunti header di sicurezza (CSP, HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy) e rimosso `X-Powered-By`.
+- Sessione ridotta a 12 ore e fallback credenziali di sviluppo attivabile solo con `AUTH_ALLOW_DEV_CREDENTIALS=true` esplicito.
+- Host key del tunnel SSH pinnata (`StrictHostKeyChecking=yes` con `known_hosts` montato) al posto di `accept-new` senza stato persistente.
+- Estrazione archivi di backup/import con `--no-same-owner --no-same-permissions` e limite di dimensione sugli upload.
+- Aggiornate Next.js a 16.2.12, sharp a 0.35.3, `@auth/core` e mongoose alle versioni non vulnerabili.
+
 ## [0.15.3] - 2026-07-19
 
 ### Security

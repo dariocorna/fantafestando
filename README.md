@@ -76,7 +76,7 @@ App disponibile su `http://localhost:3000`.
 
 Accesso backoffice:
 - ambienti standard: utenti letti da MongoDB collection `User` (`username`, `passwordHash`, `role`) con verifica password `bcrypt`;
-- sviluppo locale: fallback `admin / admin` attivo solo fuori produzione (disattivabile con `AUTH_ALLOW_DEV_CREDENTIALS=false`).
+- sviluppo locale: fallback `admin / admin` disponibile solo fuori produzione e solo con `AUTH_ALLOW_DEV_CREDENTIALS=true` esplicito.
 
 Note accesso flusso pizza:
 - `/pizza-console` e le API `/api/pizza-console/*` sono pensate per uso operativo interno e richiedono sessione autenticata;

@@ -252,8 +252,21 @@ ORACLE_TUNNEL_SSH_REMOTE_PORT=3322
 ORACLE_TUNNEL_SSH_LOCAL_HOST=host.docker.internal
 ORACLE_TUNNEL_SSH_LOCAL_PORT=22
 ORACLE_TUNNEL_CONTROL_TOKEN=<token-casuale-lungo>
+ORACLE_TUNNEL_STRICT_HOST_KEY_CHECKING=yes
+ORACLE_TUNNEL_KNOWN_HOSTS_FILENAME=known_hosts
 REMOTE_POS_HOSTNAME=pos.example.com
+REMOTE_ADMIN_HOSTNAME=admin.example.com
 REMOTE_POS_MARKER_SECRET=<secondo-token-casuale-lungo>
+POS_LAN_HOSTNAMES=pos.lan,192.168.1.10
+```
+
+La host key della VM va pinnata prima del primo avvio del sidecar, altrimenti
+il tunnel non parte (il container non ha un `known_hosts` persistente e
+`accept-new` accetterebbe una chiave nuova a ogni riavvio):
+
+```bash
+ssh-keyscan -H <oracle-vm-host> >> .secrets/oracle-menu-tunnel/known_hosts
+chmod 600 .secrets/oracle-menu-tunnel/known_hosts
 ```
 
 Admin e POS devono usare hostname distinti diretti alla stessa VM Oracle. Caddy
@@ -272,9 +285,15 @@ pos.example.com {
 }
 ```
 
-Il login Admin resta sempre obbligatorio. Il login POS e' configurabile per la
-LAN, ma viene sempre richiesto quando hostname o marker identificano il proxy
-pubblico.
+Il login Admin resta sempre obbligatorio. L'esenzione dal login POS vale solo
+per gli hostname elencati in `POS_LAN_HOSTNAMES`: qualunque altro hostname,
+incluso quello admin e qualsiasi `Host` arbitrario, richiede sempre le
+credenziali. Se `POS_LAN_HOSTNAMES` e' vuoto, l'esenzione decade appena viene
+abilitato un forward remoto Admin o POS.
+
+Le due porte del tunnel raggiungono lo stesso container: l'app blocca
+`/admin` quando la richiesta arriva con l'hostname di `REMOTE_POS_HOSTNAME`,
+quindi i due vhost Caddy devono usare hostname davvero distinti.
 
 Accesso SSH client:
 
