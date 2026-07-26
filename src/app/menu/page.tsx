@@ -208,7 +208,9 @@ export default function CustomerMenu() {
                 storeRecentOrderSummary(result.orderSummary)
             }
             clearStoredMenuCart()
-            router.push(`/menu/success?code=${result.shortCode}&orderId=${result.orderId}`)
+            router.push(
+                `/menu/success?code=${encodeURIComponent(result.shortCode || "")}&orderId=${result.orderId}&token=${encodeURIComponent(result.accessToken || "")}`
+            )
         } else {
             setCheckoutError(result.error || "Non è stato possibile inviare l'ordine. Riprova.")
             if ("stockShortages" in result && Array.isArray(result.stockShortages)) {

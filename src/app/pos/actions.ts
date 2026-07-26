@@ -287,7 +287,7 @@ async function computePricingForCart(data: {
     const productDocs = await Product.find({
         eventId: data.eventId,
         _id: { $in: productIds }
-    }).select("_id name basePrice volunteerPrice kind availableOnlyInMenus salesChannels menuComponents menuChoiceGroups").lean() as Array<{
+    }).select("_id name basePrice volunteerPrice kind availableOnlyInMenus salesChannels variants menuComponents menuChoiceGroups").lean() as Array<{
         _id: string | { toString(): string }
         name?: string
         basePrice?: number | null
@@ -295,6 +295,7 @@ async function computePricingForCart(data: {
         kind?: string
         availableOnlyInMenus?: boolean
         salesChannels?: string[]
+        variants?: Array<{ optionName?: string, priceVariation?: number | null }>
         menuComponents?: Array<{ productId?: string | { toString(): string }, quantity?: number | null }>
         menuChoiceGroups?: Array<{
             id?: string
@@ -325,6 +326,7 @@ async function computePricingForCart(data: {
         kind?: string
         availableOnlyInMenus?: boolean
         salesChannels?: string[]
+        variants?: Array<{ optionName?: string, priceVariation?: number | null }>
         menuComponents?: Array<{ productId?: string | { toString(): string }, quantity?: number | null }>
         menuChoiceGroups?: Array<{
             id?: string
@@ -357,6 +359,17 @@ async function computePricingForCart(data: {
         const unitBasePrice = normalizeCurrencyAmount(getProductUnitBasePrice(product))
 
         if (productKind === "STANDARD") {
+            // The client never prices anything: an option costs what the product
+            // variant says it costs, and unknown options are worth zero.
+            const variantPriceByName = new Map(
+                (product.variants || [])
+                    .filter((variant) => typeof variant.optionName === "string")
+                    .map((variant) => [
+                        variant.optionName as string,
+                        normalizeCurrencyAmount(Number(variant.priceVariation || 0))
+                    ])
+            )
+
             return {
                 success: true as const,
                 item: {
@@ -367,7 +380,10 @@ async function computePricingForCart(data: {
                     quantity: item.quantity,
                     productKind,
                     unitBasePrice,
-                    selectedOptions: item.selectedOptions,
+                    selectedOptions: item.selectedOptions.map((option) => ({
+                        name: option.name,
+                        priceVariation: variantPriceByName.get(option.name) ?? 0
+                    })),
                     includedComponents: []
                 }
             }

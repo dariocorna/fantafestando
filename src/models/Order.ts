@@ -80,6 +80,7 @@ export interface IOrder extends Document {
         refundTransactionId?: string;
         refundError?: string;
     };
+    publicAccessTokenHash?: string;
     easterEggAttachment?: {
         uploadTokenHash?: string;
         rasterWidth?: number;
@@ -196,6 +197,7 @@ const OrderSchema = new Schema<IOrder>({
         refundTransactionId: { type: String },
         refundError: { type: String }
     },
+    publicAccessTokenHash: { type: String, trim: true, select: false },
     easterEggAttachment: {
         uploadTokenHash: { type: String, trim: true },
         rasterWidth: { type: Number, min: 1, max: 576 },

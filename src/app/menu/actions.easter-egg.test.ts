@@ -28,6 +28,7 @@ vi.mock("@/models/Product", () => ({ default: { find: productFindMock } }));
 vi.mock("@/models/Ingredient", () => ({ default: { find: ingredientFindMock } }));
 vi.mock("@/models/Order", () => ({ default: { create: orderCreateMock } }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 vi.mock("@/lib/printer", () => ({
     PrinterService: {
         routeOrderToPrinters: routeOrderToPrintersMock

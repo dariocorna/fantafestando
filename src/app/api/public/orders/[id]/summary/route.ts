@@ -1,10 +1,20 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/mongoose";
 import Order from "@/models/Order";
-import { getOrderCodeFromOrder } from "@/lib/order-code";
+import { hashOrderAccessToken } from "@/lib/order-access-token";
 import { buildPublicOrderSummary } from "@/lib/public-order-summary";
+import { consumeRateLimit, resolveClientKey } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
+
+function tokenMatches(expectedHash: string, providedToken: string): boolean {
+    if (!expectedHash) return false;
+    const expected = Buffer.from(expectedHash);
+    const provided = Buffer.from(hashOrderAccessToken(providedToken));
+    if (expected.length !== provided.length) return false;
+    return timingSafeEqual(expected, provided);
+}
 
 export async function GET(
     request: NextRequest,
@@ -17,14 +27,24 @@ export async function GET(
             return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
         }
 
+        const { allowed } = consumeRateLimit(
+            `public-order-summary:${resolveClientKey(request.headers)}`,
+            60,
+            10 * 60 * 1000
+        );
+        if (!allowed) {
+            return NextResponse.json({ error: "Troppe richieste" }, { status: 429 });
+        }
+
         await dbConnect();
         const order = await Order.findById(id)
-            .select("_id pickupNumber pizzaTicket.pizzaNumber totalAmount customer cart")
+            .select("_id pickupNumber pizzaTicket.pizzaNumber totalAmount customer cart +publicAccessTokenHash")
             .lean() as ({
                 _id: string | { toString(): string };
                 pickupNumber?: number;
                 pizzaTicket?: { pizzaNumber?: number };
                 totalAmount: number;
+                publicAccessTokenHash?: string;
                 customer?: { name?: string; table?: string };
                 cart: Array<{
                     snapshotName: string;
@@ -33,12 +53,9 @@ export async function GET(
                 }>;
             } | null);
 
-        if (!order) {
-            return NextResponse.json({ error: "Ordine non trovato" }, { status: 404 });
-        }
-
-        const expectedCode = getOrderCodeFromOrder(order);
-        if (expectedCode !== code) {
+        // Same answer whether the order is missing or the token is wrong, so the
+        // endpoint cannot be used to probe which order ids exist.
+        if (!order || !tokenMatches(order.publicAccessTokenHash?.trim() || "", code)) {
             return NextResponse.json({ error: "Ordine non accessibile" }, { status: 403 });
         }
 

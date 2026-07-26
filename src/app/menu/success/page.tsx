@@ -27,6 +27,7 @@ function SuccessContent() {
     const searchParams = useSearchParams()
     const router = useRouter()
     const code = searchParams.get("code")
+    const accessToken = searchParams.get("token")
     const orderId = searchParams.get("orderId")
     const clientReady = useSyncExternalStore(
         subscribeToClientReady,
@@ -44,16 +45,16 @@ function SuccessContent() {
         () => clientReady && orderId ? Boolean(readPendingEasterEggUpload(orderId)) : false,
         [clientReady, orderId]
     )
-    const shouldFetchSummary = Boolean(clientReady && orderId && code && !summary)
+    const shouldFetchSummary = Boolean(clientReady && orderId && accessToken && !summary)
     const isLoadingSummary = shouldFetchSummary && !summaryFetchFailed
     const pizzaNumber = summary?.pizzaNumber
 
     useEffect(() => {
-        if (!clientReady || !orderId || !code || summary) return
+        if (!clientReady || !orderId || !accessToken || summary) return
 
         let isCancelled = false
 
-        fetch(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(code)}`, {
+        fetch(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(accessToken)}`, {
             cache: "no-store"
         })
             .then(async (response) => {
@@ -80,7 +81,7 @@ function SuccessContent() {
         return () => {
             isCancelled = true
         }
-    }, [clientReady, code, orderId, summary])
+    }, [accessToken, clientReady, orderId, summary])
 
     return (
         <div className="brand-surface-menu min-h-screen pb-16">
