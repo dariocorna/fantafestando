@@ -10,43 +10,54 @@ vi.mock("@/lib/remote-access", () => ({
   getRemoteAccessSettingsView: getRemoteAccessSettingsViewMock,
 }));
 
-import { ensurePosAccess, isRemotePosRequest } from "@/lib/pos-access";
+import { ensurePosAccess, isTrustedLanPosRequest } from "@/lib/pos-access";
 
 function requestHeaders(values: Record<string, string>) {
   const headers = new Headers(values);
   return { get: headers.get.bind(headers) };
 }
 
-describe("POS remote request detection", () => {
+describe("POS LAN trust", () => {
   const env = {
     REMOTE_POS_HOSTNAME: "pos.example.com",
     REMOTE_POS_MARKER_SECRET: "marker-secret",
+    POS_LAN_HOSTNAMES: "pos.lan,192.168.1.10",
   };
 
-  test("recognizes the configured public hostname or trusted marker", () => {
-    expect(isRemotePosRequest(
-      requestHeaders({ host: "pos.example.com" }),
-      { posEnabled: true },
-      env
-    )).toBe(true);
-    expect(isRemotePosRequest(
-      requestHeaders({ host: "lan.local", "x-fantafestando-remote-pos": "marker-secret" }),
-      { posEnabled: true },
-      env
-    )).toBe(true);
+  test("trusts only the configured LAN hostnames", () => {
+    expect(isTrustedLanPosRequest(requestHeaders({ host: "pos.lan" }), { posEnabled: true }, env)).toBe(true);
+    expect(isTrustedLanPosRequest(requestHeaders({ host: "192.168.1.10:3101" }), { posEnabled: true }, env)).toBe(true);
   });
 
-  test("does not let client headers disable remote authentication", () => {
-    expect(isRemotePosRequest(
-      requestHeaders({ host: "pos.example.com", "x-fantafestando-remote-pos": "wrong" }),
-      { posEnabled: true },
-      env
-    )).toBe(true);
+  test("never trusts an unrecognized hostname", () => {
+    expect(isTrustedLanPosRequest(requestHeaders({ host: "admin.example.com" }), { posEnabled: true }, env)).toBe(false);
+    expect(isTrustedLanPosRequest(requestHeaders({ host: "attacker-controlled" }), { posEnabled: true }, env)).toBe(false);
+    expect(isTrustedLanPosRequest(requestHeaders({}), { posEnabled: true }, env)).toBe(false);
   });
 
-  test("fails closed when the remote proxy is enabled without complete deployment configuration", () => {
-    expect(isRemotePosRequest(requestHeaders({ host: "lan.local" }), { posEnabled: true }, {})).toBe(true);
-    expect(isRemotePosRequest(requestHeaders({ host: "lan.local" }), { posEnabled: false }, env)).toBe(false);
+  test("never trusts the public POS hostname or the proxy marker", () => {
+    expect(isTrustedLanPosRequest(requestHeaders({ host: "pos.example.com" }), { posEnabled: true }, env)).toBe(false);
+    expect(isTrustedLanPosRequest(
+      requestHeaders({ host: "pos.lan", "x-fantafestando-remote-pos": "marker-secret" }),
+      { posEnabled: true },
+      env
+    )).toBe(false);
+  });
+
+  test("prefers the forwarded hostname over the internal Host header", () => {
+    expect(isTrustedLanPosRequest(
+      requestHeaders({ host: "pos.lan", "x-forwarded-host": "admin.example.com" }),
+      { posEnabled: true },
+      env
+    )).toBe(false);
+  });
+
+  test("without a LAN allow-list, trust ends as soon as the backoffice is published", () => {
+    const bare = { REMOTE_POS_HOSTNAME: "pos.example.com", REMOTE_POS_MARKER_SECRET: "marker-secret" };
+    expect(isTrustedLanPosRequest(requestHeaders({ host: "lan.local" }), {}, bare)).toBe(true);
+    expect(isTrustedLanPosRequest(requestHeaders({ host: "lan.local" }), { posEnabled: true }, bare)).toBe(false);
+    expect(isTrustedLanPosRequest(requestHeaders({ host: "lan.local" }), { adminEnabled: true }, bare)).toBe(false);
+    expect(isTrustedLanPosRequest(requestHeaders({ host: "lan.local" }), { appliedPosEnabled: true }, bare)).toBe(false);
   });
 });
 
@@ -55,8 +66,10 @@ describe("POS access policy", () => {
     vi.clearAllMocks();
     delete process.env.REMOTE_POS_HOSTNAME;
     delete process.env.REMOTE_POS_MARKER_SECRET;
+    delete process.env.POS_LAN_HOSTNAMES;
     getRemoteAccessSettingsViewMock.mockResolvedValue({
       posEnabled: false,
+      adminEnabled: false,
       posLanAuthenticationEnabled: false,
     });
   });
@@ -64,9 +77,10 @@ describe("POS access policy", () => {
   afterEach(() => {
     delete process.env.REMOTE_POS_HOSTNAME;
     delete process.env.REMOTE_POS_MARKER_SECRET;
+    delete process.env.POS_LAN_HOSTNAMES;
   });
 
-  test("allows anonymous LAN access only when configured", async () => {
+  test("allows anonymous LAN access only when nothing is published", async () => {
     await expect(ensurePosAccess(requestHeaders({ host: "lan.local" }))).resolves.toMatchObject({
       ok: true,
       user: null,
@@ -75,13 +89,14 @@ describe("POS access policy", () => {
     expect(ensureAuthenticatedSessionMock).not.toHaveBeenCalled();
   });
 
-  test("requires existing credentials for LAN policy and remote access", async () => {
+  test("requires credentials for LAN policy, public hostnames and unknown hosts", async () => {
     ensureAuthenticatedSessionMock.mockResolvedValue({
       ok: true,
       user: { id: "admin-1", username: "admin", role: "ADMIN" },
     });
     getRemoteAccessSettingsViewMock.mockResolvedValue({
       posEnabled: false,
+      adminEnabled: false,
       posLanAuthenticationEnabled: true,
     });
     await expect(ensurePosAccess(requestHeaders({ host: "lan.local" }))).resolves.toMatchObject({
@@ -91,11 +106,18 @@ describe("POS access policy", () => {
 
     process.env.REMOTE_POS_HOSTNAME = "pos.example.com";
     process.env.REMOTE_POS_MARKER_SECRET = "marker-secret";
+    process.env.POS_LAN_HOSTNAMES = "pos.lan";
     getRemoteAccessSettingsViewMock.mockResolvedValue({
       posEnabled: true,
+      adminEnabled: true,
       posLanAuthenticationEnabled: false,
     });
     await expect(ensurePosAccess(requestHeaders({ host: "pos.example.com" }))).resolves.toMatchObject({
+      ok: true,
+      authenticationRequired: true,
+    });
+    // Regression: the admin hostname reaches the same container as the POS.
+    await expect(ensurePosAccess(requestHeaders({ host: "admin.example.com" }))).resolves.toMatchObject({
       ok: true,
       authenticationRequired: true,
     });

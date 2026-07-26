@@ -40,7 +40,7 @@ const authConfig = {
                 if (!user) {
                     const allowDevCredentials =
                         process.env.NODE_ENV !== "production" &&
-                        process.env.AUTH_ALLOW_DEV_CREDENTIALS !== "false";
+                        process.env.AUTH_ALLOW_DEV_CREDENTIALS === "true";
 
                     if (allowDevCredentials && username === "admin" && password === "admin") {
                         return {
@@ -68,6 +68,12 @@ const authConfig = {
     ],
     pages: {
         signIn: "/login"
+    },
+    // Shared POS/backoffice devices: a stolen cookie must not stay valid for weeks.
+    session: {
+        strategy: "jwt",
+        maxAge: 60 * 60 * 12,
+        updateAge: 60 * 60
     },
     callbacks: {
         async jwt({ token, user }) {
