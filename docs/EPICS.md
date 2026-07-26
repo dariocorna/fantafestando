@@ -313,3 +313,18 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
 - Neutralizzazione di IP, hostname e riferimenti macchina-specifici nel tree corrente.
 - Audit della cronologia Git e dei metadati GitHub prima del cambio di visibilità.
 - Hardening applicativo e infrastrutturale rinviato a issue dedicate.
+
+---
+
+## 🔄 Epica 32: Accesso remoto selettivo e autenticazione POS
+
+- Gestione da Admin dei tunnel inversi per Menu, Admin, POS e SSH, con stato
+  richiesto/applicato e avvisi di sicurezza.
+- Controller del sidecar Docker che applica dinamicamente solo i forward
+  abilitati.
+- Autenticazione POS opzionale in LAN e obbligatoria tramite proxy remoto,
+  riutilizzando le credenziali del pannello Admin.
+- Configurazione documentata per listener Oracle in loopback, Caddy e accesso
+  SSH tramite `ProxyJump`.
+
+**Test E2E**: `e2e/remote_access.spec.ts`.
