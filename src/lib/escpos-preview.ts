@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import sharp, { type OverlayOptions } from "sharp";
 
 type AlignMode = "left" | "center" | "right";
 
@@ -219,7 +219,7 @@ export async function renderEscPosRawToPng(raw: Buffer): Promise<Buffer> {
 
     let y = padY;
     const textChunks: string[] = [];
-    const composites: sharp.OverlayOptions[] = [];
+    const composites: OverlayOptions[] = [];
 
     for (const block of blocks) {
         if (block.kind === "text") {
