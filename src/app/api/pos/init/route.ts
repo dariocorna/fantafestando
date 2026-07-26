@@ -18,7 +18,7 @@ import {
     normalizeProductKind,
     productRequiresMenuConfiguration,
 } from "@/lib/fixed-menu";
-import { ensureAuthenticatedSession } from "@/lib/authz";
+import { ensurePosAccess } from "@/lib/pos-access";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     try {
         const channel = request.nextUrl.searchParams.get("channel") === "pos" ? "pos" : "menu";
         if (channel === "pos") {
-            const sessionCheck = await ensureAuthenticatedSession();
+            const sessionCheck = await ensurePosAccess(request.headers);
             if (!sessionCheck.ok) {
                 return NextResponse.json({ error: sessionCheck.error }, { status: sessionCheck.status });
             }

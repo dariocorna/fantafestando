@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Calendar, DatabaseBackup, Home, Printer, Settings, Smartphone } from "lucide-react";
+import { Calendar, DatabaseBackup, Home, Network, Printer, Settings, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card";
 import { getAdminContextEvent } from "@/lib/events";
@@ -125,6 +125,20 @@ export default async function AdminSettings() {
                 <div>
                   <CardTitle className="text-lg">Backup e Ripristino</CardTitle>
                   <CardDescription>Policy periodica, destinazioni USB, download manuale e restore.</CardDescription>
+                </div>
+              </CardHeader>
+            </Card>
+          </Link>
+
+          <Link href="/admin/settings/remote-access">
+            <Card className="h-full border-2 border-transparent shadow-md transition-all hover:border-primary/20 hover:bg-slate-50 dark:hover:bg-slate-900">
+              <CardHeader className="flex flex-row items-center gap-4">
+                <div className="rounded-full bg-cyan-100 p-3 text-cyan-700">
+                  <Network className="h-6 w-6" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Accesso remoto</CardTitle>
+                  <CardDescription>Gestisci proxy Menu, Admin, POS, SSH e login POS in LAN.</CardDescription>
                 </div>
               </CardHeader>
             </Card>

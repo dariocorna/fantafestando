@@ -16,8 +16,7 @@ function isAdminPath(pathname: string): boolean {
 }
 
 function isAuthenticatedStaffPath(pathname: string): boolean {
-    return pathname === '/pos' || pathname.startsWith('/pos/')
-        || pathname === '/pizza-console' || pathname.startsWith('/pizza-console/');
+    return pathname === '/pizza-console' || pathname.startsWith('/pizza-console/');
 }
 
 export const proxy = auth((request) => {
