@@ -43,7 +43,10 @@ export function buildSshArgs(remoteSpecs, env = process.env) {
     "-o", "ExitOnForwardFailure=yes",
     "-o", `ServerAliveInterval=${env.ORACLE_TUNNEL_SERVER_ALIVE_INTERVAL || "30"}`,
     "-o", `ServerAliveCountMax=${env.ORACLE_TUNNEL_SERVER_ALIVE_COUNT_MAX || "3"}`,
-    "-o", `StrictHostKeyChecking=${env.ORACLE_TUNNEL_STRICT_HOST_KEY_CHECKING || "accept-new"}`,
+    // Pin the server: the container has no persistent known_hosts, so
+    // "accept-new" would silently re-trust a new key on every restart.
+    "-o", `StrictHostKeyChecking=${env.ORACLE_TUNNEL_STRICT_HOST_KEY_CHECKING || "yes"}`,
+    "-o", `UserKnownHostsFile=${env.ORACLE_TUNNEL_KNOWN_HOSTS_PATH || "/run/oracle-tunnel/known_hosts"}`,
   ];
   if (env.ORACLE_TUNNEL_KEY_PATH) args.push("-i", env.ORACLE_TUNNEL_KEY_PATH);
   for (const spec of remoteSpecs) args.push("-R", spec);

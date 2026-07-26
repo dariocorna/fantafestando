@@ -285,7 +285,7 @@ async function runTarArchive(bundleRootDir: string, bundleDirName: string, outpu
 }
 
 async function extractTarArchive(bundleFilePath: string, outputDir: string) {
-  const child = spawn("tar", ["-xzf", bundleFilePath, "-C", outputDir], {
+  const child = spawn("tar", ["-xzf", bundleFilePath, "-C", outputDir, "--no-same-owner", "--no-same-permissions"], {
     stdio: ["ignore", "pipe", "pipe"],
   });
 

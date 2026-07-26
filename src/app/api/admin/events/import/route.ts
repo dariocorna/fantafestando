@@ -13,6 +13,8 @@ import { importEventTransferBundle } from "@/lib/event-transfer";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const MAX_BUNDLE_UPLOAD_BYTES = Number(process.env.MAX_BUNDLE_UPLOAD_MB || 512) * 1024 * 1024;
+
 type UploadLike = Blob & {
   name?: string;
 };
@@ -49,6 +51,12 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { ok: false, error: "Seleziona un file export festa valido." },
         { status: 400 }
+      );
+    }
+    if (bundleFile.size > MAX_BUNDLE_UPLOAD_BYTES) {
+      return NextResponse.json(
+        { ok: false, error: "File export troppo grande." },
+        { status: 413 }
       );
     }
 

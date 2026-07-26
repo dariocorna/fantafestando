@@ -13,6 +13,8 @@ import { getBackupSettingsView, restoreRuntimeBackupBundle } from "@/lib/runtime
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const MAX_BUNDLE_UPLOAD_BYTES = Number(process.env.MAX_BUNDLE_UPLOAD_MB || 512) * 1024 * 1024;
+
 type UploadLike = Blob & {
   name?: string;
 };
@@ -57,6 +59,16 @@ export async function POST(request: Request) {
           settings: await getBackupSettingsView(),
         },
         { status: 400 }
+      );
+    }
+    if (bundleFile.size > MAX_BUNDLE_UPLOAD_BYTES) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "File backup troppo grande.",
+          settings: await getBackupSettingsView(),
+        },
+        { status: 413 }
       );
     }
 
