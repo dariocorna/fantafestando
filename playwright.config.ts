@@ -17,6 +17,9 @@ const webServerEnv = {
     PRINTER_EMULATOR_OUTPUT_DIR: emulatorOutputDir,
     BACKUP_TARGETS_ROOT: backupTargetsRoot,
     BACKUP_SCHEDULER_POLL_SECONDS: process.env.BACKUP_SCHEDULER_POLL_SECONDS ?? "60",
+    ORACLE_TUNNEL_CONTROL_TOKEN: process.env.ORACLE_TUNNEL_CONTROL_TOKEN ?? "e2e-tunnel-control-token",
+    REMOTE_POS_HOSTNAME: process.env.REMOTE_POS_HOSTNAME ?? "pos.remote.test",
+    REMOTE_POS_MARKER_SECRET: process.env.REMOTE_POS_MARKER_SECRET ?? "e2e-pos-remote-marker",
 };
 
 export default defineConfig({
@@ -55,6 +58,9 @@ export default defineConfig({
                 `PRINTER_EMULATOR_OUTPUT_DIR=${webServerEnv.PRINTER_EMULATOR_OUTPUT_DIR}`,
                 `BACKUP_TARGETS_ROOT=${webServerEnv.BACKUP_TARGETS_ROOT}`,
                 `BACKUP_SCHEDULER_POLL_SECONDS=${webServerEnv.BACKUP_SCHEDULER_POLL_SECONDS}`,
+                `ORACLE_TUNNEL_CONTROL_TOKEN=${webServerEnv.ORACLE_TUNNEL_CONTROL_TOKEN}`,
+                `REMOTE_POS_HOSTNAME=${webServerEnv.REMOTE_POS_HOSTNAME}`,
+                `REMOTE_POS_MARKER_SECRET=${webServerEnv.REMOTE_POS_MARKER_SECRET}`,
                 `npx next dev --webpack --port ${playwrightPort}`
             ].join(" "),
             url: baseURL,
