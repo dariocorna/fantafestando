@@ -1,7 +1,12 @@
 "use server";
 
+import { headers } from "next/headers";
 import { AuthError } from "next-auth";
 import { signIn } from "@/auth";
+import { consumeRateLimit, isRateLimited, resolveClientKey } from "@/lib/rate-limit";
+
+const LOGIN_ATTEMPT_LIMIT = 10;
+const LOGIN_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 
 export interface LoginActionState {
     error: string | null;
@@ -31,6 +36,18 @@ export async function loginAction(
         return { error: "Inserisci username e password." };
     }
 
+    // Only failed attempts are counted, so legitimate staff logins never lock out.
+    const clientKey = resolveClientKey(await headers());
+    const rateLimitKeys = [`login:ip:${clientKey}`, `login:user:${username.toLowerCase()}`];
+    for (const key of rateLimitKeys) {
+        const { allowed, retryAfterSeconds } = isRateLimited(key, LOGIN_ATTEMPT_LIMIT);
+        if (!allowed) {
+            return {
+                error: `Troppi tentativi di accesso falliti. Riprova tra ${Math.ceil(retryAfterSeconds / 60)} minuti.`
+            };
+        }
+    }
+
     try {
         await signIn("credentials", {
             username,
@@ -41,6 +58,9 @@ export async function loginAction(
     } catch (error) {
         if (error instanceof AuthError) {
             if (error.type === "CredentialsSignin") {
+                rateLimitKeys.forEach((key) =>
+                    consumeRateLimit(key, LOGIN_ATTEMPT_LIMIT, LOGIN_ATTEMPT_WINDOW_MS)
+                );
                 return { error: "Credenziali non valide." };
             }
 

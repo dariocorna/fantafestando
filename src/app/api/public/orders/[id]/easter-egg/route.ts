@@ -3,6 +3,7 @@ import dbConnect from "@/lib/mongoose";
 import Order from "@/models/Order";
 import { hashEasterEggUploadToken } from "@/lib/easter-egg-order";
 import { parseThermalRasterFormData } from "@/lib/easter-egg-raster-upload";
+import { consumeRateLimit, resolveClientKey } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,15 @@ export async function POST(
         const { id } = await context.params;
         if (!id) {
             return NextResponse.json({ error: "Ordine non valido" }, { status: 400 });
+        }
+
+        const { allowed } = consumeRateLimit(
+            `easter-egg-upload:${resolveClientKey(request.headers)}`,
+            30,
+            10 * 60 * 1000
+        );
+        if (!allowed) {
+            return NextResponse.json({ error: "Troppe richieste" }, { status: 429 });
         }
 
         const formData = await request.formData();

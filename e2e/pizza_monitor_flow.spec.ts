@@ -88,12 +88,15 @@ async function createWebOrderAndGetOrderData(
     const currentUrl = new URL(page.url());
     const code = currentUrl.searchParams.get("code");
     const orderId = currentUrl.searchParams.get("orderId");
+    const accessToken = currentUrl.searchParams.get("token");
     expect(code).toBeTruthy();
     expect(orderId).toBeTruthy();
+    expect(accessToken).toBeTruthy();
 
     return {
         code: code as string,
-        orderId: orderId as string
+        orderId: orderId as string,
+        accessToken: accessToken as string
     };
 }
 
@@ -145,12 +148,12 @@ test.describe.serial("Pizza monitor flow", () => {
             price: "3.00"
         });
 
-        const { code, orderId } = await createWebOrderAndGetOrderData(page, [
+        const { code, orderId, accessToken } = await createWebOrderAndGetOrderData(page, [
             { name: pizzaProductName, quantity: 1 },
             { name: drinkProductName, quantity: 1 }
         ]);
 
-        const summaryResponse = await page.request.get(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(code)}`);
+        const summaryResponse = await page.request.get(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(accessToken)}`);
         expect(summaryResponse.ok()).toBe(true);
         const summaryPayload = await summaryResponse.json() as { summary?: { pizzaNumber?: number } };
         const pizzaNumber = summaryPayload.summary?.pizzaNumber;
@@ -245,11 +248,11 @@ test.describe.serial("Pizza monitor flow", () => {
             price: "8.00"
         });
 
-        const { code, orderId } = await createWebOrderAndGetOrderData(page, [
+        const { code, orderId, accessToken } = await createWebOrderAndGetOrderData(page, [
             { name: pizzaProductName, quantity: 1 }
         ]);
 
-        const summaryResponse = await page.request.get(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(code)}`);
+        const summaryResponse = await page.request.get(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(accessToken)}`);
         expect(summaryResponse.ok()).toBe(true);
         const summaryPayload = await summaryResponse.json() as { summary?: { pizzaNumber?: number } };
         const pizzaNumber = summaryPayload.summary?.pizzaNumber;
@@ -317,11 +320,11 @@ test.describe.serial("Pizza monitor flow", () => {
             price: "8.00"
         });
 
-        const { code, orderId } = await createWebOrderAndGetOrderData(page, [
+        const { code, orderId, accessToken } = await createWebOrderAndGetOrderData(page, [
             { name: pizzaProductName, quantity: 1 }
         ]);
 
-        const summaryResponse = await page.request.get(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(code)}`);
+        const summaryResponse = await page.request.get(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(accessToken)}`);
         expect(summaryResponse.ok()).toBe(true);
         const summaryPayload = await summaryResponse.json() as { summary?: { pizzaNumber?: number } };
         const pizzaNumber = summaryPayload.summary?.pizzaNumber;

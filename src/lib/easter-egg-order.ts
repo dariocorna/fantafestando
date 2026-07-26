@@ -1,20 +1,10 @@
-import { createHash, randomBytes } from "node:crypto";
+import {
+    createOrderAccessToken,
+    hashOrderAccessToken,
+    type OrderAccessTokenPair,
+} from "./order-access-token";
 
-export interface EasterEggUploadTokenPair {
-    token: string;
-    hash: string;
-}
+export type EasterEggUploadTokenPair = OrderAccessTokenPair;
 
-export function hashEasterEggUploadToken(token: string): string {
-    return createHash("sha256")
-        .update(token.trim())
-        .digest("hex");
-}
-
-export function createEasterEggUploadToken(): EasterEggUploadTokenPair {
-    const token = randomBytes(24).toString("base64url");
-    return {
-        token,
-        hash: hashEasterEggUploadToken(token)
-    };
-}
+export const hashEasterEggUploadToken = hashOrderAccessToken;
+export const createEasterEggUploadToken = createOrderAccessToken;

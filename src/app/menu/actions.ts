@@ -1,5 +1,6 @@
 "use server"
 
+import { headers } from "next/headers"
 import dbConnect from "@/lib/mongoose"
 import Order from "@/models/Order"
 import Product from "@/models/Product"
@@ -9,6 +10,8 @@ import { revalidatePath } from "next/cache"
 import { getNextPublicOrderNumber, getOrderCodeFromOrder } from "@/lib/order-code"
 import { getCurrentDayCode, isProductAvailableToday } from "@/lib/product-availability"
 import { createEasterEggUploadToken } from "@/lib/easter-egg-order"
+import { createOrderAccessToken } from "@/lib/order-access-token"
+import { consumeRateLimit, resolveClientKey } from "@/lib/rate-limit"
 import { buildPublicOrderSummary } from "@/lib/public-order-summary"
 import { type StockShortage } from "@/lib/inventory"
 import { resolvePizzaTicketForCart } from "@/lib/pizza-ticket"
@@ -124,6 +127,12 @@ export async function createPublicOrder(data: {
     try {
         if (!data.eventId || data.cart.length === 0) {
             return { success: false, error: "Carrello non valido" }
+        }
+
+        const clientKey = resolveClientKey(await headers())
+        const { allowed } = consumeRateLimit(`public-order:${clientKey}`, 20, 10 * 60 * 1000)
+        if (!allowed) {
+            return { success: false, error: "Troppi ordini inviati. Attendi qualche minuto e riprova." }
         }
 
         const hasInvalidItem = data.cart.some((item) =>
@@ -331,6 +340,7 @@ export async function createPublicOrder(data: {
         }
 
         const pickupNumber = await getNextPublicOrderNumber(data.eventId)
+        const publicAccess = createOrderAccessToken()
         const easterEggUpload = event.settings?.portalEasterEggEnabled
             ? createEasterEggUploadToken()
             : null
@@ -358,6 +368,7 @@ export async function createPublicOrder(data: {
             cart: normalizedCart,
             ingredientPlan,
             pizzaTicket,
+            publicAccessTokenHash: publicAccess.hash,
             easterEggAttachment: easterEggUpload
                 ? {
                     uploadTokenHash: easterEggUpload.hash
@@ -372,6 +383,7 @@ export async function createPublicOrder(data: {
             success: true,
             orderId: order._id.toString(),
             shortCode: shortCode,
+            accessToken: publicAccess.token,
             orderSummary: buildPublicOrderSummary({
                 _id: order._id,
                 pickupNumber: order.pickupNumber,
