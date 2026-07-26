@@ -3,7 +3,9 @@ services:
     image: mongo:latest
     restart: unless-stopped
     ports:
-      - "27017:27017"
+      # Loopback only: these are throwaway dev credentials and the host also
+      # runs the production stack on the same LAN.
+      - "127.0.0.1:27017:27017"
     environment:
       - MONGO_INITDB_ROOT_USERNAME=root
       - MONGO_INITDB_ROOT_PASSWORD=password
@@ -26,7 +28,7 @@ services:
       - ./:/app:ro
       - printer_emulator_data:/data/printer-emulator
     ports:
-      - "19100-19109:19100-19109"
+      - "127.0.0.1:19100-19109:19100-19109"
     networks:
       - fantafestando_dev_net
 
