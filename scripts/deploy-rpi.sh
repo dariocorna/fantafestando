@@ -214,6 +214,29 @@ fi
 echo "[deploy-rpi] Ensuring remote path exists..."
 ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "sudo mkdir -p '${REMOTE_PATH}' && sudo chown -R '${REMOTE_LOGIN_USER}:${REMOTE_LOGIN_USER}' '${REMOTE_PATH}'"
 
+# The tunnel verifies the Oracle host key and rsync never ships .secrets/, so a
+# missing known_hosts on the target only shows up as a dead public menu.
+if profile_enabled "oracle-tunnel"; then
+  tunnel_ssh_dir="$(grep -E '^ORACLE_TUNNEL_SSH_DIR_HOST=' "${LOCAL_ENV_FILE}" | cut -d= -f2- || true)"
+  tunnel_ssh_dir="${tunnel_ssh_dir:-.docker/oracle-menu-tunnel}"
+  known_hosts_name="$(grep -E '^ORACLE_TUNNEL_KNOWN_HOSTS_FILENAME=' "${LOCAL_ENV_FILE}" | cut -d= -f2- || true)"
+  known_hosts_name="${known_hosts_name:-known_hosts}"
+  case "${tunnel_ssh_dir}" in
+    /*) remote_known_hosts="${tunnel_ssh_dir}/${known_hosts_name}" ;;
+    *) remote_known_hosts="${REMOTE_PATH}/${tunnel_ssh_dir}/${known_hosts_name}" ;;
+  esac
+
+  echo "[deploy-rpi] Checking the tunnel host key at ${remote_known_hosts}..."
+  if ! ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "sudo test -s '${remote_known_hosts}'"; then
+    oracle_host="$(grep -E '^ORACLE_TUNNEL_HOST=' "${LOCAL_ENV_FILE}" | cut -d= -f2- || true)"
+    echo "[deploy-rpi] Missing ${remote_known_hosts} on the target." >&2
+    echo "[deploy-rpi] The tunnel will not start. Create it there with:" >&2
+    echo "[deploy-rpi]   ssh-keyscan -H ${oracle_host:-<oracle-vm-host>} | sudo tee ${remote_known_hosts} >/dev/null" >&2
+    echo "[deploy-rpi]   sudo chmod 600 ${remote_known_hosts}" >&2
+    exit 1
+  fi
+fi
+
 if [[ "${SKIP_RSYNC}" == "false" ]]; then
   echo "[deploy-rpi] Syncing project to ${SSH_TARGET}:${REMOTE_PATH}..."
   rsync -rlz --delete     -e "ssh ${SSH_OPTS[*]}"     --exclude '.git'     --exclude '/node_modules'     --exclude '/public/uploads/'     --exclude '.next/cache'     --exclude '.next/dev'     --exclude 'playwright-report'     --exclude 'test-results'     --exclude '.env*'     --exclude '/.secrets/'     --exclude '/.docker/oracle-menu-tunnel/'     --exclude '/backups/'     ./ "${SSH_TARGET}:${REMOTE_PATH}/"
