@@ -206,7 +206,7 @@ Installa **solo la chiave pubblica** sulla VM Oracle con restrizioni per il tunn
 ```bash
 PUBKEY=$(cat .secrets/oracle-menu-tunnel/id_ed25519.pub)
 sudo tee /home/oracle-menu-tunnel/.ssh/authorized_keys >/dev/null <<EOF
-restrict,port-forwarding,permitlisten="127.0.0.1:3302",no-agent-forwarding,no-pty,no-user-rc,no-X11-forwarding ${PUBKEY}
+restrict,port-forwarding,permitlisten="127.0.0.1:3302",permitlisten="127.0.0.1:3304",permitlisten="127.0.0.1:3305",permitlisten="127.0.0.1:3322",no-agent-forwarding,no-pty,no-user-rc,no-X11-forwarding ${PUBKEY}
 EOF
 sudo chmod 600 /home/oracle-menu-tunnel/.ssh/authorized_keys
 sudo chown oracle-menu-tunnel:oracle-menu-tunnel /home/oracle-menu-tunnel/.ssh/authorized_keys
@@ -232,10 +232,66 @@ sudo systemctl reload ssh
 Con questa impostazione:
 
 - l'utente non viene usato per shell amministrativa
-- la chiave puo' aprire solo il listener `127.0.0.1:3302` sulla VM Oracle
+- la chiave puo' aprire solo i listener loopback `3302` (Menu), `3304` (Admin),
+  `3305` (POS) e `3322` (SSH board) sulla VM Oracle
 - il sidecar non eredita accesso root o privilegi di deploy
 
-#### 5.1.1.2 Pagina pubblica di fallback quando il tunnel e' assente
+#### 5.1.1.2 Accesso remoto selettivo
+
+La pagina `/admin/settings/remote-access` controlla in modo indipendente i
+forward Menu, Admin, POS e SSH. Il controller del sidecar legge soltanto questi
+quattro booleani da un endpoint interno autenticato; host e porte non sono
+modificabili dalla UI.
+
+Configurazione runtime aggiuntiva:
+
+```dotenv
+ORACLE_TUNNEL_ADMIN_REMOTE_PORT=3304
+ORACLE_TUNNEL_POS_REMOTE_PORT=3305
+ORACLE_TUNNEL_SSH_REMOTE_PORT=3322
+ORACLE_TUNNEL_SSH_LOCAL_HOST=host.docker.internal
+ORACLE_TUNNEL_SSH_LOCAL_PORT=22
+ORACLE_TUNNEL_CONTROL_TOKEN=<token-casuale-lungo>
+REMOTE_POS_HOSTNAME=pos.example.com
+REMOTE_POS_MARKER_SECRET=<secondo-token-casuale-lungo>
+```
+
+Admin e POS devono usare hostname distinti diretti alla stessa VM Oracle. Caddy
+mantiene i listener del tunnel sulla loopback e sovrascrive il marker POS:
+
+```caddy
+admin.example.com {
+    reverse_proxy 127.0.0.1:3304
+}
+
+pos.example.com {
+    reverse_proxy 127.0.0.1:3305 {
+        header_up -X-FantaFestando-Remote-Pos
+        header_up X-FantaFestando-Remote-Pos "<REMOTE_POS_MARKER_SECRET>"
+    }
+}
+```
+
+Il login Admin resta sempre obbligatorio. Il login POS e' configurabile per la
+LAN, ma viene sempre richiesto quando hostname o marker identificano il proxy
+pubblico.
+
+Accesso SSH client:
+
+```sshconfig
+Host fantafestando-remote
+    HostName 127.0.0.1
+    Port 3322
+    User fantafestando
+    IdentityFile ~/.ssh/id_ed25519
+    ProxyJump oracle
+    HostKeyAlias fantafestando-board
+```
+
+La porta `3322` non deve essere aperta nel firewall Oracle: il client la
+raggiunge dalla sessione SSH sulla VM tramite `ProxyJump`.
+
+#### 5.1.1.3 Pagina pubblica di fallback quando il tunnel e' assente
 
 Se il dominio del menu e' pubblico, conviene evitare un `502` quando il tunnel non e'
 attivo. Lo scenario piu' robusto e' questo:
@@ -308,18 +364,9 @@ cp <percorso-chiave-dedicata>/id_ed25519 .secrets/oracle-menu-tunnel/id_ed25519
 chmod 600 .secrets/oracle-menu-tunnel/id_ed25519
 ```
 
-Esempio env:
-
-```bash
-ORACLE_TUNNEL_HOST=<oracle-vm-host>
-ORACLE_TUNNEL_USER=oracle-menu-tunnel
-ORACLE_TUNNEL_SSH_DIR_HOST=/opt/fantafestando/.secrets/oracle-menu-tunnel
-ORACLE_TUNNEL_KEY_FILENAME=id_ed25519
-ORACLE_TUNNEL_REMOTE_BIND_ADDRESS=127.0.0.1
-ORACLE_TUNNEL_REMOTE_PORT=3302
-ORACLE_TUNNEL_LOCAL_HOST=fantafestando-menu
-ORACLE_TUNNEL_LOCAL_PORT=3000
-```
+Configura le variabili del tunnel e i due token come indicato nella sezione
+precedente, lasciando disattivati in admin gli endpoint che non devono essere
+raggiungibili da remoto.
 
 Avvio stack con sidecar tunnel:
 
@@ -347,10 +394,13 @@ curl -I https://menu.example.com/api/health
 Note operative:
 
 - questa variante non richiede `systemd` per il tunnel sul Docker host remoto
-- il servizio `oracle-menu-tunnel` riutilizza `scripts/oracle-menu-reverse-tunnel.sh`
+- il servizio `oracle-menu-tunnel` esegue il controller
+  `scripts/oracle-tunnel-controller.mjs`, che applica solo i forward abilitati
+  dalla pagina admin
 - la chiave privata resta fuori dall'immagine Docker e viene montata in sola lettura
 - se il profilo `oracle-tunnel` non e' attivo, il sidecar non parte
-- il tunnel effettivo usa `ssh -N -R 127.0.0.1:3302:fantafestando-menu:3000`
+- ogni modifica riavvia una singola sessione `ssh -N` con l'insieme aggiornato
+  dei forward
 
 ### 5.2 Alternativa legacy/manuale: Apache
 
