@@ -2105,6 +2105,17 @@ export class PrinterService {
                 isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual),
                 copies: job.copies || 1
             });
+            await this.updatePrintJobLog(job._id.toString(), dispatchResult.success
+                ? {
+                    status: "SENT",
+                    rawCapturePath: dispatchResult.rawCapturePath,
+                    automaticRetryCount: dispatchResult.automaticRetryCount
+                }
+                : {
+                    status: "FAILED",
+                    errorMessage: dispatchResult.errorMessage,
+                    automaticRetryCount: dispatchResult.automaticRetryCount
+                });
             return dispatchResult.success
                 ? { success: true } as const
                 : { success: false, error: "Invio stampa fallito" } as const;

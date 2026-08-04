@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { Binary } from "bson";
 import { getThermalContentWidth } from "@/lib/easter-egg-config";
 
-const { dbConnectMock, printJobFindOneMock, orderFindOneMock } = vi.hoisted(() => ({
+const { dbConnectMock, printJobFindOneMock, printJobUpdateOneMock, orderFindOneMock } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     printJobFindOneMock: vi.fn(),
+    printJobUpdateOneMock: vi.fn(),
     orderFindOneMock: vi.fn()
 }));
 
@@ -14,7 +15,8 @@ vi.mock("@/lib/mongoose", () => ({
 
 vi.mock("@/models/PrintJob", () => ({
     default: {
-        findOne: printJobFindOneMock
+        findOne: printJobFindOneMock,
+        updateOne: printJobUpdateOneMock
     }
 }));
 
@@ -77,7 +79,11 @@ describe("PrinterService.retryPrintJobById", () => {
         const dispatchSpy = vi.spyOn(
             PrinterService as unknown as { dispatchPrintDocumentWithAutomaticRetry: (params: unknown) => Promise<unknown> },
             "dispatchPrintDocumentWithAutomaticRetry"
-        ).mockResolvedValue({ success: true, automaticRetryCount: 0 });
+        ).mockResolvedValue({
+            success: true,
+            rawCapturePath: "/tmp/receipt.raw",
+            automaticRetryCount: 1
+        });
 
         const result = await PrinterService.retryPrintJobById("evt-1", "job-1");
         expect(result).toEqual({ success: true });
@@ -88,6 +94,17 @@ describe("PrinterService.retryPrintJobById", () => {
                 items: [expect.objectContaining({ name: "Panino", qty: 2, lineTotal: 10 })]
             })
         }));
+        expect(printJobUpdateOneMock).toHaveBeenCalledWith(
+            { _id: "job-1" },
+            {
+                $set: {
+                    status: "SENT",
+                    errorMessage: undefined,
+                    rawCapturePath: "/tmp/receipt.raw",
+                    automaticRetryCount: 1
+                }
+            }
+        );
     });
 
     test("retries a failed order print and returns success", async () => {
