@@ -1,3 +1,8 @@
+import {
+    buildProductSalesExportRows,
+    type ProductSalesBreakdownResult
+} from "./product-consumption"
+
 export type DashboardPaymentMethod = "CASH" | "CARD" | "OTHER"
 
 export interface DashboardOrderItemInput {
@@ -64,6 +69,7 @@ export interface ComputeDashboardStatsOptions {
 export interface DashboardExportOptions {
     eventName: string
     timezone?: string
+    salesBreakdown?: ProductSalesBreakdownResult
 }
 
 const DEFAULT_LIMIT = 5
@@ -374,6 +380,13 @@ function buildDashboardExport(
         })
     }
     rows.push("")
+
+    if (exportOptions.salesBreakdown) {
+        buildProductSalesExportRows(exportOptions.salesBreakdown).forEach((row) => {
+            rows.push(serializeRow(row, delimiter))
+        })
+        rows.push("")
+    }
 
     rows.push("Ordini saldati")
     rows.push(serializeRow(["ID Ordine", "Data", "Pagamento", "Importo", "Articoli"], delimiter))

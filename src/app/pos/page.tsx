@@ -696,15 +696,18 @@ export default function PosPage() {
     const totalDiscountApplied = isVolunteerMode ? 0 : Number(Math.min(subtotal, totalDiscountRequested).toFixed(2))
     const effectiveTotal = Number(Math.max(0, subtotal - totalDiscountApplied).toFixed(2))
     const volunteerDiscountApplied = Number(Math.max(0, standardSubtotal - subtotal).toFixed(2))
-    const discountLabels = discountCartItems
-        .map((item) => item.discountPreset?.label?.trim())
-        .filter((label): label is string => Boolean(label))
-    const orderDiscountPayload = totalDiscountApplied > 0
-        ? {
-            type: "FIXED" as const,
-            value: totalDiscountApplied,
-            label: discountLabels.length > 0 ? `Sconti: ${discountLabels.join(", ")}` : "Sconti carrello"
-        }
+    const orderDiscountsPayload = totalDiscountApplied > 0
+        ? discountCartItems.flatMap((item) => {
+            if (item.discountPreset) {
+                return [{
+                    type: item.discountPreset.type,
+                    value: item.discountPreset.value,
+                    label: item.discountPreset.label
+                }]
+            }
+            const value = computeLiveDiscountAmount(item)
+            return value > 0 ? [{ type: "FIXED" as const, value, label: item.name || "Sconto carrello" }] : []
+        })
         : undefined
     const discountBaseAmount = effectiveTotal
 
@@ -1425,7 +1428,7 @@ export default function PosPage() {
                     table: normalizedTableValue || undefined
                 },
                 totalAmount: effectiveTotal,
-                orderDiscount: orderDiscountPayload,
+                orderDiscounts: orderDiscountsPayload,
                 lineDiscounts: [],
                 pricingMode: isVolunteerMode ? "VOLUNTEER" : "STANDARD",
                 cart: cartPayload
@@ -1471,7 +1474,7 @@ export default function PosPage() {
                 table: normalizedTableValue || undefined
             },
             totalAmount: effectiveTotal,
-            orderDiscount: orderDiscountPayload,
+            orderDiscounts: orderDiscountsPayload,
             lineDiscounts: [],
             pricingMode: isVolunteerMode ? "VOLUNTEER" as const : "STANDARD" as const,
             cart: cartPayload,

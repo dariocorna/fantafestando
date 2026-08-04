@@ -1,3 +1,8 @@
+import {
+    buildProductSalesExportRows,
+    type ProductSalesBreakdownResult
+} from "./product-consumption"
+
 export type CashSessionPaymentMethod = "CASH" | "CARD" | "OTHER"
 
 export interface CashSessionOrderInput {
@@ -57,6 +62,7 @@ export interface CashSessionReportInput {
         quantityConsumed: number
         revenueAmount: number
     }>
+    salesBreakdown?: ProductSalesBreakdownResult
 }
 
 interface CashSessionReportBuildOptions {
@@ -235,6 +241,13 @@ function buildCashSessionExport(
         })
     }
     rows.push("")
+
+    if (report.salesBreakdown) {
+        buildProductSalesExportRows(report.salesBreakdown).forEach((row) => {
+            rows.push(serializeRow(row, delimiter))
+        })
+        rows.push("")
+    }
 
     rows.push("Ordini sessione")
     rows.push(serializeRow(["Data", "Codice ordine", "Ordine", "Pagamento", "Cliente", "Tavolo", "Sconto", "Totale netto"], delimiter))

@@ -96,10 +96,19 @@ export interface CashSessionClosingPrintSummary {
     paidOrdersCount: number;
     openingNotes?: string;
     closingNotes?: string;
+    grossSalesAmount?: number;
+    discountSalesAmount?: number;
+    discountSummaries?: Array<{
+        label: string;
+        amount: number;
+    }>;
     items?: Array<{
         name: string;
         qty: number;
         lineTotal?: number;
+        groupLabel?: string;
+        grossAmount?: number;
+        discountAmount?: number;
     }>;
 }
 
@@ -782,6 +791,56 @@ export class PrinterService {
         const cashierSpacerWidth = rowWidth - cashierDescriptionWidth - cashierQtyWidth - cashierPriceWidth;
         const cashierSpacer = " ".repeat(Math.max(1, cashierSpacerWidth));
 
+        if (document.printType === "CASH_SESSION_SUMMARY" && document.items.length > 0) {
+            const descriptionWidth = 26;
+            const qtyWidth = 4;
+            const netWidth = 9;
+            const spacer = " ";
+            let activeGroup: string | null = null;
+            let groupItems: PrintDocumentV2["items"] = [];
+            const printGroupTotals = () => {
+                if (groupItems.length === 0) return;
+                const gross = groupItems.reduce((sum, item) => sum + (item.grossAmount ?? item.lineTotal ?? 0), 0);
+                const discount = groupItems.reduce((sum, item) => sum + (item.discountAmount ?? 0), 0);
+                const net = groupItems.reduce((sum, item) => sum + (item.lineTotal ?? 0), 0);
+                printer.println(`${padRight("SUBT. LORDO", labelWidth)}${padLeft(formatAmountNoCurrency(gross), amountWidth)}`);
+                printer.println(`${padRight("SUBT. SCONTO", labelWidth)}${padLeft(formatAmountNoCurrency(discount), amountWidth)}`);
+                printer.println(`${padRight("SUBT. NETTO", labelWidth)}${padLeft(formatAmountNoCurrency(net), amountWidth)}`);
+                printer.println(RECEIPT_SEPARATOR);
+            };
+
+            printer.setTextNormal();
+            printer.setTypeFontB();
+            printer.println(
+                `${padRight("DESCRIZIONE", descriptionWidth)}${spacer}${padLeft("Q.TA", qtyWidth)}${padLeft("NETTO", netWidth)}`
+            );
+            printer.println(RECEIPT_SEPARATOR);
+
+            document.items.forEach((item) => {
+                const groupLabel = item.groupLabel || "DETTAGLIO VENDUTO";
+                if (activeGroup !== groupLabel) {
+                    printGroupTotals();
+                    activeGroup = groupLabel;
+                    groupItems = [];
+                    printer.bold(true);
+                    splitByLength(groupLabel.toUpperCase(), rowWidth).forEach((line) => printer.println(line));
+                    printer.bold(false);
+                }
+                groupItems.push(item);
+                splitByLength(item.name, descriptionWidth).forEach((line, index) => {
+                    printer.println(
+                        `${padRight(line, descriptionWidth)}${spacer}`
+                        + `${padLeft(index === 0 ? String(item.qty) : "", qtyWidth)}`
+                        + `${padLeft(index === 0 && Number.isFinite(item.lineTotal) ? formatAmountNoCurrency(item.lineTotal) : "", netWidth)}`
+                    );
+                });
+            });
+            printGroupTotals();
+            printer.setTypeFontA();
+            printer.setTextNormal();
+            return;
+        }
+
         if (document.items.length > 0) {
             printer.setTextNormal();
             if (document.printType === "CASHIER_SUMMARY") {
@@ -860,6 +919,25 @@ export class PrinterService {
                 printer.println(`${padRight("TOTALE", labelWidth)}${padLeft(totalRow.value, amountWidth)}`);
                 printer.println(RECEIPT_SEPARATOR);
             }
+            return;
+        }
+
+        if (document.printType === "CASH_SESSION_SUMMARY") {
+            printer.setTypeFontA();
+            printer.setTextNormal();
+            document.totals.forEach((row) => {
+                const strong = row.emphasis === "strong";
+                printer.bold(strong);
+                const label = `${row.label.toUpperCase()}:`;
+                const wrappedLabel = splitByLength(label, labelWidth);
+                wrappedLabel.forEach((line, index) => {
+                    printer.println(index === wrappedLabel.length - 1
+                        ? `${padRight(line, labelWidth)}${padLeft(row.value, amountWidth)}`
+                        : line);
+                });
+                printer.bold(false);
+            });
+            if (document.totals.length > 0) printer.println(RECEIPT_SEPARATOR);
             return;
         }
 
@@ -1885,6 +1963,9 @@ export class PrinterService {
             paidOrdersCount: summary.paidOrdersCount,
             openingNotes: summary.openingNotes,
             closingNotes: summary.closingNotes,
+            grossSalesAmount: summary.grossSalesAmount,
+            discountSalesAmount: summary.discountSalesAmount,
+            discountSummaries: summary.discountSummaries,
             items: summary.items,
             brandingLogoUrl: sanitizeReceiptHeaderLogoUrl(event?.settings?.receiptHeaderLogoUrl)
                 || sanitizePrintableHeaderLogoUrl(event?.settings?.menuHeaderLogoUrl)
@@ -2001,13 +2082,33 @@ export class PrinterService {
             return { success: false, error: "Job non trovato" } as const;
         }
 
-        if (job.printType === "CASH_SESSION_SUMMARY") {
-            return { success: false, error: "Reinvio non supportato per chiusure cassa" } as const;
-        }
-
         const document = (job.document && typeof job.document === "object")
             ? job.document as Record<string, unknown>
             : {};
+
+        if (job.printType === "CASH_SESSION_SUMMARY") {
+            const destination = resolvePrinterDestination({
+                ip: job.printerId?.ip || asString(job.destinationHost),
+                port: job.printerId?.port || job.destinationPort || DEFAULT_PRINTER_PORT,
+                isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual),
+                emulatorSlot: job.printerId?.emulatorSlot
+            });
+            if (!destination.host) {
+                return { success: false, error: "Destinazione stampante non disponibile" } as const;
+            }
+            const dispatchResult = await this.dispatchPrintDocumentWithAutomaticRetry({
+                destinationHost: destination.host,
+                destinationPort: destination.port,
+                destinationLabel: destination.label,
+                printType: "CASH_SESSION_SUMMARY",
+                document: normalizeLegacyPrintDocument(document),
+                isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual),
+                copies: job.copies || 1
+            });
+            return dispatchResult.success
+                ? { success: true } as const
+                : { success: false, error: "Invio stampa fallito" } as const;
+        }
 
         if (job.printType === "EASTER_EGG_IMAGE") {
             const orderAttachment = job.orderId

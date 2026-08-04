@@ -116,9 +116,17 @@ export function PrintDocumentViewer({
                     <div className="mt-1 space-y-1 text-xs text-slate-700">
                         {normalized.items.map((item, index) => (
                             <div key={`${item.name}-${index}`} className="rounded-md border bg-slate-50 p-2">
+                                {item.groupLabel ? <p className="text-[11px] font-semibold uppercase text-slate-500">{item.groupLabel}</p> : null}
                                 <p className="font-semibold">{item.qty}x {item.name}</p>
                                 {item.notes ? <p className="text-slate-600">Note: {item.notes}</p> : null}
-                                {typeof item.unitPrice === "number" || typeof item.lineTotal === "number" ? (
+                                {typeof item.grossAmount === "number" || typeof item.discountAmount === "number" ? (
+                                    <p className="text-slate-600">
+                                        Lordo: {item.grossAmount?.toFixed(2) ?? "-"} EUR · Sconto: {item.discountAmount?.toFixed(2) ?? "-"} EUR · Netto: {item.lineTotal?.toFixed(2) ?? "-"} EUR
+                                    </p>
+                                ) : null}
+                                {typeof item.grossAmount !== "number"
+                                    && typeof item.discountAmount !== "number"
+                                    && (typeof item.unitPrice === "number" || typeof item.lineTotal === "number") ? (
                                     <p className="text-slate-600">Prezzo: {item.unitPrice?.toFixed(2) ?? "-"} EUR · Totale: {item.lineTotal?.toFixed(2) ?? "-"} EUR</p>
                                 ) : null}
                             </div>
