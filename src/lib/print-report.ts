@@ -14,6 +14,9 @@ export interface PrintDocumentItemRow {
     notes?: string;
     unitPrice?: number;
     lineTotal?: number;
+    groupLabel?: string;
+    grossAmount?: number;
+    discountAmount?: number;
     selectedOptions?: PrintDocumentItemOption[];
 }
 
@@ -105,6 +108,12 @@ export interface BuildCashSessionPrintDocumentInput {
     brandingLogoUrl?: string;
     createdAt?: Date | string;
     items?: PrintDocumentItemRow[];
+    grossSalesAmount?: number;
+    discountSalesAmount?: number;
+    discountSummaries?: Array<{
+        label: string;
+        amount: number;
+    }>;
 }
 
 export interface PrintOrderJobPayload {
@@ -215,6 +224,9 @@ function normalizeItems(items: unknown): PrintDocumentItemRow[] {
             const notes = asTrimmedString(item.notes);
             const unitPrice = asNumber(item.unitPrice);
             const lineTotal = asNumber(item.lineTotal);
+            const groupLabel = asTrimmedString(item.groupLabel);
+            const grossAmount = asNumber(item.grossAmount);
+            const discountAmount = asNumber(item.discountAmount);
             const selectedOptions = Array.isArray(item.selectedOptions)
                 ? item.selectedOptions
                     .map((option: unknown) => {
@@ -237,6 +249,9 @@ function normalizeItems(items: unknown): PrintDocumentItemRow[] {
                 notes,
                 unitPrice,
                 lineTotal,
+                groupLabel,
+                grossAmount,
+                discountAmount,
                 selectedOptions
             } as PrintDocumentItemRow;
         });
@@ -413,13 +428,29 @@ export function buildCashSessionPrintDocumentV2(input: BuildCashSessionPrintDocu
     const posDeviceName = asTrimmedString(input.posDeviceName) || "-";
     const openedAt = formatDateTime(input.openedAt);
     const closedAt = formatDateTime(input.closedAt);
+    const netSalesAmount = input.cashSalesAmount + input.cardSalesAmount + input.otherSalesAmount;
+    const discountSalesAmount = Math.max(0, Number(input.discountSalesAmount) || 0);
+    const grossSalesAmount = Number.isFinite(input.grossSalesAmount)
+        ? Math.max(0, Number(input.grossSalesAmount))
+        : netSalesAmount + discountSalesAmount;
+    const discountRows = (input.discountSummaries || [])
+        .filter((summary) => summary.label.trim() && Number(summary.amount) > 0)
+        .map((summary): PrintDocumentTotalRow => ({
+            label: `SCONTO ${summary.label.trim().toUpperCase()}`,
+            value: formatEuro(-Math.abs(summary.amount))
+        }));
 
     const totals: PrintDocumentTotalRow[] = [
-        { label: "FONDO INIZIALE", value: formatEuro(input.openingFloatAmount) },
+        { label: "LORDO", value: formatEuro(grossSalesAmount) },
+        ...discountRows,
+        ...(discountRows.length === 0 && discountSalesAmount > 0
+            ? [{ label: "SCONTI", value: formatEuro(-discountSalesAmount) } as PrintDocumentTotalRow]
+            : []),
+        { label: "NETTO / INCASSI", value: formatEuro(netSalesAmount), emphasis: "strong" },
         { label: "INCASSO CONTANTI", value: formatEuro(input.cashSalesAmount) },
         { label: "INCASSO CARTA", value: formatEuro(input.cardSalesAmount) },
         { label: "INCASSO ALTRO", value: formatEuro(input.otherSalesAmount) },
-        { label: "TOTALE INCASSI", value: formatEuro(input.cashSalesAmount + input.cardSalesAmount + input.otherSalesAmount), emphasis: "strong" },
+        { label: "FONDO INIZIALE", value: formatEuro(input.openingFloatAmount) },
         { label: "CONTANTE ATTESO", value: formatEuro(input.expectedCashAmount), emphasis: "strong" },
         { label: "CONTANTE CONTATO", value: formatEuro(input.closingCountedCashAmount) },
         { label: "DIFFERENZA", value: formatEuro(input.varianceAmount), emphasis: "strong" },
@@ -447,7 +478,7 @@ export function buildCashSessionPrintDocumentV2(input: BuildCashSessionPrintDocu
             `APERTURA: ${openedAt}`,
             `CHIUSURA: ${closedAt}`
         ],
-        items: input.items || [],
+        items: normalizeItems(input.items),
         totals,
         footerLines,
         branding: withBranding(asTrimmedString(input.brandingLogoUrl), input.brandingLogoUrl ? "attempted" : "none"),
@@ -588,10 +619,47 @@ export function buildPreviewLines(document: Record<string, unknown> | PrintDocum
     if (normalized.headerLines.length > 0) lines.push(RECEIPT_SEPARATOR);
 
     if (normalized.items.length > 0) {
-        lines.push("DESCRIZIONE");
+        const isCashSession = normalized.printType === "CASH_SESSION_SUMMARY";
+        lines.push(isCashSession ? "DESCRIZIONE         Q.TA   NETTO" : "DESCRIZIONE");
         lines.push(RECEIPT_SEPARATOR);
+        let activeGroup: string | null = null;
+        let groupItems: PrintDocumentItemRow[] = [];
+        const appendCashSessionGroupTotals = () => {
+            if (!isCashSession || groupItems.length === 0) return;
+            const gross = groupItems.reduce((sum, item) => sum + (item.grossAmount ?? item.lineTotal ?? 0), 0);
+            const discount = groupItems.reduce((sum, item) => sum + (item.discountAmount ?? 0), 0);
+            const net = groupItems.reduce((sum, item) => sum + (item.lineTotal ?? 0), 0);
+            lines.push(...wrapLine(`SUBTOTALE LORDO: ${formatEuro(gross)}`, maxLength));
+            lines.push(...wrapLine(`SUBTOTALE SCONTO: ${formatEuro(discount)}`, maxLength));
+            lines.push(...wrapLine(`SUBTOTALE NETTO: ${formatEuro(net)}`, maxLength));
+            lines.push(RECEIPT_SEPARATOR);
+        };
+
         normalized.items.forEach((item) => {
-            lines.push(...wrapLine(`${item.qty}x ${item.name}`, maxLength));
+            const groupLabel = item.groupLabel || "DETTAGLIO VENDUTO";
+            if (isCashSession && activeGroup !== groupLabel) {
+                appendCashSessionGroupTotals();
+                activeGroup = groupLabel;
+                groupItems = [];
+                lines.push(...wrapLine(groupLabel.toUpperCase(), maxLength));
+            }
+            groupItems.push(item);
+
+            if (isCashSession) {
+                const descriptionWidth = Math.max(12, maxLength - 13);
+                const nameLines = wrapLine(item.name, descriptionWidth);
+                nameLines.forEach((nameLine, index) => {
+                    lines.push(
+                        nameLine.padEnd(descriptionWidth)
+                        + (index === 0 ? String(item.qty).padStart(4) : " ".repeat(4))
+                        + (index === 0 && typeof item.lineTotal === "number"
+                            ? item.lineTotal.toFixed(2).padStart(9)
+                            : " ".repeat(9))
+                    );
+                });
+            } else {
+                lines.push(...wrapLine(`${item.qty}x ${item.name}`, maxLength));
+            }
             if (item.notes) lines.push(...wrapLine(`NOTE: ${item.notes}`, maxLength));
 
             (item.selectedOptions || []).forEach((option) => {
@@ -602,7 +670,8 @@ export function buildPreviewLines(document: Record<string, unknown> | PrintDocum
                 lines.push(...wrapLine(`+ ${option.name}`, maxLength));
             });
         });
-        lines.push(RECEIPT_SEPARATOR);
+        if (isCashSession) appendCashSessionGroupTotals();
+        else lines.push(RECEIPT_SEPARATOR);
     }
 
     normalized.totals.forEach((total) => {

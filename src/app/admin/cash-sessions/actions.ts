@@ -4,8 +4,13 @@ import { ensureAdminSession } from "@/lib/authz";
 import CashSession from "@/models/CashSession";
 import Order from "@/models/Order";
 import Product from "@/models/Product";
-import { buildCashSessionPrintDocumentV2, PrintDocumentItemRow } from "@/lib/print-report";
-import { aggregateOrderProductConsumptions } from "@/lib/product-consumption";
+import { buildCashSessionPrintDocumentV2 } from "@/lib/print-report";
+import {
+    aggregateOrderProductSales,
+    buildProductSalesPrintRows,
+    type ProductConsumptionCatalogEntry,
+    type ProductConsumptionOrder
+} from "@/lib/product-consumption";
 
 export async function getClosedCashSessionPrintDocumentAction(sessionId: string, posDeviceName?: string) {
     const sessionCheck = await ensureAdminSession();
@@ -25,11 +30,7 @@ export async function getClosedCashSessionPrintDocumentAction(sessionId: string,
     const orders = await Order.find({
         cashSessionId: session._id,
         status: "PAID"
-    }).lean() as Array<{
-        cart?: Array<{
-            productId?: string | { toString(): string }
-        }>
-    }>;
+    }).lean() as ProductConsumptionOrder[];
 
     const productIds = Array.from(
         new Set(
@@ -49,24 +50,36 @@ export async function getClosedCashSessionPrintDocumentAction(sessionId: string,
         ? await Product.find({
             _id: { $in: productIds },
             ...(eventId ? { eventId } : {})
-        }).select("_id name basePrice").lean() as Array<{ _id: { toString(): string } | string; name?: string; basePrice?: number }>
+        })
+            .select("_id name shortName basePrice categoryId")
+            .populate("categoryId", "name printOrder")
+            .lean() as Array<{
+                _id: { toString(): string } | string
+                name?: string
+                shortName?: string
+                basePrice?: number
+                categoryId?: { name?: string; printOrder?: number }
+            }>
         : [];
 
-    const catalogByProductId = new Map(
+    const catalogByProductId = new Map<string, ProductConsumptionCatalogEntry>(
         catalogProducts.map((product) => [
             product._id.toString(),
-            { name: product.name, basePrice: product.basePrice }
-        ])
+            {
+                name: product.name,
+                shortName: product.shortName,
+                basePrice: product.basePrice,
+                categoryName: product.categoryId?.name,
+                categoryOrder: product.categoryId?.printOrder
+            }
+        ] as const)
     );
 
-    const items: PrintDocumentItemRow[] = aggregateOrderProductConsumptions({
+    const salesBreakdown = aggregateOrderProductSales({
         orders,
         catalogByProductId
-    }).map((metric) => ({
-        name: metric.productName,
-        qty: metric.quantityConsumed,
-        lineTotal: metric.revenueAmount
-    }));
+    });
+    const items = buildProductSalesPrintRows(salesBreakdown);
 
     const document = buildCashSessionPrintDocumentV2({
         sessionId: session._id.toString(),
@@ -84,6 +97,12 @@ export async function getClosedCashSessionPrintDocumentAction(sessionId: string,
         paidOrdersCount: session.paidOrdersCount || 0,
         openingNotes: session.openingNotes,
         closingNotes: session.closingNotes,
+        grossSalesAmount: salesBreakdown.totals.grossAmount,
+        discountSalesAmount: salesBreakdown.totals.discountAmount,
+        discountSummaries: salesBreakdown.discountSummaries.map((summary) => ({
+            label: summary.label,
+            amount: summary.discountAmount
+        })),
         createdAt: new Date(),
         items
     });

@@ -24,6 +24,14 @@ export interface OrderDiscountMeta {
     scope: "ORDER"
 }
 
+export interface OrderDiscountComponentMeta {
+    type: "PERCENT" | "FIXED"
+    value: number
+    label?: string
+    baseAmount: number
+    appliedAmount: number
+}
+
 export interface LineDiscountMeta {
     type: "PERCENT" | "FIXED"
     value: number
@@ -48,6 +56,7 @@ export interface OrderDiscountSummary {
     discountApplied: number
     finalAmount: number
     orderDiscountMeta?: OrderDiscountMeta
+    orderDiscountComponents: OrderDiscountComponentMeta[]
     lineResults: LineDiscountResult[]
 }
 
@@ -105,6 +114,7 @@ function computeDiscountCents(baseCents: number, discount: NormalizedDiscount): 
 export function computeOrderDiscounts(options: {
     lines: DiscountableLineItem[]
     orderDiscount?: DiscountInput | null
+    orderDiscounts?: DiscountInput[] | null
     lineDiscounts?: LineDiscountInput[] | null
     allowStacking?: boolean
 }): ComputeOrderDiscountsResult {
@@ -124,7 +134,28 @@ export function computeOrderDiscounts(options: {
         return { success: false, error: "Carrello non valido: valori riga non coerenti" }
     }
 
-    const normalizedOrderDiscount = normalizeDiscount(options.orderDiscount)
+    const hasOrderedDiscounts = Array.isArray(options.orderDiscounts) && options.orderDiscounts.length > 0
+
+    if (options.orderDiscount && hasOrderedDiscounts) {
+        return { success: false, error: "Usa orderDiscount oppure orderDiscounts, non entrambi" }
+    }
+
+    if ((options.orderDiscounts?.length || 0) > 8) {
+        return { success: false, error: "Puoi applicare al massimo 8 sconti ordine" }
+    }
+
+    const componentInput = hasOrderedDiscounts ? options.orderDiscounts || [] : []
+    const normalizedComponents = componentInput.map(normalizeDiscount)
+    if (normalizedComponents.some((discount) => !discount)) {
+        return { success: false, error: "Uno degli sconti ordine non è valido" }
+    }
+
+    const normalizedOrderDiscounts: NormalizedDiscount[] = hasOrderedDiscounts
+        ? normalizedComponents.filter((discount): discount is NormalizedDiscount => Boolean(discount))
+        : (() => {
+            const legacyDiscount = normalizeDiscount(options.orderDiscount)
+            return legacyDiscount ? [legacyDiscount] : []
+        })()
 
     const lineDiscountMap = new Map<string, NormalizedDiscount>()
     ;(options.lineDiscounts || []).forEach((entry) => {
@@ -134,7 +165,7 @@ export function computeOrderDiscounts(options: {
         lineDiscountMap.set(productId, normalized)
     })
 
-    if (!options.allowStacking && normalizedOrderDiscount && lineDiscountMap.size > 0) {
+    if (!options.allowStacking && normalizedOrderDiscounts.length > 0 && lineDiscountMap.size > 0) {
         return {
             success: false,
             error: "Non è possibile combinare sconto ordine e sconti su singole righe"
@@ -184,11 +215,35 @@ export function computeOrderDiscounts(options: {
     })
 
     const baseAfterLineCents = baseCents - lineDiscountCents
-    const orderDiscountCents = normalizedOrderDiscount
-        ? computeDiscountCents(baseAfterLineCents, normalizedOrderDiscount)
-        : 0
+    let remainingOrderBaseCents = baseAfterLineCents
+    const orderDiscountComponents: OrderDiscountComponentMeta[] = []
+    normalizedOrderDiscounts.forEach((discount) => {
+        const appliedCents = computeDiscountCents(remainingOrderBaseCents, discount)
+        orderDiscountComponents.push({
+            type: discount.type,
+            value: discount.value,
+            label: discount.label,
+            baseAmount: fromCents(remainingOrderBaseCents),
+            appliedAmount: fromCents(appliedCents)
+        })
+        remainingOrderBaseCents -= appliedCents
+    })
+    const orderDiscountCents = baseAfterLineCents - remainingOrderBaseCents
     const totalDiscountCents = lineDiscountCents + orderDiscountCents
     const finalAmountCents = baseCents - totalDiscountCents
+
+    const firstOrderDiscount = normalizedOrderDiscounts[0]
+    const orderDiscountMeta = firstOrderDiscount
+        ? {
+            type: normalizedOrderDiscounts.length === 1 ? firstOrderDiscount.type : "FIXED" as const,
+            value: normalizedOrderDiscounts.length === 1 ? firstOrderDiscount.value : fromCents(orderDiscountCents),
+            label: normalizedOrderDiscounts.length === 1
+                ? firstOrderDiscount.label
+                : `Sconti: ${normalizedOrderDiscounts.map((discount) => discount.label || discount.type).join(", ")}`,
+            baseAmount: fromCents(baseAfterLineCents),
+            scope: "ORDER" as const
+        }
+        : undefined
 
     return {
         success: true,
@@ -198,15 +253,8 @@ export function computeOrderDiscounts(options: {
             orderDiscountAmount: fromCents(orderDiscountCents),
             discountApplied: fromCents(totalDiscountCents),
             finalAmount: fromCents(finalAmountCents),
-            orderDiscountMeta: normalizedOrderDiscount
-                ? {
-                    type: normalizedOrderDiscount.type,
-                    value: normalizedOrderDiscount.value,
-                    label: normalizedOrderDiscount.label,
-                    baseAmount: fromCents(baseAfterLineCents),
-                    scope: "ORDER"
-                }
-                : undefined,
+            orderDiscountMeta,
+            orderDiscountComponents,
             lineResults
         }
     }

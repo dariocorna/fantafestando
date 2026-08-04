@@ -19,6 +19,15 @@ export interface IOrder extends Document {
         baseAmount?: number;
         scope?: "ORDER";
     };
+    discountComponents?: Array<{
+        scope: "VOLUNTEER" | "LINE" | "ORDER";
+        type: "PERCENT" | "FIXED";
+        label?: string;
+        value: number;
+        baseAmount: number;
+        appliedAmount: number;
+        productId?: Types.ObjectId;
+    }>;
     pricingMode?: "STANDARD" | "VOLUNTEER";
     cart: Array<{
         productId: Types.ObjectId;
@@ -116,6 +125,23 @@ const OrderSchema = new Schema<IOrder>({
             enum: ["ORDER"]
         }
     },
+    discountComponents: [{
+        scope: {
+            type: String,
+            enum: ["VOLUNTEER", "LINE", "ORDER"],
+            required: true
+        },
+        type: {
+            type: String,
+            enum: ["PERCENT", "FIXED"],
+            required: true
+        },
+        label: { type: String },
+        value: { type: Number, min: 0, required: true },
+        baseAmount: { type: Number, min: 0, required: true },
+        appliedAmount: { type: Number, min: 0, required: true },
+        productId: { type: Schema.Types.ObjectId, ref: "Product" }
+    }],
     pricingMode: { type: String, enum: ["STANDARD", "VOLUNTEER"], default: "STANDARD" },
     cart: [{
         productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true },

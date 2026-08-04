@@ -15,7 +15,12 @@ import { getOrderCodeFromOrder, parseOrderNumberInput } from "@/lib/order-code"
 import { resolvePizzaTicketForCart } from "@/lib/pizza-ticket"
 import { type StockMode } from "@/lib/inventory"
 import { computeCashSessionSummary } from "@/lib/cash-session"
-import { aggregateOrderProductConsumptions } from "@/lib/product-consumption"
+import {
+    aggregateOrderProductSales,
+    buildProductSalesPrintRows,
+    type ProductConsumptionCatalogEntry,
+    type ProductConsumptionOrder
+} from "@/lib/product-consumption"
 import {
     computeOrderDiscounts,
     type DiscountInput,
@@ -116,6 +121,15 @@ interface PosOrderPricingResult {
     baseAmount: number
     discountApplied: number
     finalAmount: number
+    discountComponents: Array<{
+        scope: "VOLUNTEER" | "LINE" | "ORDER"
+        type: "PERCENT" | "FIXED"
+        label?: string
+        value: number
+        baseAmount: number
+        appliedAmount: number
+        productId?: string
+    }>
     cartWithDiscounts: Array<{
         productId: string
         snapshotName: string
@@ -277,6 +291,7 @@ async function computePricingForCart(data: {
     cart: PosCartItemInput[]
     declaredTotalAmount?: number
     orderDiscount?: DiscountInput
+    orderDiscounts?: DiscountInput[]
     lineDiscounts?: LineDiscountInput[]
     pricingMode?: PosPricingMode
 }): Promise<
@@ -433,7 +448,7 @@ async function computePricingForCart(data: {
         .map((entry) => entry.item)
 
     const pricingMode = data.pricingMode === "VOLUNTEER" ? "VOLUNTEER" : "STANDARD"
-    if (pricingMode === "VOLUNTEER" && (data.orderDiscount || (data.lineDiscounts && data.lineDiscounts.length > 0))) {
+    if (pricingMode === "VOLUNTEER" && (data.orderDiscount || (data.orderDiscounts && data.orderDiscounts.length > 0) || (data.lineDiscounts && data.lineDiscounts.length > 0))) {
         return { success: false, error: "La modalità volontari non può essere combinata con altri sconti" }
     }
 
@@ -510,6 +525,17 @@ async function computePricingForCart(data: {
                 baseAmount,
                 discountApplied,
                 finalAmount,
+                discountComponents: cartWithDiscounts.flatMap((item) => item.discountMeta
+                    ? [{
+                        scope: "VOLUNTEER" as const,
+                        type: item.discountMeta.type,
+                        label: item.discountMeta.label,
+                        value: item.discountMeta.value,
+                        baseAmount: normalizeCurrencyAmount(item.lineTotal + item.discountApplied),
+                        appliedAmount: item.discountApplied,
+                        productId: item.productId
+                    }]
+                    : []),
                 cartWithDiscounts
             }
         }
@@ -527,6 +553,7 @@ async function computePricingForCart(data: {
             }
         }),
         orderDiscount: data.orderDiscount,
+        orderDiscounts: data.orderDiscounts,
         lineDiscounts: data.lineDiscounts
     })
 
@@ -548,6 +575,23 @@ async function computePricingForCart(data: {
             baseAmount: computedDiscounts.summary.baseAmount,
             discountApplied: computedDiscounts.summary.discountApplied,
             finalAmount: computedDiscounts.summary.finalAmount,
+            discountComponents: [
+                ...computedDiscounts.summary.lineResults.flatMap((line) => line.discountMeta
+                    ? [{
+                        scope: "LINE" as const,
+                        type: line.discountMeta.type,
+                        label: line.discountMeta.label,
+                        value: line.discountMeta.value,
+                        baseAmount: line.baseAmount,
+                        appliedAmount: line.discountApplied,
+                        productId: line.productId
+                    }]
+                    : []),
+                ...computedDiscounts.summary.orderDiscountComponents.map((component) => ({
+                    scope: "ORDER" as const,
+                    ...component
+                }))
+            ],
             orderDiscountMeta: computedDiscounts.summary.orderDiscountMeta,
             cartWithDiscounts: normalizedCart.map((item, index) => {
                 const line = computedDiscounts.summary.lineResults[index]
@@ -929,16 +973,7 @@ export async function closeCashSession(data: {
         const paidOrdersForSession = await Order.find({
             cashSessionId: openSession._id,
             status: "PAID"
-        }).lean() as Array<{
-            cart?: Array<{
-                productId?: { toString(): string } | string
-                snapshotName?: string
-                quantity?: number
-                selectedOptions?: Array<{ priceVariation?: number }>
-                discountApplied?: number
-                lineTotal?: number
-            }>
-        }>
+        }).lean() as ProductConsumptionOrder[]
 
         const productIds = Array.from(
             new Set(
@@ -954,24 +989,36 @@ export async function closeCashSession(data: {
             ? await Product.find({
                 eventId: data.eventId,
                 _id: { $in: productIds }
-            }).select("_id name basePrice").lean() as Array<{ _id: string | { toString(): string }; name?: string; basePrice?: number }>
+            })
+                .select("_id name shortName basePrice categoryId")
+                .populate("categoryId", "name printOrder")
+                .lean() as Array<{
+                    _id: string | { toString(): string }
+                    name?: string
+                    shortName?: string
+                    basePrice?: number
+                    categoryId?: { name?: string; printOrder?: number }
+                }>
             : []
 
-        const catalogByProductId = new Map(
+        const catalogByProductId = new Map<string, ProductConsumptionCatalogEntry>(
             catalogProducts.map((product) => [
                 product._id.toString(),
-                { name: product.name, basePrice: product.basePrice }
-            ])
+                {
+                    name: product.name,
+                    shortName: product.shortName,
+                    basePrice: product.basePrice,
+                    categoryName: product.categoryId?.name,
+                    categoryOrder: product.categoryId?.printOrder
+                }
+            ] as const)
         )
 
-        const printItems = aggregateOrderProductConsumptions({
+        const salesBreakdown = aggregateOrderProductSales({
             orders: paidOrdersForSession,
             catalogByProductId
-        }).map((metric) => ({
-            name: metric.productName,
-            qty: metric.quantityConsumed,
-            lineTotal: metric.revenueAmount
-        }))
+        })
+        const printItems = buildProductSalesPrintRows(salesBreakdown)
 
         try {
             await PrinterService.printCashSessionSummary(data.eventId, data.posDeviceId, {
@@ -988,6 +1035,12 @@ export async function closeCashSession(data: {
                 paidOrdersCount: computed.paidOrdersCount,
                 openingNotes: openSession.openingNotes,
                 closingNotes: closingNotes || undefined,
+                grossSalesAmount: salesBreakdown.totals.grossAmount,
+                discountSalesAmount: salesBreakdown.totals.discountAmount,
+                discountSummaries: salesBreakdown.discountSummaries.map((summary) => ({
+                    label: summary.label,
+                    amount: summary.discountAmount
+                })),
                 items: printItems
             })
         } catch (printError) {
@@ -1031,6 +1084,7 @@ export async function createOrder(data: {
         menuSelections?: Array<{ groupId: string, productId: string }>
     }>,
     orderDiscount?: DiscountInput,
+    orderDiscounts?: DiscountInput[],
     lineDiscounts?: LineDiscountInput[],
     pricingMode?: PosPricingMode,
     paymentMethod: "CASH" | "CARD" | "OTHER",
@@ -1069,6 +1123,7 @@ export async function createOrder(data: {
             cart: sanitizedCart,
             declaredTotalAmount: data.totalAmount,
             orderDiscount: data.orderDiscount,
+            orderDiscounts: data.orderDiscounts,
             lineDiscounts: data.lineDiscounts,
             pricingMode: data.pricingMode
         })
@@ -1142,6 +1197,7 @@ export async function createOrder(data: {
             totalAmount: payableAmount,
             discountApplied: pricingResult.pricing.discountApplied,
             discountMeta: pricingResult.pricing.orderDiscountMeta,
+            discountComponents: pricingResult.pricing.discountComponents,
             pricingMode: data.pricingMode === "VOLUNTEER" ? "VOLUNTEER" : "STANDARD",
             cart: pricingResult.pricing.cartWithDiscounts,
             ingredientPlan,
@@ -1663,6 +1719,7 @@ export async function completePendingOrderPayment(data: {
     customer?: { name?: string, table?: string }
     totalAmount?: number
     orderDiscount?: DiscountInput
+    orderDiscounts?: DiscountInput[]
     lineDiscounts?: LineDiscountInput[]
     pricingMode?: PosPricingMode
     cart?: Array<{
@@ -1768,6 +1825,7 @@ export async function completePendingOrderPayment(data: {
             pendingPricingMode === "VOLUNTEER"
             && order.pricingMode === "VOLUNTEER"
             && !data.orderDiscount
+            && (!data.orderDiscounts || data.orderDiscounts.length === 0)
             && (!data.lineDiscounts || data.lineDiscounts.length === 0)
             && shouldReusePendingIngredientPlan(orderCartInput, persistedOrderCartInput)
         ) {
@@ -1786,6 +1844,25 @@ export async function completePendingOrderPayment(data: {
                     baseAmount: normalizeCurrencyAmount(persistedFinalAmount + Number(order.discountApplied || 0)),
                     discountApplied: normalizeCurrencyAmount(Number(order.discountApplied || 0)),
                     finalAmount: persistedFinalAmount,
+                    discountComponents: Array.isArray(order.discountComponents)
+                        ? order.discountComponents.map((component: {
+                            scope: "VOLUNTEER" | "LINE" | "ORDER"
+                            type: "PERCENT" | "FIXED"
+                            label?: string
+                            value: number
+                            baseAmount: number
+                            appliedAmount: number
+                            productId?: { toString(): string } | string
+                        }) => ({
+                            scope: component.scope,
+                            type: component.type,
+                            label: component.label,
+                            value: component.value,
+                            baseAmount: component.baseAmount,
+                            appliedAmount: component.appliedAmount,
+                            productId: component.productId?.toString()
+                        }))
+                        : [],
                     cartWithDiscounts: order.cart.map((item: {
                         productId: { toString(): string } | string
                         snapshotName: string
@@ -1840,6 +1917,7 @@ export async function completePendingOrderPayment(data: {
                 cart: orderCartInput,
                 declaredTotalAmount: data.totalAmount,
                 orderDiscount: data.orderDiscount,
+                orderDiscounts: data.orderDiscounts,
                 lineDiscounts: data.lineDiscounts,
                 pricingMode: pendingPricingMode
             })
@@ -1920,6 +1998,7 @@ export async function completePendingOrderPayment(data: {
         order.totalAmount = payableAmount
         order.discountApplied = pricingResult.pricing.discountApplied
         order.set("discountMeta", pricingResult.pricing.orderDiscountMeta || undefined)
+        order.set("discountComponents", pricingResult.pricing.discountComponents)
         order.set("pricingMode", pendingPricingMode === "VOLUNTEER" ? "VOLUNTEER" : "STANDARD")
         order.status = "PAID"
         order.paymentMethod = data.paymentMethod

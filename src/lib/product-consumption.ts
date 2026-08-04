@@ -1,6 +1,22 @@
 export interface ProductConsumptionCatalogEntry {
     name?: string | null
+    shortName?: string | null
     basePrice?: number | null
+    categoryName?: string | null
+    categoryOrder?: number | null
+}
+
+export interface ProductDiscountMetaInput {
+    type?: string | null
+    label?: string | null
+    value?: number | null
+}
+
+export interface ProductDiscountComponentInput extends ProductDiscountMetaInput {
+    scope?: string | null
+    baseAmount?: number | null
+    appliedAmount?: number | null
+    productId?: string | { toString(): string } | null
 }
 
 export interface ProductConsumptionCartItem {
@@ -9,12 +25,16 @@ export interface ProductConsumptionCartItem {
     quantity?: number | null
     selectedOptions?: Array<{ priceVariation?: number | null } | null> | null
     discountApplied?: number | null
+    discountMeta?: ProductDiscountMetaInput | null
     lineTotal?: number | null
 }
 
 export interface ProductConsumptionOrder {
+    pricingMode?: string | null
     totalAmount?: number | null
     discountApplied?: number | null
+    discountMeta?: ProductDiscountMetaInput | null
+    discountComponents?: ProductDiscountComponentInput[] | null
     cart?: ProductConsumptionCartItem[] | null
 }
 
@@ -24,6 +44,54 @@ export interface ProductConsumptionMetric {
     productName: string
     quantityConsumed: number
     revenueAmount: number
+}
+
+export interface ProductSalesBreakdownRow {
+    categoryName: string
+    categoryOrder: number
+    productId?: string
+    productKey: string
+    productName: string
+    displayName: string
+    pricingRegime: "PREZZO PIENO" | "SCONTATO"
+    discountLabel: string
+    discountMode: string
+    discountValue: string
+    groupLabel: string
+    quantitySold: number
+    grossAmount: number
+    discountAmount: number
+    netAmount: number
+}
+
+export interface DiscountSalesSummary {
+    label: string
+    mode: string
+    value: string
+    ordersCount: number
+    discountAmount: number
+}
+
+export interface ProductSalesBreakdownResult {
+    rows: ProductSalesBreakdownRow[]
+    discountSummaries: DiscountSalesSummary[]
+    totals: {
+        quantitySold: number
+        grossAmount: number
+        discountAmount: number
+        netAmount: number
+    }
+}
+
+export type ProductSalesExportRow = Array<string | number>
+
+export interface ProductSalesPrintRow {
+    name: string
+    qty: number
+    lineTotal: number
+    groupLabel: string
+    grossAmount: number
+    discountAmount: number
 }
 
 function toCents(value: number | null | undefined): number {
@@ -65,7 +133,7 @@ function hasPersistedLineTotal(item: ProductConsumptionCartItem): boolean {
     return Number.isFinite(item.lineTotal) && Number(item.lineTotal) >= 0
 }
 
-function computeItemRevenueCents(
+function computeItemGrossCents(
     item: ProductConsumptionCartItem,
     catalogEntry?: ProductConsumptionCatalogEntry
 ): number {
@@ -73,15 +141,12 @@ function computeItemRevenueCents(
     if (quantity <= 0) return 0
 
     if (hasPersistedLineTotal(item)) {
-        // Historical line totals are authoritative when available.
-        return toCents(item.lineTotal)
+        return toCents(item.lineTotal) + toCents(item.discountApplied)
     }
 
     const basePriceCents = catalogEntry ? toCents(catalogEntry.basePrice) : 0
     const unitPriceCents = basePriceCents + getOptionAdjustmentsCents(item)
-    const grossAmountCents = unitPriceCents * quantity
-    const discountCents = toCents(item.discountApplied)
-    return Math.max(0, grossAmountCents - discountCents)
+    return unitPriceCents * quantity
 }
 
 function allocateCentsByWeights(totalCents: number, weights: number[]): number[] {
@@ -113,37 +178,127 @@ function allocateCentsByWeights(totalCents: number, weights: number[]): number[]
         .map((entry) => entry.cents)
 }
 
-function getOrderTargetRevenueCents(
-    order: ProductConsumptionOrder,
-    preliminaryRevenueCents: number,
-    lineDiscountCents: number
-): number {
-    if (Number.isFinite(order.totalAmount)) {
-        return toCents(order.totalAmount)
+function allocateCentsWithinCapacities(totalCents: number, weights: number[], capacities: number[]): number[] {
+    const result = capacities.map(() => 0)
+    let remaining = Math.min(
+        Math.max(0, Math.floor(totalCents)),
+        capacities.reduce((sum, capacity) => sum + Math.max(0, Math.floor(capacity)), 0)
+    )
+
+    while (remaining > 0) {
+        const activeIndexes = capacities
+            .map((capacity, index) => ({ capacity: Math.max(0, Math.floor(capacity)) - result[index], index }))
+            .filter((entry) => entry.capacity > 0)
+
+        if (activeIndexes.length === 0) break
+
+        const allocation = allocateCentsByWeights(
+            remaining,
+            activeIndexes.map((entry) => weights[entry.index])
+        )
+        let allocated = 0
+        activeIndexes.forEach((entry, allocationIndex) => {
+            const amount = Math.min(entry.capacity, allocation[allocationIndex])
+            result[entry.index] += amount
+            allocated += amount
+        })
+
+        if (allocated === 0) {
+            const first = activeIndexes[0]
+            result[first.index] += 1
+            allocated = 1
+        }
+        remaining -= allocated
     }
 
-    const residualOrderDiscountCents = Math.max(0, toCents(order.discountApplied) - lineDiscountCents)
-    return Math.max(0, preliminaryRevenueCents - residualOrderDiscountCents)
+    return result
 }
 
-export function aggregateOrderProductConsumptions(options: {
+interface NormalizedDiscountComponent {
+    label: string
+    mode: string
+    value: string
+    appliedCents: number
+}
+
+function normalizeDiscountComponent(
+    input: ProductDiscountMetaInput,
+    appliedCents: number,
+    fallbackLabel = "Sconto non classificato"
+): NormalizedDiscountComponent {
+    const type = input.type?.trim().toUpperCase()
+    const numericValue = Number(input.value)
+    const combined = input.label?.trim().toLowerCase().startsWith("sconti:")
+    const label = combined
+        ? "Sconto combinato"
+        : input.label?.trim() || (type === "PERCENT" ? "Sconto percentuale" : type === "FIXED" ? "Sconto fisso" : fallbackLabel)
+
+    return {
+        label,
+        mode: combined ? "Combinato" : type === "PERCENT" ? "Percentuale" : type === "FIXED" ? "Fisso" : "Non classificato",
+        value: combined || !Number.isFinite(numericValue)
+            ? "-"
+            : type === "PERCENT"
+                ? `${Number(numericValue.toFixed(2))}%`
+                : type === "FIXED"
+                    ? `${fromCents(toCents(numericValue)).toFixed(2)} EUR`
+                    : "-",
+        appliedCents
+    }
+}
+
+function buildPricingGroup(components: NormalizedDiscountComponent[]): Pick<
+    ProductSalesBreakdownRow,
+    "pricingRegime" | "discountLabel" | "discountMode" | "discountValue" | "groupLabel"
+> {
+    if (components.length === 0) {
+        return {
+            pricingRegime: "PREZZO PIENO",
+            discountLabel: "-",
+            discountMode: "-",
+            discountValue: "-",
+            groupLabel: "PREZZO PIENO"
+        }
+    }
+
+    return {
+        pricingRegime: "SCONTATO",
+        discountLabel: components.map((component) => component.label).join(" + "),
+        discountMode: components.length > 1 ? "Combinato" : components[0].mode,
+        discountValue: components.map((component) => component.value).join(" + "),
+        groupLabel: components.map((component) => component.label).join(" + ")
+    }
+}
+
+export function aggregateOrderProductSales(options: {
     orders: ProductConsumptionOrder[]
     catalogByProductId?: Map<string, ProductConsumptionCatalogEntry>
-}): ProductConsumptionMetric[] {
-    const resultByKey = new Map<string, ProductConsumptionMetric & { revenueCents: number }>()
+}): ProductSalesBreakdownResult {
+    const resultByKey = new Map<string, ProductSalesBreakdownRow & {
+        grossCents: number
+        discountCents: number
+        netCents: number
+    }>()
+    const discountSummaryByKey = new Map<string, DiscountSalesSummary & {
+        discountCents: number
+        orderIndexes: Set<number>
+    }>()
     const catalogByProductId = options.catalogByProductId || new Map<string, ProductConsumptionCatalogEntry>()
 
-    for (const order of options.orders) {
+    options.orders.forEach((order, orderIndex) => {
         const orderLines: Array<{
+            item: ProductConsumptionCartItem
             productId?: string
             productKey: string
             productName: string
-            quantityConsumed: number
-            revenueCents: number
+            displayName: string
+            categoryName: string
+            categoryOrder: number
+            quantitySold: number
+            grossCents: number
+            lineDiscountCents: number
             weightCents: number
         }> = []
-        let preliminaryRevenueCents = 0
-        let lineDiscountCents = 0
 
         for (const item of order.cart || []) {
             const quantity = normalizeQuantity(item.quantity)
@@ -154,66 +309,374 @@ export function aggregateOrderProductConsumptions(options: {
             const productKey = productId ? `product:${productId}` : `snapshot:${snapshotName || "unknown"}`
             const catalogEntry = productId ? catalogByProductId.get(productId) : undefined
             const productName = catalogEntry?.name?.trim() || snapshotName || "Prodotto"
-            const revenueCents = computeItemRevenueCents(item, catalogEntry)
-            const weightCents = revenueCents > 0 ? revenueCents : quantity
-
-            preliminaryRevenueCents += revenueCents
-            if (!hasPersistedLineTotal(item)) {
-                lineDiscountCents += toCents(item.discountApplied)
-            }
+            const grossCents = computeItemGrossCents(item, catalogEntry)
 
             orderLines.push({
+                item,
                 productId,
                 productKey,
                 productName,
-                quantityConsumed: quantity,
-                revenueCents,
-                weightCents
+                displayName: (catalogEntry?.shortName?.trim() || productName).slice(0, 24),
+                categoryName: catalogEntry?.categoryName?.trim() || "Non categorizzato",
+                categoryOrder: Number.isFinite(catalogEntry?.categoryOrder)
+                    ? Number(catalogEntry?.categoryOrder)
+                    : Number.MAX_SAFE_INTEGER,
+                quantitySold: quantity,
+                grossCents,
+                lineDiscountCents: toCents(item.discountApplied),
+                weightCents: grossCents > 0 ? grossCents : quantity
             })
         }
 
-        if (orderLines.length === 0) continue
+        if (orderLines.length === 0) return
 
-        const targetRevenueCents = getOrderTargetRevenueCents(order, preliminaryRevenueCents, lineDiscountCents)
-        const allocatedRevenueCents = allocateCentsByWeights(
-            targetRevenueCents,
+        const preliminaryGrossCents = orderLines.reduce((sum, line) => sum + line.grossCents, 0)
+        const declaredLineDiscountCents = orderLines.reduce((sum, line) => sum + line.lineDiscountCents, 0)
+        const componentDiscountCents = (order.discountComponents || []).reduce(
+            (sum, component) => sum + toCents(component.appliedAmount),
+            0
+        )
+        const totalDiscountCents = Math.min(
+            Number.isFinite(order.totalAmount)
+                ? toCents(order.totalAmount) + Math.max(
+                    toCents(order.discountApplied),
+                    declaredLineDiscountCents,
+                    componentDiscountCents
+                )
+                : preliminaryGrossCents,
+            Math.max(toCents(order.discountApplied), declaredLineDiscountCents, componentDiscountCents)
+        )
+        const targetNetCents = Number.isFinite(order.totalAmount)
+            ? toCents(order.totalAmount)
+            : Math.max(0, preliminaryGrossCents - totalDiscountCents)
+        const targetGrossCents = targetNetCents + totalDiscountCents
+        const allocatedGrossCents = allocateCentsByWeights(
+            targetGrossCents,
             orderLines.map((line) => line.weightCents)
         )
+        const lineDiscountTargetCents = Math.min(totalDiscountCents, declaredLineDiscountCents)
+        const allocatedLineDiscountCents = allocateCentsWithinCapacities(
+            lineDiscountTargetCents,
+            orderLines.map((line) => line.lineDiscountCents),
+            allocatedGrossCents
+        )
+        const afterLineCapacities = allocatedGrossCents.map((grossCents, index) => (
+            grossCents - allocatedLineDiscountCents[index]
+        ))
+        const allocatedOrderDiscountCents = allocateCentsWithinCapacities(
+            totalDiscountCents - allocatedLineDiscountCents.reduce((sum, value) => sum + value, 0),
+            afterLineCapacities,
+            afterLineCapacities
+        )
 
-        orderLines.forEach((line, index) => {
-            const existing = resultByKey.get(line.productKey)
+        const modernComponents = (order.discountComponents || [])
+            .filter((component) => toCents(component.appliedAmount) > 0)
+
+        orderLines.forEach((line, lineIndex) => {
+            const rowDiscountCents = allocatedLineDiscountCents[lineIndex] + allocatedOrderDiscountCents[lineIndex]
+            const lineComponents = modernComponents
+                .filter((component) => {
+                    if (component.scope?.toUpperCase() === "ORDER") return true
+                    return getProductId(component.productId) === line.productId
+                })
+                .map((component) => normalizeDiscountComponent(
+                    component,
+                    toCents(component.appliedAmount),
+                    component.scope?.toUpperCase() === "VOLUNTEER" ? "Volontari" : undefined
+                ))
+
+            if (lineComponents.length === 0 && line.lineDiscountCents > 0) {
+                lineComponents.push(normalizeDiscountComponent(
+                    line.item.discountMeta || {},
+                    line.lineDiscountCents,
+                    order.pricingMode?.toUpperCase() === "VOLUNTEER" ? "Volontari" : undefined
+                ))
+            }
+
+            const residualOrderDiscountCents = Math.max(0, totalDiscountCents - declaredLineDiscountCents)
+            if (modernComponents.length === 0 && residualOrderDiscountCents > 0) {
+                lineComponents.push(normalizeDiscountComponent(
+                    order.discountMeta || {},
+                    residualOrderDiscountCents
+                ))
+            }
+            if (lineComponents.length === 0 && rowDiscountCents > 0) {
+                lineComponents.push(normalizeDiscountComponent({}, rowDiscountCents))
+            }
+
+            const pricingGroup = buildPricingGroup(lineComponents)
+            const resultKey = [
+                line.categoryName,
+                line.productKey,
+                pricingGroup.pricingRegime,
+                pricingGroup.discountLabel,
+                pricingGroup.discountMode,
+                pricingGroup.discountValue
+            ].join("\u0000")
+            const existing = resultByKey.get(resultKey)
             if (existing) {
-                existing.quantityConsumed += line.quantityConsumed
-                existing.revenueCents += allocatedRevenueCents[index]
+                existing.quantitySold += line.quantitySold
+                existing.grossCents += allocatedGrossCents[lineIndex]
+                existing.discountCents += rowDiscountCents
+                existing.netCents += allocatedGrossCents[lineIndex] - rowDiscountCents
                 return
             }
 
-            resultByKey.set(line.productKey, {
+            resultByKey.set(resultKey, {
+                categoryName: line.categoryName,
+                categoryOrder: line.categoryOrder,
                 productId: line.productId,
                 productKey: line.productKey,
                 productName: line.productName,
-                quantityConsumed: line.quantityConsumed,
-                revenueAmount: 0,
-                revenueCents: allocatedRevenueCents[index]
+                displayName: line.displayName,
+                ...pricingGroup,
+                quantitySold: line.quantitySold,
+                grossAmount: 0,
+                discountAmount: 0,
+                netAmount: 0,
+                grossCents: allocatedGrossCents[lineIndex],
+                discountCents: rowDiscountCents,
+                netCents: allocatedGrossCents[lineIndex] - rowDiscountCents
             })
         })
-    }
 
-    return Array.from(resultByKey.values())
-        .map((metric) => ({
-            productId: metric.productId,
-            productKey: metric.productKey,
-            productName: metric.productName,
-            quantityConsumed: metric.quantityConsumed,
-            revenueAmount: fromCents(metric.revenueCents)
+        const summaryComponents = modernComponents.length > 0
+            ? modernComponents.map((component) => normalizeDiscountComponent(
+                component,
+                toCents(component.appliedAmount),
+                component.scope?.toUpperCase() === "VOLUNTEER" ? "Volontari" : undefined
+            ))
+            : [
+                ...orderLines
+                    .filter((line) => line.lineDiscountCents > 0)
+                    .map((line) => normalizeDiscountComponent(
+                        line.item.discountMeta || {},
+                        line.lineDiscountCents,
+                        order.pricingMode?.toUpperCase() === "VOLUNTEER" ? "Volontari" : undefined
+                    )),
+                ...(totalDiscountCents > declaredLineDiscountCents
+                    ? [normalizeDiscountComponent(
+                        order.discountMeta || {},
+                        totalDiscountCents - declaredLineDiscountCents
+                    )]
+                    : [])
+            ]
+
+        const knownSummaryCents = summaryComponents.reduce((sum, component) => sum + component.appliedCents, 0)
+        if (knownSummaryCents < totalDiscountCents) {
+            summaryComponents.push(normalizeDiscountComponent({}, totalDiscountCents - knownSummaryCents))
+        }
+
+        summaryComponents.forEach((component) => {
+            const summaryKey = [component.label, component.mode, component.value].join("\u0000")
+            const existing = discountSummaryByKey.get(summaryKey)
+            if (existing) {
+                existing.discountCents += component.appliedCents
+                existing.orderIndexes.add(orderIndex)
+                return
+            }
+            discountSummaryByKey.set(summaryKey, {
+                label: component.label,
+                mode: component.mode,
+                value: component.value,
+                ordersCount: 0,
+                discountAmount: 0,
+                discountCents: component.appliedCents,
+                orderIndexes: new Set([orderIndex])
+            })
+        })
+    })
+
+    const rows = Array.from(resultByKey.values())
+        .map((row) => ({
+            categoryName: row.categoryName,
+            categoryOrder: row.categoryOrder,
+            productId: row.productId,
+            productKey: row.productKey,
+            productName: row.productName,
+            displayName: row.displayName,
+            pricingRegime: row.pricingRegime,
+            discountLabel: row.discountLabel,
+            discountMode: row.discountMode,
+            discountValue: row.discountValue,
+            groupLabel: row.groupLabel,
+            quantitySold: row.quantitySold,
+            grossAmount: fromCents(row.grossCents),
+            discountAmount: fromCents(row.discountCents),
+            netAmount: fromCents(row.netCents)
         }))
         .sort((left, right) => {
-            if (right.quantityConsumed !== left.quantityConsumed) {
-                return right.quantityConsumed - left.quantityConsumed
+            if (left.categoryOrder !== right.categoryOrder) return left.categoryOrder - right.categoryOrder
+            const categoryComparison = left.categoryName.localeCompare(right.categoryName, "it")
+            if (categoryComparison !== 0) return categoryComparison
+            const productComparison = left.productName.localeCompare(right.productName, "it")
+            if (productComparison !== 0) return productComparison
+            if (left.pricingRegime !== right.pricingRegime) {
+                return left.pricingRegime === "PREZZO PIENO" ? -1 : 1
             }
-            if (right.revenueAmount !== left.revenueAmount) {
-                return right.revenueAmount - left.revenueAmount
+            return left.discountLabel.localeCompare(right.discountLabel, "it")
+        })
+
+    const totals = rows.reduce((result, row) => ({
+        quantitySold: result.quantitySold + row.quantitySold,
+        grossAmount: Number((result.grossAmount + row.grossAmount).toFixed(2)),
+        discountAmount: Number((result.discountAmount + row.discountAmount).toFixed(2)),
+        netAmount: Number((result.netAmount + row.netAmount).toFixed(2))
+    }), { quantitySold: 0, grossAmount: 0, discountAmount: 0, netAmount: 0 })
+
+    return {
+        rows,
+        discountSummaries: Array.from(discountSummaryByKey.values())
+            .map((summary) => ({
+                label: summary.label,
+                mode: summary.mode,
+                value: summary.value,
+                ordersCount: summary.orderIndexes.size,
+                discountAmount: fromCents(summary.discountCents)
+            }))
+            .sort((left, right) => left.label.localeCompare(right.label, "it")),
+        totals
+    }
+}
+
+export function aggregateOrderProductConsumptions(options: {
+    orders: ProductConsumptionOrder[]
+    catalogByProductId?: Map<string, ProductConsumptionCatalogEntry>
+}): ProductConsumptionMetric[] {
+    const byProductKey = new Map<string, ProductConsumptionMetric>()
+
+    aggregateOrderProductSales(options).rows.forEach((row) => {
+        const existing = byProductKey.get(row.productKey)
+        if (existing) {
+            existing.quantityConsumed += row.quantitySold
+            existing.revenueAmount = Number((existing.revenueAmount + row.netAmount).toFixed(2))
+            return
+        }
+        byProductKey.set(row.productKey, {
+            productId: row.productId,
+            productKey: row.productKey,
+            productName: row.productName,
+            quantityConsumed: row.quantitySold,
+            revenueAmount: row.netAmount
+        })
+    })
+
+    return Array.from(byProductKey.values()).sort((left, right) => {
+        if (right.quantityConsumed !== left.quantityConsumed) {
+            return right.quantityConsumed - left.quantityConsumed
+        }
+        if (right.revenueAmount !== left.revenueAmount) {
+            return right.revenueAmount - left.revenueAmount
+        }
+        return left.productName.localeCompare(right.productName, "it")
+    })
+}
+
+export function buildProductSalesExportRows(result: ProductSalesBreakdownResult): ProductSalesExportRow[] {
+    const rows: ProductSalesExportRow[] = [["Vendite per categoria - prodotto e regime"], [
+        "Tipo riga",
+        "Categoria",
+        "Prodotto",
+        "Descrizione breve",
+        "Regime prezzo",
+        "Etichetta sconto",
+        "Modalità sconto",
+        "Valore sconto",
+        "Quantità venduta",
+        "Lordo",
+        "Sconto",
+        "Netto"
+    ]]
+    let currentCategory: string | null = null
+    let categoryRows: ProductSalesBreakdownRow[] = []
+
+    const appendCategoryTotal = () => {
+        if (!currentCategory) return
+        const totals = categoryRows.reduce((sum, row) => ({
+            quantity: sum.quantity + row.quantitySold,
+            grossCents: sum.grossCents + toCents(row.grossAmount),
+            discountCents: sum.discountCents + toCents(row.discountAmount),
+            netCents: sum.netCents + toCents(row.netAmount)
+        }), { quantity: 0, grossCents: 0, discountCents: 0, netCents: 0 })
+        rows.push([
+            "TOTALE CATEGORIA", currentCategory, "", "", "", "", "", "",
+            totals.quantity,
+            fromCents(totals.grossCents).toFixed(2),
+            fromCents(totals.discountCents).toFixed(2),
+            fromCents(totals.netCents).toFixed(2)
+        ])
+    }
+
+    result.rows.forEach((row) => {
+        if (currentCategory !== row.categoryName) {
+            appendCategoryTotal()
+            currentCategory = row.categoryName
+            categoryRows = []
+        }
+        categoryRows.push(row)
+        rows.push([
+            "DETTAGLIO",
+            row.categoryName,
+            row.productName,
+            row.displayName,
+            row.pricingRegime,
+            row.discountLabel,
+            row.discountMode,
+            row.discountValue,
+            row.quantitySold,
+            row.grossAmount.toFixed(2),
+            row.discountAmount.toFixed(2),
+            row.netAmount.toFixed(2)
+        ])
+    })
+    appendCategoryTotal()
+    rows.push([
+        "TOTALE GENERALE", "", "", "", "", "", "", "",
+        result.totals.quantitySold,
+        result.totals.grossAmount.toFixed(2),
+        result.totals.discountAmount.toFixed(2),
+        result.totals.netAmount.toFixed(2)
+    ])
+    rows.push([], ["Riepilogo componenti sconto"], [
+        "Etichetta sconto",
+        "Modalità sconto",
+        "Valore sconto",
+        "Ordini coinvolti",
+        "Sconto applicato"
+    ])
+    if (result.discountSummaries.length === 0) {
+        rows.push(["Nessuno", "-", "-", 0, "0.00"])
+    } else {
+        result.discountSummaries.forEach((summary) => rows.push([
+            summary.label,
+            summary.mode,
+            summary.value,
+            summary.ordersCount,
+            summary.discountAmount.toFixed(2)
+        ]))
+    }
+
+    return rows
+}
+
+export function buildProductSalesPrintRows(result: ProductSalesBreakdownResult): ProductSalesPrintRow[] {
+    return result.rows
+        .slice()
+        .sort((left, right) => {
+            if (left.pricingRegime !== right.pricingRegime) {
+                return left.pricingRegime === "PREZZO PIENO" ? -1 : 1
             }
+            const groupComparison = left.groupLabel.localeCompare(right.groupLabel, "it")
+            if (groupComparison !== 0) return groupComparison
+            if (left.categoryOrder !== right.categoryOrder) return left.categoryOrder - right.categoryOrder
             return left.productName.localeCompare(right.productName, "it")
         })
+        .map((row) => ({
+            name: row.displayName,
+            qty: row.quantitySold,
+            lineTotal: row.netAmount,
+            groupLabel: row.groupLabel,
+            grossAmount: row.grossAmount,
+            discountAmount: row.discountAmount
+        }))
 }

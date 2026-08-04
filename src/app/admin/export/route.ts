@@ -4,6 +4,7 @@ import { adminUnauthorizedJson, ensureAdminSession } from "@/lib/authz";
 import { getAdminContextEvent } from "@/lib/events";
 import Order from "@/models/Order";
 import Product from "@/models/Product";
+import Category from "@/models/Category";
 import type { IEvent } from "@/models/Event";
 import {
     buildDashboardCsvContent,
@@ -12,6 +13,7 @@ import {
     type DashboardOrderInput,
     type DashboardProductInput
 } from "@/lib/dashboard-stats";
+import { aggregateOrderProductSales } from "@/lib/product-consumption";
 
 export const dynamic = "force-dynamic";
 
@@ -20,17 +22,50 @@ interface OrderProjection {
     status?: string
     createdAt?: Date | string
     totalAmount?: number
+    discountApplied?: number
+    discountMeta?: {
+        type?: string
+        label?: string
+        value?: number
+    }
+    discountComponents?: Array<{
+        scope?: string
+        type?: string
+        label?: string
+        value?: number
+        baseAmount?: number
+        appliedAmount?: number
+        productId?: string | { toString(): string }
+    }>
+    pricingMode?: string
     paymentMethod?: string
     cart?: Array<{
-        productId?: unknown
+        productId?: string | { toString(): string }
         snapshotName?: string
         quantity?: number
+        selectedOptions?: Array<{ priceVariation?: number }>
+        discountApplied?: number
+        discountMeta?: {
+            type?: string
+            label?: string
+            value?: number
+        }
+        lineTotal?: number
     }>
 }
 
 interface ProductProjection {
     _id: unknown
     name: string
+    shortName?: string
+    basePrice?: number
+    categoryId?: unknown
+}
+
+interface CategoryProjection {
+    _id: unknown
+    name?: string
+    printOrder?: number
 }
 
 function sanitizeFileNameSegment(value: string): string {
@@ -79,12 +114,17 @@ export async function GET(request: NextRequest) {
         const eventId = String(contextEvent._id);
 
         await dbConnect();
-        const [orders, products] = await Promise.all([
+        const [orders, products, categories] = await Promise.all([
             Order.find({ eventId, status: "PAID" })
                 .sort({ createdAt: -1 })
-                .select("_id status createdAt totalAmount paymentMethod cart")
+                .select("_id status createdAt totalAmount discountApplied discountMeta discountComponents pricingMode paymentMethod cart")
                 .lean() as Promise<OrderProjection[]>,
-            Product.find({ eventId }).select("_id name").lean() as Promise<ProductProjection[]>
+            Product.find({ eventId })
+                .select("_id name shortName basePrice categoryId")
+                .lean() as Promise<ProductProjection[]>,
+            Category.find({ eventId })
+                .select("_id name printOrder")
+                .lean() as Promise<CategoryProjection[]>
         ]);
 
         const dashboardOrders: DashboardOrderInput[] = orders.map((order) => ({
@@ -114,11 +154,26 @@ export async function GET(request: NextRequest) {
             underperformingLimit: 100,
             underperformingThreshold: 1
         });
+        const categoryById = new Map(categories.map((category) => [String(category._id), category]));
+        const catalogByProductId = new Map(products.map((product) => {
+            const category = product.categoryId ? categoryById.get(String(product.categoryId)) : undefined;
+            return [String(product._id), {
+                name: product.name,
+                shortName: product.shortName,
+                basePrice: product.basePrice,
+                categoryName: category?.name,
+                categoryOrder: category?.printOrder
+            }];
+        }));
+        const salesBreakdown = aggregateOrderProductSales({
+            orders,
+            catalogByProductId
+        });
 
         const content =
             format === "xls"
-                ? buildDashboardXlsCompatibleContent(stats, { eventName: contextEvent.name })
-                : buildDashboardCsvContent(stats, { eventName: contextEvent.name });
+                ? buildDashboardXlsCompatibleContent(stats, { eventName: contextEvent.name, salesBreakdown })
+                : buildDashboardCsvContent(stats, { eventName: contextEvent.name, salesBreakdown });
 
         const extension = format === "xls" ? "xls" : "csv";
         const contentType =

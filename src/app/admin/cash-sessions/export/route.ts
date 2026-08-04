@@ -7,6 +7,7 @@ import CashSession from "@/models/CashSession"
 import Order from "@/models/Order"
 import PosDevice from "@/models/PosDevice"
 import Product from "@/models/Product"
+import Category from "@/models/Category"
 import {
     buildCashSessionCsvContent,
     buildCashSessionXlsCompatibleContent,
@@ -14,7 +15,11 @@ import {
     type CashSessionOrderInput
 } from "@/lib/cash-session"
 import { getOrderCodeFromOrder } from "@/lib/order-code"
-import { aggregateOrderProductConsumptions } from "@/lib/product-consumption"
+import {
+    aggregateOrderProductConsumptions,
+    aggregateOrderProductSales,
+    type ProductConsumptionCatalogEntry
+} from "@/lib/product-consumption"
 
 export const dynamic = "force-dynamic"
 
@@ -50,11 +55,31 @@ interface OrderProjection {
     paymentMethod?: string
     totalAmount?: number
     discountApplied?: number
+    discountMeta?: {
+        type?: string
+        label?: string
+        value?: number
+    }
+    discountComponents?: Array<{
+        scope?: string
+        type?: string
+        label?: string
+        value?: number
+        baseAmount?: number
+        appliedAmount?: number
+        productId?: string | { toString(): string }
+    }>
+    pricingMode?: string
     cart?: Array<{
         productId?: string | { toString(): string }
         snapshotName?: string
         quantity?: number
         discountApplied?: number
+        discountMeta?: {
+            type?: string
+            label?: string
+            value?: number
+        }
         lineTotal?: number
         selectedOptions?: Array<{ name?: string, priceVariation?: number }>
     }>
@@ -67,7 +92,15 @@ interface OrderProjection {
 interface ProductProjection {
     _id: unknown
     name?: string
+    shortName?: string
     basePrice?: number
+    categoryId?: unknown
+}
+
+interface CategoryProjection {
+    _id: unknown
+    name?: string
+    printOrder?: number
 }
 
 function isObjectIdLike(value: string): boolean {
@@ -167,7 +200,7 @@ export async function GET(request: NextRequest) {
                 status: "PAID"
             })
                 .sort({ createdAt: -1 })
-                .select("_id pickupNumber createdAt status paymentMethod totalAmount discountApplied customer cart")
+                .select("_id pickupNumber createdAt status paymentMethod totalAmount discountApplied discountMeta discountComponents pricingMode customer cart")
                 .lean() as Promise<OrderProjection[]>
         ])
 
@@ -181,18 +214,32 @@ export async function GET(request: NextRequest) {
             )
         )
 
-        const catalogProducts = productIds.length > 0
-            ? await Product.find({ eventId, _id: { $in: productIds } })
-                .select("_id name basePrice")
-                .lean() as ProductProjection[]
-            : []
+        const [catalogProducts, categories] = await Promise.all([
+            productIds.length > 0
+                ? Product.find({ eventId, _id: { $in: productIds } })
+                    .select("_id name shortName basePrice categoryId")
+                    .lean() as Promise<ProductProjection[]>
+                : Promise.resolve([] as ProductProjection[]),
+            Category.find({ eventId })
+                .select("_id name printOrder")
+                .lean() as Promise<CategoryProjection[]>
+        ])
 
-        const productById = new Map<string, { name: string, basePrice: number }>()
+        const categoryById = new Map(categories.map((category) => [String(category._id), category] as const))
+        const productById = new Map<string, ProductConsumptionCatalogEntry>()
         catalogProducts.forEach((product) => {
+            const category = product.categoryId ? categoryById.get(String(product.categoryId)) : undefined
             productById.set(String(product._id), {
                 name: product.name?.trim() || "Prodotto senza nome",
-                basePrice: normalizeAmount(product.basePrice)
+                shortName: product.shortName?.trim(),
+                basePrice: normalizeAmount(product.basePrice),
+                categoryName: category?.name,
+                categoryOrder: category?.printOrder
             })
+        })
+        const salesBreakdown = aggregateOrderProductSales({
+            orders: paidOrders,
+            catalogByProductId: productById
         })
         const productConsumptions = aggregateOrderProductConsumptions({
             orders: paidOrders,
@@ -226,6 +273,7 @@ export async function GET(request: NextRequest) {
             varianceAmount: session.varianceAmount ?? computedFallback.varianceAmount,
             openingNotes: session.openingNotes || "",
             closingNotes: session.closingNotes || "",
+            salesBreakdown,
             productConsumptions: productConsumptions.map((metric) => ({
                 productId: metric.productId || metric.productKey,
                 productName: metric.productName,
