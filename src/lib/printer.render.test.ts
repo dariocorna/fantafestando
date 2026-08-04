@@ -21,6 +21,48 @@ function createFakePrinter() {
 }
 
 describe("PrinterService renderPrintDocument", () => {
+    test("renders cash-session products in Font B and restores Font A without double-size text", () => {
+        const printer = createFakePrinter();
+        const document: PrintDocumentV2 = {
+            schemaVersion: 2,
+            kind: "CASH_SESSION_SUMMARY",
+            printType: "CASH_SESSION_SUMMARY",
+            title: "Chiusura Cassa",
+            copyLabel: "COPIA CASSA",
+            createdAt: "2026-03-27T22:00:00.000Z",
+            headerLines: [],
+            items: [
+                { qty: 2, name: "PANINO", groupLabel: "PREZZO PIENO", grossAmount: 10, discountAmount: 0, lineTotal: 10 },
+                { qty: 1, name: "BIBITA", groupLabel: "Staff", grossAmount: 5, discountAmount: 1, lineTotal: 4 }
+            ],
+            totals: [
+                { label: "LORDO", value: "15.00 EUR" },
+                { label: "NETTO / INCASSI", value: "14.00 EUR", emphasis: "strong" }
+            ],
+            footerLines: []
+        };
+        const service = PrinterService as unknown as {
+            printItems: (printerInstance: ReturnType<typeof createFakePrinter>, printDocument: PrintDocumentV2) => void;
+            printTotals: (printerInstance: ReturnType<typeof createFakePrinter>, printDocument: PrintDocumentV2) => void;
+        };
+
+        service.printItems(printer, document);
+
+        expect(printer.setTypeFontB).toHaveBeenCalledTimes(1);
+        expect(printer.setTypeFontA).toHaveBeenCalledTimes(1);
+        expect(printer.setTypeFontB.mock.invocationCallOrder[0]).toBeLessThan(printer.setTypeFontA.mock.invocationCallOrder[0]);
+        expect(printer.println).toHaveBeenCalledWith(expect.stringContaining("PANINO"));
+        expect(printer.println).toHaveBeenCalledWith(expect.stringContaining("SUBT. SCONTO"));
+        expect(printer.setTextDoubleWidth).not.toHaveBeenCalled();
+        expect(printer.setTextDoubleHeight).not.toHaveBeenCalled();
+
+        service.printTotals(printer, document);
+
+        expect(printer.bold).toHaveBeenCalledWith(true);
+        expect(printer.setTextDoubleWidth).not.toHaveBeenCalled();
+        expect(printer.setTextDoubleHeight).not.toHaveBeenCalled();
+    });
+
     test("prints pizza barcodes as native EAN-8 commands on customer orders", async () => {
         const printer = createFakePrinter();
         const document: PrintDocumentV2 = {

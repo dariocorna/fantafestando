@@ -183,18 +183,43 @@ describe("print-report", () => {
             cashSalesAmount: 50,
             cardSalesAmount: 20,
             otherSalesAmount: 5,
+            grossSalesAmount: 90,
+            discountSalesAmount: 15,
+            discountSummaries: [
+                { label: "Staff", amount: 10 },
+                { label: "Promo", amount: 5 }
+            ],
             expectedCashAmount: 150,
             closingCountedCashAmount: 149,
             varianceAmount: -1,
             paidOrdersCount: 7,
             openingNotes: "Apertura regolare",
-            closingNotes: "Consegna completata"
+            closingNotes: "Consegna completata",
+            items: [{
+                name: "PANINO",
+                qty: 2,
+                lineTotal: 8,
+                groupLabel: "Staff",
+                grossAmount: 10,
+                discountAmount: 2
+            }]
         });
 
         expect(document.printType).toBe("CASH_SESSION_SUMMARY");
         expect(document.referenceCode).toBe("12345678");
         expect(document.headerLines[0]).toContain("FESTA: Evento Test");
-        expect(document.totals.map((row) => row.label)).toContain("TOTALE INCASSI");
+        expect(document.totals.map((row) => row.label)).toEqual(expect.arrayContaining([
+            "LORDO",
+            "SCONTO STAFF",
+            "SCONTO PROMO",
+            "NETTO / INCASSI"
+        ]));
+        expect(document.items[0]).toEqual(expect.objectContaining({
+            groupLabel: "Staff",
+            grossAmount: 10,
+            discountAmount: 2,
+            lineTotal: 8
+        }));
         expect(document.footerLines.join(" ")).toContain("NOTE APERTURA");
     });
 
@@ -430,6 +455,41 @@ describe("print-report", () => {
         expect(lines).toContain("SESSIONE N° AABBCCDD");
         expect(lines.some((l) => l.includes("TOTALE INCASSI --> 75.00 EUR"))).toBe(true);
         expect(lines.some((l) => l.includes("FONDO INIZIALE: 100.00 EUR"))).toBe(true);
+    });
+
+    it("builds grouped cash session preview with compact rows and section subtotals", () => {
+        const lines = buildPreviewLines({
+            schemaVersion: 2,
+            printType: "CASH_SESSION_SUMMARY",
+            kind: "CASH_SESSION_SUMMARY",
+            title: "Chiusura Cassa",
+            copyLabel: "COPIA CASSA",
+            createdAt: "2026-02-28T10:00:00.000Z",
+            headerLines: [],
+            items: [
+                { qty: 2, name: "PANINO", groupLabel: "PREZZO PIENO", grossAmount: 10, discountAmount: 0, lineTotal: 10 },
+                { qty: 1, name: "BIBITA", groupLabel: "Staff", grossAmount: 5, discountAmount: 1, lineTotal: 4 }
+            ],
+            totals: [],
+            footerLines: []
+        });
+
+        expect(lines).toContain("PREZZO PIENO");
+        expect(lines).toContain("STAFF");
+        expect(lines.some((line) => line.includes("PANINO") && line.includes("2") && line.includes("10.00"))).toBe(true);
+        expect(lines).toContain("SUBTOTALE LORDO: 10.00 EUR");
+        expect(lines).toContain("SUBTOTALE SCONTO: 1.00 EUR");
+        expect(lines).toContain("SUBTOTALE NETTO: 4.00 EUR");
+    });
+
+    it("keeps legacy cash-session items readable in a neutral group", () => {
+        const lines = buildPreviewLines({
+            kind: "CASH_SESSION_SUMMARY",
+            items: [{ name: "Prodotto storico", quantity: 1, lineTotal: 3 }]
+        });
+
+        expect(lines).toContain("DETTAGLIO VENDUTO");
+        expect(lines.some((line) => line.includes("Prodotto storico"))).toBe(true);
     });
 
     it("builds preview lines with item notes and options", () => {

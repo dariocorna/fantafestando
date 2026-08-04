@@ -141,10 +141,12 @@ describe("getClosedCashSessionPrintDocumentAction", () => {
 
         productFindMock.mockReturnValue({
             select: vi.fn().mockReturnValue({
-                lean: vi.fn().mockResolvedValue([
-                    { _id: "p1", name: "Birra", basePrice: 4 },
-                    { _id: "p2", name: "Patatine", basePrice: 5 }
-                ])
+                populate: vi.fn().mockReturnValue({
+                    lean: vi.fn().mockResolvedValue([
+                        { _id: "p1", name: "Birra", shortName: "BIRRA", basePrice: 4, categoryId: { name: "Bar", printOrder: 1 } },
+                        { _id: "p2", name: "Patatine", shortName: "PATATINE", basePrice: 5, categoryId: { name: "Cucina", printOrder: 2 } }
+                    ])
+                })
             })
         });
 
@@ -163,9 +165,12 @@ describe("getClosedCashSessionPrintDocumentAction", () => {
             posDeviceName: "Cassa Bar",
             openingFloatAmount: 100,
             cashSalesAmount: 50,
+            grossSalesAmount: 20,
+            discountSalesAmount: 1,
             items: expect.arrayContaining([
-                expect.objectContaining({ name: "Birra", qty: 3, lineTotal: 14 }),
-                expect.objectContaining({ name: "Patatine", qty: 1, lineTotal: 5 })
+                expect.objectContaining({ name: "BIRRA", qty: 1, lineTotal: 5, groupLabel: "PREZZO PIENO" }),
+                expect.objectContaining({ name: "BIRRA", qty: 2, lineTotal: 9, groupLabel: "Sconto non classificato" }),
+                expect.objectContaining({ name: "PATATINE", qty: 1, lineTotal: 5, groupLabel: "PREZZO PIENO" })
             ])
         }));
         expect(result).toEqual({ title: "MOCK DOCUMENT" });

@@ -93,4 +93,59 @@ describe("order discounts helpers", () => {
             error: "Sconto riga non valido: prodotto non presente nel carrello"
         })
     })
+
+    it("applies ordered order discounts sequentially", () => {
+        const result = computeOrderDiscounts({
+            lines: [{ productId: "p1", quantity: 1, unitAmount: 10 }],
+            orderDiscounts: [
+                { type: "PERCENT", value: 50, label: "Staff" },
+                { type: "FIXED", value: 1, label: "Promo" }
+            ]
+        })
+
+        expect(result.success).toBe(true)
+        if (!result.success) return
+        expect(result.summary.orderDiscountComponents).toEqual([
+            { type: "PERCENT", value: 50, label: "Staff", baseAmount: 10, appliedAmount: 5 },
+            { type: "FIXED", value: 1, label: "Promo", baseAmount: 5, appliedAmount: 1 }
+        ])
+        expect(result.summary.discountApplied).toBe(6)
+        expect(result.summary.finalAmount).toBe(4)
+    })
+
+    it("rejects mixed legacy and ordered order discount payloads", () => {
+        const result = computeOrderDiscounts({
+            lines: [{ productId: "p1", quantity: 1, unitAmount: 10 }],
+            orderDiscount: { type: "PERCENT", value: 10 },
+            orderDiscounts: [{ type: "FIXED", value: 1 }]
+        })
+
+        expect(result).toEqual({ success: false, error: "Usa orderDiscount oppure orderDiscounts, non entrambi" })
+    })
+
+    it("treats an empty ordered-discount array as absent for legacy clients", () => {
+        const result = computeOrderDiscounts({
+            lines: [{ productId: "p1", quantity: 1, unitAmount: 10 }],
+            orderDiscount: { type: "PERCENT", value: 10, label: "Legacy" },
+            orderDiscounts: []
+        })
+
+        expect(result.success).toBe(true)
+        if (!result.success) return
+        expect(result.summary.discountApplied).toBe(1)
+        expect(result.summary.finalAmount).toBe(9)
+    })
+
+    it("limits ordered order discounts to eight components", () => {
+        const result = computeOrderDiscounts({
+            lines: [{ productId: "p1", quantity: 1, unitAmount: 10 }],
+            orderDiscounts: Array.from({ length: 9 }, (_, index) => ({
+                type: "FIXED",
+                value: 0.01,
+                label: `Sconto ${index + 1}`
+            }))
+        })
+
+        expect(result).toEqual({ success: false, error: "Puoi applicare al massimo 8 sconti ordine" })
+    })
 })

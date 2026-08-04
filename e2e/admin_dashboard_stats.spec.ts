@@ -6,6 +6,7 @@ import {
     openPosAndSelectDevice,
     openCashSessionIfRequired,
     completeCashOrder,
+    deleteEvent,
     uniqueSuffix,
     localPrinterIp,
 } from "./utils/fixtures"
@@ -27,6 +28,7 @@ test.describe("Dashboard statistiche e reportistica", () => {
         const supportingName = `Supporting ${suffix}`
         const unsoldName = `Unsold ${suffix}`
 
+        try {
         await createAndActivateEvent(page, eventName)
         await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName)
         await createCategoryAndProducts(page, categoryName, [
@@ -75,5 +77,8 @@ test.describe("Dashboard statistiche e reportistica", () => {
         const xlsPayload = await xlsResponse.text()
         expect(xlsPayload).toContain("Sezione\tValore")
         expect(xlsPayload).toContain(unsoldName)
+        } finally {
+            await deleteEvent(page, eventName)
+        }
     })
 })
