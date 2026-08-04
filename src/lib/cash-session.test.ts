@@ -4,6 +4,7 @@ import {
     buildCashSessionXlsCompatibleContent,
     computeCashSessionSummary
 } from "./cash-session"
+import { aggregateOrderProductSales } from "./product-consumption"
 
 describe("cash session summary", () => {
     it("computes expected totals and variance", () => {
@@ -117,6 +118,20 @@ describe("cash session summary", () => {
     })
 
     it("builds xls-compatible cash session report using tab separator", () => {
+        const salesBreakdown = aggregateOrderProductSales({
+            orders: [{
+                totalAmount: 8,
+                discountApplied: 2,
+                discountMeta: { type: "FIXED", label: "Buono", value: 2 },
+                cart: [{ productId: "p1", snapshotName: "Panino", quantity: 2, lineTotal: 10 }]
+            }],
+            catalogByProductId: new Map([["p1", {
+                name: "Panino",
+                shortName: "PANINO",
+                categoryName: "Cucina",
+                categoryOrder: 1
+            }]])
+        })
         const xls = buildCashSessionXlsCompatibleContent({
             eventName: "Festa Demo",
             posDeviceName: "Cassa B",
@@ -129,6 +144,7 @@ describe("cash session summary", () => {
             productConsumptions: [
                 { productId: "p1", productName: "Panino", quantityConsumed: 2, revenueAmount: 10 }
             ],
+            salesBreakdown,
             orders: []
         })
 
@@ -138,5 +154,8 @@ describe("cash session summary", () => {
         expect(xls).toContain("Ordini sessione")
         expect(xls).toContain("Consumo prodotti sessione")
         expect(xls).toContain("Panino\t2\t10.00")
+        expect(xls).toContain("Tipo riga\tCategoria\tProdotto\tDescrizione breve")
+        expect(xls).toContain("TOTALE CATEGORIA\tCucina")
+        expect(xls).toContain("Buono\tFisso\t2.00 EUR\t1\t2.00")
     })
 })

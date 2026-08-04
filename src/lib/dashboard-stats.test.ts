@@ -6,6 +6,7 @@ import {
     formatDashboardDateTime,
     normalizePaymentMethod
 } from "./dashboard-stats"
+import { aggregateOrderProductSales } from "./product-consumption"
 
 describe("dashboard stats helpers", () => {
     it("aggregates totals and payment split for paid orders only", () => {
@@ -195,18 +196,43 @@ describe("dashboard stats helpers", () => {
             products: [{ id: "p1", name: "Piadina" }]
         })
 
-        const csv = buildDashboardCsvContent(stats, { eventName: "Festa Test" })
-        const xls = buildDashboardXlsCompatibleContent(stats, { eventName: "Festa Test" })
+        const salesBreakdown = aggregateOrderProductSales({
+            orders: [{
+                totalAmount: 8,
+                discountApplied: 2,
+                discountMeta: { type: "PERCENT", label: "Staff", value: 20 },
+                cart: [{ productId: "p1", snapshotName: "Piadina", quantity: 2, lineTotal: 10 }]
+            }],
+            catalogByProductId: new Map([["p1", {
+                name: "Piadina speciale",
+                shortName: "PIADINA",
+                categoryName: "Cucina",
+                categoryOrder: 1
+            }]])
+        })
+        const csv = buildDashboardCsvContent(stats, { eventName: "Festa Test", salesBreakdown })
+        const xls = buildDashboardXlsCompatibleContent(stats, { eventName: "Festa Test", salesBreakdown })
 
         expect(csv.startsWith("\uFEFF")).toBe(true)
         expect(csv).toContain("Sezione,Valore")
         expect(csv).toContain("Incasso totale")
         expect(csv).toContain("Top prodotti")
         expect(csv).toContain("Piadina")
+        expect(csv).toContain("Tipo riga,Categoria,Prodotto,Descrizione breve")
+        expect(csv).toContain("TOTALE CATEGORIA,Cucina")
+        expect(csv).toContain("TOTALE GENERALE")
+        expect(csv).toContain("Riepilogo componenti sconto")
+        expect(csv).toContain("Staff,Percentuale,20%,1,2.00")
 
         expect(xls.startsWith("\uFEFF")).toBe(true)
         expect(xls).toContain("Sezione\tValore")
         expect(xls).toContain("Ordini saldati")
+        expect(xls).toContain("Tipo riga\tCategoria\tProdotto\tDescrizione breve")
+        expect(xls).toContain("Staff\tPercentuale\t20%\t1\t2.00")
+
+        const csvSalesSection = csv.slice(csv.indexOf("Vendite per categoria"), csv.indexOf("Ordini saldati", csv.indexOf("Vendite per categoria")))
+        const xlsSalesSection = xls.slice(xls.indexOf("Vendite per categoria"), xls.indexOf("Ordini saldati", xls.indexOf("Vendite per categoria")))
+        expect(csvSalesSection.replaceAll(",", "\t")).toBe(xlsSalesSection)
     })
 
     it("normalizes payment method values and formats date", () => {

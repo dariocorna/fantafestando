@@ -208,8 +208,10 @@ export async function createCategory(
     options?: CreateCategoryOptions
 ) {
     await page.goto("/admin/catalog");
-    await page.click("#new-category-btn");
+    await expect(page.getByTestId("product-table-ready")).toHaveText("ready");
+    await page.getByRole("button", { name: "+ Nuova Categoria", exact: true }).click();
     const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
     await dialog.locator("#cat-name").fill(categoryName);
 
     if (options?.kitchenPrinterName) {

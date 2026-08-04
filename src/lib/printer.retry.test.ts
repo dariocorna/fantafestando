@@ -59,16 +59,35 @@ describe("PrinterService.retryPrintJobById", () => {
         expect(result).toEqual({ success: false, error: "Job non trovato" });
     });
 
-    test("returns unsupported error for cash session summary", async () => {
+    test("retries legacy cash session summaries without losing their document", async () => {
         mockFindOneJob({
             _id: { toString: () => "job-1" },
             source: "CASH_SESSION",
             printType: "CASH_SESSION_SUMMARY",
-            document: {}
+            copies: 1,
+            destinationHost: "printer-emulator",
+            destinationPort: 19100,
+            document: {
+                kind: "CASH_SESSION_SUMMARY",
+                sessionId: "session-12345678",
+                items: [{ name: "Panino", quantity: 2, lineTotal: 10 }],
+                totals: { totaleIncassi: "10.00 EUR" }
+            }
         });
+        const dispatchSpy = vi.spyOn(
+            PrinterService as unknown as { dispatchPrintDocumentWithAutomaticRetry: (params: unknown) => Promise<unknown> },
+            "dispatchPrintDocumentWithAutomaticRetry"
+        ).mockResolvedValue({ success: true, automaticRetryCount: 0 });
 
         const result = await PrinterService.retryPrintJobById("evt-1", "job-1");
-        expect(result).toEqual({ success: false, error: "Reinvio non supportato per chiusure cassa" });
+        expect(result).toEqual({ success: true });
+        expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({
+            printType: "CASH_SESSION_SUMMARY",
+            document: expect.objectContaining({
+                printType: "CASH_SESSION_SUMMARY",
+                items: [expect.objectContaining({ name: "Panino", qty: 2, lineTotal: 10 })]
+            })
+        }));
     });
 
     test("retries a failed order print and returns success", async () => {
