@@ -138,11 +138,35 @@ interface IOrder {
   createdAt: Date;
   totalAmount: number;
   discountApplied: number;
+  discountMeta?: {
+    type: "NONE" | "PERCENT" | "FIXED";
+    label?: string;
+    value?: number;
+    baseAmount?: number;
+    scope?: "ORDER";
+  };
+  discountComponents?: Array<{
+    scope: "VOLUNTEER" | "LINE" | "ORDER";
+    type: "PERCENT" | "FIXED";
+    label?: string;
+    value: number;
+    baseAmount: number;
+    appliedAmount: number;
+    productId?: ObjectId;
+  }>;
   cart: Array<{
     productId: ObjectId;
     snapshotName: string;       // Name shown at order time (POS uses shortName||name, menu uses name)
     customKitchenNotes?: string;  // e.g. "Well done for grandpa" - custom note
     quantity: number;
+    lineTotal?: number;
+    discountApplied?: number;
+    discountMeta?: {
+      type: "NONE" | "PERCENT" | "FIXED";
+      label?: string;
+      value?: number;
+      baseUnitAmount?: number;
+    };
     selectedOptions: Array<{
       name: string;
       priceVariation: number;

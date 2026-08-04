@@ -328,3 +328,17 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
   SSH tramite `ProxyJump`.
 
 **Test E2E**: `e2e/remote_access.spec.ts`.
+
+---
+
+## 🔄 Issue #97: Report vendite e sconti
+
+- Tracciamento sequenziale dei componenti sconto ordine, riga e Volontari,
+  mantenendo compatibilità con gli ordini storici.
+- Export evento e sessione cassa con dettaglio per categoria, prodotto e regime
+  prezzo, subtotali categoria, totale generale e riepilogo monetario sconti.
+- Chiusura cassa con sezioni prezzo pieno/sconti, nomi brevi e subtotali
+  lordo/sconto/netto, condivisi con l'aggregato degli export.
+- Compatibilità di anteprima e ristampa per i documenti di chiusura storici.
+
+**Issue collegata**: `#97`.
