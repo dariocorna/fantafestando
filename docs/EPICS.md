@@ -342,3 +342,16 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
 - Compatibilità di anteprima e ristampa per i documenti di chiusura storici.
 
 **Issue collegata**: `#97`.
+
+---
+
+## 🔄 Epica 33: Numerazione generica piatti
+
+- Generalizzazione del flusso pizza per categorie con preparazione numerata,
+  incluse Pizza e Calamari, con un solo numero condiviso per ordine.
+- Etichette operative generiche in catalogo, menu pubblico, console, monitor,
+  anteprime e stampe, mantenendo compatibili campi e URL storici `pizza*`.
+- `PIATTO N°` ingrandito soltanto sulle copie cliente e reparto; riepilogo cassa
+  privo di numero e barcode.
+
+**Test E2E**: `e2e/admin_pizza_category.spec.ts`, `e2e/pizza_monitor_flow.spec.ts`.

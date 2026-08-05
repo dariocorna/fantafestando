@@ -12,7 +12,7 @@ Gestionale per feste locali con:
 - storno sicuro ordine pagato da admin con ripristino contabile/scorte
 - web app pubblica per ordini cliente
 - PWA dedicata per `menu` (pubblico), installabile e online-first
-- flusso pizza con numerazione dedicata, console cucina e monitor pubblico pizze pronte
+- flusso preparazioni numerate con numero piatto condiviso, console cucina e monitor pubblico
 - integrazione pagamenti elettronici SumUp
 - rimborso SumUp in caso di storno ordine pagato con carta
 - stampa comande su stampanti termiche di rete
@@ -69,8 +69,8 @@ App disponibile su `http://localhost:3000`.
 - `GET /admin`: pannello amministrazione
 - `GET /pos`: interfaccia punto cassa
 - `GET /menu`: web app ordini pubblica
-- `GET /pizza-console`: console operativa cucina per gestione ticket pizza
-- `GET /pizza-monitor`: monitor pubblico delle pizze pronte
+- `GET /pizza-console`: console operativa cucina per gestione preparazioni numerate
+- `GET /pizza-monitor`: monitor pubblico dei piatti pronti
 - `GET /manifest-menu.webmanifest`: manifest PWA menu
 - `GET /login`: login admin
 
@@ -78,27 +78,26 @@ Accesso backoffice:
 - ambienti standard: utenti letti da MongoDB collection `User` (`username`, `passwordHash`, `role`) con verifica password `bcrypt`;
 - sviluppo locale: fallback `admin / admin` disponibile solo fuori produzione e solo con `AUTH_ALLOW_DEV_CREDENTIALS=true` esplicito.
 
-Note accesso flusso pizza:
+Note accesso preparazioni numerate:
 - `/pizza-console` e le API `/api/pizza-console/*` sono pensate per uso operativo interno e richiedono sessione autenticata;
 - `/pizza-monitor` usa la route pubblica `/api/public/pizza-monitor` ed e` pensato per essere mostrato su monitor/schermo cliente.
 
-## Flusso pizza
+## Preparazioni numerate
 
-1. In Admin Catalogo, marca come `Categoria pizza` la categoria che deve entrare nel flusso dedicato.
-2. Quando un ordine contiene almeno un prodotto appartenente a una categoria pizza, il sistema assegna un `numero pizza` dedicato.
+1. In Admin Catalogo, abilita `Preparazione numerata` sulle categorie che devono entrare nel flusso, ad esempio Pizza e Calamari.
+2. Quando un ordine contiene almeno un prodotto appartenente a una categoria abilitata, il sistema assegna un unico `numero piatto` all'ordine.
 3. Dopo il pagamento:
-   - se la categoria pizza ha una stampante reparto, la comanda cucina include numero pizza e barcode `EAN-8` numerico corto, derivato dal numero pizza;
-   - se non ha una stampante reparto, il flusso resta valido e la pizza stampa solo in cassa sulla copia cliente, con lo stesso barcode `EAN-8` sulla comanda cliente.
-4. La console cucina su `/pizza-console` mostra la coda delle pizze da preparare e permette di:
-   - segnare una pizza come pronta scansionando il barcode;
-   - rimettere in coda una pizza gia` pronta;
-   - rimuovere manualmente un ticket sia dalla coda di preparazione sia dalla lista delle pizze pronte.
-5. Il monitor pubblico su `/pizza-monitor` mostra solo i numeri pizza nello stato `READY`.
+   - ogni copia reparto abilitata include `PIATTO N°` e barcode `EAN-8` derivato dal numero condiviso;
+   - la copia cliente include `PIATTO N°`; senza stampante reparto include anche il barcode;
+   - il riepilogo cassa non include numero piatto o barcode.
+4. La console cucina su `/pizza-console` mostra la coda delle preparazioni e permette di segnarle pronte, rimetterle in coda o rimuoverle.
+5. Il monitor pubblico su `/pizza-monitor` mostra i numeri piatto nello stato `READY`.
 
 Dettagli utili:
 - la console cucina e` una route separata, non e` annidata sotto `/admin`;
 - il monitor pubblico e` anch'esso separato dal backoffice, per poter essere esposto su uno schermo dedicato;
-- nel riepilogo ordine pubblico (`/menu/success` e summary ordine) viene mostrato anche il numero pizza quando presente.
+- nel riepilogo ordine pubblico (`/menu/success` e summary ordine) viene mostrato anche il numero piatto quando presente;
+- campi persistiti, API e URL mantengono i nomi storici `pizza*` per compatibilità.
 
 ## Script principali
 
