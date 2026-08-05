@@ -14,7 +14,7 @@ import { createOrderAccessToken } from "@/lib/order-access-token"
 import { consumeRateLimit, resolveClientKey } from "@/lib/rate-limit"
 import { buildPublicOrderSummary } from "@/lib/public-order-summary"
 import { type StockShortage } from "@/lib/inventory"
-import { resolvePizzaTicketForCart } from "@/lib/pizza-ticket"
+import { resolveDishTicketsForCart } from "@/lib/pizza-ticket"
 import {
     collectReferencedProductIds,
     getProductUnitBasePrice,
@@ -344,7 +344,7 @@ export async function createPublicOrder(data: {
         const easterEggUpload = event.settings?.portalEasterEggEnabled
             ? createEasterEggUploadToken()
             : null
-        const pizzaTicket = await resolvePizzaTicketForCart(
+        const dishTickets = await resolveDishTicketsForCart(
             data.eventId,
             normalizedCart.map((item) => ({
                 productId: item.productId,
@@ -367,7 +367,7 @@ export async function createPublicOrder(data: {
             totalAmount: computedTotalAmount,
             cart: normalizedCart,
             ingredientPlan,
-            pizzaTicket,
+            dishTickets,
             publicAccessTokenHash: publicAccess.hash,
             easterEggAttachment: easterEggUpload
                 ? {
@@ -387,7 +387,7 @@ export async function createPublicOrder(data: {
             orderSummary: buildPublicOrderSummary({
                 _id: order._id,
                 pickupNumber: order.pickupNumber,
-                pizzaTicket: order.pizzaTicket,
+                dishTickets: order.dishTickets,
                 totalAmount: order.totalAmount,
                 customer: order.customer,
                 cart: order.cart

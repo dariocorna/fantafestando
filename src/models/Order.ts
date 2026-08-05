@@ -66,11 +66,13 @@ export interface IOrder extends Document {
         sourceProductName?: string;
         legacy?: boolean;
     }>;
-    pizzaTicket?: {
+    dishTickets: Array<{
+        productId: Types.ObjectId;
+        snapshotName: string;
         pizzaNumber: number;
         state: "QUEUED" | "READY" | "REMOVED";
         readyAt?: Date;
-    };
+    }>;
     paymentMethod: "CASH" | "CARD" | "OTHER";
     sumupCheckoutId?: string;
     sumupPaymentId?: string;
@@ -190,14 +192,18 @@ const OrderSchema = new Schema<IOrder>({
         sourceProductName: { type: String },
         legacy: { type: Boolean, default: false }
     }],
-    pizzaTicket: {
-        pizzaNumber: { type: Number, min: 1 },
+    dishTickets: [{
+        productId: { type: Schema.Types.ObjectId, ref: "Product", required: true },
+        snapshotName: { type: String, required: true },
+        pizzaNumber: { type: Number, required: true, min: 1 },
         state: {
             type: String,
-            enum: ["QUEUED", "READY", "REMOVED"]
+            enum: ["QUEUED", "READY", "REMOVED"],
+            required: true,
+            default: "QUEUED"
         },
         readyAt: { type: Date }
-    },
+    }],
     paymentMethod: { type: String, enum: ["CASH", "CARD", "OTHER"], default: "CASH" },
     sumupCheckoutId: { type: String },
     sumupPaymentId: { type: String },

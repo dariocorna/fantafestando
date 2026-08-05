@@ -10,6 +10,7 @@ interface PizzaConsolePayload {
     queuedTickets: Array<{
         orderId: string;
         pizzaNumber: number;
+        productName: string;
         orderCode: string;
         customerName?: string;
         table?: string;
@@ -18,6 +19,7 @@ interface PizzaConsolePayload {
     readyTickets: Array<{
         orderId: string;
         pizzaNumber: number;
+        productName: string;
         readyAt: string;
     }>;
 }
@@ -117,13 +119,13 @@ export function PizzaConsoleClient() {
         setFeedback("Piatto segnato come pronto.");
     };
 
-    const requeue = async (orderId: string) => {
+    const requeue = async (orderId: string, pizzaNumber: number) => {
         const response = await fetch("/api/pizza-console/requeue", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({ orderId })
+            body: JSON.stringify({ orderId, pizzaNumber })
         });
         const result = await response.json().catch(() => ({} as { status?: string }));
         if (!response.ok && result.status !== "already_queued") {
@@ -138,13 +140,13 @@ export function PizzaConsoleClient() {
         setFeedback("Ticket rimesso in coda.");
     };
 
-    const removeTicket = async (orderId: string, source: "queued" | "ready") => {
+    const removeTicket = async (orderId: string, pizzaNumber: number, source: "queued" | "ready") => {
         const response = await fetch("/api/pizza-console/remove", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({ orderId })
+            body: JSON.stringify({ orderId, pizzaNumber })
         });
         const result = await response.json().catch(() => ({} as { status?: string }));
         if (!response.ok && result.status !== "already_removed") {
@@ -182,11 +184,11 @@ export function PizzaConsoleClient() {
         });
     };
 
-    const handleRequeue = (orderId: string) => {
+    const handleRequeue = (orderId: string, pizzaNumber: number) => {
         startTransition(async () => {
             try {
                 setError(null);
-                await requeue(orderId);
+                await requeue(orderId, pizzaNumber);
                 await refreshTickets();
             } catch (requeueError) {
                 console.error("Pizza requeue failed", requeueError);
@@ -197,11 +199,11 @@ export function PizzaConsoleClient() {
         });
     };
 
-    const handleRemove = (orderId: string, source: "queued" | "ready") => {
+    const handleRemove = (orderId: string, pizzaNumber: number, source: "queued" | "ready") => {
         startTransition(async () => {
             try {
                 setError(null);
-                await removeTicket(orderId, source);
+                await removeTicket(orderId, pizzaNumber, source);
                 await refreshTickets();
             } catch (removeError) {
                 console.error("Pizza remove failed", removeError);
@@ -298,7 +300,7 @@ export function PizzaConsoleClient() {
                             <div className="mt-5 space-y-3">
                                 {payload.queuedTickets.map((ticket) => (
                                     <article
-                                        key={ticket.orderId}
+                                        key={`${ticket.orderId}-${ticket.pizzaNumber}`}
                                         className="rounded-[28px] border border-[#d9e6f8] bg-[linear-gradient(135deg,#ffffff_0%,#f7fbff_52%,#eef6ff_100%)] p-5 shadow-[var(--brand-shadow-soft)]"
                                         data-testid={`pizza-console-queued-${ticket.pizzaNumber}`}
                                     >
@@ -310,6 +312,7 @@ export function PizzaConsoleClient() {
                                                 <p className="font-brand-display mt-3 text-5xl font-black tracking-[-0.07em] text-slate-900">
                                                     {ticket.pizzaNumber}
                                                 </p>
+                                                <p className="mt-1 text-sm font-black text-slate-900">{ticket.productName}</p>
                                                 <p className="mt-2 text-sm font-bold text-slate-700">
                                                     Ordine {ticket.orderCode}
                                                     {ticket.customerName ? ` · ${ticket.customerName}` : ""}
@@ -332,7 +335,7 @@ export function PizzaConsoleClient() {
                                                     type="button"
                                                     variant="outline"
                                                     className="rounded-2xl border-rose-200 bg-white/85 text-rose-700 hover:bg-rose-50"
-                                                    onClick={() => handleRemove(ticket.orderId, "queued")}
+                                                    onClick={() => handleRemove(ticket.orderId, ticket.pizzaNumber, "queued")}
                                                     disabled={isPending}
                                                     data-testid={`pizza-console-remove-queued-${ticket.pizzaNumber}`}
                                                 >
@@ -370,7 +373,7 @@ export function PizzaConsoleClient() {
                             <div className="mt-5 space-y-3">
                                 {payload.readyTickets.map((ticket) => (
                                     <article
-                                        key={`${ticket.orderId}-${ticket.readyAt}`}
+                                        key={`${ticket.orderId}-${ticket.pizzaNumber}-${ticket.readyAt}`}
                                         className="rounded-[28px] border border-[#d9e6f8] bg-[linear-gradient(135deg,#ffffff_0%,#f5fffa_48%,#ebfff3_100%)] p-5 shadow-[var(--brand-shadow-soft)]"
                                         data-testid={`pizza-console-ready-${ticket.pizzaNumber}`}
                                     >
@@ -383,6 +386,7 @@ export function PizzaConsoleClient() {
                                                 <p className="font-brand-display mt-3 text-5xl font-black tracking-[-0.07em] text-slate-900">
                                                     {ticket.pizzaNumber}
                                                 </p>
+                                                <p className="mt-1 text-sm font-black text-slate-900">{ticket.productName}</p>
                                                 <p className="mt-2 text-xs font-semibold text-emerald-700">
                                                     Pubblicata alle {formatTime(ticket.readyAt)}
                                                 </p>
@@ -392,7 +396,7 @@ export function PizzaConsoleClient() {
                                                     type="button"
                                                     variant="outline"
                                                     className="rounded-2xl border-emerald-300 bg-white/80 text-emerald-700 hover:bg-white"
-                                                    onClick={() => handleRequeue(ticket.orderId)}
+                                                    onClick={() => handleRequeue(ticket.orderId, ticket.pizzaNumber)}
                                                     disabled={isPending}
                                                 >
                                                     <RotateCcw className="h-4 w-4" />
@@ -402,7 +406,7 @@ export function PizzaConsoleClient() {
                                                     type="button"
                                                     variant="outline"
                                                     className="rounded-2xl border-rose-200 bg-white/85 text-rose-700 hover:bg-rose-50"
-                                                    onClick={() => handleRemove(ticket.orderId, "ready")}
+                                                    onClick={() => handleRemove(ticket.orderId, ticket.pizzaNumber, "ready")}
                                                     disabled={isPending}
                                                     data-testid={`pizza-console-remove-ready-${ticket.pizzaNumber}`}
                                                 >

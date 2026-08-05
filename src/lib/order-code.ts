@@ -27,13 +27,19 @@ export function getOrderCodeFromOrder(order: OrderCodeSource): string {
 }
 
 async function getNextScopedOrderNumber(eventId: string, scope: OrderCounterScope): Promise<number> {
+    return (await getNextScopedOrderNumbers(eventId, scope, 1))[0];
+}
+
+async function getNextScopedOrderNumbers(eventId: string, scope: OrderCounterScope, count: number): Promise<number[]> {
+    if (!Number.isSafeInteger(count) || count <= 0) return [];
     const counter = await OrderCounter.findOneAndUpdate(
         { eventId, scope },
-        { $inc: { seq: 1 } },
+        { $inc: { seq: count } },
         { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
     ).select("seq").lean();
 
-    return counter?.seq ?? 1;
+    const last = counter?.seq ?? count;
+    return Array.from({ length: count }, (_, index) => last - count + index + 1);
 }
 
 export async function getNextPublicOrderNumber(eventId: string): Promise<number> {
@@ -42,4 +48,8 @@ export async function getNextPublicOrderNumber(eventId: string): Promise<number>
 
 export async function getNextPizzaOrderNumber(eventId: string): Promise<number> {
     return getNextScopedOrderNumber(eventId, "PIZZA_ORDER");
+}
+
+export async function getNextPizzaOrderNumbers(eventId: string, count: number): Promise<number[]> {
+    return getNextScopedOrderNumbers(eventId, "PIZZA_ORDER", count);
 }

@@ -47,7 +47,7 @@ function SuccessContent() {
     )
     const shouldFetchSummary = Boolean(clientReady && orderId && accessToken && !summary)
     const isLoadingSummary = shouldFetchSummary && !summaryFetchFailed
-    const pizzaNumber = summary?.pizzaNumber
+    const dishTickets = summary?.dishTickets || []
 
     useEffect(() => {
         if (!clientReady || !orderId || !accessToken || summary) return
@@ -138,20 +138,28 @@ function SuccessContent() {
 
                             </div>
 
-                            {pizzaNumber ? (
+                            {dishTickets.length > 0 ? (
                                 <div
                                     data-testid="menu-success-pizza-card"
                                     className="rounded-[34px] border-2 border-[#ffb15b] bg-[linear-gradient(145deg,#fff7e8_0%,#ffe6b8_52%,#ffd189_100%)] px-6 py-7 text-center shadow-[0_20px_48px_rgba(194,106,9,0.18)]"
                                 >
                                     <span className="block text-xs font-black uppercase tracking-[0.16em] text-[#9a4d00]">
-                                        Numero piatto
+                                        Numeri piatti
                                     </span>
-                                    <span
-                                        data-testid="menu-success-pizza-number"
-                                        className="font-brand-display mt-3 block text-7xl font-black tracking-[-0.08em] text-[#8a2f00] md:text-8xl"
-                                    >
-                                        {pizzaNumber}
-                                    </span>
+                                    <div className="mt-4 space-y-3">
+                                        {dishTickets.map((ticket) => (
+                                            <div
+                                                key={ticket.productId}
+                                                data-testid={`menu-success-dish-ticket-${ticket.productId}`}
+                                                className="rounded-[24px] border border-white/70 bg-white/75 px-4 py-3"
+                                            >
+                                                <span className="block text-sm font-black text-[#8a4d10]">{ticket.productName}</span>
+                                                <span className="font-brand-display mt-1 block text-6xl font-black tracking-[-0.08em] text-[#8a2f00]">
+                                                    {ticket.pizzaNumber}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
                                     <div className="mt-5 rounded-[24px] border border-white/70 bg-white/75 px-4 py-3">
                                         <p className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">
                                             Codice ordine generale
@@ -164,7 +172,7 @@ function SuccessContent() {
                                         </p>
                                     </div>
                                     <p className="mt-4 text-sm font-bold leading-relaxed text-[#8a4d10]">
-                                        Quando il piatto sarà pronto, verrà chiamato questo numero.
+                                        Ogni piatto verrà chiamato con il numero associato.
                                     </p>
                                 </div>
                             ) : (
