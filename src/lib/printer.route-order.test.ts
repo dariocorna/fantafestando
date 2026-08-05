@@ -666,10 +666,12 @@ describe("PrinterService.routeOrderToPrinters", () => {
 
     test("adds the dish number to customer and department copies but not the cashier summary", async () => {
         mockOrder(buildOrder("order-pizza", {
-            pizzaTicket: {
+            dishTickets: [{
+                productId: "prod-1",
+                snapshotName: "Panino",
                 pizzaNumber: 81,
                 state: "QUEUED"
-            }
+            }]
         }));
         mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
         mockPosDevice({
@@ -730,10 +732,12 @@ describe("PrinterService.routeOrderToPrinters", () => {
 
     test("keeps dish numbering on the customer copy but not the cashier summary without a department printer", async () => {
         mockOrder(buildOrder("order-pizza-cashier-only", {
-            pizzaTicket: {
+            dishTickets: [{
+                productId: "prod-1",
+                snapshotName: "Panino",
                 pizzaNumber: 81,
                 state: "QUEUED"
-            }
+            }]
         }));
         mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
         mockPosDevice({
@@ -797,10 +801,12 @@ describe("PrinterService.routeOrderToPrinters", () => {
                     selectedOptions: []
                 }
             ],
-            pizzaTicket: {
+            dishTickets: [{
+                productId: "prod-pizza",
+                snapshotName: "Margherita",
                 pizzaNumber: 81,
                 state: "QUEUED"
-            }
+            }]
         }));
         mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
         mockPosDevice({
@@ -857,11 +863,12 @@ describe("PrinterService.routeOrderToPrinters", () => {
         const customerJobs = printedJobs.filter((job) => job.printType === "CUSTOMER_ORDER");
         const pizzaKitchenJob = kitchenJobs.find((job) => getPrintedItemNames(job).includes("Margherita"));
         const standardKitchenJob = kitchenJobs.find((job) => getPrintedItemNames(job).includes("Birra"));
-        const customerJob = customerJobs[0];
+        const pizzaCustomerJob = customerJobs.find((job) => getPrintedItemNames(job).includes("Margherita"));
+        const standardCustomerJob = customerJobs.find((job) => getPrintedItemNames(job).includes("Birra"));
 
-        expect(result).toEqual([true, true, true, true]);
+        expect(result).toEqual([true, true, true, true, true]);
         expect(kitchenJobs).toHaveLength(2);
-        expect(customerJobs).toHaveLength(1);
+        expect(customerJobs).toHaveLength(2);
         expect(pizzaKitchenJob).toEqual(expect.objectContaining({
             items: [expect.objectContaining({ name: "Margherita" })],
             pizzaNumber: 81,
@@ -872,17 +879,17 @@ describe("PrinterService.routeOrderToPrinters", () => {
         }));
         expect(standardKitchenJob?.pizzaNumber).toBeUndefined();
         expect(standardKitchenJob?.pizzaBarcodeValue).toBeUndefined();
-        expect(customerJob).toEqual(expect.objectContaining({
-            items: [
-                expect.objectContaining({ name: "Margherita" }),
-                expect.objectContaining({ name: "Birra" })
-            ],
+        expect(pizzaCustomerJob).toEqual(expect.objectContaining({
+            items: [expect.objectContaining({ name: "Margherita" })],
             pizzaNumber: 81
         }));
-        expect(customerJob?.pizzaBarcodeValue).toBeUndefined();
+        expect(standardCustomerJob).toEqual(expect.objectContaining({
+            items: [expect.objectContaining({ name: "Birra" })]
+        }));
+        expect(standardCustomerJob?.pizzaNumber).toBeUndefined();
     });
 
-    test("shares one dish number between pizza and calamari departments", async () => {
+    test("assigns distinct numbers to pizza and calamari in the same order", async () => {
         mockOrder(buildOrder("order-mixed-numbered-dishes", {
             cart: [
                 {
@@ -898,10 +905,10 @@ describe("PrinterService.routeOrderToPrinters", () => {
                     selectedOptions: []
                 }
             ],
-            pizzaTicket: {
-                pizzaNumber: 81,
-                state: "QUEUED"
-            }
+            dishTickets: [
+                { productId: "prod-pizza", snapshotName: "Margherita", pizzaNumber: 81, state: "QUEUED" },
+                { productId: "prod-calamari", snapshotName: "Calamari fritti", pizzaNumber: 82, state: "QUEUED" }
+            ]
         }));
         mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
         mockPosDevice({
@@ -966,8 +973,10 @@ describe("PrinterService.routeOrderToPrinters", () => {
         expect(cashierJob?.pizzaBarcodeValue).toBeUndefined();
         expect(kitchenJobs).toHaveLength(2);
         expect(customerJobs).toHaveLength(2);
-        expect(kitchenJobs.every((job) => job.pizzaNumber === 81 && job.pizzaBarcodeValue === "00000819")).toBe(true);
-        expect(customerJobs.every((job) => job.pizzaNumber === 81 && job.pizzaBarcodeValue === undefined)).toBe(true);
+        expect(kitchenJobs.map((job) => job.pizzaNumber).sort()).toEqual([81, 82]);
+        expect(kitchenJobs.map((job) => job.pizzaBarcodeValue).sort()).toEqual(["00000819", "00000826"]);
+        expect(customerJobs.map((job) => job.pizzaNumber).sort()).toEqual([81, 82]);
+        expect(customerJobs.every((job) => job.pizzaBarcodeValue === undefined)).toBe(true);
     });
 
     test("splits kitchen and customer jobs per unit when the product flag is enabled", async () => {
@@ -1242,10 +1251,12 @@ describe("PrinterService.routeOrderToPrinters", () => {
 
     test("keeps pizza metadata on each separated kitchen and customer copy", async () => {
         mockOrder(buildOrder("order-pizza-split", {
-            pizzaTicket: {
+            dishTickets: [{
+                productId: "prod-1",
+                snapshotName: "Pizza Margherita",
                 pizzaNumber: 88,
                 state: "QUEUED"
-            },
+            }],
             cart: [
                 {
                     productId: "prod-1",

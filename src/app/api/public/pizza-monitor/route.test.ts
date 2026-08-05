@@ -42,10 +42,14 @@ describe("GET /api/public/pizza-monitor", () => {
                     select: vi.fn().mockReturnValue({
                         lean: vi.fn().mockResolvedValue([
                             {
-                                pizzaTicket: {
-                                    pizzaNumber: 18,
-                                    readyAt: "2026-03-26T11:20:00.000Z"
-                                }
+                                dishTickets: [
+                                    {
+                                        pizzaNumber: 18,
+                                        state: "READY",
+                                        readyAt: "2026-03-26T11:20:00.000Z"
+                                    },
+                                    { pizzaNumber: 19, state: "QUEUED" }
+                                ]
                             }
                         ])
                     })
@@ -59,7 +63,7 @@ describe("GET /api/public/pizza-monitor", () => {
         expect(orderFindMock).toHaveBeenCalledWith({
             eventId: "evt-1",
             status: "PAID",
-            "pizzaTicket.state": "READY"
+            "dishTickets.state": "READY"
         });
         expect(payload).toEqual({
             eventName: "Festa Pizza",
