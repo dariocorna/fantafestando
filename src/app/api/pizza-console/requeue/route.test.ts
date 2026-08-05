@@ -71,7 +71,7 @@ describe("POST /api/pizza-console/requeue", () => {
 
         const response = await POST(new Request("http://localhost/api/pizza-console/requeue", {
             method: "POST",
-            body: JSON.stringify({ orderId: ORDER_ID }),
+            body: JSON.stringify({ orderId: ORDER_ID, pizzaNumber: 42 }),
             headers: { "Content-Type": "application/json" }
         }) as unknown as import("next/server").NextRequest);
 
@@ -96,15 +96,16 @@ describe("POST /api/pizza-console/requeue", () => {
     test("requeues a ready pizza ticket", async () => {
         mockOrder({
             _id: ORDER_ID,
-            pizzaTicket: {
+            dishTickets: [{
+                productId: "prod-1",
                 pizzaNumber: 42,
                 state: "READY"
-            }
+            }]
         });
 
         const response = await POST(new Request("http://localhost/api/pizza-console/requeue", {
             method: "POST",
-            body: JSON.stringify({ orderId: ORDER_ID }),
+            body: JSON.stringify({ orderId: ORDER_ID, pizzaNumber: 42 }),
             headers: { "Content-Type": "application/json" }
         }) as unknown as import("next/server").NextRequest);
         const payload = await response.json();
@@ -115,32 +116,33 @@ describe("POST /api/pizza-console/requeue", () => {
             {
                 _id: ORDER_ID,
                 eventId: "evt-1",
-                status: "PAID",
-                "pizzaTicket.pizzaNumber": 42
+                status: "PAID"
             },
             expect.objectContaining({
                 $set: expect.objectContaining({
-                    "pizzaTicket.state": "QUEUED"
+                    "dishTickets.$[ticket].state": "QUEUED"
                 }),
                 $unset: expect.objectContaining({
-                    "pizzaTicket.readyAt": 1
+                    "dishTickets.$[ticket].readyAt": 1
                 })
-            })
+            }),
+            { arrayFilters: [{ "ticket.pizzaNumber": 42 }] }
         );
     });
 
     test("restores a manually removed pizza ticket to the queue", async () => {
         mockOrder({
             _id: ORDER_ID,
-            pizzaTicket: {
+            dishTickets: [{
+                productId: "prod-1",
                 pizzaNumber: 42,
                 state: "REMOVED"
-            }
+            }]
         });
 
         const response = await POST(new Request("http://localhost/api/pizza-console/requeue", {
             method: "POST",
-            body: JSON.stringify({ orderId: ORDER_ID }),
+            body: JSON.stringify({ orderId: ORDER_ID, pizzaNumber: 42 }),
             headers: { "Content-Type": "application/json" }
         }) as unknown as import("next/server").NextRequest);
         const payload = await response.json();
@@ -151,17 +153,17 @@ describe("POST /api/pizza-console/requeue", () => {
             {
                 _id: ORDER_ID,
                 eventId: "evt-1",
-                status: "PAID",
-                "pizzaTicket.pizzaNumber": 42
+                status: "PAID"
             },
             expect.objectContaining({
                 $set: expect.objectContaining({
-                    "pizzaTicket.state": "QUEUED"
+                    "dishTickets.$[ticket].state": "QUEUED"
                 }),
                 $unset: expect.objectContaining({
-                    "pizzaTicket.readyAt": 1
+                    "dishTickets.$[ticket].readyAt": 1
                 })
-            })
+            }),
+            { arrayFilters: [{ "ticket.pizzaNumber": 42 }] }
         );
     });
 });

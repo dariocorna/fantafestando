@@ -75,7 +75,10 @@ describe("GET /api/pizza-console/tickets", () => {
                                 {
                                     _id: { toString: () => "507f1f77bcf86cd799439011" },
                                     pickupNumber: 12,
-                                    pizzaTicket: { pizzaNumber: 18 },
+                                    dishTickets: [
+                                        { snapshotName: "Calamari", pizzaNumber: 18, state: "QUEUED" },
+                                        { snapshotName: "Arrosticini", pizzaNumber: 19, state: "READY" }
+                                    ],
                                     customer: { name: "Mario", table: "A1" },
                                     createdAt: "2026-03-26T11:00:00.000Z"
                                 }
@@ -91,10 +94,12 @@ describe("GET /api/pizza-console/tickets", () => {
                             lean: vi.fn().mockResolvedValue([
                                 {
                                     _id: { toString: () => "507f1f77bcf86cd799439012" },
-                                    pizzaTicket: {
-                                        pizzaNumber: 18,
+                                    dishTickets: [{
+                                        snapshotName: "Arrosticini",
+                                        pizzaNumber: 19,
+                                        state: "READY",
                                         readyAt: "2026-03-26T11:20:00.000Z"
-                                    }
+                                    }]
                                 }
                             ])
                         })
@@ -109,18 +114,19 @@ describe("GET /api/pizza-console/tickets", () => {
         expect(orderFindMock).toHaveBeenNthCalledWith(1, {
             eventId: "evt-1",
             status: "PAID",
-            "pizzaTicket.state": "QUEUED"
+            "dishTickets.state": "QUEUED"
         });
         expect(orderFindMock).toHaveBeenNthCalledWith(2, {
             eventId: "evt-1",
             status: "PAID",
-            "pizzaTicket.state": "READY"
+            "dishTickets.state": "READY"
         });
         expect(payload).toEqual({
             eventName: "Festa Pizza",
             queuedTickets: [{
                 orderId: "507f1f77bcf86cd799439011",
                 pizzaNumber: 18,
+                productName: "Calamari",
                 orderCode: "12",
                 customerName: "Mario",
                 table: "A1",
@@ -128,7 +134,8 @@ describe("GET /api/pizza-console/tickets", () => {
             }],
             readyTickets: [{
                 orderId: "507f1f77bcf86cd799439012",
-                pizzaNumber: 18,
+                pizzaNumber: 19,
+                productName: "Arrosticini",
                 readyAt: "2026-03-26T11:20:00.000Z"
             }]
         });

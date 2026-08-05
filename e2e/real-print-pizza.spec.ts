@@ -164,9 +164,10 @@ test.describe("Real Pizza Printing", () => {
                 `/api/public/orders/${orderId}/summary?code=${encodeURIComponent(accessToken)}`
             );
             expect(summaryResponse.ok()).toBe(true);
-            const summaryPayload = await summaryResponse.json() as { summary?: { pizzaNumber?: number } };
-            const pizzaNumber = summaryPayload.summary?.pizzaNumber;
+            const summaryPayload = await summaryResponse.json() as { summary?: { dishTickets?: Array<{ pizzaNumber: number }> } };
+            const pizzaNumber = summaryPayload.summary?.dishTickets?.[0]?.pizzaNumber;
             expect(pizzaNumber).toBeTruthy();
+            if (!pizzaNumber) throw new Error("Numero piatto mancante");
 
             await openPosAndSelectDevice(page, posName);
             await openCashSessionIfRequired(page);

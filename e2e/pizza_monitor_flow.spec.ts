@@ -165,13 +165,20 @@ test.describe.serial("Flusso preparazioni numerate", () => {
 
         const summaryResponse = await page.request.get(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(accessToken)}`);
         expect(summaryResponse.ok()).toBe(true);
-        const summaryPayload = await summaryResponse.json() as { summary?: { pizzaNumber?: number } };
-        const pizzaNumber = summaryPayload.summary?.pizzaNumber;
-        expect(pizzaNumber).toBeTruthy();
+        const summaryPayload = await summaryResponse.json() as {
+            summary?: { dishTickets?: Array<{ productId: string; productName: string; pizzaNumber: number }> }
+        };
+        const dishTickets = summaryPayload.summary?.dishTickets || [];
+        expect(dishTickets).toHaveLength(2);
+        const pizzaTicket = dishTickets.find((ticket) => ticket.productName === pizzaProductName)!;
+        const calamariTicket = dishTickets.find((ticket) => ticket.productName === calamariProductName)!;
+        expect(pizzaTicket).toBeTruthy();
+        expect(calamariTicket).toBeTruthy();
+        expect(Math.abs(pizzaTicket.pizzaNumber - calamariTicket.pizzaNumber)).toBe(1);
 
         await expect(page.getByTestId("menu-success-pizza-card")).toBeVisible();
-        await expect(page.getByTestId("menu-success-pizza-card")).toContainText("Numero piatto");
-        await expect(page.getByTestId("menu-success-pizza-number")).toHaveText(String(pizzaNumber));
+        await expect(page.getByTestId(`menu-success-dish-ticket-${pizzaTicket.productId}`)).toContainText(`${pizzaProductName}${pizzaTicket.pizzaNumber}`);
+        await expect(page.getByTestId(`menu-success-dish-ticket-${calamariTicket.productId}`)).toContainText(`${calamariProductName}${calamariTicket.pizzaNumber}`);
         await expect(page.getByTestId("menu-success-general-order-code")).toHaveText(code);
 
         await page.goto("/pizza-console");
@@ -207,29 +214,36 @@ test.describe.serial("Flusso preparazioni numerate", () => {
         const kitchenJobs = orderJobs.filter((job) => job.printType === "KITCHEN_ORDER");
         const cashierJob = orderJobs.find((job) => job.printType === "CASHIER_SUMMARY");
         const customerJobs = orderJobs.filter((job) => job.printType === "CUSTOMER_ORDER");
-        const pizzaBarcodeValue = getPizzaBarcodeValue(pizzaNumber);
+        const expectedNumbers = dishTickets.map((ticket) => ticket.pizzaNumber).sort((a, b) => a - b);
+        const expectedBarcodes = expectedNumbers.map(getPizzaBarcodeValue);
 
         expect(kitchenJobs).toHaveLength(2);
-        expect(kitchenJobs.every((job) => job.document?.pizzaNumber === pizzaNumber)).toBe(true);
-        expect(kitchenJobs.every((job) => job.document?.pizzaBarcodeValue === pizzaBarcodeValue)).toBe(true);
+        expect(kitchenJobs.map((job) => job.document?.pizzaNumber).sort()).toEqual(expectedNumbers);
+        expect(kitchenJobs.map((job) => job.document?.pizzaBarcodeValue).sort()).toEqual(expectedBarcodes);
         expect(cashierJob?.document?.pizzaNumber).toBeUndefined();
         expect(cashierJob?.document?.pizzaBarcodeValue).toBeUndefined();
         expect(customerJobs).toHaveLength(2);
-        expect(customerJobs.every((job) => job.document?.pizzaNumber === pizzaNumber)).toBe(true);
+        expect(customerJobs.map((job) => job.document?.pizzaNumber).sort()).toEqual(expectedNumbers);
         expect(customerJobs.every((job) => job.document?.pizzaBarcodeValue === undefined)).toBe(true);
 
         await page.goto("/pizza-console");
-        await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
-        await page.getByTestId("pizza-console-scanner-input").fill(pizzaBarcodeValue);
+        await expect(page.getByTestId(`pizza-console-queued-${pizzaTicket.pizzaNumber}`)).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId(`pizza-console-queued-${calamariTicket.pizzaNumber}`)).toBeVisible();
+        await page.getByTestId("pizza-console-scanner-input").fill(getPizzaBarcodeValue(pizzaTicket.pizzaNumber));
         await page.getByTestId("pizza-console-scanner-input").press("Enter");
 
-        await expect(page.getByTestId(`pizza-console-ready-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
-        await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toHaveCount(0);
+        await expect(page.getByTestId(`pizza-console-ready-${pizzaTicket.pizzaNumber}`)).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId(`pizza-console-queued-${pizzaTicket.pizzaNumber}`)).toHaveCount(0);
+        await expect(page.getByTestId(`pizza-console-queued-${calamariTicket.pizzaNumber}`)).toBeVisible();
+        await page.getByTestId("pizza-console-scanner-input").fill(getPizzaBarcodeValue(calamariTicket.pizzaNumber));
+        await page.getByTestId("pizza-console-scanner-input").press("Enter");
+        await expect(page.getByTestId(`pizza-console-ready-${calamariTicket.pizzaNumber}`)).toBeVisible({ timeout: 15000 });
 
         await page.goto("/pizza-monitor");
         await expect(page.getByText("Monitor preparazioni", { exact: true })).toBeVisible();
         await expect(page.getByText("Piatto pronto per il ritiro", { exact: true })).toBeVisible();
-        await expect(page.getByTestId(`pizza-monitor-number-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId(`pizza-monitor-number-${pizzaTicket.pizzaNumber}`)).toBeVisible({ timeout: 15000 });
+        await expect(page.getByTestId(`pizza-monitor-number-${calamariTicket.pizzaNumber}`)).toBeVisible();
     });
 
     test("permette di rimuovere manualmente ticket in coda e ticket pronti", async ({ page, isMobile }) => {
@@ -270,9 +284,10 @@ test.describe.serial("Flusso preparazioni numerate", () => {
 
         const summaryResponse = await page.request.get(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(accessToken)}`);
         expect(summaryResponse.ok()).toBe(true);
-        const summaryPayload = await summaryResponse.json() as { summary?: { pizzaNumber?: number } };
-        const pizzaNumber = summaryPayload.summary?.pizzaNumber;
+        const summaryPayload = await summaryResponse.json() as { summary?: { dishTickets?: Array<{ pizzaNumber: number }> } };
+        const pizzaNumber = summaryPayload.summary?.dishTickets?.[0]?.pizzaNumber;
         expect(pizzaNumber).toBeTruthy();
+        if (!pizzaNumber) throw new Error("Numero piatto mancante");
 
         await openPosAndSelectDevice(page, posName);
         await openCashSessionIfRequired(page);
@@ -342,9 +357,10 @@ test.describe.serial("Flusso preparazioni numerate", () => {
 
         const summaryResponse = await page.request.get(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(accessToken)}`);
         expect(summaryResponse.ok()).toBe(true);
-        const summaryPayload = await summaryResponse.json() as { summary?: { pizzaNumber?: number } };
-        const pizzaNumber = summaryPayload.summary?.pizzaNumber;
+        const summaryPayload = await summaryResponse.json() as { summary?: { dishTickets?: Array<{ pizzaNumber: number }> } };
+        const pizzaNumber = summaryPayload.summary?.dishTickets?.[0]?.pizzaNumber;
         expect(pizzaNumber).toBeTruthy();
+        if (!pizzaNumber) throw new Error("Numero piatto mancante");
 
         await openPosAndSelectDevice(page, posName);
         await openCashSessionIfRequired(page);

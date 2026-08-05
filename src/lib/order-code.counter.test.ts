@@ -10,7 +10,7 @@ vi.mock("@/models/OrderCounter", () => ({
     }
 }));
 
-import { getNextPizzaOrderNumber, getNextPublicOrderNumber } from "./order-code";
+import { getNextPizzaOrderNumber, getNextPizzaOrderNumbers, getNextPublicOrderNumber } from "./order-code";
 
 describe("order-code counters", () => {
     beforeEach(() => {
@@ -43,6 +43,21 @@ describe("order-code counters", () => {
         expect(findOneAndUpdateMock).toHaveBeenCalledWith(
             { eventId: "evt-1", scope: "PIZZA_ORDER" },
             { $inc: { seq: 1 } },
+            { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
+        );
+    });
+
+    test("reserves a consecutive range for products in the same order", async () => {
+        findOneAndUpdateMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue({ seq: 12 })
+            })
+        });
+
+        await expect(getNextPizzaOrderNumbers("evt-1", 3)).resolves.toEqual([10, 11, 12]);
+        expect(findOneAndUpdateMock).toHaveBeenCalledWith(
+            { eventId: "evt-1", scope: "PIZZA_ORDER" },
+            { $inc: { seq: 3 } },
             { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
         );
     });
