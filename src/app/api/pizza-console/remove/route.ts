@@ -10,20 +10,15 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
     try {
         const sessionCheck = await ensureAuthenticatedSession();
-        if (!sessionCheck.ok) {
-            return adminUnauthorizedJson(sessionCheck);
-        }
+        if (!sessionCheck.ok) return adminUnauthorizedJson(sessionCheck);
 
         const activeEventId = await getActiveEventId();
-        if (!activeEventId) {
-            return NextResponse.json({ status: "not_found" }, { status: 404 });
-        }
+        if (!activeEventId) return NextResponse.json({ status: "not_found" }, { status: 404 });
 
-        const payload = await request.json().catch(() => ({} as { orderId?: string }));
-        const parsedOrderId = typeof payload.orderId === "string"
-            ? parsePizzaOrderIdValue(payload.orderId)
-            : null;
-        if (!parsedOrderId) {
+        const payload = await request.json().catch(() => ({} as { orderId?: string; pizzaNumber?: number }));
+        const parsedOrderId = typeof payload.orderId === "string" ? parsePizzaOrderIdValue(payload.orderId) : null;
+        const pizzaNumber = Number(payload.pizzaNumber);
+        if (!parsedOrderId || !Number.isInteger(pizzaNumber) || pizzaNumber <= 0) {
             return NextResponse.json({ status: "invalid" }, { status: 400 });
         }
 
@@ -31,52 +26,34 @@ export async function POST(request: NextRequest) {
         const order = await Order.findOne({
             _id: parsedOrderId.orderId,
             eventId: activeEventId,
-            status: "PAID"
-        }).select("_id pizzaTicket").lean() as ({
+            status: "PAID",
+            "dishTickets.pizzaNumber": pizzaNumber
+        }).select("_id dishTickets").lean() as ({
             _id: string | { toString(): string };
-            pizzaTicket?: {
-                pizzaNumber?: number;
-                state?: "QUEUED" | "READY" | "REMOVED";
-            };
+            dishTickets?: Array<{ pizzaNumber?: number; state?: "QUEUED" | "READY" | "REMOVED" }>;
         } | null);
+        const ticket = order?.dishTickets?.find((entry) => entry.pizzaNumber === pizzaNumber);
+        if (!order || !ticket) return NextResponse.json({ status: "not_found" }, { status: 404 });
 
-        if (!order?.pizzaTicket?.pizzaNumber) {
-            return NextResponse.json({ status: "not_found" }, { status: 404 });
-        }
-
-        if (order.pizzaTicket.state === "REMOVED") {
+        if (ticket.state === "REMOVED") {
             return NextResponse.json({
                 status: "already_removed",
-                ticket: {
-                    orderId: order._id.toString(),
-                    pizzaNumber: order.pizzaTicket.pizzaNumber
-                }
+                ticket: { orderId: order._id.toString(), pizzaNumber }
             });
         }
 
         await Order.updateOne(
+            { _id: order._id, eventId: activeEventId, status: "PAID" },
             {
-                _id: order._id,
-                eventId: activeEventId,
-                status: "PAID",
-                "pizzaTicket.pizzaNumber": order.pizzaTicket.pizzaNumber
+                $set: { "dishTickets.$[ticket].state": "REMOVED" },
+                $unset: { "dishTickets.$[ticket].readyAt": 1 }
             },
-            {
-                $set: {
-                    "pizzaTicket.state": "REMOVED"
-                },
-                $unset: {
-                    "pizzaTicket.readyAt": 1
-                }
-            }
+            { arrayFilters: [{ "ticket.pizzaNumber": pizzaNumber }] }
         );
 
         return NextResponse.json({
             status: "removed",
-            ticket: {
-                orderId: order._id.toString(),
-                pizzaNumber: order.pizzaTicket.pizzaNumber
-            }
+            ticket: { orderId: order._id.toString(), pizzaNumber }
         });
     } catch (error) {
         console.error("Pizza console remove API error:", error);

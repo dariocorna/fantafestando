@@ -1510,11 +1510,13 @@ export class PrinterService {
             _id: { toString(): string };
             eventId: { toString(): string };
             pickupNumber?: number;
-            pizzaTicket?: {
+            dishTickets?: Array<{
+                productId?: { toString(): string } | string;
+                snapshotName?: string;
                 pizzaNumber?: number;
                 state?: "QUEUED" | "READY" | "REMOVED";
                 readyAt?: Date | string;
-            };
+            }>;
             status?: string;
             paymentMethod?: string;
             totalAmount?: number;
@@ -1675,9 +1677,15 @@ export class PrinterService {
             }));
         });
 
-        const pizzaNumber = typeof order.pizzaTicket?.pizzaNumber === "number"
-            ? order.pizzaTicket.pizzaNumber
-            : undefined;
+        const dishTicketByProductId = new Map(
+            (order.dishTickets || []).flatMap((ticket) => {
+                const productId = ticket.productId?.toString() || "";
+                const pizzaNumber = Number(ticket.pizzaNumber);
+                return productId && Number.isInteger(pizzaNumber) && pizzaNumber > 0
+                    ? [[productId, pizzaNumber] as const]
+                    : [];
+            })
+        );
 
         const cashierJob: PrinterCommandJob = {
             ip: cashierPrinter?.ip || "",
@@ -1697,7 +1705,6 @@ export class PrinterService {
             tableNumber: order.customer?.table,
             orderId: order._id.toString(),
             shortCode: orderCode || undefined,
-            pizzaNumber
         };
 
         const ensureCustomerJob = (groupKey: string, footerLines?: string[]) => {
@@ -1726,15 +1733,19 @@ export class PrinterService {
             const categoryId = category?._id.toString() || product.categoryId.toString();
             const categoryName = category?.name?.trim();
             const printerName = kitchenPrinter?.name?.trim();
-            const isPizzaItem = Boolean(category?.pizzaFlowEnabled) && typeof pizzaNumber === "number";
-            const printFlowKey = isPizzaItem ? "pizza" : "standard";
+            const pizzaNumber = category?.pizzaFlowEnabled
+                ? dishTicketByProductId.get(String(item.productId))
+                : undefined;
+            const isPizzaItem = typeof pizzaNumber === "number";
+            const printFlowKey = isPizzaItem ? `dish:${String(item.productId)}` : "standard";
             const baseGroupKey = kitchenPrinter?._id
                 ? `printer:${String(kitchenPrinter._id)}`
                 : `category:${categoryId}`;
-            const customerGroupKey = typeof item.splitSequence === "number"
+            const baseCustomerGroupKey = typeof item.splitSequence === "number"
                 ? `${baseGroupKey}:unit:${item.splitSequence}`
                 : baseGroupKey;
-            const kitchenGroupKey = `${customerGroupKey}:${printFlowKey}`;
+            const customerGroupKey = `${baseCustomerGroupKey}:${printFlowKey}`;
+            const kitchenGroupKey = customerGroupKey;
             const departmentLabel = printerName || categoryName || resolvePrintName(item.productId, item.snapshotName);
             if (departmentLabel) involvedDepartments.add(departmentLabel);
 
@@ -1787,8 +1798,11 @@ export class PrinterService {
             });
 
             const customerJob = ensureCustomerJob(customerGroupKey, departmentFooterLines);
-            if (isPizzaItem && customerJob && !kitchenJob) {
-                customerJob.pizzaBarcodeValue = getPizzaBarcodeValue(pizzaNumber);
+            if (isPizzaItem && customerJob) {
+                customerJob.pizzaNumber = pizzaNumber;
+                if (!kitchenJob) {
+                    customerJob.pizzaBarcodeValue = getPizzaBarcodeValue(pizzaNumber);
+                }
             }
             customerJob?.items.push({
                 name: resolvePrintName(item.productId, item.snapshotName),

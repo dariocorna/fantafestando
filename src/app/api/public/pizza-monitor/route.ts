@@ -9,46 +9,34 @@ export async function GET() {
     try {
         const activeEvent = await getActiveEvent() as ({ _id?: { toString(): string }, name?: string } | null);
         if (!activeEvent?._id) {
-            return NextResponse.json({
-                eventName: null,
-                readyNumbers: []
-            });
+            return NextResponse.json({ eventName: null, readyNumbers: [] });
         }
 
         await dbConnect();
         const readyOrders = await Order.find({
             eventId: activeEvent._id.toString(),
             status: "PAID",
-            "pizzaTicket.state": "READY"
-        })
-            .sort({ "pizzaTicket.readyAt": -1, updatedAt: -1 })
-            .limit(12)
-            .select("pizzaTicket.pizzaNumber pizzaTicket.readyAt")
-            .lean() as Array<{
-                pizzaTicket?: {
-                    pizzaNumber?: number;
-                    readyAt?: Date | string;
-                };
+            "dishTickets.state": "READY"
+        }).sort({ "dishTickets.readyAt": -1, updatedAt: -1 }).limit(12).select("dishTickets").lean() as Array<{
+            dishTickets?: Array<{
+                pizzaNumber?: number;
+                state?: "QUEUED" | "READY" | "REMOVED";
+                readyAt?: Date | string;
             }>;
+        }>;
 
-        return NextResponse.json({
-            eventName: activeEvent.name || null,
-            readyNumbers: readyOrders
-                .map((order) => {
-                    const pizzaNumber = Number(order.pizzaTicket?.pizzaNumber);
-                    if (!Number.isInteger(pizzaNumber) || pizzaNumber <= 0) return null;
+        const readyNumbers = readyOrders.flatMap((order) =>
+            (order.dishTickets || []).flatMap((ticket) => {
+                const pizzaNumber = Number(ticket.pizzaNumber);
+                if (ticket.state !== "READY" || !Number.isInteger(pizzaNumber) || pizzaNumber <= 0) return [];
+                return [{
+                    pizzaNumber,
+                    readyAt: ticket.readyAt ? new Date(ticket.readyAt).toISOString() : new Date(0).toISOString()
+                }];
+            })
+        ).sort((left, right) => right.readyAt.localeCompare(left.readyAt)).slice(0, 12);
 
-                    const readyAt = order.pizzaTicket?.readyAt
-                        ? new Date(order.pizzaTicket.readyAt).toISOString()
-                        : new Date(0).toISOString();
-
-                    return {
-                        pizzaNumber,
-                        readyAt
-                    };
-                })
-                .filter((entry): entry is { pizzaNumber: number; readyAt: string } => Boolean(entry))
-        });
+        return NextResponse.json({ eventName: activeEvent.name || null, readyNumbers });
     } catch (error) {
         console.error("Public pizza monitor API error:", error);
         return NextResponse.json({ error: "Errore interno" }, { status: 500 });

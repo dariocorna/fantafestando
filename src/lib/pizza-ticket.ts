@@ -1,7 +1,7 @@
 import dbConnect from "@/lib/mongoose";
 import Category from "@/models/Category";
 import Product from "@/models/Product";
-import { getNextPizzaOrderNumber } from "@/lib/order-code";
+import { getNextPizzaOrderNumbers } from "@/lib/order-code";
 export {
     getPizzaBarcodeValue,
     parsePizzaBarcodeValue,
@@ -24,23 +24,28 @@ export interface PizzaCartItemInput {
     includedComponents?: PizzaCartComponentInput[];
 }
 
-export interface PizzaTicketSnapshot {
+export interface DishTicketSnapshot {
+    productId: string;
+    snapshotName: string;
     pizzaNumber: number;
     state: "QUEUED" | "READY" | "REMOVED";
     readyAt?: Date;
 }
 
-interface PersistedPizzaTicketSource {
+interface PersistedDishTicketSource {
+    productId?: string | { toString(): string } | null;
+    snapshotName?: string | null;
     pizzaNumber?: number | null;
     state?: string | null;
     readyAt?: Date | string | null;
 }
 
-export function normalizePizzaTicket(
-    value?: PersistedPizzaTicketSource | null
-): PizzaTicketSnapshot | undefined {
+export function normalizeDishTicket(
+    value?: PersistedDishTicketSource | null
+): DishTicketSnapshot | undefined {
+    const productId = value?.productId?.toString().trim() || "";
     const pizzaNumber = Number(value?.pizzaNumber);
-    if (!Number.isInteger(pizzaNumber) || pizzaNumber <= 0) return undefined;
+    if (!productId || !Number.isInteger(pizzaNumber) || pizzaNumber <= 0) return undefined;
 
     const state = value?.state === "READY"
         ? "READY"
@@ -53,25 +58,35 @@ export function normalizePizzaTicket(
         : undefined;
 
     return {
+        productId,
+        snapshotName: value?.snapshotName?.trim() || "Piatto",
         pizzaNumber,
         state,
         readyAt
     };
 }
 
-export function extractProductionProductIds(cartItems: PizzaCartItemInput[]): string[] {
-    return [...new Set(
-        cartItems.flatMap((item) => {
-            if (Array.isArray(item.includedComponents) && item.includedComponents.length > 0) {
-                return item.includedComponents
-                    .map((component) => component.productId?.trim())
-                    .filter((productId): productId is string => Boolean(productId));
+export function extractProductionProducts(cartItems: PizzaCartItemInput[]): Array<{
+    productId: string;
+    snapshotName: string;
+}> {
+    const products = new Map<string, string>();
+    cartItems.forEach((item) => {
+        const entries = Array.isArray(item.includedComponents) && item.includedComponents.length > 0
+            ? item.includedComponents
+            : [item];
+        entries.forEach((entry) => {
+            const productId = entry.productId?.trim();
+            if (productId && !products.has(productId)) {
+                products.set(productId, entry.snapshotName?.trim() || "Piatto");
             }
+        });
+    });
+    return Array.from(products, ([productId, snapshotName]) => ({ productId, snapshotName }));
+}
 
-            const productId = item.productId?.trim();
-            return productId ? [productId] : [];
-        })
-    )];
+export function extractProductionProductIds(cartItems: PizzaCartItemInput[]): string[] {
+    return extractProductionProducts(cartItems).map((product) => product.productId);
 }
 
 export async function resolvePizzaEligibleProductIds(
@@ -92,11 +107,9 @@ export async function resolvePizzaEligibleProductIds(
         categoryId?: string | { toString(): string };
     }>;
 
-    if (products.length === 0) {
-        return new Set<string>();
-    }
+    if (products.length === 0) return new Set<string>();
 
-    const pizzaCategoryIds = new Set(
+    const numberedCategoryIds = new Set(
         (
             await Category.find({
                 eventId,
@@ -116,30 +129,41 @@ export async function resolvePizzaEligibleProductIds(
         products
             .filter((product) => {
                 const categoryId = product.categoryId?.toString();
-                if (!categoryId) return false;
-                return pizzaCategoryIds.has(categoryId);
+                return Boolean(categoryId && numberedCategoryIds.has(categoryId));
             })
             .map((product) => product._id.toString())
     );
 }
 
-export async function resolvePizzaTicketForCart(
+export async function resolveDishTicketsForCart(
     eventId: string,
     cartItems: PizzaCartItemInput[],
-    existingTicket?: PersistedPizzaTicketSource | null
-): Promise<PizzaTicketSnapshot | undefined> {
-    const pizzaEligibleProductIds = await resolvePizzaEligibleProductIds(eventId, cartItems);
-    if (pizzaEligibleProductIds.size === 0) {
-        return undefined;
-    }
+    existingTickets: PersistedDishTicketSource[] = []
+): Promise<DishTicketSnapshot[]> {
+    const productionProducts = extractProductionProducts(cartItems);
+    const eligibleProductIds = await resolvePizzaEligibleProductIds(eventId, cartItems);
+    const desiredProducts = productionProducts.filter((product) => eligibleProductIds.has(product.productId));
+    if (desiredProducts.length === 0) return [];
 
-    const normalizedExistingTicket = normalizePizzaTicket(existingTicket);
-    if (normalizedExistingTicket) {
-        return normalizedExistingTicket;
-    }
+    const existingByProductId = new Map(
+        existingTickets
+            .map(normalizeDishTicket)
+            .filter((ticket): ticket is DishTicketSnapshot => Boolean(ticket))
+            .map((ticket) => [ticket.productId, ticket])
+    );
+    const missingProducts = desiredProducts.filter((product) => !existingByProductId.has(product.productId));
+    const allocatedNumbers = await getNextPizzaOrderNumbers(eventId, missingProducts.length);
+    const allocatedByProductId = new Map(
+        missingProducts.map((product, index) => [product.productId, allocatedNumbers[index]])
+    );
 
-    return {
-        pizzaNumber: await getNextPizzaOrderNumber(eventId),
-        state: "QUEUED"
-    };
+    return desiredProducts.map((product) => {
+        const existing = existingByProductId.get(product.productId);
+        if (existing) return existing;
+        return {
+            ...product,
+            pizzaNumber: allocatedByProductId.get(product.productId)!,
+            state: "QUEUED"
+        };
+    });
 }

@@ -38,11 +38,15 @@ export async function GET(
 
         await dbConnect();
         const order = await Order.findById(id)
-            .select("_id pickupNumber pizzaTicket.pizzaNumber totalAmount customer cart +publicAccessTokenHash")
+            .select("_id pickupNumber dishTickets totalAmount customer cart +publicAccessTokenHash")
             .lean() as ({
                 _id: string | { toString(): string };
                 pickupNumber?: number;
-                pizzaTicket?: { pizzaNumber?: number };
+                dishTickets?: Array<{
+                    productId?: string | { toString(): string };
+                    snapshotName?: string;
+                    pizzaNumber?: number;
+                }>;
                 totalAmount: number;
                 publicAccessTokenHash?: string;
                 customer?: { name?: string; table?: string };

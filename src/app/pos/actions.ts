@@ -12,7 +12,7 @@ import { PrinterService } from "@/lib/printer"
 import { createSumUpCheckout } from "@/lib/sumup"
 import { decryptSecret } from "@/lib/secrets"
 import { getOrderCodeFromOrder, parseOrderNumberInput } from "@/lib/order-code"
-import { resolvePizzaTicketForCart } from "@/lib/pizza-ticket"
+import { resolveDishTicketsForCart } from "@/lib/pizza-ticket"
 import { type StockMode } from "@/lib/inventory"
 import { computeCashSessionSummary } from "@/lib/cash-session"
 import {
@@ -1152,7 +1152,7 @@ export async function createOrder(data: {
                 }))
             }))
         )
-        const pizzaTicket = await resolvePizzaTicketForCart(
+        const dishTickets = await resolveDishTicketsForCart(
             data.eventId,
             pricingResult.pricing.cartWithDiscounts.map((item) => ({
                 productId: item.productId,
@@ -1201,7 +1201,7 @@ export async function createOrder(data: {
             pricingMode: data.pricingMode === "VOLUNTEER" ? "VOLUNTEER" : "STANDARD",
             cart: pricingResult.pricing.cartWithDiscounts,
             ingredientPlan,
-            pizzaTicket,
+            dishTickets,
             paymentMethod: data.paymentMethod,
             sumupCheckoutId: requiresPendingState ? undefined : data.sumupCheckoutId,
             posDeviceId: data.posDeviceId,
@@ -1966,7 +1966,7 @@ export async function completePendingOrderPayment(data: {
                     }))
                 }))
             )
-        const pizzaTicket = await resolvePizzaTicketForCart(
+        const dishTickets = await resolveDishTicketsForCart(
             data.eventId,
             pricingResult.pricing.cartWithDiscounts.map((item) => ({
                 productId: item.productId,
@@ -1978,7 +1978,7 @@ export async function completePendingOrderPayment(data: {
                     quantity: component.quantity
                 }))
             })),
-            order.pizzaTicket
+            order.dishTickets
         )
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
@@ -1994,7 +1994,7 @@ export async function completePendingOrderPayment(data: {
 
         order.set("cart", pricingResult.pricing.cartWithDiscounts)
         order.set("ingredientPlan", ingredientPlan)
-        order.set("pizzaTicket", pizzaTicket || undefined)
+        order.set("dishTickets", dishTickets)
         order.totalAmount = payableAmount
         order.discountApplied = pricingResult.pricing.discountApplied
         order.set("discountMeta", pricingResult.pricing.orderDiscountMeta || undefined)

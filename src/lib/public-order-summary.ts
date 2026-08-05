@@ -10,7 +10,11 @@ export interface PublicOrderSummaryItem {
 export interface PublicOrderSummary {
     orderId: string;
     shortCode: string;
-    pizzaNumber?: number;
+    dishTickets: Array<{
+        productId: string;
+        productName: string;
+        pizzaNumber: number;
+    }>;
     totalAmount: number;
     customer: {
         name?: string;
@@ -22,9 +26,11 @@ export interface PublicOrderSummary {
 interface PublicOrderSummarySource {
     _id?: string | { toString(): string } | null;
     pickupNumber?: number | null;
-    pizzaTicket?: {
+    dishTickets?: Array<{
+        productId?: string | { toString(): string } | null;
+        snapshotName?: string | null;
         pizzaNumber?: number | null;
-    };
+    }>;
     totalAmount: number;
     customer?: {
         name?: string;
@@ -49,9 +55,16 @@ export function buildPublicOrderSummary(order: PublicOrderSummarySource): Public
     return {
         orderId,
         shortCode,
-        pizzaNumber: typeof order.pizzaTicket?.pizzaNumber === "number" && order.pizzaTicket.pizzaNumber > 0
-            ? order.pizzaTicket.pizzaNumber
-            : undefined,
+        dishTickets: (order.dishTickets || []).flatMap((ticket) => {
+            const productId = ticket.productId?.toString() || "";
+            const pizzaNumber = Number(ticket.pizzaNumber);
+            if (!productId || !Number.isInteger(pizzaNumber) || pizzaNumber <= 0) return [];
+            return [{
+                productId,
+                productName: ticket.snapshotName?.trim() || "Piatto",
+                pizzaNumber
+            }];
+        }),
         totalAmount: order.totalAmount,
         customer: {
             name: order.customer?.name?.trim() || undefined,
