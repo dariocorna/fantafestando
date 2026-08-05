@@ -5,7 +5,7 @@ export function validatePizzaCategoryConfiguration(input: {
 }) {
     if (!input.pizzaFlowEnabled) return null;
     if (input.skipKitchenPrint) {
-        return "Una categoria pizza non può disattivare la stampa comanda";
+        return "Una categoria con preparazione numerata non può disattivare la stampa comanda";
     }
     return null;
 }

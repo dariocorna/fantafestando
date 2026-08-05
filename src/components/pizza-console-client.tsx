@@ -60,7 +60,7 @@ export function PizzaConsoleClient() {
             } catch (loadError) {
                 if (isCancelled) return;
                 console.error("Failed to load pizza console", loadError);
-                setError("Console pizza non disponibile");
+                setError("Console preparazioni non disponibile");
             } finally {
                 if (!isCancelled) {
                     setIsLoading(false);
@@ -106,7 +106,7 @@ export function PizzaConsoleClient() {
         });
         const result = await response.json().catch(() => ({} as { status?: string }));
         if (!response.ok && result.status !== "already_ready") {
-            throw new Error(result.status === "invalid" ? "Barcode non valido" : "Ticket pizza non trovato");
+            throw new Error(result.status === "invalid" ? "Barcode non valido" : "Ticket preparazione non trovato");
         }
 
         if (result.status === "already_ready") {
@@ -114,7 +114,7 @@ export function PizzaConsoleClient() {
             return;
         }
 
-        setFeedback("Pizza segnata come pronta.");
+        setFeedback("Piatto segnato come pronto.");
     };
 
     const requeue = async (orderId: string) => {
@@ -158,8 +158,8 @@ export function PizzaConsoleClient() {
 
         setFeedback(
             source === "queued"
-                ? "Pizza rimossa dalla coda di preparazione."
-                : "Pizza rimossa dalla lista delle pronte."
+                ? "Piatto rimosso dalla coda di preparazione."
+                : "Piatto rimosso dalla lista dei pronti."
         );
     };
 
@@ -220,13 +220,13 @@ export function PizzaConsoleClient() {
                         <div>
                             <p className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-slate-700">
                                 <ScanLine className="h-4 w-4" />
-                                Console pizza
+                                Console preparazioni
                             </p>
                             <h1 className="mt-4 font-brand-display text-4xl font-black tracking-[-0.05em] text-slate-900 md:text-5xl">
                                 {payload?.eventName || "Nessuna festa attiva"}
                             </h1>
                             <p className="mt-2 text-sm font-semibold text-slate-600">
-                                Scansiona il barcode della comanda pizza o usa i comandi manuali sulla coda.
+                                Scansiona il barcode della comanda o usa i comandi manuali sulla coda.
                             </p>
                         </div>
 
@@ -283,7 +283,7 @@ export function PizzaConsoleClient() {
                         <div className="flex items-center justify-between gap-3">
                             <div>
                                 <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">In preparazione</p>
-                                <h2 className="mt-2 text-2xl font-black text-slate-900">Coda pizza</h2>
+                                <h2 className="mt-2 text-2xl font-black text-slate-900">Coda preparazioni</h2>
                             </div>
                             <div className="rounded-full bg-slate-100 px-4 py-2 text-sm font-black text-slate-700">
                                 {payload?.queuedTickets.length || 0}
@@ -305,7 +305,7 @@ export function PizzaConsoleClient() {
                                         <div className="flex items-start justify-between gap-4">
                                             <div>
                                                 <p className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-amber-700">
-                                                    Pizza in coda
+                                                    Piatto in coda
                                                 </p>
                                                 <p className="font-brand-display mt-3 text-5xl font-black tracking-[-0.07em] text-slate-900">
                                                     {ticket.pizzaNumber}
@@ -346,7 +346,7 @@ export function PizzaConsoleClient() {
                             </div>
                         ) : (
                             <div className="mt-5 rounded-[28px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-sm font-semibold text-slate-500">
-                                Nessuna pizza in coda.
+                                Nessun piatto in coda.
                             </div>
                         )}
                     </section>
@@ -416,7 +416,7 @@ export function PizzaConsoleClient() {
                             </div>
                         ) : (
                             <div className="mt-5 rounded-[28px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-sm font-semibold text-slate-500">
-                                Nessuna pizza segnata come pronta.
+                                Nessun piatto segnato come pronto.
                             </div>
                         )}
                     </section>

@@ -142,7 +142,7 @@ export function EditCategoryDialog({
                                     }
                                 }}
                             />
-                            Categoria pizza
+                            Preparazione numerata
                         </label>
                         <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
                             <input
@@ -157,7 +157,7 @@ export function EditCategoryDialog({
                         </label>
                         {pizzaFlowEnabled ? (
                             <p className="text-xs font-semibold text-amber-700">
-                                La stampante reparto e` opzionale: senza stampante dedicata la comanda pizza esce solo in cassa sulla copia cliente.
+                                La stampante reparto e` opzionale: senza stampante dedicata la comanda esce solo in cassa sulla copia cliente.
                             </p>
                         ) : null}
                     </div>

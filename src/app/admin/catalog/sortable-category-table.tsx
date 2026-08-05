@@ -116,7 +116,7 @@ export function SortableCategoryTable({
                         <TableHead className="w-[40px]"></TableHead>
                         <TableHead>Nome</TableHead>
                         <TableHead>Colore</TableHead>
-                        <TableHead>Flusso Pizza</TableHead>
+                        <TableHead>Preparazione</TableHead>
                         <TableHead>Stampa Comanda</TableHead>
                         <TableHead>Stampante Comanda</TableHead>
                         <TableHead className="w-[80px]">Azioni</TableHead>
@@ -138,7 +138,7 @@ export function SortableCategoryTable({
                             <TableCell>
                                 {cat.pizzaFlowEnabled ? (
                                     <span className="rounded-full bg-rose-100 px-2 py-1 text-xs font-bold text-rose-700">
-                                        Pizza
+                                        Numerata
                                     </span>
                                 ) : (
                                     <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
@@ -188,7 +188,7 @@ export function SortableCategoryTable({
                             <TableHead className="w-[40px]"></TableHead>
                             <TableHead>Nome</TableHead>
                         <TableHead>Colore</TableHead>
-                        <TableHead>Flusso Pizza</TableHead>
+                        <TableHead>Preparazione</TableHead>
                         <TableHead>Stampa Comanda</TableHead>
                         <TableHead>Stampante Comanda</TableHead>
                         <TableHead className="w-[80px]">Azioni</TableHead>
@@ -210,7 +210,7 @@ export function SortableCategoryTable({
                                 <TableCell>
                                     {cat.pizzaFlowEnabled ? (
                                         <span className="rounded-full bg-rose-100 px-2 py-1 text-xs font-bold text-rose-700">
-                                            Pizza
+                                            Numerata
                                         </span>
                                     ) : (
                                         <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">

@@ -598,8 +598,9 @@ export function buildPreviewLines(document: Record<string, unknown> | PrintDocum
     lines.push(...wrapLine(normalized.copyLabel.toUpperCase(), maxLength));
     lines.push(RECEIPT_SEPARATOR);
 
-    if (typeof normalized.pizzaNumber === "number") {
-        lines.push(...wrapLine(`PIZZA N° ${normalized.pizzaNumber}`, maxLength));
+    const showsDishNumber = normalized.printType === "CUSTOMER_ORDER" || normalized.printType === "KITCHEN_ORDER";
+    if (showsDishNumber && typeof normalized.pizzaNumber === "number") {
+        lines.push(...wrapLine(`PIATTO N° ${normalized.pizzaNumber}`, maxLength));
         if (normalized.pizzaBarcodeValue) {
             lines.push(...wrapLine(`BARCODE: ${normalized.pizzaBarcodeValue}`, maxLength));
         }
