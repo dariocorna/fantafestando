@@ -427,11 +427,31 @@ describe("print-report", () => {
 
         expect(lines).toContain("COMANDA CLIENTE");
         expect(lines).toContain("COPIA CLIENTE");
-        expect(lines).toContain("PIZZA N° 44");
+        expect(lines).toContain("PIATTO N° 44");
         expect(lines).toContain("ORDINE N° 123");
         expect(lines).toContain("DESCRIZIONE");
         expect(lines).toContain("1x Panino");
         expect(lines).toContain("TOTALE --> 5.00 EUR");
+    });
+
+    it("omits the dish number from cashier summaries", () => {
+        const lines = buildPreviewLines({
+            schemaVersion: 2,
+            printType: "CASHIER_SUMMARY",
+            kind: "COMANDA",
+            title: "Scontrino Cassa",
+            copyLabel: "COPIA CASSA",
+            pizzaNumber: 44,
+            pizzaBarcodeValue: "00000447",
+            createdAt: "2026-02-28T10:00:00.000Z",
+            headerLines: [],
+            items: [{ qty: 1, quantity: 1, name: "Calamari" }],
+            totals: [],
+            footerLines: []
+        });
+
+        expect(lines).not.toContain("PIATTO N° 44");
+        expect(lines.some((line) => line.includes("BARCODE"))).toBe(false);
     });
 
     it("builds preview lines for cash session with SESSIONE N° prefix", () => {

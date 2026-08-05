@@ -2,29 +2,29 @@ import { describe, expect, test } from "vitest";
 import { validatePizzaCategoryConfiguration } from "./category-pizza-validation";
 
 describe("validatePizzaCategoryConfiguration", () => {
-    test("accetta categorie non pizza anche senza stampante reparto", () => {
+    test("accetta categorie senza preparazione numerata anche senza stampante reparto", () => {
         expect(validatePizzaCategoryConfiguration({
             pizzaFlowEnabled: false,
             skipKitchenPrint: true
         })).toBeNull();
     });
 
-    test("accetta le categorie pizza anche senza stampante kitchen dedicata", () => {
+    test("accetta le categorie numerate anche senza stampante kitchen dedicata", () => {
         expect(validatePizzaCategoryConfiguration({
             pizzaFlowEnabled: true,
             skipKitchenPrint: false
         })).toBeNull();
     });
 
-    test("blocca le categorie pizza che disattivano la stampa comanda", () => {
+    test("blocca le categorie numerate che disattivano la stampa comanda", () => {
         expect(validatePizzaCategoryConfiguration({
             pizzaFlowEnabled: true,
             printerId: "printer-1",
             skipKitchenPrint: true
-        })).toBe("Una categoria pizza non può disattivare la stampa comanda");
+        })).toBe("Una categoria con preparazione numerata non può disattivare la stampa comanda");
     });
 
-    test("accetta le categorie pizza con stampante kitchen e stampa attiva", () => {
+    test("accetta le categorie numerate con stampante kitchen e stampa attiva", () => {
         expect(validatePizzaCategoryConfiguration({
             pizzaFlowEnabled: true,
             printerId: "printer-1",

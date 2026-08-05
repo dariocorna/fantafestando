@@ -100,7 +100,7 @@ async function createWebOrderAndGetOrderData(
     };
 }
 
-test.describe.serial("Pizza monitor flow", () => {
+test.describe.serial("Flusso preparazioni numerate", () => {
     const createdEvents: string[] = [];
 
     test.afterEach(async ({ page }) => {
@@ -109,48 +109,58 @@ test.describe.serial("Pizza monitor flow", () => {
         await deleteEvent(page, eventName);
     });
 
-    test("assegna il numero pizza, stampa il barcode reparto e aggiorna console e monitor", async ({ page, isMobile }) => {
+    test("condivide un numero tra pizza e calamari, stampa i reparti e aggiorna console e monitor", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso validato su desktop.");
         test.setTimeout(120000);
 
         const suffix = uniqueSuffix();
         const eventName = `Pizza Flow ${suffix}`;
         const cashierPrinterName = `Cashier ${suffix}`;
-        const kitchenPrinterName = `Forno ${suffix}`;
+        const pizzaPrinterName = `Forno ${suffix}`;
+        const calamariPrinterName = `Friggitoria ${suffix}`;
         const cashBoxName = `CashBox ${suffix}`;
         const posName = `POS ${suffix}`;
         const pizzaCategoryName = `Pizze ${suffix}`;
-        const drinkCategoryName = `Bar ${suffix}`;
+        const calamariCategoryName = `Calamari ${suffix}`;
         const pizzaProductName = `Margherita ${suffix}`;
-        const drinkProductName = `Cola ${suffix}`;
+        const calamariProductName = `Calamari fritti ${suffix}`;
         const pizzaShortName = `PZ${suffix.slice(-4)}`;
+        const calamariShortName = `CAL${suffix.slice(-4)}`;
 
         await ensureAdminAuthenticated(page, "/admin");
         await createAndActivateEvent(page, eventName);
         createdEvents.push(eventName);
         await configureCashPos(page, cashierPrinterName, localPrinterIp(), cashBoxName, posName);
-        await createPrinter(page, kitchenPrinterName, localPrinterIp(), {
+        await createPrinter(page, pizzaPrinterName, localPrinterIp(), {
             printerType: "KITCHEN",
             printerPort: "19101"
         });
+        await createPrinter(page, calamariPrinterName, localPrinterIp(), {
+            printerType: "KITCHEN",
+            printerPort: "19102"
+        });
         await createCategory(page, pizzaCategoryName, {
-            kitchenPrinterName,
+            kitchenPrinterName: pizzaPrinterName,
             pizzaFlowEnabled: true
         });
-        await createCategory(page, drinkCategoryName);
+        await createCategory(page, calamariCategoryName, {
+            kitchenPrinterName: calamariPrinterName,
+            pizzaFlowEnabled: true
+        });
         await createProduct(page, pizzaCategoryName, {
             name: pizzaProductName,
             shortName: pizzaShortName,
             price: "8.00"
         });
-        await createProduct(page, drinkCategoryName, {
-            name: drinkProductName,
-            price: "3.00"
+        await createProduct(page, calamariCategoryName, {
+            name: calamariProductName,
+            shortName: calamariShortName,
+            price: "9.00"
         });
 
         const { code, orderId, accessToken } = await createWebOrderAndGetOrderData(page, [
             { name: pizzaProductName, quantity: 1 },
-            { name: drinkProductName, quantity: 1 }
+            { name: calamariProductName, quantity: 1 }
         ]);
 
         const summaryResponse = await page.request.get(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(accessToken)}`);
@@ -160,11 +170,13 @@ test.describe.serial("Pizza monitor flow", () => {
         expect(pizzaNumber).toBeTruthy();
 
         await expect(page.getByTestId("menu-success-pizza-card")).toBeVisible();
+        await expect(page.getByTestId("menu-success-pizza-card")).toContainText("Numero piatto");
         await expect(page.getByTestId("menu-success-pizza-number")).toHaveText(String(pizzaNumber));
         await expect(page.getByTestId("menu-success-general-order-code")).toHaveText(code);
 
         await page.goto("/pizza-console");
-        await expect(page.getByText(/Nessuna pizza in coda/i)).toBeVisible({ timeout: 15000 });
+        await expect(page.getByText("Console preparazioni", { exact: true })).toBeVisible();
+        await expect(page.getByText(/Nessun piatto in coda/i)).toBeVisible({ timeout: 15000 });
 
         await openPosAndSelectDevice(page, posName);
         await openCashSessionIfRequired(page);
@@ -187,22 +199,24 @@ test.describe.serial("Pizza monitor flow", () => {
             if (!response.ok()) return 0;
             const payload = await response.json() as PrintJobsPayload;
             return (payload.jobs || []).filter((job) => job.document?.orderId === orderId).length;
-        }, { timeout: 20000 }).toBeGreaterThanOrEqual(3);
+        }, { timeout: 20000 }).toBeGreaterThanOrEqual(5);
 
         const printJobsResponse = await page.request.get("/api/admin/print-jobs?limit=20");
         const printJobsPayload = await printJobsResponse.json() as PrintJobsPayload;
         const orderJobs = (printJobsPayload.jobs || []).filter((job) => job.document?.orderId === orderId);
-        const kitchenJob = orderJobs.find((job) => job.printType === "KITCHEN_ORDER");
+        const kitchenJobs = orderJobs.filter((job) => job.printType === "KITCHEN_ORDER");
         const cashierJob = orderJobs.find((job) => job.printType === "CASHIER_SUMMARY");
-        const customerJob = orderJobs.find((job) => job.printType === "CUSTOMER_ORDER");
+        const customerJobs = orderJobs.filter((job) => job.printType === "CUSTOMER_ORDER");
         const pizzaBarcodeValue = getPizzaBarcodeValue(pizzaNumber);
 
-        expect(kitchenJob?.document?.pizzaNumber).toBe(pizzaNumber);
-        expect(kitchenJob?.document?.pizzaBarcodeValue).toBe(pizzaBarcodeValue);
-        expect(cashierJob?.document?.pizzaNumber).toBe(pizzaNumber);
+        expect(kitchenJobs).toHaveLength(2);
+        expect(kitchenJobs.every((job) => job.document?.pizzaNumber === pizzaNumber)).toBe(true);
+        expect(kitchenJobs.every((job) => job.document?.pizzaBarcodeValue === pizzaBarcodeValue)).toBe(true);
+        expect(cashierJob?.document?.pizzaNumber).toBeUndefined();
         expect(cashierJob?.document?.pizzaBarcodeValue).toBeUndefined();
-        expect(customerJob?.document?.pizzaNumber).toBe(pizzaNumber);
-        expect(customerJob?.document?.pizzaBarcodeValue).toBeUndefined();
+        expect(customerJobs).toHaveLength(2);
+        expect(customerJobs.every((job) => job.document?.pizzaNumber === pizzaNumber)).toBe(true);
+        expect(customerJobs.every((job) => job.document?.pizzaBarcodeValue === undefined)).toBe(true);
 
         await page.goto("/pizza-console");
         await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
@@ -213,6 +227,8 @@ test.describe.serial("Pizza monitor flow", () => {
         await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toHaveCount(0);
 
         await page.goto("/pizza-monitor");
+        await expect(page.getByText("Monitor preparazioni", { exact: true })).toBeVisible();
+        await expect(page.getByText("Piatto pronto per il ritiro", { exact: true })).toBeVisible();
         await expect(page.getByTestId(`pizza-monitor-number-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
     });
 
@@ -361,7 +377,7 @@ test.describe.serial("Pizza monitor flow", () => {
         const customerJob = orderJobs.find((job) => job.printType === "CUSTOMER_ORDER");
 
         expect(kitchenJob).toBeUndefined();
-        expect(cashierJob?.document?.pizzaNumber).toBe(pizzaNumber);
+        expect(cashierJob?.document?.pizzaNumber).toBeUndefined();
         expect(cashierJob?.document?.pizzaBarcodeValue).toBeUndefined();
         expect(customerJob?.document?.pizzaNumber).toBe(pizzaNumber);
         expect(customerJob?.document?.pizzaBarcodeValue).toBe(getPizzaBarcodeValue(pizzaNumber));

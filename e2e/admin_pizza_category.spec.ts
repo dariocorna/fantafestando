@@ -6,7 +6,7 @@ import {
     uniqueSuffix,
 } from "./utils/fixtures";
 
-test.describe.serial("Admin catalogo - categorie pizza", () => {
+test.describe.serial("Admin catalogo - preparazioni numerate", () => {
     const createdEvents: string[] = [];
 
     test.afterEach(async ({ page }) => {
@@ -15,7 +15,7 @@ test.describe.serial("Admin catalogo - categorie pizza", () => {
         await deleteEvent(page, eventName);
     });
 
-    test("valida le categorie pizza e salva una configurazione coerente", async ({ page, isMobile }) => {
+    test("valida le categorie numerate e salva una configurazione coerente", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso validato su desktop.");
 
         const suffix = uniqueSuffix();
@@ -32,14 +32,14 @@ test.describe.serial("Admin catalogo - categorie pizza", () => {
         await expect(dialog).toBeVisible();
 
         await dialog.locator("#cat-name").fill(categoryName);
-        await dialog.getByLabel("Categoria pizza").check();
+        await dialog.getByLabel("Preparazione numerata").check();
         await expect(dialog.locator("#skipKitchenPrint")).toBeDisabled();
-        await expect(dialog).toContainText("senza stampante dedicata la comanda pizza esce solo in cassa");
+        await expect(dialog).toContainText("senza stampante dedicata la comanda esce solo in cassa");
         await dialog.getByRole("button", { name: "Salva Categoria", exact: true }).click();
 
         await expect(dialog).toBeHidden({ timeout: 15000 });
         const row = page.getByRole("row").filter({ hasText: categoryName }).first();
-        await expect(row).toContainText("Pizza");
+        await expect(row).toContainText("Numerata");
         await expect(row).toContainText("Default Cassa");
     });
 });
