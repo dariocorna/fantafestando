@@ -63,7 +63,7 @@ describe("PrinterService renderPrintDocument", () => {
         expect(printer.setTextDoubleHeight).not.toHaveBeenCalled();
     });
 
-    test("prints pizza barcodes as native EAN-8 commands on customer orders", async () => {
+    test("prints numbered-dish barcodes as native EAN-8 commands on customer orders", async () => {
         const printer = createFakePrinter();
         const document: PrintDocumentV2 = {
             schemaVersion: 2,
@@ -104,6 +104,38 @@ describe("PrinterService renderPrintDocument", () => {
             printer.setTextQuadArea.mock.invocationCallOrder[0]
         );
         expect(printer.code128).not.toHaveBeenCalled();
+        expect(printer.println).toHaveBeenCalledWith("PIATTO N°");
+    });
+
+    test("does not print dish numbers or barcodes on cashier summaries", async () => {
+        const printer = createFakePrinter();
+        const document: PrintDocumentV2 = {
+            schemaVersion: 2,
+            kind: "COMANDA",
+            printType: "CASHIER_SUMMARY",
+            title: "Scontrino Cassa",
+            copyLabel: "COPIA CASSA",
+            pizzaNumber: 81,
+            pizzaBarcodeValue: "00000819",
+            createdAt: "2026-03-27T22:00:00.000Z",
+            headerLines: [],
+            items: [{ qty: 1, quantity: 1, name: "Calamari" }],
+            totals: [],
+            footerLines: []
+        };
+
+        await (PrinterService as unknown as {
+            renderPrintDocument: (
+                printerInstance: ReturnType<typeof createFakePrinter>,
+                printDocument: PrintDocumentV2,
+                withLargeEventTitle: boolean
+            ) => Promise<void>;
+        }).renderPrintDocument(printer, document, false);
+
+        expect(printer.printBarcode).not.toHaveBeenCalled();
+        expect(printer.code128).not.toHaveBeenCalled();
+        expect(printer.setTextQuadArea).not.toHaveBeenCalled();
+        expect(printer.println).not.toHaveBeenCalledWith("PIATTO N°");
     });
 
     test("falls back to code128 for non-EAN-8 pizza barcode payloads", async () => {

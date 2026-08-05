@@ -131,6 +131,32 @@ describe("pizza-ticket helpers", () => {
         expect(getNextPizzaOrderNumberMock).toHaveBeenCalledTimes(1);
     });
 
+    test("uses one shared sequence across different numbered categories", async () => {
+        mockProducts([
+            { _id: "prod-calamari", categoryId: "cat-calamari" },
+            { _id: "prod-pizza", categoryId: "cat-pizza" }
+        ]);
+        mockCategories([
+            { _id: "cat-calamari" },
+            { _id: "cat-pizza" }
+        ]);
+        getNextPizzaOrderNumberMock
+            .mockResolvedValueOnce(1)
+            .mockResolvedValueOnce(2)
+            .mockResolvedValueOnce(3);
+
+        await expect(resolvePizzaTicketForCart(EVENT_ID, [
+            { productId: "prod-calamari" }
+        ])).resolves.toMatchObject({ pizzaNumber: 1 });
+        await expect(resolvePizzaTicketForCart(EVENT_ID, [
+            { productId: "prod-pizza" }
+        ])).resolves.toMatchObject({ pizzaNumber: 2 });
+        await expect(resolvePizzaTicketForCart(EVENT_ID, [
+            { productId: "prod-calamari" }
+        ])).resolves.toMatchObject({ pizzaNumber: 3 });
+        expect(getNextPizzaOrderNumberMock).toHaveBeenCalledTimes(3);
+    });
+
     test("does not allocate a pizza ticket when no pizza category is involved", async () => {
         mockProducts([
             { _id: "prod-burger", categoryId: "cat-kitchen" }

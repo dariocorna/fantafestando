@@ -226,7 +226,7 @@ export async function createCategory(
     }
 
     if (options?.pizzaFlowEnabled) {
-        await dialog.getByLabel("Categoria pizza").check();
+        await dialog.getByLabel("Preparazione numerata").check();
     }
 
     await dialog.getByRole("button", { name: "Salva Categoria", exact: true }).click();
