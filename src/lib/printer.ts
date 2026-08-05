@@ -644,7 +644,10 @@ export class PrinterService {
     }
 
     private static async printPizzaTicketHighlight(printer: ThermalPrinter, document: PrintDocumentV2) {
-        if (!document.pizzaNumber) return;
+        if (
+            !document.pizzaNumber
+            || (document.printType !== "CUSTOMER_ORDER" && document.printType !== "KITCHEN_ORDER")
+        ) return;
 
         const rowWidth = 40;
         printer.alignCenter();
@@ -668,7 +671,7 @@ export class PrinterService {
         }
 
         printer.bold(true);
-        splitByLength("PIZZA N°", rowWidth).forEach((line) => printer.println(line));
+        splitByLength("PIATTO N°", rowWidth).forEach((line) => printer.println(line));
         printer.setTextQuadArea();
         splitByLength(String(document.pizzaNumber), rowWidth).forEach((line) => printer.println(line));
         printer.setTextNormal();
@@ -983,9 +986,6 @@ export class PrinterService {
             printer.println(`DATA/ORA ORDINE: ${formatPrintDateTime(document.createdAt)}`);
             if (document.referenceCode) {
                 printer.println(`NUMERO ORDINE: ${document.referenceCode}`);
-            }
-            if (document.pizzaNumber) {
-                printer.println(`NUMERO PIZZA: ${document.pizzaNumber}`);
             }
             printer.println(RECEIPT_SEPARATOR);
             printer.cut();
@@ -1818,6 +1818,8 @@ export class PrinterService {
                 title: "SCONTRINO CASSA",
                 copyLabel: "COPIA CASSA",
                 items: cashierReceiptItems,
+                pizzaNumber: undefined,
+                pizzaBarcodeValue: undefined,
                 totals: [
                     { label: "TOTALE", value: formatEuroReceipt(order.totalAmount || 0), emphasis: "strong" },
                     { label: "PAGAMENTO", value: formatPaymentMethod(order.paymentMethod) },

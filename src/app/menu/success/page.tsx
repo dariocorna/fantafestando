@@ -144,7 +144,7 @@ function SuccessContent() {
                                     className="rounded-[34px] border-2 border-[#ffb15b] bg-[linear-gradient(145deg,#fff7e8_0%,#ffe6b8_52%,#ffd189_100%)] px-6 py-7 text-center shadow-[0_20px_48px_rgba(194,106,9,0.18)]"
                                 >
                                     <span className="block text-xs font-black uppercase tracking-[0.16em] text-[#9a4d00]">
-                                        Numero pizza
+                                        Numero piatto
                                     </span>
                                     <span
                                         data-testid="menu-success-pizza-number"
@@ -164,7 +164,7 @@ function SuccessContent() {
                                         </p>
                                     </div>
                                     <p className="mt-4 text-sm font-bold leading-relaxed text-[#8a4d10]">
-                                        Quando la pizza sarà pronta, verrà chiamato questo numero.
+                                        Quando il piatto sarà pronto, verrà chiamato questo numero.
                                     </p>
                                 </div>
                             ) : (

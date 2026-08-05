@@ -92,8 +92,12 @@ export function PrintDocumentViewer({
                 <p><span className="font-semibold">Copia:</span> {normalized.copyLabel}</p>
                 {normalized.eventName ? <p><span className="font-semibold">Festa:</span> {normalized.eventName}</p> : null}
                 {normalized.referenceCode ? <p><span className="font-semibold">{referenceLabel}:</span> {normalized.referenceCode}</p> : null}
-                {normalized.pizzaNumber ? <p><span className="font-semibold">Pizza N°:</span> {normalized.pizzaNumber}</p> : null}
-                {normalized.pizzaBarcodeValue ? <p><span className="font-semibold">Barcode pizza:</span> {normalized.pizzaBarcodeValue}</p> : null}
+                {(normalized.printType === "CUSTOMER_ORDER" || normalized.printType === "KITCHEN_ORDER") && normalized.pizzaNumber
+                    ? <p><span className="font-semibold">Piatto N°:</span> {normalized.pizzaNumber}</p>
+                    : null}
+                {(normalized.printType === "CUSTOMER_ORDER" || normalized.printType === "KITCHEN_ORDER") && normalized.pizzaBarcodeValue
+                    ? <p><span className="font-semibold">Barcode piatto:</span> {normalized.pizzaBarcodeValue}</p>
+                    : null}
                 <p><span className="font-semibold">Generato:</span> {formatDateTime(normalized.createdAt)}</p>
                 <p><span className="font-semibold">Formato:</span> {schemaLabel}</p>
                 <p><span className="font-semibold">Branding:</span> {logoLabel}</p>

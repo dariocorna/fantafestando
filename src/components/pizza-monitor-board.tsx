@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Pizza, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw, UtensilsCrossed } from "lucide-react";
 
 interface PizzaMonitorPayload {
     eventName: string | null;
@@ -78,8 +78,8 @@ export function PizzaMonitorBoard() {
                 <header className="flex items-start justify-between gap-3 px-4 pb-3 pt-4 md:px-8 md:pb-4 md:pt-6">
                     <div className="min-w-0">
                         <p className="inline-flex items-center gap-2 rounded-sm border-2 border-black bg-white/80 px-2 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-black md:text-xs">
-                            <Pizza className="h-3.5 w-3.5" />
-                            Monitor pizza
+                            <UtensilsCrossed className="h-3.5 w-3.5" />
+                            Monitor preparazioni
                         </p>
                         <p className="mt-3 text-[11px] font-black uppercase tracking-[0.28em] text-black/65 md:text-sm">
                             {payload?.eventName || "Nessuna festa attiva"}
@@ -115,10 +115,10 @@ export function PizzaMonitorBoard() {
                             >
                                 <div className="text-center">
                                     <h1 className="font-brand-display text-4xl font-black uppercase tracking-[-0.05em] text-black md:text-7xl xl:text-8xl">
-                                        Pizzeria
+                                        Preparazioni
                                     </h1>
                                     <p className="mt-2 text-[11px] font-black uppercase tracking-[0.26em] text-black/65 md:text-sm">
-                                        Pizza pronta per il ritiro
+                                        Piatto pronto per il ritiro
                                     </p>
                                 </div>
 
@@ -141,7 +141,7 @@ export function PizzaMonitorBoard() {
                                             data-testid={`pizza-monitor-number-${entry.pizzaNumber}`}
                                         >
                                             <p className="text-sm font-black uppercase tracking-[0.16em] text-black/70 md:text-xl">
-                                                Pizzeria
+                                                Preparazioni
                                             </p>
                                             <p className="font-brand-display mt-1 text-5xl font-black leading-none tracking-[-0.08em] text-black md:mt-2 md:text-8xl">
                                                 {entry.pizzaNumber}
@@ -170,7 +170,7 @@ export function PizzaMonitorBoard() {
                                     In attesa
                                 </p>
                                 <p className="mt-3 font-brand-display text-4xl font-black tracking-tight text-black">
-                                    Nessuna pizza pronta
+                                    Nessun piatto pronto
                                 </p>
                             </div>
                         </div>
