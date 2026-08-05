@@ -348,7 +348,8 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
 ## 🔄 Epica 33: Numerazione generica piatti
 
 - Generalizzazione del flusso pizza per categorie con preparazione numerata,
-  incluse Pizza e Calamari, con un solo numero condiviso per ordine.
+  con un numero distinto per ogni prodotto numerato e una sequenza globale
+  condivisa tra reparti.
 - Etichette operative generiche in catalogo, menu pubblico, console, monitor,
   anteprime e stampe, mantenendo compatibili campi e URL storici `pizza*`.
 - `PIATTO N°` ingrandito soltanto sulle copie cliente e reparto; riepilogo cassa
