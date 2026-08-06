@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useSyncExternalStore, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -15,8 +15,17 @@ import { Label } from "@/components/ui/label";
 import { createEventAction } from "@/app/admin/settings/actions";
 import { Loader2 } from "lucide-react";
 
+const subscribeToHydration = () => () => undefined;
+const getClientHydrationSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
+
 export function CreateEventDialog() {
     const [open, setOpen] = useState(false);
+    const hydrated = useSyncExternalStore(
+        subscribeToHydration,
+        getClientHydrationSnapshot,
+        getServerHydrationSnapshot
+    );
     const [isPending, startTransition] = useTransition();
     const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -45,7 +54,7 @@ export function CreateEventDialog() {
             }}
         >
             <DialogTrigger asChild>
-                <Button id="new-event-btn">+ Nuova Festa</Button>
+                <Button id="new-event-btn" disabled={!hydrated}>+ Nuova Festa</Button>
             </DialogTrigger>
             <DialogContent>
                 <form action={handleSubmit}>
