@@ -40,6 +40,7 @@ export interface SerializedCategory {
     printerName?: string;
     printerId?: string;
     skipKitchenPrint?: boolean;
+    printKitchenCopyAtCashier?: boolean;
     pizzaFlowEnabled?: boolean;
 }
 
@@ -153,7 +154,7 @@ export function SortableCategoryTable({
                                     </span>
                                 ) : (
                                     <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">
-                                        Standard
+                                        {cat.printKitchenCopyAtCashier ? "Reparto + cliente in cassa" : "Standard"}
                                     </span>
                                 )}
                             </TableCell>
@@ -219,14 +220,14 @@ export function SortableCategoryTable({
                                     )}
                                 </TableCell>
                                 <TableCell>
-                                    {cat.skipKitchenPrint ? (
+                                {cat.skipKitchenPrint ? (
                                         <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800">
                                             Non stampare
                                         </span>
                                     ) : (
-                                        <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">
-                                            Standard
-                                        </span>
+                                    <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">
+                                        {cat.printKitchenCopyAtCashier ? "Reparto + cliente in cassa" : "Standard"}
+                                    </span>
                                     )}
                                 </TableCell>
                                 <TableCell>
@@ -242,6 +243,7 @@ export function SortableCategoryTable({
                                             uiColor: normalizeCategoryColor(cat.uiColor),
                                             printerId: cat.printerId,
                                             skipKitchenPrint: cat.skipKitchenPrint,
+                                            printKitchenCopyAtCashier: cat.printKitchenCopyAtCashier,
                                             pizzaFlowEnabled: cat.pizzaFlowEnabled
                                         }}
                                         eventId={eventId}

@@ -21,6 +21,7 @@ export interface PizzaCartItemInput {
     productId: string;
     snapshotName?: string;
     quantity?: number;
+    splitPrintPerUnit?: boolean;
     includedComponents?: PizzaCartComponentInput[];
 }
 
@@ -89,25 +90,26 @@ export function extractProductionProductIds(cartItems: PizzaCartItemInput[]): st
     return extractProductionProducts(cartItems).map((product) => product.productId);
 }
 
-export async function resolvePizzaEligibleProductIds(
+async function resolvePizzaEligibleProducts(
     eventId: string,
     cartItems: PizzaCartItemInput[]
-): Promise<Set<string>> {
+): Promise<Map<string, { splitKitchenPrintPerUnit: boolean }>> {
     const productionProductIds = extractProductionProductIds(cartItems);
     if (!MONGO_OBJECT_ID_PATTERN.test(eventId) || productionProductIds.length === 0) {
-        return new Set<string>();
+        return new Map();
     }
 
     await dbConnect();
     const products = await Product.find({
         eventId,
         _id: { $in: productionProductIds }
-    }).select("_id categoryId").lean() as Array<{
+    }).select("_id categoryId splitKitchenPrintPerUnit").lean() as Array<{
         _id: string | { toString(): string };
         categoryId?: string | { toString(): string };
+        splitKitchenPrintPerUnit?: boolean;
     }>;
 
-    if (products.length === 0) return new Set<string>();
+    if (products.length === 0) return new Map();
 
     const numberedCategoryIds = new Set(
         (
@@ -125,14 +127,24 @@ export async function resolvePizzaEligibleProductIds(
         ).map((category) => category._id.toString())
     );
 
-    return new Set(
+    return new Map(
         products
             .filter((product) => {
                 const categoryId = product.categoryId?.toString();
                 return Boolean(categoryId && numberedCategoryIds.has(categoryId));
             })
-            .map((product) => product._id.toString())
+            .map((product) => [
+                product._id.toString(),
+                { splitKitchenPrintPerUnit: Boolean(product.splitKitchenPrintPerUnit) }
+            ])
     );
+}
+
+export async function resolvePizzaEligibleProductIds(
+    eventId: string,
+    cartItems: PizzaCartItemInput[]
+): Promise<Set<string>> {
+    return new Set((await resolvePizzaEligibleProducts(eventId, cartItems)).keys());
 }
 
 export async function resolveDishTicketsForCart(
@@ -140,30 +152,79 @@ export async function resolveDishTicketsForCart(
     cartItems: PizzaCartItemInput[],
     existingTickets: PersistedDishTicketSource[] = []
 ): Promise<DishTicketSnapshot[]> {
-    const productionProducts = extractProductionProducts(cartItems);
-    const eligibleProductIds = await resolvePizzaEligibleProductIds(eventId, cartItems);
-    const desiredProducts = productionProducts.filter((product) => eligibleProductIds.has(product.productId));
+    const eligibleProducts = await resolvePizzaEligibleProducts(eventId, cartItems);
+    const desiredByProductId = new Map<string, {
+        productId: string;
+        snapshotName: string;
+        count: number;
+        hasGroupedTicket: boolean;
+    }>();
+
+    cartItems.forEach((item) => {
+        const parentQuantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
+        const entries = Array.isArray(item.includedComponents) && item.includedComponents.length > 0
+            ? item.includedComponents.map((component) => ({
+                ...component,
+                quantity: parentQuantity * Math.max(1, Math.floor(Number(component.quantity) || 1))
+            }))
+            : [{
+                productId: item.productId,
+                snapshotName: item.snapshotName,
+                quantity: parentQuantity
+            }];
+
+        entries.forEach((entry) => {
+            const productId = entry.productId?.trim();
+            const product = productId ? eligibleProducts.get(productId) : undefined;
+            if (!productId || !product) return;
+
+            let desired = desiredByProductId.get(productId);
+            if (!desired) {
+                desired = {
+                    productId,
+                    snapshotName: entry.snapshotName?.trim() || "Piatto",
+                    count: 0,
+                    hasGroupedTicket: false
+                };
+                desiredByProductId.set(productId, desired);
+            }
+
+            const splitPerUnit = product.splitKitchenPrintPerUnit || Boolean(item.splitPrintPerUnit);
+            if (splitPerUnit) {
+                desired.count += Math.max(1, Math.floor(Number(entry.quantity) || 1));
+            } else if (!desired.hasGroupedTicket) {
+                desired.count += 1;
+                desired.hasGroupedTicket = true;
+            }
+        });
+    });
+
+    const desiredProducts = Array.from(desiredByProductId.values());
     if (desiredProducts.length === 0) return [];
 
-    const existingByProductId = new Map(
-        existingTickets
-            .map(normalizeDishTicket)
-            .filter((ticket): ticket is DishTicketSnapshot => Boolean(ticket))
-            .map((ticket) => [ticket.productId, ticket])
-    );
-    const missingProducts = desiredProducts.filter((product) => !existingByProductId.has(product.productId));
-    const allocatedNumbers = await getNextPizzaOrderNumbers(eventId, missingProducts.length);
-    const allocatedByProductId = new Map(
-        missingProducts.map((product, index) => [product.productId, allocatedNumbers[index]])
-    );
+    const existingByProductId = new Map<string, DishTicketSnapshot[]>();
+    existingTickets.forEach((source) => {
+        const ticket = normalizeDishTicket(source);
+        if (!ticket) return;
+        const entries = existingByProductId.get(ticket.productId) || [];
+        entries.push(ticket);
+        existingByProductId.set(ticket.productId, entries);
+    });
 
-    return desiredProducts.map((product) => {
-        const existing = existingByProductId.get(product.productId);
-        if (existing) return existing;
-        return {
-            ...product,
-            pizzaNumber: allocatedByProductId.get(product.productId)!,
-            state: "QUEUED"
-        };
+    const missingCount = desiredProducts.reduce((count, product) => (
+        count + Math.max(0, product.count - (existingByProductId.get(product.productId)?.length || 0))
+    ), 0);
+    const allocatedNumbers = await getNextPizzaOrderNumbers(eventId, missingCount);
+    let allocatedIndex = 0;
+
+    return desiredProducts.flatMap((product) => {
+        const retained = (existingByProductId.get(product.productId) || []).slice(0, product.count);
+        const created = Array.from({ length: product.count - retained.length }, () => ({
+            productId: product.productId,
+            snapshotName: product.snapshotName,
+            pizzaNumber: allocatedNumbers[allocatedIndex++]!,
+            state: "QUEUED" as const
+        }));
+        return [...retained, ...created];
     });
 }

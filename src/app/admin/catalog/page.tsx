@@ -399,6 +399,7 @@ export default async function AdminCatalog() {
         const uiColor = normalizeCategoryColor(formData.get("uiColor") as string | null);
         const printerId = formData.get("printerId") as string;
         const skipKitchenPrint = formData.get("skipKitchenPrint") === "on";
+        const printKitchenCopyAtCashier = formData.get("printKitchenCopyAtCashier") === "on";
         const pizzaFlowEnabled = formData.get("pizzaFlowEnabled") === "on";
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
@@ -440,6 +441,7 @@ export default async function AdminCatalog() {
             printerId: printerId || undefined,
             printOrder: nextPrintOrder,
             skipKitchenPrint,
+            printKitchenCopyAtCashier,
             pizzaFlowEnabled
         });
         revalidateCatalogSurfaces();
@@ -609,6 +611,7 @@ export default async function AdminCatalog() {
         const uiColor = normalizeCategoryColor(formData.get("uiColor") as string | null);
         const printerId = formData.get("printerId") as string;
         const skipKitchenPrint = formData.get("skipKitchenPrint") === "on";
+        const printKitchenCopyAtCashier = formData.get("printKitchenCopyAtCashier") === "on";
         const pizzaFlowEnabled = formData.get("pizzaFlowEnabled") === "on";
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
@@ -631,7 +634,7 @@ export default async function AdminCatalog() {
 
         await Category.findOneAndUpdate(
             { _id: id, eventId: scopedEventId },
-            { name, uiColor, printerId: printerId || null, skipKitchenPrint, pizzaFlowEnabled }
+            { name, uiColor, printerId: printerId || null, skipKitchenPrint, printKitchenCopyAtCashier, pizzaFlowEnabled }
         );
         revalidateCatalogSurfaces();
         return { success: true };
@@ -885,6 +888,7 @@ export default async function AdminCatalog() {
                         printerName: (c.printerId as unknown as IPrinter)?.name || undefined,
                         printerId: getReferencedId(c.printerId),
                         skipKitchenPrint: Boolean(c.skipKitchenPrint),
+                        printKitchenCopyAtCashier: Boolean(c.printKitchenCopyAtCashier),
                         pizzaFlowEnabled: Boolean(c.pizzaFlowEnabled),
                     }))}
                     onReorder={reorderCategories}
