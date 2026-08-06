@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo, useRef, type KeyboardEvent, type MouseEvent } from "react"
-import { ShoppingCart, User, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X, RefreshCw, Clock3, Wallet, Check, Minus, Settings2, Printer } from "lucide-react"
+import { ShoppingCart, User, Banknote, Trash2, CheckCircle2, Loader2, Hash, Monitor, Search, X, RefreshCw, Clock3, Wallet, Check, Minus, Settings2, Printer, PackageOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -41,6 +41,7 @@ import { buildMenuConfigurationKey, type MenuSelectionInput } from "@/lib/fixed-
 import { useIsMobile } from "@/hooks/use-mobile"
 import { buildProductQuantityMap, decrementProductQuantityInCart, replaceSingleCartUnit } from "@/lib/pos-cart"
 import { buildCashReceivedSuggestions, formatCents, normalizeCashReceivedInput, toCents } from "@/lib/cash-change"
+import { PosQuickStockDialog } from "@/components/pos-quick-stock-dialog"
 
 const POS_TOUCH_BREAKPOINT = 1024
 
@@ -64,6 +65,7 @@ interface IProduct {
     stockQuantity?: number | null
     isSoldOut?: boolean
     stockStatus?: "UNLIMITED" | "OK" | "LOW" | "OUT"
+    variants?: Array<{ optionName: string; priceVariation: number; stockQuantity?: number | null }>
     recipeItems?: Array<{
         ingredientId: string
         name: string
@@ -194,6 +196,7 @@ interface OpenCashSessionState {
     openedAt: string
     openingFloatAmount: number
     openingNotes?: string
+    isTest: boolean
 }
 
 interface ClosedCashSessionSummaryState {
@@ -227,9 +230,17 @@ interface FeedbackModalState {
     message: string
     action?: {
         type: "RETRY_FAILED_PRINTS"
-        eventId: string
         orderId: string
+        failedPrinters: FailedPrinterGroupState[]
     }
+}
+
+interface FailedPrinterGroupState {
+    key: string
+    name: string
+    error?: string
+    count: number
+    jobIds: string[]
 }
 
 interface PrintDispatchSummaryState {
@@ -237,6 +248,7 @@ interface PrintDispatchSummaryState {
     succeeded: number
     failed: number
     allSuccessful: boolean
+    failedPrinters: FailedPrinterGroupState[]
 }
 
 function getCurrentEpochMs() {
@@ -368,7 +380,7 @@ function PosProductCard({
                 >
                     <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                            <p className="line-clamp-3 text-lg font-black uppercase leading-tight text-slate-900">
+                            <p className="line-clamp-2 min-h-10 text-lg font-black leading-tight text-slate-900">
                                 {displayName}
                             </p>
                             {product.requiresConfiguration ? (
@@ -440,7 +452,7 @@ function PosProductCard({
                         className="flex flex-1 flex-col gap-2 px-2.5 py-2.5"
                         style={{ backgroundColor }}
                     >
-                        <p className={`line-clamp-3 text-[1.02rem] font-black uppercase leading-tight text-slate-900 ${hasQuantity ? "pr-10" : ""} ${shouldShowTouchDecrement ? "pl-16" : ""}`}>
+                        <p className={`line-clamp-2 min-h-10 text-lg font-black leading-tight text-slate-900 ${hasQuantity ? "pr-10" : ""} ${shouldShowTouchDecrement ? "pl-16" : ""}`}>
                             {displayName}
                         </p>
                         {product.requiresConfiguration ? (
@@ -494,7 +506,7 @@ function PosProductCard({
                     boxShadow,
                 }}
             >
-                <p className={`mx-auto w-full max-w-[96%] truncate text-center text-[clamp(14px,0.95vw,20px)] font-black uppercase leading-tight text-slate-800 ${hasQuantity ? "pr-7" : ""} ${shouldShowTouchDecrement ? "pl-16" : ""}`}>
+                <p className={`mx-auto line-clamp-2 min-h-10 w-full max-w-[96%] text-center text-[clamp(16px,1vw,20px)] font-black leading-tight text-slate-800 ${hasQuantity ? "pr-7" : ""} ${shouldShowTouchDecrement ? "pl-16" : ""}`}>
                     {displayName}
                 </p>
                 {product.requiresConfiguration ? (
@@ -523,6 +535,7 @@ export default function PosPage() {
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
     const [isDiscountsExpanded, setIsDiscountsExpanded] = useState(false)
     const [isDiscountSheetOpen, setIsDiscountSheetOpen] = useState(false)
+    const [isQuickStockOpen, setIsQuickStockOpen] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
     const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD">("CASH")
     const [cashReceivedInput, setCashReceivedInput] = useState("")
@@ -562,7 +575,7 @@ export default function PosPage() {
         title: "",
         message: ""
     })
-    const [isRetryingFailedPrints, setIsRetryingFailedPrints] = useState(false)
+    const [retryingPrinterKey, setRetryingPrinterKey] = useState<string | null>(null)
     const [retryPrintsFeedback, setRetryPrintsFeedback] = useState<string | null>(null)
     const [configuringProduct, setConfiguringProduct] = useState<IProduct | null>(null)
     const [contextLineId, setContextLineId] = useState<string | null>(null)
@@ -655,7 +668,7 @@ export default function PosPage() {
     const activeEventId = activeEvent?._id
 
     const cashAvailable = Boolean(selectedCashBox)
-    const cardAvailable = Boolean(selectedPaymentTerminal)
+    const cardAvailable = Boolean(selectedPaymentTerminal) && !(cashSession?.isTest && selectedPaymentTerminal?.type === "SUMUP")
 
     const effectivePaymentMethod: "CASH" | "CARD" =
         paymentMethod === "CASH" && !cashAvailable && cardAvailable
@@ -1110,6 +1123,41 @@ export default function PosPage() {
         setCashReceivedInput((current) => normalizeCashReceivedInput(`${current}${key}`))
     }
 
+    useEffect(() => {
+        if (!isCheckoutOpen || effectivePaymentMethod !== "CASH") return
+        const onKeyDown = (event: globalThis.KeyboardEvent) => {
+            const target = event.target as HTMLElement | null
+            if (target?.matches("input, textarea, select, [contenteditable='true']")) return
+            if (/^[0-9]$/.test(event.key)) {
+                event.preventDefault()
+                setCashReceivedInput((current) => normalizeCashReceivedInput(`${current}${event.key}`))
+            } else if (event.key === "," || event.key === ".") {
+                event.preventDefault()
+                setCashReceivedInput((current) => normalizeCashReceivedInput(`${current},`))
+            } else if (event.key === "Backspace") {
+                event.preventDefault()
+                setCashReceivedInput((current) => current.slice(0, -1))
+            } else if (event.key === "Delete" || event.key.toLowerCase() === "c") {
+                event.preventDefault()
+                setCashReceivedInput("")
+            }
+        }
+        window.addEventListener("keydown", onKeyDown)
+        return () => window.removeEventListener("keydown", onKeyDown)
+    }, [effectivePaymentMethod, isCheckoutOpen])
+
+    const handleStockUpdated = (updated: {
+        id: string
+        stockQuantity: number | null
+        isSoldOut: boolean
+        stockStatus: "UNLIMITED" | "OK" | "LOW" | "OUT"
+        variants: Array<{ optionName: string; priceVariation: number; stockQuantity: number | null }>
+    }) => {
+        setProducts((current) => current.map((product) => product._id === updated.id
+            ? { ...product, ...updated, _id: product._id }
+            : product))
+    }
+
     const showFeedbackModal = (
         message: string,
         tone: FeedbackModalState["tone"] = "error",
@@ -1131,25 +1179,26 @@ export default function PosPage() {
             action
         })
         setRetryPrintsFeedback(null)
-        setIsRetryingFailedPrints(false)
+        setRetryingPrinterKey(null)
     }
 
     const buildPrintFailureMessage = (summary?: PrintDispatchSummaryState) => {
         if (!summary || summary.failed === 0) return null
-        return `Pagamento registrato, ma la stampa ha errori: ${summary.succeeded}/${summary.attempted} job inviati, ${summary.failed} falliti. Controlla il Monitor Stampa.`
+        const printers = summary.failedPrinters.map((printer) => printer.name).join(", ")
+        return `Pagamento registrato, ma ${summary.failed} stampe sono fallite${printers ? ` su: ${printers}` : ""}.`
     }
 
-    const handleRetryFailedPrintsFromModal = async () => {
+    const handleRetryFailedPrintsFromModal = async (printer: FailedPrinterGroupState) => {
         const action = feedbackModal.action
         if (!action || action.type !== "RETRY_FAILED_PRINTS") return
 
-        setIsRetryingFailedPrints(true)
+        setRetryingPrinterKey(printer.key)
         setRetryPrintsFeedback(null)
         const result = await retryFailedOrderPrintJobs({
-            eventId: action.eventId,
-            orderId: action.orderId
+            orderId: action.orderId,
+            jobIds: printer.jobIds
         })
-        setIsRetryingFailedPrints(false)
+        setRetryingPrinterKey(null)
 
         if (!result.success) {
             setRetryPrintsFeedback(result.error || "Reinvio non riuscito")
@@ -1158,15 +1207,14 @@ export default function PosPage() {
 
         if (result.attempted === 0) {
             setRetryPrintsFeedback("Nessun job fallito da reinviare per questo ordine.")
-            return
-        }
-
-        if (result.failed > 0) {
+        } else if (result.failed > 0) {
             setRetryPrintsFeedback(`Reinvio completato parzialmente: ${result.retried}/${result.attempted} inviati.`)
-            return
+        } else {
+            setRetryPrintsFeedback(`Reinvio completato: ${result.retried}/${result.attempted} job inviati.`)
         }
-
-        setRetryPrintsFeedback(`Reinvio completato: ${result.retried}/${result.attempted} job inviati.`)
+        setFeedbackModal((current) => current.action?.type === "RETRY_FAILED_PRINTS"
+            ? { ...current, action: { ...current.action, failedPrinters: result.failedPrinters } }
+            : current)
     }
 
     const handleCodeDialogOpenChange = (open: boolean) => {
@@ -1445,8 +1493,8 @@ export default function PosPage() {
                 if (printFailureMessage) {
                     showFeedbackModal(printFailureMessage, "error", "Errore stampa", {
                         type: "RETRY_FAILED_PRINTS",
-                        eventId: activeEvent._id,
-                        orderId: completionResult.orderId
+                        orderId: completionResult.orderId,
+                        failedPrinters: completionResult.printSummary?.failedPrinters || []
                     })
                 }
             } else {
@@ -1493,8 +1541,8 @@ export default function PosPage() {
             if (printFailureMessage) {
                 showFeedbackModal(printFailureMessage, "error", "Errore stampa", {
                     type: "RETRY_FAILED_PRINTS",
-                    eventId: activeEvent._id,
-                    orderId: result.orderId
+                    orderId: result.orderId,
+                    failedPrinters: result.printSummary?.failedPrinters || []
                 })
             }
         } else {
@@ -1941,7 +1989,7 @@ export default function PosPage() {
                             <p className="text-2xl font-black text-[var(--brand-blue-700)]">{effectiveTotal.toFixed(2)} €</p>
                         </div>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                         <button
                             type="button"
                             onClick={() => setIsCashStatusSheetOpen(true)}
@@ -1949,6 +1997,7 @@ export default function PosPage() {
                         >
                             <Wallet size={14} />
                             {cashSession ? "Cassa aperta" : "Cassa chiusa"}
+                            {cashSession?.isTest ? <span className="rounded bg-rose-700 px-1.5 py-0.5 text-xs text-white">TEST</span> : null}
                         </button>
                         <button
                             type="button"
@@ -1973,6 +2022,14 @@ export default function PosPage() {
                         >
                             <Banknote size={14} />
                             Sconti
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setIsQuickStockOpen(true)}
+                            className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-black text-amber-800"
+                        >
+                            <PackageOpen size={14} />
+                            Scorte
                         </button>
                     </div>
                     {loadedPendingOrder ? (
@@ -2012,26 +2069,29 @@ export default function PosPage() {
             <div className="flex h-full">
             {/* Sinistra: Selezione Prodotti (70%) */}
             <div className="flex h-full flex-1 flex-col border-r border-[#d9e6f8] bg-white">
-                <div className="shrink-0 border-b border-[#d9e6f8] bg-[#f7fbff] px-3 py-2">
-                    <div className="flex items-center justify-between gap-3">
-                        <div>
-                            <h3 className="text-xs font-black uppercase tracking-[0.08em] text-[var(--brand-blue-700)]">
-                                Catalogo completo
-                            </h3>
-                            <p className="text-[11px] font-semibold text-slate-500">
-                                {categories.length} categorie • {products.length} prodotti
-                            </p>
-                        </div>
+                <div className="shrink-0 border-b border-[#d9e6f8] bg-[#f7fbff] px-3 py-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-bold text-slate-600">
+                            {categories.length} reparti • {products.length} prodotti
+                        </p>
+                        <div className="flex items-center gap-1.5">
+                        <button type="button" onClick={() => setIsCashStatusSheetOpen(true)} className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-bold text-slate-700">
+                            Cassa {cashSession?.isTest ? <span className="ml-1 rounded bg-rose-700 px-1.5 py-0.5 text-xs text-white">TEST</span> : null}
+                        </button>
+                        <button type="button" onClick={openPendingOrdersSurface} className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-sm font-bold text-indigo-700">Pendenti</button>
+                        <button type="button" onClick={() => handleCodeDialogOpenChange(true)} className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-bold text-slate-700">Codice</button>
                         <button
                             id="discounts-tab-trigger"
                             onClick={() => setIsDiscountsExpanded((prev) => !prev)}
-                            className={`rounded-md border px-2.5 py-1.5 text-[11px] font-black uppercase tracking-[0.05em] transition-colors ${isDiscountsExpanded
+                            className={`rounded-md border px-2.5 py-1.5 text-sm font-bold transition-colors ${isDiscountsExpanded
                                 ? "border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800"
                                 : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                                 }`}
                         >
                             Sconti
                         </button>
+                        <button type="button" onClick={() => setIsQuickStockOpen(true)} className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-sm font-bold text-amber-800"><PackageOpen size={15} />Scorte</button>
+                        </div>
                     </div>
                 </div>
 
@@ -2085,7 +2145,7 @@ export default function PosPage() {
                         <section data-testid="pos-all-categories-catalog">
                             {isModernCatalogLayout ? (
                                 <div className="space-y-2">
-                                    <div className="flex flex-wrap gap-1 border-b border-[#d9e6f8] pb-2">
+                                    <div className="flex gap-1 overflow-x-auto border-b border-[#d9e6f8] pb-2">
                                         {categories.map((cat) => {
                                             const catTheme = getCategoryTheme(cat.uiColor)
                                             const isActive = selectedModernCategoryId === cat._id
@@ -2095,7 +2155,7 @@ export default function PosPage() {
                                                     type="button"
                                                     onClick={() => setActiveCategory(cat._id)}
                                                     aria-pressed={isActive}
-                                                    className="inline-flex min-h-11 items-center gap-1.5 border px-3.5 py-2 text-sm font-black uppercase tracking-[0.04em] transition-all"
+                                                    className="inline-flex min-h-12 shrink-0 items-center gap-1.5 border px-3.5 py-2 text-base font-black leading-tight transition-all"
                                                     style={isActive
                                                         ? {
                                                             backgroundColor: catTheme.base,
@@ -2109,7 +2169,7 @@ export default function PosPage() {
                                                         }}
                                                 >
                                                     {isActive ? <Check size={14} /> : null}
-                                                    <span className="max-w-[170px] truncate">{cat.name}</span>
+                                                    <span className="line-clamp-2 max-w-[190px]">{cat.name}</span>
                                                 </button>
                                             )
                                         })}
@@ -2137,7 +2197,7 @@ export default function PosPage() {
                                                         Categoria attiva
                                                     </p>
                                                     <p
-                                                        className="truncate text-sm font-black uppercase tracking-[0.04em]"
+                                                        className="line-clamp-2 text-base font-black leading-tight"
                                                         style={{ color: selectedModernCategoryTheme.base }}
                                                     >
                                                         {selectedModernCategory.name}
@@ -2219,7 +2279,7 @@ export default function PosPage() {
                                                                 }}
                                                             >
                                                                 <h4
-                                                                    className="truncate text-sm font-black uppercase tracking-[0.04em]"
+                                                                    className="line-clamp-2 text-base font-black leading-tight"
                                                                     style={{ color: catTheme.base }}
                                                                 >
                                                                     {cat.name}
@@ -3262,7 +3322,7 @@ export default function PosPage() {
                     setFeedbackModal((prev) => ({ ...prev, open }))
                     if (!open) {
                         setRetryPrintsFeedback(null)
-                        setIsRetryingFailedPrints(false)
+                        setRetryingPrinterKey(null)
                     }
                 }}
             >
@@ -3288,18 +3348,20 @@ export default function PosPage() {
                     </DialogHeader>
                     <div className="space-y-4 p-8">
                         <p className="text-base font-semibold text-slate-700">{feedbackModal.message}</p>
+                        {feedbackModal.action?.type === "RETRY_FAILED_PRINTS" ? (
+                            <div className="space-y-2">
+                                {feedbackModal.action.failedPrinters.map((printer) => (
+                                    <div key={printer.key} className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+                                        <p className="font-black text-rose-900">{printer.name} · {printer.count} {printer.count === 1 ? "stampa" : "stampe"}</p>
+                                        {printer.error ? <p className="text-sm text-rose-700">{printer.error}</p> : null}
+                                        <Button type="button" variant="outline" className="mt-2 w-full rounded-lg font-bold" onClick={() => void handleRetryFailedPrintsFromModal(printer)} disabled={retryingPrinterKey !== null}>
+                                            {retryingPrinterKey === printer.key ? "Reinvio..." : `Riprova — ${printer.name}`}
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : null}
                         <div className="flex items-center justify-end gap-3">
-                            {feedbackModal.action?.type === "RETRY_FAILED_PRINTS" ? (
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="rounded-xl px-6 font-bold"
-                                    onClick={() => void handleRetryFailedPrintsFromModal()}
-                                    disabled={isRetryingFailedPrints}
-                                >
-                                    {isRetryingFailedPrints ? "Reinvio..." : "Riprova stampa"}
-                                </Button>
-                            ) : null}
                             <Button
                                 type="button"
                                 className={`rounded-xl px-8 font-black ${feedbackModal.tone === "success"
@@ -3463,6 +3525,15 @@ export default function PosPage() {
                     </DialogContent>
                 </Dialog>
             )}
+
+            <PosQuickStockDialog
+                open={isQuickStockOpen}
+                onOpenChange={setIsQuickStockOpen}
+                eventId={activeEvent?._id || ""}
+                categories={categories}
+                products={products}
+                onUpdated={handleStockUpdated}
+            />
 
             {/* Modal Selezione Punto Cassa */}
             <Dialog open={isPosSelectorOpen} onOpenChange={setIsPosSelectorOpen}>

@@ -32,6 +32,8 @@ interface OrderForStornoProjection {
         ingredientId?: string | { toString(): string }
         quantity?: number
     }>
+    stockAdjustments?: StockAdjustment[]
+    stockEffectStatus?: "APPLIED" | "REVERTED"
     stornoMeta?: {
         status?: "IN_PROGRESS" | "COMPLETED" | "FAILED"
         refundStatus?: "SKIPPED" | "DONE" | "FAILED"
@@ -343,7 +345,9 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
             }
         }
 
-        const stockAdjustments = buildStockAdjustmentsFromOrder(lockedOrder)
+        const stockAdjustments = lockedOrder.stockEffectStatus === "REVERTED"
+            ? []
+            : (lockedOrder.stockAdjustments?.length ? lockedOrder.stockAdjustments : buildStockAdjustmentsFromOrder(lockedOrder))
         try {
             await rollbackStockAdjustments(eventId, stockAdjustments)
         } catch (rollbackError) {
@@ -373,7 +377,8 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                     "stornoMeta.completedAt": new Date(),
                     "stornoMeta.refundRequired": lockedOrder.paymentMethod === "CARD",
                     "stornoMeta.refundStatus": refundStatus,
-                    "stornoMeta.refundTransactionId": refundTransactionId
+                    "stornoMeta.refundTransactionId": refundTransactionId,
+                    stockEffectStatus: "REVERTED"
                 },
                 $unset: {
                     "stornoMeta.refundError": 1

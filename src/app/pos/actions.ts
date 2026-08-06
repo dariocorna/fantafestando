@@ -7,13 +7,14 @@ import Product from "@/models/Product"
 import Ingredient from "@/models/Ingredient"
 import CashSession from "@/models/CashSession"
 import PrintJob from "@/models/PrintJob"
+import Event from "@/models/Event"
 import { revalidatePath } from "next/cache"
 import { PrinterService } from "@/lib/printer"
 import { createSumUpCheckout } from "@/lib/sumup"
 import { decryptSecret } from "@/lib/secrets"
 import { getOrderCodeFromOrder, parseOrderNumberInput } from "@/lib/order-code"
 import { resolveDishTicketsForCart } from "@/lib/pizza-ticket"
-import { type StockMode } from "@/lib/inventory"
+import { getStockStatus, type StockMode } from "@/lib/inventory"
 import { computeCashSessionSummary } from "@/lib/cash-session"
 import {
     aggregateOrderProductSales,
@@ -55,12 +56,23 @@ import {
 } from "@/lib/ingredient-plan"
 import { shouldReusePendingIngredientPlan } from "@/lib/pending-ingredient-plan"
 import { ensurePosAccess } from "@/lib/pos-access"
+import { transitionCashSessionStock } from "@/lib/cash-session-stock"
+import { randomUUID } from "node:crypto"
 
 interface PrintDispatchSummary {
     attempted: number
     succeeded: number
     failed: number
     allSuccessful: boolean
+    failedPrinters: FailedPrinterGroup[]
+}
+
+interface FailedPrinterGroup {
+    key: string
+    name: string
+    error?: string
+    count: number
+    jobIds: string[]
 }
 
 async function ensurePosActionSession() {
@@ -71,11 +83,64 @@ async function ensurePosActionSession() {
     return { success: true as const }
 }
 
+export async function updatePosStock(data: {
+    eventId: string
+    productId: string
+    variantName?: string
+    stockQuantity: number | null
+}) {
+    const sessionCheck = await ensurePosActionSession()
+    if (!sessionCheck.success) return sessionCheck
+
+    if (!data.eventId || !data.productId || (
+        data.stockQuantity !== null
+        && (!Number.isInteger(data.stockQuantity) || data.stockQuantity < 0)
+    )) {
+        return { success: false as const, error: "Quantità scorte non valida" }
+    }
+
+    await dbConnect()
+    const activeEvent = await Event.exists({ _id: data.eventId, active: true, archived: { $ne: true } })
+    if (!activeEvent) return { success: false as const, error: "Evento attivo non valido" }
+
+    const query = data.variantName
+        ? { _id: data.productId, eventId: data.eventId, "variants.optionName": data.variantName }
+        : { _id: data.productId, eventId: data.eventId }
+    const update = data.variantName
+        ? { $set: { "variants.$.stockQuantity": data.stockQuantity } }
+        : { $set: { stockQuantity: data.stockQuantity, isSoldOut: data.stockQuantity === 0 } }
+    const product = await Product.findOneAndUpdate(query, update, { returnDocument: "after" })
+        .select("_id stockQuantity isSoldOut variants")
+        .lean() as ({
+            _id: { toString(): string }
+            stockQuantity?: number | null
+            isSoldOut?: boolean
+            variants?: Array<{ optionName?: string, priceVariation?: number, stockQuantity?: number | null }>
+        } | null)
+
+    if (!product) return { success: false as const, error: "Prodotto o variante non trovato" }
+    return {
+        success: true as const,
+        product: {
+            id: product._id.toString(),
+            stockQuantity: product.stockQuantity ?? null,
+            isSoldOut: Boolean(product.isSoldOut),
+            stockStatus: getStockStatus(product.stockQuantity ?? null, Boolean(product.isSoldOut)),
+            variants: (product.variants || []).map((variant) => ({
+                optionName: variant.optionName || "",
+                priceVariation: Number(variant.priceVariation || 0),
+                stockQuantity: variant.stockQuantity ?? null
+            }))
+        }
+    }
+}
+
 interface OpenCashSessionDto {
     id: string
     openedAt: string
     openingFloatAmount: number
     openingNotes?: string
+    isTest: boolean
 }
 
 interface CashSessionClosurePreviewDto {
@@ -623,12 +688,14 @@ function serializeOpenCashSession(session: {
     openedAt?: Date
     openingFloatAmount?: number
     openingNotes?: string
+    isTest?: boolean
 }): OpenCashSessionDto {
     return {
         id: session._id.toString(),
         openedAt: (session.openedAt || new Date()).toISOString(),
         openingFloatAmount: normalizeCurrencyAmount(session.openingFloatAmount ?? 0),
-        openingNotes: session.openingNotes?.trim() || undefined
+        openingNotes: session.openingNotes?.trim() || undefined,
+        isTest: Boolean(session.isTest)
     }
 }
 
@@ -712,8 +779,34 @@ function summarizePrintDispatch(results: boolean[] | undefined): PrintDispatchSu
         attempted,
         succeeded,
         failed,
-        allSuccessful: attempted > 0 && failed === 0
+        allSuccessful: attempted > 0 && failed === 0,
+        failedPrinters: []
     }
+}
+
+async function listFailedPrinterGroups(eventId: string, orderId: string): Promise<FailedPrinterGroup[]> {
+    const jobs = await PrintJob.find({ eventId, orderId, source: "ORDER", status: "FAILED" })
+        .sort({ createdAt: 1 })
+        .populate("printerId", "name ip port")
+        .select("_id printerId destinationHost destinationPort errorMessage")
+        .lean() as Array<{
+            _id: { toString(): string }
+            printerId?: { _id?: { toString(): string }; name?: string; ip?: string; port?: number } | null
+            destinationHost?: string
+            destinationPort?: number
+            errorMessage?: string
+        }>
+    const groups = new Map<string, FailedPrinterGroup>()
+    for (const job of jobs) {
+        const fallback = `${job.destinationHost || job.printerId?.ip || "stampante"}:${job.destinationPort || job.printerId?.port || 9100}`
+        const key = job.printerId?._id?.toString() || fallback
+        const current = groups.get(key) || { key, name: job.printerId?.name || fallback, count: 0, jobIds: [] }
+        current.count += 1
+        current.jobIds.push(job._id.toString())
+        current.error ||= job.errorMessage
+        groups.set(key, current)
+    }
+    return [...groups.values()]
 }
 
 async function getOpenCashSession(eventId: string, posDeviceId?: string): Promise<
@@ -727,16 +820,18 @@ async function getOpenCashSession(eventId: string, posDeviceId?: string): Promis
     const openSession = await CashSession.findOne({
         eventId,
         posDeviceId,
-        status: "OPEN"
+        status: "OPEN",
+        transition: { $exists: false }
     })
         .sort({ openedAt: -1 })
-        .select("_id openedAt openingFloatAmount openingNotes")
+        .select("_id openedAt openingFloatAmount openingNotes isTest")
         .lean() as (
             {
                 _id: { toString(): string } | string
                 openedAt?: Date
                 openingFloatAmount?: number
                 openingNotes?: string
+                isTest?: boolean
             } | null
         )
 
@@ -949,6 +1044,38 @@ export async function closeCashSession(data: {
             return { success: false, error: "Nessuna sessione cassa aperta da chiudere" }
         }
 
+        const transitionToken = openSession.transition?.token || randomUUID()
+        const claimed = await CashSession.findOneAndUpdate(
+            {
+                _id: openSession._id,
+                status: "OPEN",
+                $or: [
+                    { transition: { $exists: false } },
+                    { "transition.token": transitionToken, "transition.type": "CLOSE" }
+                ]
+            },
+            { $set: { transition: { token: transitionToken, type: "CLOSE", status: "IN_PROGRESS" } } },
+            { returnDocument: "after" }
+        )
+        if (!claimed) return { success: false, error: "Chiusura già in corso: riprova tra poco" }
+
+        if (claimed.isTest) {
+            const sumUpOrder = await Order.exists({
+                cashSessionId: claimed._id,
+                status: "PAID",
+                $or: [{ sumupCheckoutId: { $exists: true, $ne: "" } }, { sumupPaymentId: { $exists: true, $ne: "" } }]
+            })
+            if (sumUpOrder) {
+                await CashSession.updateOne({ _id: claimed._id }, { $set: { "transition.status": "FAILED", "transition.error": "Sono presenti pagamenti SumUp da stornare e rimborsare" } })
+                return { success: false, error: "La sessione TEST contiene pagamenti SumUp: stornali e rimborsali prima della chiusura" }
+            }
+            const stockResult = await transitionCashSessionStock({ eventId: data.eventId, sessionId: claimed._id.toString(), token: transitionToken, target: "REVERTED" })
+            if (!stockResult.success) {
+                await CashSession.updateOne({ _id: claimed._id }, { $set: { "transition.status": "FAILED", "transition.error": stockResult.error } })
+                return { success: false, error: stockResult.error }
+            }
+        }
+
         const { computed } = await computeSummaryForCashSession({
             eventId: data.eventId,
             posDeviceId: data.posDeviceId,
@@ -959,6 +1086,7 @@ export async function closeCashSession(data: {
 
         const closedAt = new Date()
         openSession.status = "CLOSED"
+        openSession.stockEffectStatus = openSession.isTest ? "REVERTED" : "APPLIED"
         openSession.closedAt = closedAt
         openSession.closingCountedCashAmount = closingCountedCashAmount
         openSession.closingNotes = closingNotes || undefined
@@ -968,6 +1096,7 @@ export async function closeCashSession(data: {
         openSession.otherSalesAmount = computed.otherSalesAmount
         openSession.expectedCashAmount = computed.expectedCashAmount
         openSession.varianceAmount = computed.varianceAmount
+        openSession.set("transition", undefined)
         await openSession.save()
 
         const paidOrdersForSession = await Order.find({
@@ -1169,6 +1298,9 @@ export async function createOrder(data: {
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
         const requiresPendingState = computeRequiresPendingState(data.paymentMethod, capabilitiesResult.capabilities)
+        if (sessionResult.session.isTest && requiresPendingState) {
+            return { success: false, error: "I pagamenti sul terminale SumUp sono bloccati nelle sessioni TEST" }
+        }
 
         if (requiresPendingState) {
             const stockCheckResult = await validateStockForPendingOrder(data.eventId, stockPayload, stockMode, ingredientPlan)
@@ -1207,7 +1339,9 @@ export async function createOrder(data: {
             sumupCheckoutId: requiresPendingState ? undefined : data.sumupCheckoutId,
             posDeviceId: data.posDeviceId,
             cashSessionId: sessionResult.session.id,
-            stockOverrideApproved: Boolean(data.allowStockOverride)
+            stockOverrideApproved: Boolean(data.allowStockOverride),
+            stockAdjustments: stockAdjustmentsToRollback,
+            stockEffectStatus: requiresPendingState ? undefined : "APPLIED"
         })
         stockAdjustmentsToRollback = []
 
@@ -1252,13 +1386,15 @@ export async function createOrder(data: {
             try {
                 const printResults = await PrinterService.routeOrderToPrinters(order._id.toString(), data.posDeviceId)
                 printSummary = summarizePrintDispatch(printResults)
+                if (printSummary.failed > 0) printSummary.failedPrinters = await listFailedPrinterGroups(data.eventId, order._id.toString())
             } catch (printError) {
                 console.error("Order created but printer routing failed:", printError)
                 printSummary = {
                     attempted: 1,
                     succeeded: 0,
                     failed: 1,
-                    allSuccessful: false
+                    allSuccessful: false,
+                    failedPrinters: await listFailedPrinterGroups(data.eventId, order._id.toString())
                 }
             }
         }
@@ -1282,6 +1418,12 @@ export async function triggerSumUpPayment(amount: number, eventId: string, posDe
     try {
         const sessionCheck = await ensurePosActionSession()
         if (!sessionCheck.success) return sessionCheck
+
+        const cashSessionResult = await getOpenCashSession(eventId, posDeviceId)
+        if (!cashSessionResult.success) return cashSessionResult
+        if (cashSessionResult.session.isTest) {
+            return { success: false, error: "I pagamenti sul terminale SumUp sono bloccati nelle sessioni TEST" }
+        }
 
         const capabilitiesResult = await getPosPaymentCapabilities(eventId, posDeviceId)
         if (!capabilitiesResult.success) {
@@ -2007,6 +2149,8 @@ export async function completePendingOrderPayment(data: {
         order.set("posDeviceId", data.posDeviceId || undefined)
         order.set("cashSessionId", sessionResult.session.id)
         order.set("stockOverrideApproved", Boolean(data.allowStockOverride))
+        order.set("stockAdjustments", stockAdjustmentsToRollback)
+        order.set("stockEffectStatus", "APPLIED")
         await order.save()
         stockAdjustmentsToRollback = []
 
@@ -2014,13 +2158,15 @@ export async function completePendingOrderPayment(data: {
         try {
             const printResults = await PrinterService.routeOrderToPrinters(order._id.toString(), data.posDeviceId)
             printSummary = summarizePrintDispatch(printResults)
+            if (printSummary.failed > 0) printSummary.failedPrinters = await listFailedPrinterGroups(data.eventId, order._id.toString())
         } catch (printError) {
             console.error("Pending order completed but printer routing failed:", printError)
             printSummary = {
                 attempted: 1,
                 succeeded: 0,
                 failed: 1,
-                allSuccessful: false
+                allSuccessful: false,
+                failedPrinters: await listFailedPrinterGroups(data.eventId, order._id.toString())
             }
         }
 
@@ -2040,37 +2186,45 @@ export async function completePendingOrderPayment(data: {
 }
 
 export async function retryFailedOrderPrintJobs(data: {
-    eventId: string
     orderId: string
+    jobIds: string[]
 }): Promise<
-    { success: true, retried: number, failed: number, attempted: number }
+    { success: true, retried: number, failed: number, attempted: number, failedPrinters: FailedPrinterGroup[] }
     | { success: false, error: string }
 > {
     try {
         const sessionCheck = await ensurePosActionSession()
         if (!sessionCheck.success) return sessionCheck
 
-        if (!data.eventId || !data.orderId) {
+        if (!data.orderId || !Array.isArray(data.jobIds) || data.jobIds.length === 0) {
             return { success: false, error: "Dati mancanti per il reinvio stampa" }
         }
 
         await dbConnect()
+        const order = await Order.findOne({ _id: data.orderId, status: "PAID" }).select("eventId").lean() as ({ eventId: { toString(): string } } | null)
+        if (!order) return { success: false, error: "Ordine pagato non trovato" }
+        const eventId = order.eventId.toString()
         const failedJobs = await PrintJob.find({
-            eventId: data.eventId,
+            eventId,
             orderId: data.orderId,
-            status: "FAILED"
+            source: "ORDER",
+            status: "FAILED",
+            _id: { $in: data.jobIds }
         })
             .sort({ createdAt: 1 })
             .select("_id")
             .lean() as Array<{ _id: { toString(): string } | string }>
 
         if (failedJobs.length === 0) {
-            return { success: true, retried: 0, failed: 0, attempted: 0 }
+            return { success: true, retried: 0, failed: 0, attempted: 0, failedPrinters: await listFailedPrinterGroups(eventId, data.orderId) }
         }
 
-        const results = await Promise.all(
-            failedJobs.map((job) => PrinterService.retryPrintJobById(data.eventId, job._id.toString()))
-        )
+        const results = []
+        for (const job of failedJobs) {
+            const result = await PrinterService.retryPrintJobById(eventId, job._id.toString())
+            results.push(result)
+            if (!result.success) break
+        }
 
         const retried = results.filter((result) => result.success).length
         const failed = results.length - retried
@@ -2079,7 +2233,8 @@ export async function retryFailedOrderPrintJobs(data: {
             success: true,
             attempted: results.length,
             retried,
-            failed
+            failed,
+            failedPrinters: await listFailedPrinterGroups(eventId, data.orderId)
         }
     } catch (error) {
         console.error("Retry Failed Order Print Jobs Error:", error)

@@ -24,7 +24,6 @@ import {
     buildCashSessionPrintDocumentV2,
     buildOrderPrintDocumentV2,
     normalizeLegacyPrintDocument,
-    toOrderJobPayloadFromDocument,
     type PrintDocumentV2
 } from "./print-report";
 import {
@@ -36,12 +35,7 @@ import {
     preparePrintableEasterEggRasterFromUrl,
     renderThermalRasterToStripePngBuffers
 } from "./easter-egg-image";
-import {
-    normalizeEasterEggCrop,
-    normalizeEasterEggProcessingSettings,
-    type EasterEggCrop,
-    type EasterEggProcessingSettings
-} from "./easter-egg-config";
+import { type EasterEggCrop, type EasterEggProcessingSettings } from "./easter-egg-config";
 
 export interface PrinterCommandJob {
     ip: string;
@@ -83,6 +77,7 @@ export interface PrinterCommandJob {
 
 export interface CashSessionClosingPrintSummary {
     sessionId: string;
+    isTest?: boolean;
     posDeviceName?: string;
     openedAt?: Date | string;
     closedAt?: Date | string;
@@ -103,6 +98,7 @@ export interface CashSessionClosingPrintSummary {
         amount: number;
     }>;
     items?: Array<{
+        categoryName?: string;
         name: string;
         qty: number;
         lineTotal?: number;
@@ -1593,6 +1589,7 @@ export class PrinterService {
             skipKitchenPrint?: boolean;
             printKitchenCopyAtCashier?: boolean;
             pizzaFlowEnabled?: boolean;
+            pizzaBarcodeEnabled?: boolean;
             printerId?: {
                 _id?: unknown;
                 name?: string;
@@ -1737,6 +1734,7 @@ export class PrinterService {
             const categoryName = category?.name?.trim();
             const printerName = kitchenPrinter?.name?.trim();
             const isNumberedCategory = Boolean(category?.pizzaFlowEnabled);
+            const shouldPrintDishBarcode = isNumberedCategory && Boolean(category?.pizzaBarcodeEnabled);
             const printFlowKey = isNumberedCategory ? `dish:${String(item.productId)}` : "standard";
             const baseGroupKey = kitchenPrinter?._id
                 ? `printer:${String(kitchenPrinter._id)}`
@@ -1813,7 +1811,9 @@ export class PrinterService {
                 hasKitchenJob = true;
                 if (typeof pizzaNumber === "number") {
                     kitchenJob.pizzaNumber = pizzaNumber;
-                    kitchenJob.pizzaBarcodeValue = getPizzaBarcodeValue(pizzaNumber);
+                    kitchenJob.pizzaBarcodeValue = shouldPrintDishBarcode
+                        ? getPizzaBarcodeValue(pizzaNumber)
+                        : undefined;
                 }
                 kitchenJob.items.push({
                     name: resolvePrintName(item.productId, item.snapshotName),
@@ -1825,7 +1825,7 @@ export class PrinterService {
             const customerJob = ensureCustomerJob(customerGroupKey, departmentFooterLines);
             if (typeof pizzaNumber === "number" && customerJob) {
                 customerJob.pizzaNumber = pizzaNumber;
-                if (!hasKitchenJob) {
+                if (!hasKitchenJob && shouldPrintDishBarcode) {
                     customerJob.pizzaBarcodeValue = getPizzaBarcodeValue(pizzaNumber);
                 }
             }
@@ -1956,7 +1956,7 @@ export class PrinterService {
         return results;
     }
 
-    static async printCashSessionSummary(eventId: string, posDeviceId: string, summary: CashSessionClosingPrintSummary) {
+    static async printCashSessionSummary(eventId: string, posDeviceId: string, summary: CashSessionClosingPrintSummary, documentOverride?: PrintDocumentV2) {
         if (!eventId || !posDeviceId) return false;
 
         await dbConnect();
@@ -1988,8 +1988,9 @@ export class PrinterService {
         const printerId = device?.printerId?._id ? String(device.printerId._id) : undefined;
         const isVirtual = Boolean(device?.printerId?.isVirtual);
 
-        const document = buildCashSessionPrintDocumentV2({
+        const document = documentOverride || buildCashSessionPrintDocumentV2({
             sessionId: summary.sessionId,
+            isTest: summary.isTest,
             eventName: event?.name,
             posDeviceName: summary.posDeviceName || device?.name,
             openedAt: summary.openedAt,
@@ -2097,7 +2098,11 @@ export class PrinterService {
         }
 
         await dbConnect();
-        const job = await PrintJobModel.findOne({ _id: jobId, eventId })
+        const job = await PrintJobModel.findOneAndUpdate(
+            { _id: jobId, eventId, status: "FAILED" },
+            { $set: { status: "QUEUED" } },
+            { returnDocument: "after" }
+        )
             .populate("printerId", "ip port isVirtual emulatorSlot")
             .lean() as ({
                 _id: { toString(): string };
@@ -2120,7 +2125,7 @@ export class PrinterService {
             } | null);
 
         if (!job) {
-            return { success: false, error: "Job non trovato" } as const;
+            return { success: false, error: "Job non disponibile o già acquisito" } as const;
         }
 
         const document = (job.document && typeof job.document === "object")
@@ -2135,6 +2140,7 @@ export class PrinterService {
                 emulatorSlot: job.printerId?.emulatorSlot
             });
             if (!destination.host) {
+                await this.updatePrintJobLog(job._id.toString(), { status: "FAILED", errorMessage: "Destinazione stampante non disponibile" });
                 return { success: false, error: "Destinazione stampante non disponibile" } as const;
             }
             const dispatchResult = await this.dispatchPrintDocumentWithAutomaticRetry({
@@ -2197,77 +2203,61 @@ export class PrinterService {
                 : undefined);
 
             if (!raster) {
+                await this.updatePrintJobLog(job._id.toString(), { status: "FAILED", errorMessage: "Immagine easter egg non più disponibile" });
                 return { success: false, error: "Immagine easter egg non più disponibile" } as const;
             }
 
-            const printed = await this.printRasterImage({
+            const destination = resolvePrinterDestination({
                 ip: job.printerId?.ip || asString(job.destinationHost),
                 port: job.printerId?.port || job.destinationPort || DEFAULT_PRINTER_PORT,
                 emulatorSlot: job.printerId?.emulatorSlot,
-                printerId: job.printerId?._id ? String(job.printerId._id) : undefined,
-                eventId,
-                orderId: job.orderId?.toString(),
-                source: job.source,
-                printType: "EASTER_EGG_IMAGE",
-                isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual),
-                title: asString(document.title) || "Easter Egg Portale",
-                eventName: asString(document.eventName) || undefined,
-                copyLabel: asString(document.copyLabel) || "EASTER EGG",
-                brandingLogoUrl: sanitizePrintableHeaderLogoUrl(
-                    typeof document.branding === "object" && document.branding
-                        ? (document.branding as Record<string, unknown>).logoPath
-                        : undefined
-                ),
-                imageUrl,
-                crop: normalizeEasterEggCrop(typeof document.crop === "object" && document.crop ? document.crop as Partial<EasterEggCrop> : undefined),
-                processing: normalizeEasterEggProcessingSettings(
-                    typeof document.processing === "object" && document.processing
-                        ? document.processing as Partial<EasterEggProcessingSettings>
-                        : undefined
-                ),
-                footerLines: Array.isArray(document.footerLines) ? document.footerLines as string[] : []
-            }, raster, job.copies || 1);
-
-            if (!printed) {
-                return { success: false, error: "Invio stampa fallito" } as const;
+                isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual)
+            });
+            if (!destination.host) {
+                await this.updatePrintJobLog(job._id.toString(), { status: "FAILED", errorMessage: "Destinazione stampante non disponibile" });
+                return { success: false, error: "Destinazione stampante non disponibile" } as const;
             }
-
-            return { success: true } as const;
+            const dispatchResult = await this.dispatchRasterImageWithAutomaticRetry({
+                destinationHost: destination.host,
+                destinationPort: destination.port,
+                destinationLabel: destination.label,
+                document: normalizeLegacyPrintDocument(document),
+                raster,
+                isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual),
+                copies: job.copies || 1
+            });
+            await this.updatePrintJobLog(job._id.toString(), dispatchResult.success
+                ? { status: "SENT", rawCapturePath: dispatchResult.rawCapturePath, automaticRetryCount: dispatchResult.automaticRetryCount }
+                : { status: "FAILED", errorMessage: dispatchResult.errorMessage, automaticRetryCount: dispatchResult.automaticRetryCount });
+            return dispatchResult.success
+                ? { success: true } as const
+                : { success: false, error: "Invio stampa fallito" } as const;
         }
 
-        const payload = toOrderJobPayloadFromDocument(
-            document,
-            asString(document.orderId) || job.orderId?.toString() || job._id.toString()
-        );
-
-        const printJob: PrinterCommandJob = {
+        const destination = resolvePrinterDestination({
             ip: job.printerId?.ip || asString(job.destinationHost),
             port: job.printerId?.port || job.destinationPort || DEFAULT_PRINTER_PORT,
             emulatorSlot: job.printerId?.emulatorSlot,
-            printerId: job.printerId?._id ? String(job.printerId._id) : undefined,
-            eventId,
-            source: job.source,
-            printType: job.printType,
-            isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual),
-            title: payload.title,
-            eventName: payload.eventName,
-            copyLabel: payload.copyLabel,
-            brandingLogoUrl: sanitizePrintableHeaderLogoUrl(payload.brandingLogoUrl),
-            items: payload.items,
-            totals: payload.totals,
-            customerName: payload.customerName,
-            tableNumber: payload.tableNumber,
-            orderId: payload.orderId,
-            shortCode: payload.shortCode,
-            pizzaNumber: payload.pizzaNumber,
-            pizzaBarcodeValue: payload.pizzaBarcodeValue
-        };
-
-        const printed = await this.printComanda(printJob, job.copies || 1);
-        if (!printed) {
-            return { success: false, error: "Invio stampa fallito" } as const;
+            isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual)
+        });
+        if (!destination.host) {
+            await this.updatePrintJobLog(job._id.toString(), { status: "FAILED", errorMessage: "Destinazione stampante non disponibile" });
+            return { success: false, error: "Destinazione stampante non disponibile" } as const;
         }
-
-        return { success: true } as const;
+        const dispatchResult = await this.dispatchPrintDocumentWithAutomaticRetry({
+            destinationHost: destination.host,
+            destinationPort: destination.port,
+            destinationLabel: destination.label,
+            printType: job.printType,
+            document: normalizeLegacyPrintDocument(document),
+            isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual),
+            copies: job.copies || 1
+        });
+        await this.updatePrintJobLog(job._id.toString(), dispatchResult.success
+            ? { status: "SENT", rawCapturePath: dispatchResult.rawCapturePath, automaticRetryCount: dispatchResult.automaticRetryCount }
+            : { status: "FAILED", errorMessage: dispatchResult.errorMessage, automaticRetryCount: dispatchResult.automaticRetryCount });
+        return dispatchResult.success
+            ? { success: true } as const
+            : { success: false, error: "Invio stampa fallito" } as const;
     }
 }

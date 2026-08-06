@@ -6,6 +6,7 @@ export interface IIngredient extends Document {
     shortName?: string;
     stockQuantity?: number | null;
     active: boolean;
+    stockOperationKeys?: string[];
 }
 
 const IngredientSchema = new Schema<IIngredient>({
@@ -14,6 +15,7 @@ const IngredientSchema = new Schema<IIngredient>({
     shortName: { type: String, trim: true, maxlength: 24 },
     stockQuantity: { type: Number, default: null, min: 0 },
     active: { type: Boolean, default: true },
+    stockOperationKeys: { type: [String], default: [], select: false },
 }, {
     timestamps: true
 });

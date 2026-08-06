@@ -141,11 +141,13 @@ test.describe.serial("Flusso preparazioni numerate", () => {
         });
         await createCategory(page, pizzaCategoryName, {
             kitchenPrinterName: pizzaPrinterName,
-            pizzaFlowEnabled: true
+            pizzaFlowEnabled: true,
+            pizzaBarcodeEnabled: true
         });
         await createCategory(page, calamariCategoryName, {
             kitchenPrinterName: calamariPrinterName,
-            pizzaFlowEnabled: true
+            pizzaFlowEnabled: true,
+            pizzaBarcodeEnabled: true
         });
         await createProduct(page, pizzaCategoryName, {
             name: pizzaProductName,
@@ -343,7 +345,8 @@ test.describe.serial("Flusso preparazioni numerate", () => {
         createdEvents.push(eventName);
         await configureCashPos(page, cashierPrinterName, localPrinterIp(), cashBoxName, posName);
         await createCategory(page, pizzaCategoryName, {
-            pizzaFlowEnabled: true
+            pizzaFlowEnabled: true,
+            pizzaBarcodeEnabled: true
         });
         await createProduct(page, pizzaCategoryName, {
             name: pizzaProductName,

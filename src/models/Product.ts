@@ -41,6 +41,7 @@ export interface IProduct extends Document {
         priceVariation: number;
         stockQuantity?: number | null;
     }>;
+    stockOperationKeys?: string[];
 }
 
 const ProductSchema = new Schema<IProduct>({
@@ -84,7 +85,8 @@ const ProductSchema = new Schema<IProduct>({
         optionName: { type: String, required: true },
         priceVariation: { type: Number, required: true },
         stockQuantity: { type: Number, default: null, min: 0 }
-    }]
+    }],
+    stockOperationKeys: { type: [String], default: [], select: false }
 }, {
     timestamps: true
 });

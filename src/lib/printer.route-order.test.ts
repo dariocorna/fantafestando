@@ -695,6 +695,7 @@ describe("PrinterService.routeOrderToPrinters", () => {
                 _id: { toString: () => "cat-pizza" },
                 name: "Pizze",
                 pizzaFlowEnabled: true,
+                pizzaBarcodeEnabled: true,
                 printerId: {
                     _id: "kitchen-printer-1",
                     name: "Forno",
@@ -760,7 +761,8 @@ describe("PrinterService.routeOrderToPrinters", () => {
             {
                 _id: { toString: () => "cat-pizza" },
                 name: "Pizze",
-                pizzaFlowEnabled: true
+                pizzaFlowEnabled: true,
+                pizzaBarcodeEnabled: true
             }
         ]);
 
@@ -785,7 +787,7 @@ describe("PrinterService.routeOrderToPrinters", () => {
         }));
     });
 
-    test("prints the optional department and customer pair on the cashier printer", async () => {
+    test("prints the optional department and customer pair without a barcode by default", async () => {
         mockOrder(buildOrder("order-pizza-cashier-pair", {
             dishTickets: [{
                 productId: "prod-1",
@@ -827,9 +829,9 @@ describe("PrinterService.routeOrderToPrinters", () => {
         expect(kitchenJob).toEqual(expect.objectContaining({
             ip: "192.168.178.203",
             printType: "KITCHEN_ORDER",
-            pizzaNumber: 81,
-            pizzaBarcodeValue: "00000819"
+            pizzaNumber: 81
         }));
+        expect(kitchenJob?.pizzaBarcodeValue).toBeUndefined();
         expect(customerJob).toEqual(expect.objectContaining({
             ip: "192.168.178.203",
             printType: "CUSTOMER_ORDER",
@@ -887,6 +889,7 @@ describe("PrinterService.routeOrderToPrinters", () => {
                 _id: { toString: () => "cat-pizza" },
                 name: "Pizze",
                 pizzaFlowEnabled: true,
+                pizzaBarcodeEnabled: true,
                 printerId: {
                     _id: "shared-kitchen-printer",
                     name: "Stampante Cucina",
@@ -991,6 +994,7 @@ describe("PrinterService.routeOrderToPrinters", () => {
                 _id: { toString: () => "cat-pizza" },
                 name: "Pizze",
                 pizzaFlowEnabled: true,
+                pizzaBarcodeEnabled: true,
                 printerId: {
                     _id: "pizza-printer",
                     name: "Forno",
@@ -1003,6 +1007,7 @@ describe("PrinterService.routeOrderToPrinters", () => {
                 _id: { toString: () => "cat-calamari" },
                 name: "Calamari",
                 pizzaFlowEnabled: true,
+                pizzaBarcodeEnabled: true,
                 printerId: {
                     _id: "calamari-printer",
                     name: "Friggitoria",
@@ -1350,6 +1355,7 @@ describe("PrinterService.routeOrderToPrinters", () => {
                 _id: { toString: () => "cat-pizza" },
                 name: "Pizze",
                 pizzaFlowEnabled: true,
+                pizzaBarcodeEnabled: true,
                 printerId: {
                     _id: "kitchen-printer-1",
                     name: "Forno",

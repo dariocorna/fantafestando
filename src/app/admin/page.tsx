@@ -19,6 +19,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { BrandSectionHeader } from "@/components/brand/brand-section-header";
 import { CashSessionPreviewDialog } from "@/components/cash-session-preview-dialog";
+import { CashSessionAdminActions } from "@/components/cash-session-admin-actions";
 
 const currencyFormatter = new Intl.NumberFormat("it-IT", {
     style: "currency",
@@ -55,6 +56,7 @@ interface CashSessionProjection {
     paidOrdersCount?: number
     expectedCashAmount?: number
     varianceAmount?: number
+    isTest?: boolean
     posDeviceId?: {
         _id?: unknown
         name?: string
@@ -85,17 +87,18 @@ export default async function AdminDashboard() {
     const eventId = String(contextEvent._id);
     await dbConnect();
 
-    const [orders, products, cashSessions] = await Promise.all([
-        Order.find({ eventId, status: "PAID" })
+    const cashSessions = await CashSession.find({ eventId })
+        .sort({ openedAt: -1 })
+        .populate({ path: "posDeviceId", select: "_id name" })
+        .select("_id status isTest openedAt closedAt openingFloatAmount closingCountedCashAmount paidOrdersCount expectedCashAmount varianceAmount posDeviceId")
+        .lean() as CashSessionProjection[];
+    const excludedSessionIds = cashSessions.filter((session) => session.status === "CLOSED" && session.isTest).map((session) => session._id);
+    const [orders, products] = await Promise.all([
+        Order.find({ eventId, status: "PAID", cashSessionId: { $nin: excludedSessionIds } })
             .sort({ createdAt: -1 })
             .select("_id status createdAt totalAmount paymentMethod cart")
             .lean() as Promise<OrderProjection[]>,
-        Product.find({ eventId }).select("_id name").lean() as Promise<ProductProjection[]>,
-        CashSession.find({ eventId })
-            .sort({ openedAt: -1 })
-            .populate({ path: "posDeviceId", select: "_id name" })
-            .select("_id status openedAt closedAt openingFloatAmount closingCountedCashAmount paidOrdersCount expectedCashAmount varianceAmount posDeviceId")
-            .lean() as Promise<CashSessionProjection[]>
+        Product.find({ eventId }).select("_id name").lean() as Promise<ProductProjection[]>
     ]);
 
     const dashboardOrders: DashboardOrderInput[] = orders.map((order) => ({
@@ -182,7 +185,7 @@ export default async function AdminDashboard() {
                         </Link>
                     </Button>
                     <Button asChild variant="outline" size="sm">
-                        <Link href="/admin/export?format=xls">
+                        <Link href="/admin/export?format=xlsx">
                             <Download className="h-4 w-4" />
                             Export Excel
                         </Link>
@@ -342,7 +345,7 @@ export default async function AdminDashboard() {
                                 <TableHead className="text-right">Contato</TableHead>
                                 <TableHead className="text-right">Differenza</TableHead>
                                 <TableHead className="text-right">Ordini</TableHead>
-                                <TableHead className="text-right">Report</TableHead>
+                                <TableHead className="text-right">Report e azioni</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -362,6 +365,7 @@ export default async function AdminDashboard() {
                                                 <span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${isClosed ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
                                                     {isClosed ? "Chiusa" : "Aperta"}
                                                 </span>
+                                                {session.isTest ? <span className="ml-1 inline-flex rounded-full bg-rose-100 px-2 py-1 text-xs font-black text-rose-700">TEST</span> : null}
                                             </TableCell>
                                             <TableCell className="font-medium">{getPosDeviceName(session.posDeviceId)}</TableCell>
                                             <TableCell>{formatDashboardDateTime(session.openedAt)}</TableCell>
@@ -379,7 +383,7 @@ export default async function AdminDashboard() {
                                             <TableCell className="text-right">{numberFormatter.format(session.paidOrdersCount ?? 0)}</TableCell>
                                             <TableCell className="text-right">
                                                 {isClosed ? (
-                                                    <div className="flex justify-end gap-2">
+                                                    <div className="flex flex-wrap justify-end gap-2">
                                                         <CashSessionPreviewDialog
                                                             sessionId={sessionId}
                                                             posName={getPosDeviceName(session.posDeviceId)}
@@ -394,15 +398,16 @@ export default async function AdminDashboard() {
                                                         </Button>
                                                         <Button asChild variant="outline" size="sm">
                                                             <Link
-                                                                href={`/admin/cash-sessions/export?sessionId=${sessionId}&format=xls`}
+                                                                href={`/admin/cash-sessions/export?sessionId=${sessionId}&format=xlsx`}
                                                                 data-testid={`cash-session-report-xls-${sessionId}`}
                                                             >
-                                                                XLS
+                                                                XLSX
                                                             </Link>
                                                         </Button>
+                                                        <CashSessionAdminActions sessionId={sessionId} isClosed={isClosed} isTest={Boolean(session.isTest)} />
                                                     </div>
                                                 ) : (
-                                                    "-"
+                                                    <CashSessionAdminActions sessionId={sessionId} isClosed={isClosed} isTest={Boolean(session.isTest)} />
                                                 )}
                                             </TableCell>
                                         </TableRow>

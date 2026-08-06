@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { Binary } from "bson";
 import { getThermalContentWidth } from "@/lib/easter-egg-config";
 
-const { dbConnectMock, printJobFindOneMock, printJobUpdateOneMock, orderFindOneMock } = vi.hoisted(() => ({
+const { dbConnectMock, printJobFindOneAndUpdateMock, printJobUpdateOneMock, orderFindOneMock } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
-    printJobFindOneMock: vi.fn(),
+    printJobFindOneAndUpdateMock: vi.fn(),
     printJobUpdateOneMock: vi.fn(),
     orderFindOneMock: vi.fn()
 }));
@@ -15,7 +15,7 @@ vi.mock("@/lib/mongoose", () => ({
 
 vi.mock("@/models/PrintJob", () => ({
     default: {
-        findOne: printJobFindOneMock,
+        findOneAndUpdate: printJobFindOneAndUpdateMock,
         updateOne: printJobUpdateOneMock
     }
 }));
@@ -32,7 +32,7 @@ vi.mock("@/models/PosDevice", () => ({ default: {} }));
 import { PrinterService } from "@/lib/printer";
 
 function mockFindOneJob(job: unknown) {
-    printJobFindOneMock.mockReturnValue({
+    printJobFindOneAndUpdateMock.mockReturnValue({
         populate: vi.fn().mockReturnValue({
             lean: vi.fn().mockResolvedValue(job)
         })
@@ -58,7 +58,7 @@ describe("PrinterService.retryPrintJobById", () => {
         mockFindOneJob(null);
 
         const result = await PrinterService.retryPrintJobById("evt-1", "job-1");
-        expect(result).toEqual({ success: false, error: "Job non trovato" });
+        expect(result).toEqual({ success: false, error: "Job non disponibile o già acquisito" });
     });
 
     test("retries legacy cash session summaries without losing their document", async () => {
@@ -135,20 +135,17 @@ describe("PrinterService.retryPrintJobById", () => {
             }
         });
 
-        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+        const dispatchSpy = vi.spyOn(
+            PrinterService as unknown as { dispatchPrintDocumentWithAutomaticRetry: (params: unknown) => Promise<unknown> },
+            "dispatchPrintDocumentWithAutomaticRetry"
+        ).mockResolvedValue({ success: true, automaticRetryCount: 0 });
 
         const result = await PrinterService.retryPrintJobById("evt-1", "job-1");
-        expect(printComandaSpy).toHaveBeenCalledTimes(1);
-        expect(printComandaSpy.mock.calls[0]?.[0]).toMatchObject({
-            eventId: "evt-1",
-            source: "ORDER",
+        expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({
             printType: "MANUAL_TEST",
-            title: "Ricevuta Demo",
-            copyLabel: "COPIA TEST",
-            orderId: "order-1",
-            shortCode: "D-12345"
-        });
-        expect(printComandaSpy.mock.calls[0]?.[1]).toBe(2);
+            copies: 2,
+            document: expect.objectContaining({ title: "Ricevuta Demo", copyLabel: "COPIA TEST", orderId: "order-1", shortCode: "D-12345" })
+        }));
         expect(result).toEqual({ success: true });
     });
 
@@ -171,21 +168,17 @@ describe("PrinterService.retryPrintJobById", () => {
             }
         });
 
-        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+        const dispatchSpy = vi.spyOn(
+            PrinterService as unknown as { dispatchPrintDocumentWithAutomaticRetry: (params: unknown) => Promise<unknown> },
+            "dispatchPrintDocumentWithAutomaticRetry"
+        ).mockResolvedValue({ success: true, automaticRetryCount: 0 });
 
         const result = await PrinterService.retryPrintJobById("evt-1", "job-legacy");
         expect(result).toEqual({ success: true });
-        expect(printComandaSpy).toHaveBeenCalledTimes(1);
-        expect(printComandaSpy.mock.calls[0]?.[0]).toMatchObject({
+        expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({
             printType: "CUSTOMER_ORDER",
-            title: "Comanda Cliente",
-            shortCode: "123",
-            customerName: "Mario",
-            tableNumber: "A1"
-        });
-        expect(printComandaSpy.mock.calls[0]?.[0].totals).toEqual([
-            { label: "TOTALE", value: "10.00 EUR", emphasis: "strong" }
-        ]);
+            document: expect.objectContaining({ title: "Comanda Cliente", shortCode: "123", customerName: "Mario", tableNumber: "A1", totals: [{ label: "TOTALE", value: "10.00 EUR", emphasis: "strong" }] })
+        }));
     });
 
     test("returns retry failure when print dispatch fails", async () => {
@@ -202,7 +195,10 @@ describe("PrinterService.retryPrintJobById", () => {
             }
         });
 
-        vi.spyOn(PrinterService, "printComanda").mockResolvedValue(false);
+        vi.spyOn(
+            PrinterService as unknown as { dispatchPrintDocumentWithAutomaticRetry: (params: unknown) => Promise<unknown> },
+            "dispatchPrintDocumentWithAutomaticRetry"
+        ).mockResolvedValue({ success: false, errorMessage: "Printer not reachable", automaticRetryCount: 0 });
         const result = await PrinterService.retryPrintJobById("evt-1", "job-1");
         expect(result).toEqual({ success: false, error: "Invio stampa fallito" });
     });
@@ -239,20 +235,19 @@ describe("PrinterService.retryPrintJobById", () => {
             })
         });
 
-        const printRasterSpy = vi.spyOn(PrinterService, "printRasterImage").mockResolvedValue(true);
+        const printRasterSpy = vi.spyOn(
+            PrinterService as unknown as { dispatchRasterImageWithAutomaticRetry: (params: unknown) => Promise<unknown> },
+            "dispatchRasterImageWithAutomaticRetry"
+        ).mockResolvedValue({ success: true, automaticRetryCount: 0 });
         const result = await PrinterService.retryPrintJobById("evt-1", "job-raster");
 
         expect(result).toEqual({ success: true });
-        expect(printRasterSpy).toHaveBeenCalledWith(
-            expect.objectContaining({
-                orderId: "order-1",
-                printType: "EASTER_EGG_IMAGE"
-            }),
-            expect.objectContaining({
+        expect(printRasterSpy).toHaveBeenCalledWith(expect.objectContaining({
+            raster: expect.objectContaining({
                 width: rasterWidth,
                 height: 20
             }),
-            1
-        );
+            copies: 1
+        }));
     });
 });
