@@ -9,6 +9,7 @@ export interface ICategory extends Document {
     skipKitchenPrint: boolean;
     printKitchenCopyAtCashier: boolean;
     pizzaFlowEnabled: boolean;
+    pizzaBarcodeEnabled: boolean;
 }
 
 const CategorySchema = new Schema<ICategory>({
@@ -19,7 +20,8 @@ const CategorySchema = new Schema<ICategory>({
     printerId: { type: Schema.Types.ObjectId, ref: 'Printer' },
     skipKitchenPrint: { type: Boolean, default: false },
     printKitchenCopyAtCashier: { type: Boolean, default: false },
-    pizzaFlowEnabled: { type: Boolean, default: false }
+    pizzaFlowEnabled: { type: Boolean, default: false },
+    pizzaBarcodeEnabled: { type: Boolean, default: false }
 }, {
     timestamps: true
 });

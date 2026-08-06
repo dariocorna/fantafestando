@@ -24,7 +24,7 @@ export function EditCategoryDialog({
     printers,
     updateAction
 }: {
-    category: { id: string, name: string, uiColor: string, printerId?: string, skipKitchenPrint?: boolean, printKitchenCopyAtCashier?: boolean, pizzaFlowEnabled?: boolean },
+    category: { id: string, name: string, uiColor: string, printerId?: string, skipKitchenPrint?: boolean, printKitchenCopyAtCashier?: boolean, pizzaFlowEnabled?: boolean, pizzaBarcodeEnabled?: boolean },
     eventId?: string,
     printers: { id: string, name: string, ip: string, port?: number }[],
     updateAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>
@@ -33,6 +33,7 @@ export function EditCategoryDialog({
     const [formInstanceKey, setFormInstanceKey] = useState(0);
     const [selectedColor, setSelectedColor] = useState(() => normalizeCategoryColor(category.uiColor));
     const [pizzaFlowEnabled, setPizzaFlowEnabled] = useState(Boolean(category.pizzaFlowEnabled));
+    const [pizzaBarcodeEnabled, setPizzaBarcodeEnabled] = useState(Boolean(category.pizzaBarcodeEnabled));
     const [submitError, setSubmitError] = useState<string | null>(null);
     const skipKitchenPrintRef = useRef<HTMLInputElement>(null);
 
@@ -58,7 +59,9 @@ export function EditCategoryDialog({
                 setOpen(nextOpen);
                 if (nextOpen) {
                     setSubmitError(null);
+                    setSelectedColor(normalizeCategoryColor(category.uiColor));
                     setPizzaFlowEnabled(Boolean(category.pizzaFlowEnabled));
+                    setPizzaBarcodeEnabled(Boolean(category.pizzaBarcodeEnabled));
                     setFormInstanceKey((current) => current + 1);
                 }
             }}
@@ -78,7 +81,6 @@ export function EditCategoryDialog({
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <input type="hidden" name="id" value={category.id} />
-                        <input type="hidden" name="uiColor" value={selectedColor} />
                         {eventId && <input type="hidden" name="eventId" value={eventId} />}
                         <div className="grid gap-2">
                             <Label htmlFor="cat-edit-name">Nome</Label>
@@ -95,10 +97,11 @@ export function EditCategoryDialog({
                                             type="button"
                                             title={option.label}
                                             aria-label={`Colore ${option.label}`}
+                                            aria-pressed={isSelected}
                                             onClick={() => setSelectedColor(option.value)}
                                             className={`h-9 rounded-md border-2 transition ${isSelected
                                                 ? "border-slate-900 dark:border-slate-100 scale-105"
-                                                : "border-transparent hover:border-slate-300"
+                                                : "border-slate-200 hover:border-slate-400"
                                                 }`}
                                             style={{
                                                 backgroundColor: option.value,
@@ -109,6 +112,19 @@ export function EditCategoryDialog({
                                         </button>
                                     );
                                 })}
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <input
+                                    id={`cat-edit-color-picker-${category.id}`}
+                                    name="uiColor"
+                                    type="color"
+                                    value={selectedColor}
+                                    onChange={(event) => setSelectedColor(event.target.value)}
+                                    className="h-10 w-14 cursor-pointer rounded-md border bg-white p-1"
+                                />
+                                <Label htmlFor={`cat-edit-color-picker-${category.id}`} className="font-normal text-slate-600">
+                                    Colore personalizzato
+                                </Label>
                             </div>
                         </div>
                         <div className="grid gap-2">
@@ -137,6 +153,7 @@ export function EditCategoryDialog({
                                 onChange={(event) => {
                                     const nextValue = event.target.checked;
                                     setPizzaFlowEnabled(nextValue);
+                                    if (!nextValue) setPizzaBarcodeEnabled(false);
                                     if (nextValue && skipKitchenPrintRef.current) {
                                         skipKitchenPrintRef.current.checked = false;
                                     }
@@ -144,6 +161,18 @@ export function EditCategoryDialog({
                             />
                             Preparazione numerata
                         </label>
+                        {pizzaFlowEnabled ? (
+                            <label className="ml-6 inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                                <input
+                                    id="pizzaBarcodeEnabled"
+                                    name="pizzaBarcodeEnabled"
+                                    type="checkbox"
+                                    checked={pizzaBarcodeEnabled}
+                                    onChange={(event) => setPizzaBarcodeEnabled(event.target.checked)}
+                                />
+                                Stampa barcode piatto
+                            </label>
+                        ) : null}
                         <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
                             <input
                                 ref={skipKitchenPrintRef}

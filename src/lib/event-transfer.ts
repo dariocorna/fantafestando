@@ -130,6 +130,7 @@ interface ExportedCategory {
   skipKitchenPrint: boolean;
   printKitchenCopyAtCashier: boolean;
   pizzaFlowEnabled: boolean;
+  pizzaBarcodeEnabled: boolean;
 }
 
 interface ExportedIngredient {
@@ -523,6 +524,7 @@ export async function buildEventTransferBundle(eventId: string): Promise<Generat
       skipKitchenPrint: Boolean(category.skipKitchenPrint),
       printKitchenCopyAtCashier: Boolean(category.printKitchenCopyAtCashier),
       pizzaFlowEnabled: Boolean(category.pizzaFlowEnabled),
+      pizzaBarcodeEnabled: Boolean(category.pizzaBarcodeEnabled),
     })),
     ingredients: ingredients.map((ingredient) => ({
       bundleId: String(ingredient._id),
@@ -731,6 +733,7 @@ export async function importEventTransferBundle(
         skipKitchenPrint: Boolean(category.skipKitchenPrint),
         printKitchenCopyAtCashier: Boolean(category.printKitchenCopyAtCashier),
         pizzaFlowEnabled: Boolean(category.pizzaFlowEnabled),
+        pizzaBarcodeEnabled: Boolean(category.pizzaBarcodeEnabled),
       });
       categoryMap.set(category.bundleId, String(createdCategory._id));
       importedCategoryCount += 1;

@@ -4,16 +4,17 @@ type ColorOption = {
 };
 
 export const CATEGORY_COLOR_OPTIONS: ColorOption[] = [
-    { value: "#3b82f6", label: "Blu" },
-    { value: "#ef4444", label: "Rosso" },
-    { value: "#f97316", label: "Arancione" },
-    { value: "#eab308", label: "Giallo" },
-    { value: "#22c55e", label: "Verde" },
-    { value: "#14b8a6", label: "Turchese" },
-    { value: "#06b6d4", label: "Ciano" },
-    { value: "#8b5cf6", label: "Viola" },
-    { value: "#ec4899", label: "Rosa" },
-    { value: "#64748b", label: "Ardesia" }
+    { value: "#93c5fd", label: "Blu" },
+    { value: "#fca5a5", label: "Rosso" },
+    { value: "#fdba74", label: "Arancione" },
+    { value: "#fde047", label: "Giallo" },
+    { value: "#86efac", label: "Verde" },
+    { value: "#5eead4", label: "Turchese" },
+    { value: "#67e8f9", label: "Ciano" },
+    { value: "#c4b5fd", label: "Viola" },
+    { value: "#f9a8d4", label: "Rosa" },
+    { value: "#cbd5e1", label: "Ardesia" },
+    { value: "#ffffff", label: "Bianco" }
 ];
 
 export const DEFAULT_CATEGORY_COLOR = CATEGORY_COLOR_OPTIONS[0].value;

@@ -31,6 +31,7 @@ export function CreateCategoryDialog({
     const [formInstanceKey, setFormInstanceKey] = useState(0);
     const [selectedColor, setSelectedColor] = useState(DEFAULT_CATEGORY_COLOR);
     const [pizzaFlowEnabled, setPizzaFlowEnabled] = useState(false);
+    const [pizzaBarcodeEnabled, setPizzaBarcodeEnabled] = useState(false);
     const [submitError, setSubmitError] = useState<string | null>(null);
     const skipKitchenPrintRef = useRef<HTMLInputElement>(null);
 
@@ -58,6 +59,7 @@ export function CreateCategoryDialog({
                     setSubmitError(null);
                     setSelectedColor(DEFAULT_CATEGORY_COLOR);
                     setPizzaFlowEnabled(false);
+                    setPizzaBarcodeEnabled(false);
                     if (skipKitchenPrintRef.current) {
                         skipKitchenPrintRef.current.checked = false;
                     }
@@ -78,7 +80,6 @@ export function CreateCategoryDialog({
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <input type="hidden" name="eventId" value={eventId} />
-                        <input type="hidden" name="uiColor" value={selectedColor} />
                         <div className="grid gap-2">
                             <Label htmlFor="cat-name">Nome</Label>
                             <Input id="cat-name" name="name" placeholder="Primi, Bar..." required />
@@ -94,10 +95,11 @@ export function CreateCategoryDialog({
                                             type="button"
                                             title={option.label}
                                             aria-label={`Colore ${option.label}`}
+                                            aria-pressed={isSelected}
                                             onClick={() => setSelectedColor(option.value)}
                                             className={`h-9 rounded-md border-2 transition ${isSelected
                                                 ? "border-slate-900 dark:border-slate-100 scale-105"
-                                                : "border-transparent hover:border-slate-300"
+                                                : "border-slate-200 hover:border-slate-400"
                                                 }`}
                                             style={{
                                                 backgroundColor: option.value,
@@ -108,6 +110,19 @@ export function CreateCategoryDialog({
                                         </button>
                                     );
                                 })}
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <input
+                                    id="cat-color-picker"
+                                    name="uiColor"
+                                    type="color"
+                                    value={selectedColor}
+                                    onChange={(event) => setSelectedColor(event.target.value)}
+                                    className="h-10 w-14 cursor-pointer rounded-md border bg-white p-1"
+                                />
+                                <Label htmlFor="cat-color-picker" className="font-normal text-slate-600">
+                                    Colore personalizzato
+                                </Label>
                             </div>
                         </div>
                         <div className="grid gap-2">
@@ -130,6 +145,7 @@ export function CreateCategoryDialog({
                                 onChange={(event) => {
                                     const nextValue = event.target.checked;
                                     setPizzaFlowEnabled(nextValue);
+                                    if (!nextValue) setPizzaBarcodeEnabled(false);
                                     if (nextValue && skipKitchenPrintRef.current) {
                                         skipKitchenPrintRef.current.checked = false;
                                     }
@@ -137,6 +153,18 @@ export function CreateCategoryDialog({
                             />
                             Preparazione numerata
                         </label>
+                        {pizzaFlowEnabled ? (
+                            <label className="ml-6 inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                                <input
+                                    id="pizzaBarcodeEnabled"
+                                    name="pizzaBarcodeEnabled"
+                                    type="checkbox"
+                                    checked={pizzaBarcodeEnabled}
+                                    onChange={(event) => setPizzaBarcodeEnabled(event.target.checked)}
+                                />
+                                Stampa barcode piatto
+                            </label>
+                        ) : null}
                         <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
                             <input
                                 ref={skipKitchenPrintRef}

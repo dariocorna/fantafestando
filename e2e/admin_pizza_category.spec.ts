@@ -33,6 +33,9 @@ test.describe.serial("Admin catalogo - preparazioni numerate", () => {
 
         await dialog.locator("#cat-name").fill(categoryName);
         await dialog.getByLabel("Preparazione numerata").check();
+        const barcode = dialog.getByLabel("Stampa barcode piatto");
+        await expect(barcode).not.toBeChecked();
+        await barcode.check();
         await expect(dialog.locator("#skipKitchenPrint")).toBeDisabled();
         await expect(dialog).toContainText("senza stampante dedicata la comanda esce solo in cassa");
         await dialog.getByRole("button", { name: "Salva Categoria", exact: true }).click();
@@ -40,6 +43,7 @@ test.describe.serial("Admin catalogo - preparazioni numerate", () => {
         await expect(dialog).toBeHidden({ timeout: 15000 });
         const row = page.getByRole("row").filter({ hasText: categoryName }).first();
         await expect(row).toContainText("Numerata");
+        await expect(row).toContainText("barcode");
         await expect(row).toContainText("Default Cassa");
     });
 });
