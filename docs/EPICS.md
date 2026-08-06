@@ -356,3 +356,18 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
   privo di numero e barcode.
 
 **Test E2E**: `e2e/admin_pizza_category.spec.ts`, `e2e/pizza_monitor_flow.spec.ts`.
+
+---
+
+## 🔄 Epica 34: Doppia copia opzionale e numerazione per unità
+
+- Il comportamento predefinito `Default Cassa` conserva una sola copia
+  cliente per il normale ritiro self service.
+- Ogni categoria può abilitare esplicitamente la stampa aggiuntiva della copia
+  reparto sulla stampante cassa.
+- Per i prodotti con stampa separata per unità, ogni coppia reparto/cliente
+  riceve un numero piatto univoco della sequenza globale.
+- Categorie e prodotti senza le nuove opzioni mantengono il routing corrente.
+
+**Test E2E**: `e2e/category_skip_kitchen_print.spec.ts`,
+`e2e/product_split_kitchen_print.spec.ts`, `e2e/pizza_monitor_flow.spec.ts`.
