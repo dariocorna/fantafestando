@@ -120,6 +120,7 @@ export function PrintDocumentViewer({
                     <div className="mt-1 space-y-1 text-xs text-slate-700">
                         {normalized.items.map((item, index) => (
                             <div key={`${item.name}-${index}`} className="rounded-md border bg-slate-50 p-2">
+                                {item.categoryName ? <p className="text-xs font-black uppercase text-slate-800">Categoria: {item.categoryName}</p> : null}
                                 {item.groupLabel ? <p className="text-[11px] font-semibold uppercase text-slate-500">{item.groupLabel}</p> : null}
                                 <p className="font-semibold">{item.qty}x {item.name}</p>
                                 {item.notes ? <p className="text-slate-600">Note: {item.notes}</p> : null}

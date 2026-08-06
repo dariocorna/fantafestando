@@ -5,15 +5,16 @@ import { getAdminContextEvent } from "@/lib/events";
 import Order from "@/models/Order";
 import Product from "@/models/Product";
 import Category from "@/models/Category";
+import CashSession from "@/models/CashSession";
 import type { IEvent } from "@/models/Event";
 import {
     buildDashboardCsvContent,
-    buildDashboardXlsCompatibleContent,
     computeDashboardStats,
     type DashboardOrderInput,
     type DashboardProductInput
 } from "@/lib/dashboard-stats";
 import { aggregateOrderProductSales } from "@/lib/product-consumption";
+import { buildEventWorkbook } from "@/lib/excel-report";
 
 export const dynamic = "force-dynamic";
 
@@ -96,9 +97,9 @@ export async function GET(request: NextRequest) {
         }
 
         const format = request.nextUrl.searchParams.get("format")?.trim().toLowerCase() || "csv";
-        if (format !== "csv" && format !== "xls") {
+        if (!["csv", "xls", "xlsx"].includes(format)) {
             return NextResponse.json(
-                { error: "Formato export non supportato. Usa format=csv oppure format=xls." },
+                { error: "Formato export non supportato. Usa format=csv oppure format=xlsx." },
                 { status: 400 }
             );
         }
@@ -114,8 +115,9 @@ export async function GET(request: NextRequest) {
         const eventId = String(contextEvent._id);
 
         await dbConnect();
+        const excludedSessionIds = (await CashSession.find({ eventId, status: "CLOSED", isTest: true }).select("_id").lean() as Array<{ _id: unknown }>).map((session) => session._id);
         const [orders, products, categories] = await Promise.all([
-            Order.find({ eventId, status: "PAID" })
+            Order.find({ eventId, status: "PAID", cashSessionId: { $nin: excludedSessionIds } })
                 .sort({ createdAt: -1 })
                 .select("_id status createdAt totalAmount discountApplied discountMeta discountComponents pricingMode paymentMethod cart")
                 .lean() as Promise<OrderProjection[]>,
@@ -170,22 +172,21 @@ export async function GET(request: NextRequest) {
             catalogByProductId
         });
 
-        const content =
-            format === "xls"
-                ? buildDashboardXlsCompatibleContent(stats, { eventName: contextEvent.name, salesBreakdown })
-                : buildDashboardCsvContent(stats, { eventName: contextEvent.name, salesBreakdown });
+        const isExcel = format === "xls" || format === "xlsx";
+        const content = isExcel
+            ? await buildEventWorkbook({ eventName: contextEvent.name, stats, sales: salesBreakdown })
+            : buildDashboardCsvContent(stats, { eventName: contextEvent.name, salesBreakdown });
 
-        const extension = format === "xls" ? "xls" : "csv";
-        const contentType =
-            format === "xls"
-                ? "application/vnd.ms-excel; charset=utf-8"
-                : "text/csv; charset=utf-8";
+        const extension = isExcel ? "xlsx" : "csv";
+        const contentType = isExcel
+            ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            : "text/csv; charset=utf-8";
 
         const filenamePrefix = sanitizeFileNameSegment(contextEvent.name);
         const fileTimestamp = getTimestampTag(new Date(stats.generatedAt));
         const filename = `report-${filenamePrefix}-${fileTimestamp}.${extension}`;
 
-        return new NextResponse(content, {
+        return new NextResponse(typeof content === "string" ? content : new Uint8Array(content), {
             status: 200,
             headers: {
                 "Content-Type": contentType,
