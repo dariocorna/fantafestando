@@ -24,7 +24,7 @@ export function EditCategoryDialog({
     printers,
     updateAction
 }: {
-    category: { id: string, name: string, uiColor: string, printerId?: string, skipKitchenPrint?: boolean, pizzaFlowEnabled?: boolean },
+    category: { id: string, name: string, uiColor: string, printerId?: string, skipKitchenPrint?: boolean, printKitchenCopyAtCashier?: boolean, pizzaFlowEnabled?: boolean },
     eventId?: string,
     printers: { id: string, name: string, ip: string, port?: number }[],
     updateAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>
@@ -154,6 +154,15 @@ export function EditCategoryDialog({
                                 disabled={pizzaFlowEnabled}
                             />
                             Non stampare comanda
+                        </label>
+                        <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                            <input
+                                id="printKitchenCopyAtCashier"
+                                name="printKitchenCopyAtCashier"
+                                type="checkbox"
+                                defaultChecked={Boolean(category.printKitchenCopyAtCashier)}
+                            />
+                            Stampa anche copia reparto in cassa
                         </label>
                         {pizzaFlowEnabled ? (
                             <p className="text-xs font-semibold text-amber-700">

@@ -1591,6 +1591,7 @@ export class PrinterService {
             _id: { toString(): string };
             name?: string;
             skipKitchenPrint?: boolean;
+            printKitchenCopyAtCashier?: boolean;
             pizzaFlowEnabled?: boolean;
             printerId?: {
                 _id?: unknown;
@@ -1677,15 +1678,17 @@ export class PrinterService {
             }));
         });
 
-        const dishTicketByProductId = new Map(
-            (order.dishTickets || []).flatMap((ticket) => {
+        const dishTicketsByProductId = new Map<string, number[]>();
+        (order.dishTickets || []).forEach((ticket) => {
                 const productId = ticket.productId?.toString() || "";
                 const pizzaNumber = Number(ticket.pizzaNumber);
-                return productId && Number.isInteger(pizzaNumber) && pizzaNumber > 0
-                    ? [[productId, pizzaNumber] as const]
-                    : [];
-            })
-        );
+                if (!productId || !Number.isInteger(pizzaNumber) || pizzaNumber <= 0) return;
+                const numbers = dishTicketsByProductId.get(productId) || [];
+                numbers.push(pizzaNumber);
+                dishTicketsByProductId.set(productId, numbers);
+            });
+        const dishTicketCursorByProductId = new Map<string, number>();
+        const dishNumberByPrintGroup = new Map<string, number>();
 
         const cashierJob: PrinterCommandJob = {
             ip: cashierPrinter?.ip || "",
@@ -1733,11 +1736,8 @@ export class PrinterService {
             const categoryId = category?._id.toString() || product.categoryId.toString();
             const categoryName = category?.name?.trim();
             const printerName = kitchenPrinter?.name?.trim();
-            const pizzaNumber = category?.pizzaFlowEnabled
-                ? dishTicketByProductId.get(String(item.productId))
-                : undefined;
-            const isPizzaItem = typeof pizzaNumber === "number";
-            const printFlowKey = isPizzaItem ? `dish:${String(item.productId)}` : "standard";
+            const isNumberedCategory = Boolean(category?.pizzaFlowEnabled);
+            const printFlowKey = isNumberedCategory ? `dish:${String(item.productId)}` : "standard";
             const baseGroupKey = kitchenPrinter?._id
                 ? `printer:${String(kitchenPrinter._id)}`
                 : `category:${categoryId}`;
@@ -1745,62 +1745,87 @@ export class PrinterService {
                 ? `${baseGroupKey}:unit:${item.splitSequence}`
                 : baseGroupKey;
             const customerGroupKey = `${baseCustomerGroupKey}:${printFlowKey}`;
-            const kitchenGroupKey = customerGroupKey;
+            let pizzaNumber = dishNumberByPrintGroup.get(customerGroupKey);
+            if (isNumberedCategory && typeof pizzaNumber !== "number") {
+                const productId = String(item.productId);
+                const cursor = dishTicketCursorByProductId.get(productId) || 0;
+                pizzaNumber = dishTicketsByProductId.get(productId)?.[cursor];
+                if (typeof pizzaNumber === "number") {
+                    dishTicketCursorByProductId.set(productId, cursor + 1);
+                    dishNumberByPrintGroup.set(customerGroupKey, pizzaNumber);
+                }
+            }
             const departmentLabel = printerName || categoryName || resolvePrintName(item.productId, item.snapshotName);
             if (departmentLabel) involvedDepartments.add(departmentLabel);
 
-            const destination = kitchenPrinter?.ip
-                ? {
+            const destinations: Array<PrinterDestinationRef & { groupKey: string }> = [];
+            if (kitchenPrinter?.ip) {
+                destinations.push({
+                    groupKey: `department:${String(kitchenPrinter._id || kitchenPrinter.ip)}`,
                     ip: kitchenPrinter.ip,
                     port: kitchenPrinter.port || DEFAULT_PRINTER_PORT,
                     emulatorSlot: kitchenPrinter.emulatorSlot,
-                    printerId: kitchenPrinter._id ? String(kitchenPrinter._id) : undefined,
+                    id: kitchenPrinter._id ? String(kitchenPrinter._id) : undefined,
                     isVirtual: Boolean(kitchenPrinter.isVirtual)
-                }
-                : null;
+                });
+            }
+            if (category?.printKitchenCopyAtCashier && cashierPrinter?.ip) {
+                destinations.push({
+                    groupKey: `cashier:${cashierPrinter.id || cashierPrinter.ip}`,
+                    ip: cashierPrinter.ip,
+                    port: cashierPrinter.port || DEFAULT_PRINTER_PORT,
+                    emulatorSlot: cashierPrinter.emulatorSlot,
+                    id: cashierPrinter.id,
+                    isVirtual: Boolean(cashierPrinter.isVirtual)
+                });
+            }
 
             const departmentFooterLines = departmentLabel ? [`REPARTO: ${departmentLabel}`] : undefined;
+            let hasKitchenJob = false;
+            destinations.forEach((destination) => {
+                const kitchenGroupKey = `${customerGroupKey}:${destination.groupKey}`;
+                let kitchenJob = kitchenJobsByGroup.get(kitchenGroupKey);
+                if (!kitchenJob && destination.ip) {
+                    kitchenJob = {
+                        ip: destination.ip,
+                        port: destination.port,
+                        emulatorSlot: destination.emulatorSlot,
+                        printerId: destination.id,
+                        eventId,
+                        source: "ORDER",
+                        printType: "KITCHEN_ORDER",
+                        isVirtual: destination.isVirtual,
+                        title: "COMANDA REPARTO",
+                        eventName,
+                        copyLabel: "COPIA REPARTO",
+                        brandingLogoUrl,
+                        items: [],
+                        customerName: order.customer?.name,
+                        tableNumber: order.customer?.table,
+                        orderId: order._id.toString(),
+                        shortCode: cashierJob.shortCode,
+                        footerLines: departmentFooterLines
+                    };
+                    kitchenJobsByGroup.set(kitchenGroupKey, kitchenJob);
+                }
 
-            let kitchenJob = kitchenJobsByGroup.get(kitchenGroupKey);
-            if (!kitchenJob && destination?.ip) {
-                kitchenJob = {
-                    ip: destination.ip,
-                    port: destination.port,
-                    emulatorSlot: destination.emulatorSlot,
-                    printerId: destination.printerId,
-                    eventId,
-                    source: "ORDER",
-                    printType: "KITCHEN_ORDER",
-                    isVirtual: destination.isVirtual,
-                    title: "COMANDA REPARTO",
-                    eventName,
-                    copyLabel: "COPIA REPARTO",
-                    brandingLogoUrl,
-                    items: [],
-                    customerName: order.customer?.name,
-                    tableNumber: order.customer?.table,
-                    orderId: order._id.toString(),
-                    shortCode: cashierJob.shortCode,
-                    footerLines: departmentFooterLines
-                };
-                kitchenJobsByGroup.set(kitchenGroupKey, kitchenJob);
-            }
-
-            if (isPizzaItem && kitchenJob) {
-                kitchenJob.pizzaNumber = pizzaNumber;
-                kitchenJob.pizzaBarcodeValue = getPizzaBarcodeValue(pizzaNumber);
-            }
-
-            kitchenJob?.items.push({
-                name: resolvePrintName(item.productId, item.snapshotName),
-                quantity: item.quantity,
-                notes: item.notes
+                if (!kitchenJob) return;
+                hasKitchenJob = true;
+                if (typeof pizzaNumber === "number") {
+                    kitchenJob.pizzaNumber = pizzaNumber;
+                    kitchenJob.pizzaBarcodeValue = getPizzaBarcodeValue(pizzaNumber);
+                }
+                kitchenJob.items.push({
+                    name: resolvePrintName(item.productId, item.snapshotName),
+                    quantity: item.quantity,
+                    notes: item.notes
+                });
             });
 
             const customerJob = ensureCustomerJob(customerGroupKey, departmentFooterLines);
-            if (isPizzaItem && customerJob) {
+            if (typeof pizzaNumber === "number" && customerJob) {
                 customerJob.pizzaNumber = pizzaNumber;
-                if (!kitchenJob) {
+                if (!hasKitchenJob) {
                     customerJob.pizzaBarcodeValue = getPizzaBarcodeValue(pizzaNumber);
                 }
             }

@@ -128,6 +128,7 @@ interface ExportedCategory {
   printOrder: number;
   printerBundleId?: string;
   skipKitchenPrint: boolean;
+  printKitchenCopyAtCashier: boolean;
   pizzaFlowEnabled: boolean;
 }
 
@@ -520,6 +521,7 @@ export async function buildEventTransferBundle(eventId: string): Promise<Generat
       printOrder: typeof category.printOrder === "number" ? category.printOrder : 0,
       printerBundleId: normalizeOptionalString(category.printerId ? String(category.printerId) : undefined),
       skipKitchenPrint: Boolean(category.skipKitchenPrint),
+      printKitchenCopyAtCashier: Boolean(category.printKitchenCopyAtCashier),
       pizzaFlowEnabled: Boolean(category.pizzaFlowEnabled),
     })),
     ingredients: ingredients.map((ingredient) => ({
@@ -727,6 +729,7 @@ export async function importEventTransferBundle(
           ? getMappedIdOrThrow("categoria", category.printerBundleId, printerMap, "stampante")
           : undefined,
         skipKitchenPrint: Boolean(category.skipKitchenPrint),
+        printKitchenCopyAtCashier: Boolean(category.printKitchenCopyAtCashier),
         pizzaFlowEnabled: Boolean(category.pizzaFlowEnabled),
       });
       categoryMap.set(category.bundleId, String(createdCategory._id));

@@ -1158,6 +1158,7 @@ export async function createOrder(data: {
                 productId: item.productId,
                 snapshotName: item.snapshotName,
                 quantity: item.quantity,
+                splitPrintPerUnit: item.splitPrintPerUnit,
                 includedComponents: item.includedComponents?.map((component) => ({
                     productId: component.productId,
                     snapshotName: component.snapshotName,
@@ -1972,6 +1973,7 @@ export async function completePendingOrderPayment(data: {
                 productId: item.productId,
                 snapshotName: item.snapshotName,
                 quantity: item.quantity,
+                splitPrintPerUnit: item.splitPrintPerUnit,
                 includedComponents: item.includedComponents?.map((component) => ({
                     productId: component.productId,
                     snapshotName: component.snapshotName,

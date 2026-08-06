@@ -147,6 +147,14 @@ export function CreateCategoryDialog({
                             />
                             Non stampare comanda
                         </label>
+                        <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                            <input
+                                id="printKitchenCopyAtCashier"
+                                name="printKitchenCopyAtCashier"
+                                type="checkbox"
+                            />
+                            Stampa anche copia reparto in cassa
+                        </label>
                         {pizzaFlowEnabled ? (
                             <p className="text-xs font-semibold text-amber-700">
                                 La stampante reparto e` opzionale: senza stampante dedicata la comanda esce solo in cassa sulla copia cliente.
