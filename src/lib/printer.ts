@@ -795,7 +795,9 @@ export class PrinterService {
             const qtyWidth = 4;
             const netWidth = 9;
             const spacer = " ";
+            let activeCategory: string | null = null;
             let activeGroup: string | null = null;
+            let categoryItems: PrintDocumentV2["items"] = [];
             let groupItems: PrintDocumentV2["items"] = [];
             const printGroupTotals = () => {
                 if (groupItems.length === 0) return;
@@ -805,6 +807,19 @@ export class PrinterService {
                 printer.println(`${padRight("SUBT. LORDO", labelWidth)}${padLeft(formatAmountNoCurrency(gross), amountWidth)}`);
                 printer.println(`${padRight("SUBT. SCONTO", labelWidth)}${padLeft(formatAmountNoCurrency(discount), amountWidth)}`);
                 printer.println(`${padRight("SUBT. NETTO", labelWidth)}${padLeft(formatAmountNoCurrency(net), amountWidth)}`);
+            };
+            const printCategoryTotals = () => {
+                if (categoryItems.length === 0) return;
+                const quantity = categoryItems.reduce((sum, item) => sum + item.qty, 0);
+                const gross = categoryItems.reduce((sum, item) => sum + (item.grossAmount ?? item.lineTotal ?? 0), 0);
+                const discount = categoryItems.reduce((sum, item) => sum + (item.discountAmount ?? 0), 0);
+                const net = categoryItems.reduce((sum, item) => sum + (item.lineTotal ?? 0), 0);
+                printer.bold(true);
+                printer.println(`${padRight("CAT. Q.TA", labelWidth)}${padLeft(String(quantity), amountWidth)}`);
+                printer.println(`${padRight("CAT. LORDO", labelWidth)}${padLeft(formatAmountNoCurrency(gross), amountWidth)}`);
+                printer.println(`${padRight("CAT. SCONTO", labelWidth)}${padLeft(formatAmountNoCurrency(discount), amountWidth)}`);
+                printer.println(`${padRight("CAT. NETTO", labelWidth)}${padLeft(formatAmountNoCurrency(net), amountWidth)}`);
+                printer.bold(false);
                 printer.println(RECEIPT_SEPARATOR);
             };
 
@@ -816,15 +831,30 @@ export class PrinterService {
             printer.println(RECEIPT_SEPARATOR);
 
             document.items.forEach((item) => {
+                const categoryName = item.categoryName || "Non categorizzato";
                 const groupLabel = item.groupLabel || "DETTAGLIO VENDUTO";
-                if (activeGroup !== groupLabel) {
+                if (activeCategory !== categoryName) {
                     printGroupTotals();
+                    printCategoryTotals();
+                    activeCategory = categoryName;
+                    activeGroup = null;
+                    categoryItems = [];
+                    groupItems = [];
+                    printer.bold(true);
+                    splitByLength(`CATEGORIA: ${categoryName.toUpperCase()}`, rowWidth).forEach((line) => printer.println(line));
+                    printer.bold(false);
+                }
+                if (activeGroup !== groupLabel) {
+                    const hasPreviousGroup = groupItems.length > 0;
+                    printGroupTotals();
+                    if (hasPreviousGroup) printer.println(RECEIPT_SEPARATOR);
                     activeGroup = groupLabel;
                     groupItems = [];
                     printer.bold(true);
                     splitByLength(groupLabel.toUpperCase(), rowWidth).forEach((line) => printer.println(line));
                     printer.bold(false);
                 }
+                categoryItems.push(item);
                 groupItems.push(item);
                 splitByLength(item.name, descriptionWidth).forEach((line, index) => {
                     printer.println(
@@ -835,6 +865,7 @@ export class PrinterService {
                 });
             });
             printGroupTotals();
+            printCategoryTotals();
             printer.setTypeFontA();
             printer.setTextNormal();
             return;
@@ -1051,20 +1082,23 @@ export class PrinterService {
             errorMessage?: string;
             rawCapturePath?: string;
             automaticRetryCount?: number;
+            clearRetryClaim?: boolean;
         }
     ) {
         if (!id) return;
         try {
+            const update: Record<string, unknown> = {
+                $set: {
+                    status: updates.status,
+                    errorMessage: updates.errorMessage || undefined,
+                    rawCapturePath: updates.rawCapturePath || undefined,
+                    automaticRetryCount: updates.automaticRetryCount ?? 0
+                }
+            };
+            if (updates.clearRetryClaim) update.$unset = { retryClaimedAt: 1 };
             await PrintJobModel.updateOne(
                 { _id: id },
-                {
-                    $set: {
-                        status: updates.status,
-                        errorMessage: updates.errorMessage || undefined,
-                        rawCapturePath: updates.rawCapturePath || undefined,
-                        automaticRetryCount: updates.automaticRetryCount ?? 0
-                    }
-                }
+                update
             );
         } catch (error) {
             console.error(`Unable to update print job log ${id}:`, error);
@@ -2100,7 +2134,7 @@ export class PrinterService {
         await dbConnect();
         const job = await PrintJobModel.findOneAndUpdate(
             { _id: jobId, eventId, status: "FAILED" },
-            { $set: { status: "QUEUED" } },
+            { $set: { status: "QUEUED", retryClaimedAt: new Date() } },
             { returnDocument: "after" }
         )
             .populate("printerId", "ip port isVirtual emulatorSlot")
@@ -2128,6 +2162,7 @@ export class PrinterService {
             return { success: false, error: "Job non disponibile o già acquisito" } as const;
         }
 
+        try {
         const document = (job.document && typeof job.document === "object")
             ? job.document as Record<string, unknown>
             : {};
@@ -2140,7 +2175,7 @@ export class PrinterService {
                 emulatorSlot: job.printerId?.emulatorSlot
             });
             if (!destination.host) {
-                await this.updatePrintJobLog(job._id.toString(), { status: "FAILED", errorMessage: "Destinazione stampante non disponibile" });
+                await this.updatePrintJobLog(job._id.toString(), { status: "FAILED", errorMessage: "Destinazione stampante non disponibile", clearRetryClaim: true });
                 return { success: false, error: "Destinazione stampante non disponibile" } as const;
             }
             const dispatchResult = await this.dispatchPrintDocumentWithAutomaticRetry({
@@ -2156,12 +2191,14 @@ export class PrinterService {
                 ? {
                     status: "SENT",
                     rawCapturePath: dispatchResult.rawCapturePath,
-                    automaticRetryCount: dispatchResult.automaticRetryCount
+                    automaticRetryCount: dispatchResult.automaticRetryCount,
+                    clearRetryClaim: true
                 }
                 : {
                     status: "FAILED",
                     errorMessage: dispatchResult.errorMessage,
-                    automaticRetryCount: dispatchResult.automaticRetryCount
+                    automaticRetryCount: dispatchResult.automaticRetryCount,
+                    clearRetryClaim: true
                 });
             return dispatchResult.success
                 ? { success: true } as const
@@ -2203,7 +2240,7 @@ export class PrinterService {
                 : undefined);
 
             if (!raster) {
-                await this.updatePrintJobLog(job._id.toString(), { status: "FAILED", errorMessage: "Immagine easter egg non più disponibile" });
+                await this.updatePrintJobLog(job._id.toString(), { status: "FAILED", errorMessage: "Immagine easter egg non più disponibile", clearRetryClaim: true });
                 return { success: false, error: "Immagine easter egg non più disponibile" } as const;
             }
 
@@ -2214,7 +2251,7 @@ export class PrinterService {
                 isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual)
             });
             if (!destination.host) {
-                await this.updatePrintJobLog(job._id.toString(), { status: "FAILED", errorMessage: "Destinazione stampante non disponibile" });
+                await this.updatePrintJobLog(job._id.toString(), { status: "FAILED", errorMessage: "Destinazione stampante non disponibile", clearRetryClaim: true });
                 return { success: false, error: "Destinazione stampante non disponibile" } as const;
             }
             const dispatchResult = await this.dispatchRasterImageWithAutomaticRetry({
@@ -2227,8 +2264,8 @@ export class PrinterService {
                 copies: job.copies || 1
             });
             await this.updatePrintJobLog(job._id.toString(), dispatchResult.success
-                ? { status: "SENT", rawCapturePath: dispatchResult.rawCapturePath, automaticRetryCount: dispatchResult.automaticRetryCount }
-                : { status: "FAILED", errorMessage: dispatchResult.errorMessage, automaticRetryCount: dispatchResult.automaticRetryCount });
+                ? { status: "SENT", rawCapturePath: dispatchResult.rawCapturePath, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true }
+                : { status: "FAILED", errorMessage: dispatchResult.errorMessage, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true });
             return dispatchResult.success
                 ? { success: true } as const
                 : { success: false, error: "Invio stampa fallito" } as const;
@@ -2241,7 +2278,7 @@ export class PrinterService {
             isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual)
         });
         if (!destination.host) {
-            await this.updatePrintJobLog(job._id.toString(), { status: "FAILED", errorMessage: "Destinazione stampante non disponibile" });
+            await this.updatePrintJobLog(job._id.toString(), { status: "FAILED", errorMessage: "Destinazione stampante non disponibile", clearRetryClaim: true });
             return { success: false, error: "Destinazione stampante non disponibile" } as const;
         }
         const dispatchResult = await this.dispatchPrintDocumentWithAutomaticRetry({
@@ -2254,10 +2291,19 @@ export class PrinterService {
             copies: job.copies || 1
         });
         await this.updatePrintJobLog(job._id.toString(), dispatchResult.success
-            ? { status: "SENT", rawCapturePath: dispatchResult.rawCapturePath, automaticRetryCount: dispatchResult.automaticRetryCount }
-            : { status: "FAILED", errorMessage: dispatchResult.errorMessage, automaticRetryCount: dispatchResult.automaticRetryCount });
+            ? { status: "SENT", rawCapturePath: dispatchResult.rawCapturePath, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true }
+            : { status: "FAILED", errorMessage: dispatchResult.errorMessage, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true });
         return dispatchResult.success
             ? { success: true } as const
             : { success: false, error: "Invio stampa fallito" } as const;
+        } catch (error) {
+            console.error(`Retry print job ${jobId} failed unexpectedly:`, error);
+            await this.updatePrintJobLog(job._id.toString(), {
+                status: "FAILED",
+                errorMessage: "Reinvio stampa interrotto",
+                clearRetryClaim: true
+            });
+            return { success: false, error: "Reinvio stampa interrotto" } as const;
+        }
     }
 }

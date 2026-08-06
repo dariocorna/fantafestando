@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { dbConnectMock, printJobFindMock, orderFindOneMock, productFindOneAndUpdateMock, eventExistsMock, retryPrintJobByIdMock, ensureAuthenticatedSessionMock } = vi.hoisted(() => ({
+const { dbConnectMock, printJobFindMock, printJobUpdateManyMock, orderFindOneMock, productFindOneAndUpdateMock, eventExistsMock, retryPrintJobByIdMock, ensureAuthenticatedSessionMock } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     printJobFindMock: vi.fn(),
+    printJobUpdateManyMock: vi.fn(),
     orderFindOneMock: vi.fn(),
     productFindOneAndUpdateMock: vi.fn(),
     eventExistsMock: vi.fn(),
@@ -24,7 +25,8 @@ vi.mock("@/lib/pos-access", () => ({
 
 vi.mock("@/models/PrintJob", () => ({
     default: {
-        find: printJobFindMock
+        find: printJobFindMock,
+        updateMany: printJobUpdateManyMock
     }
 }));
 
@@ -56,6 +58,7 @@ describe("retryFailedOrderPrintJobs", () => {
             user: { id: "user-1", username: "cashier", role: "CASHIER" }
         });
         orderFindOneMock.mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue({ eventId: { toString: () => "evt-1" } }) }) });
+        printJobUpdateManyMock.mockResolvedValue({ modifiedCount: 0 });
     });
 
     test("returns error when event/order ids are missing", async () => {
@@ -85,6 +88,18 @@ describe("retryFailedOrderPrintJobs", () => {
             failed: 0,
             failedPrinters: []
         });
+        expect(printJobUpdateManyMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                eventId: "evt-1",
+                orderId: "ord-1",
+                status: "QUEUED",
+                retryClaimedAt: { $lte: expect.any(Date) }
+            }),
+            {
+                $set: { status: "FAILED", errorMessage: "Reinvio interrotto: riprova" },
+                $unset: { retryClaimedAt: 1 }
+            }
+        );
     });
 
     test("counts partial retry results", async () => {

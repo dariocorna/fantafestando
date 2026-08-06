@@ -784,7 +784,26 @@ function summarizePrintDispatch(results: boolean[] | undefined): PrintDispatchSu
     }
 }
 
+const PRINT_RETRY_LEASE_MS = 5 * 60 * 1000
+
+async function recoverStalePrintRetryClaims(eventId: string, orderId: string) {
+    await PrintJob.updateMany(
+        {
+            eventId,
+            orderId,
+            source: "ORDER",
+            status: "QUEUED",
+            retryClaimedAt: { $lte: new Date(Date.now() - PRINT_RETRY_LEASE_MS) }
+        },
+        {
+            $set: { status: "FAILED", errorMessage: "Reinvio interrotto: riprova" },
+            $unset: { retryClaimedAt: 1 }
+        }
+    )
+}
+
 async function listFailedPrinterGroups(eventId: string, orderId: string): Promise<FailedPrinterGroup[]> {
+    await recoverStalePrintRetryClaims(eventId, orderId)
     const jobs = await PrintJob.find({ eventId, orderId, source: "ORDER", status: "FAILED" })
         .sort({ createdAt: 1 })
         .populate("printerId", "name ip port")
@@ -2204,6 +2223,7 @@ export async function retryFailedOrderPrintJobs(data: {
         const order = await Order.findOne({ _id: data.orderId, status: "PAID" }).select("eventId").lean() as ({ eventId: { toString(): string } } | null)
         if (!order) return { success: false, error: "Ordine pagato non trovato" }
         const eventId = order.eventId.toString()
+        await recoverStalePrintRetryClaims(eventId, data.orderId)
         const failedJobs = await PrintJob.find({
             eventId,
             orderId: data.orderId,

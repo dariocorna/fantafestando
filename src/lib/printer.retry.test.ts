@@ -102,7 +102,8 @@ describe("PrinterService.retryPrintJobById", () => {
                     errorMessage: undefined,
                     rawCapturePath: "/tmp/receipt.raw",
                     automaticRetryCount: 1
-                }
+                },
+                $unset: { retryClaimedAt: 1 }
             }
         );
     });
@@ -147,6 +148,37 @@ describe("PrinterService.retryPrintJobById", () => {
             document: expect.objectContaining({ title: "Ricevuta Demo", copyLabel: "COPIA TEST", orderId: "order-1", shortCode: "D-12345" })
         }));
         expect(result).toEqual({ success: true });
+        expect(printJobFindOneAndUpdateMock).toHaveBeenCalledWith(
+            { _id: "job-1", eventId: "evt-1", status: "FAILED" },
+            { $set: { status: "QUEUED", retryClaimedAt: expect.any(Date) } },
+            { returnDocument: "after" }
+        );
+    });
+
+    test("returns unexpectedly interrupted retries to FAILED", async () => {
+        mockFindOneJob({
+            _id: { toString: () => "job-1" },
+            source: "ORDER",
+            printType: "MANUAL_TEST",
+            destinationHost: "printer-emulator",
+            destinationPort: 19100,
+            document: { title: "Ricevuta Demo", items: [] }
+        });
+        vi.spyOn(
+            PrinterService as unknown as { dispatchPrintDocumentWithAutomaticRetry: (params: unknown) => Promise<unknown> },
+            "dispatchPrintDocumentWithAutomaticRetry"
+        ).mockRejectedValue(new Error("render failed"));
+
+        const result = await PrinterService.retryPrintJobById("evt-1", "job-1");
+
+        expect(result).toEqual({ success: false, error: "Reinvio stampa interrotto" });
+        expect(printJobUpdateOneMock).toHaveBeenCalledWith(
+            { _id: "job-1" },
+            expect.objectContaining({
+                $set: expect.objectContaining({ status: "FAILED", errorMessage: "Reinvio stampa interrotto" }),
+                $unset: { retryClaimedAt: 1 }
+            })
+        );
     });
 
     test("retries legacy print documents with object totals", async () => {

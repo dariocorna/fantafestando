@@ -25,6 +25,7 @@ export interface IPrintJob extends Document {
     document: Record<string, unknown>;
     rawCapturePath?: string;
     errorMessage?: string;
+    retryClaimedAt?: Date;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -58,7 +59,8 @@ const PrintJobSchema = new Schema<IPrintJob>({
     automaticRetryCount: { type: Number, required: true, default: 0, min: 0, max: 10 },
     document: { type: Schema.Types.Mixed, required: true },
     rawCapturePath: { type: String, trim: true },
-    errorMessage: { type: String, trim: true }
+    errorMessage: { type: String, trim: true },
+    retryClaimedAt: { type: Date }
 }, {
     timestamps: true
 });
