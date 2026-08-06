@@ -192,6 +192,7 @@ export async function createPosDevice(
 export interface CreateCategoryOptions {
     kitchenPrinterName?: string;
     pizzaFlowEnabled?: boolean;
+    printKitchenCopyAtCashier?: boolean;
 }
 
 export async function createCategoryWithPrinter(
@@ -227,6 +228,10 @@ export async function createCategory(
 
     if (options?.pizzaFlowEnabled) {
         await dialog.getByLabel("Preparazione numerata").check();
+    }
+
+    if (options?.printKitchenCopyAtCashier) {
+        await dialog.getByLabel("Stampa anche copia reparto in cassa").check();
     }
 
     await dialog.getByRole("button", { name: "Salva Categoria", exact: true }).click();
