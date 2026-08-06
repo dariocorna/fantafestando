@@ -36,6 +36,7 @@ interface ICategory {
   printOrder: number;           // Sorting order in POS
   printerId?: ObjectId;         // OPTIONAL: Link to IPrinter for comanda routing
   printKitchenCopyAtCashier: boolean; // Optional department copy on cashier printer
+  pizzaBarcodeEnabled: boolean; // Barcode numerazione piatto, opt-in
 }
 ```
 
@@ -72,6 +73,10 @@ interface ICashSession {
   eventId: ObjectId;
   posDeviceId: ObjectId;
   status: "OPEN" | "CLOSED";
+  isTest: boolean;
+  stockEffectStatus: "APPLIED" | "REVERTED";
+  transition?: { token: string; type: "TO_TEST" | "TO_NORMAL" | "CLOSE" | "DELETE"; status: "IN_PROGRESS" | "FAILED"; error?: string };
+  deletionStatus?: "IN_PROGRESS" | "FAILED";
   openedAt: Date;
   openingFloatAmount: number;       // Fondo iniziale
   openingNotes?: string;
@@ -132,6 +137,8 @@ interface IOrder {
   paymentMethod: "CASH" | "CARD" | "OTHER";
   posDeviceId?: ObjectId;
   cashSessionId?: ObjectId;
+  stockAdjustments?: Array<{ entityType: "PRODUCT" | "INGREDIENT"; entityId: ObjectId; quantity: number }>;
+  stockEffectStatus?: "APPLIED" | "REVERTED";
   customer: {
     name?: string;
     table?: string;

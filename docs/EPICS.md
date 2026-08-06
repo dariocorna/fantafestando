@@ -359,7 +359,7 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
 
 ---
 
-## 🔄 Epica 34: Doppia copia opzionale e numerazione per unità
+## ✅ Epica 34: Doppia copia opzionale e numerazione per unità
 
 - Il comportamento predefinito `Default Cassa` conserva una sola copia
   cliente per il normale ritiro self service.
@@ -371,3 +371,15 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
 
 **Test E2E**: `e2e/category_skip_kitchen_print.spec.ts`,
 `e2e/product_split_kitchen_print.spec.ts`, `e2e/pizza_monitor_flow.spec.ts`.
+
+---
+
+## 🔄 Epica 35: Leggibilità POS, catalogo, sessioni TEST e reportistica
+
+- Catalogo filtrabile con ricerca smart, palette ad alto contrasto e barcode dei piatti numerati esplicitamente opt-in.
+- POS più leggibile con titoli su due righe, tastiera fisica per il calcolo resto ed editor rapido delle scorte.
+- Errori di stampa raggruppati per stampante e retry atomico dei soli job falliti.
+- Sessioni TEST reversibili: incidono durante l'apertura, vengono escluse e ripristinano le scorte alla chiusura; eliminazione sicura delle sessioni chiuse.
+- Riepiloghi per categoria, ristampa dalla dashboard e workbook `.xlsx` multi-sheet reali.
+
+**Test principali**: unit test catalogo, scorte, stampa, transizioni sessione e workbook; flussi Playwright POS/Admin.
