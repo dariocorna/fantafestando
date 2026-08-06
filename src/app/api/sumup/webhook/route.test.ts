@@ -83,7 +83,11 @@ describe("POST /api/sumup/webhook", () => {
                 sumupWebhookClaimToken: expect.any(String)
             }),
             expect.objectContaining({
-                $set: expect.objectContaining({ status: "PAID" })
+                $set: expect.objectContaining({
+                    status: "PAID",
+                    stockAdjustments: [],
+                    stockEffectStatus: "APPLIED"
+                })
             })
         );
         expect(routeOrderToPrintersMock).toHaveBeenCalledOnce();

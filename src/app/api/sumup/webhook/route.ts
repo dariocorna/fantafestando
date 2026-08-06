@@ -200,6 +200,8 @@ export async function POST(req: NextRequest) {
                         $set: {
                             status: "PAID",
                             stockOverrideApproved,
+                            stockAdjustments: appliedAdjustmentsToRollback,
+                            stockEffectStatus: "APPLIED",
                             ...(sumupPaymentId ? { sumupPaymentId } : {})
                         },
                         $unset: {

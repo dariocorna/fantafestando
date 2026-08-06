@@ -347,7 +347,7 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
 
         const stockAdjustments = lockedOrder.stockEffectStatus === "REVERTED"
             ? []
-            : (lockedOrder.stockAdjustments?.length ? lockedOrder.stockAdjustments : buildStockAdjustmentsFromOrder(lockedOrder))
+            : (Array.isArray(lockedOrder.stockAdjustments) ? lockedOrder.stockAdjustments : buildStockAdjustmentsFromOrder(lockedOrder))
         try {
             await rollbackStockAdjustments(eventId, stockAdjustments)
         } catch (rollbackError) {

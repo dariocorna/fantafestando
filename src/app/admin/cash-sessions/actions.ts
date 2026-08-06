@@ -153,24 +153,47 @@ export async function setCashSessionTestAction(sessionId: string, isTest: boolea
     const token = session.transition?.type === type && session.transition.token
         ? session.transition.token
         : randomUUID();
-    session.transition = { token, type, status: "IN_PROGRESS" };
-    await session.save();
+    const transitionGuard = session.transition?.type === type && session.transition.token
+        ? { "transition.type": type, "transition.token": token }
+        : {
+            $or: [
+                { transition: { $exists: false } },
+                { transition: null },
+                { "transition.token": { $exists: false } }
+            ]
+        };
+    const claimedSession = await CashSession.findOneAndUpdate(
+        { _id: sessionId, status: "CLOSED", isTest: { $ne: isTest }, ...transitionGuard },
+        { $set: { transition: { token, type, status: "IN_PROGRESS" } } },
+        { returnDocument: "after" }
+    );
+    if (!claimedSession) {
+        return { success: false as const, error: "Un'altra transizione è già in corso sulla sessione" };
+    }
     const result = await transitionCashSessionStock({
-        eventId: session.eventId.toString(),
+        eventId: claimedSession.eventId.toString(),
         sessionId,
         token,
         target: isTest ? "REVERTED" : "APPLIED"
     });
     if (!result.success) {
-        session.transition = { token, type, status: "FAILED", error: result.error };
-        await session.save();
+        await CashSession.updateOne(
+            { _id: sessionId, "transition.token": token, "transition.type": type },
+            { $set: { transition: { token, type, status: "FAILED", error: result.error } } }
+        );
         return { success: false as const, error: result.error, shortages: result.shortages };
     }
 
-    session.isTest = isTest;
-    session.stockEffectStatus = isTest ? "REVERTED" : "APPLIED";
-    session.set("transition", undefined);
-    await session.save();
+    const finalized = await CashSession.updateOne(
+        { _id: sessionId, "transition.token": token, "transition.type": type },
+        {
+            $set: { isTest, stockEffectStatus: isTest ? "REVERTED" : "APPLIED" },
+            $unset: { transition: 1 }
+        }
+    );
+    if (finalized.matchedCount !== 1) {
+        return { success: false as const, error: "Transizione interrotta: riprova per completarla" };
+    }
     revalidatePath("/admin");
     revalidatePath("/admin/orders");
     return { success: true as const, approximateOrders: result.approximateOrders };
@@ -185,26 +208,53 @@ export async function deleteCashSessionAction(sessionId: string, confirmation: s
     if (!session) return { success: false as const, error: "È possibile eliminare soltanto una sessione chiusa" };
     if (await hasUnrefundedSumUpOrders(sessionId)) return { success: false as const, error: "Storna e rimborsa i pagamenti SumUp prima di eliminare la sessione" };
 
-    const token = session.transition?.type === "DELETE" && session.transition.token ? session.transition.token : randomUUID();
-    session.deletionStatus = "IN_PROGRESS";
-    session.transition = { token, type: "DELETE", status: "IN_PROGRESS" };
-    await session.save();
-    if (session.stockEffectStatus !== "REVERTED") {
-        const stockResult = await transitionCashSessionStock({ eventId: session.eventId.toString(), sessionId, token, target: "REVERTED" });
+    const type = "DELETE" as const;
+    const token = session.transition?.type === type && session.transition.token ? session.transition.token : randomUUID();
+    const transitionGuard = session.transition?.type === type && session.transition.token
+        ? { "transition.type": type, "transition.token": token }
+        : {
+            $or: [
+                { transition: { $exists: false } },
+                { transition: null },
+                { "transition.token": { $exists: false } }
+            ]
+        };
+    const claimedSession = await CashSession.findOneAndUpdate(
+        { _id: sessionId, status: "CLOSED", ...transitionGuard },
+        {
+            $set: {
+                deletionStatus: "IN_PROGRESS",
+                transition: { token, type, status: "IN_PROGRESS" }
+            }
+        },
+        { returnDocument: "after" }
+    );
+    if (!claimedSession) return { success: false as const, error: "Un'altra transizione è già in corso sulla sessione" };
+
+    if (claimedSession.stockEffectStatus !== "REVERTED") {
+        const stockResult = await transitionCashSessionStock({ eventId: claimedSession.eventId.toString(), sessionId, token, target: "REVERTED" });
         if (!stockResult.success) {
-            session.deletionStatus = "FAILED";
-            session.transition = { token, type: "DELETE", status: "FAILED", error: stockResult.error };
-            await session.save();
+            await CashSession.updateOne(
+                { _id: sessionId, "transition.token": token, "transition.type": type },
+                {
+                    $set: {
+                        deletionStatus: "FAILED",
+                        transition: { token, type, status: "FAILED", error: stockResult.error }
+                    }
+                }
+            );
             return { success: false as const, error: stockResult.error };
         }
-        session.stockEffectStatus = "REVERTED";
-        await session.save();
+        await CashSession.updateOne(
+            { _id: sessionId, "transition.token": token, "transition.type": type },
+            { $set: { stockEffectStatus: "REVERTED" } }
+        );
     }
 
     const orderIds = (await Order.find({ cashSessionId: sessionId }).select("_id").lean() as Array<{ _id: { toString(): string } }>).map((order) => order._id.toString());
-    await PrintJob.deleteMany({ eventId: session.eventId, $or: [{ orderId: { $in: orderIds } }, { source: "CASH_SESSION", "document.sessionId": sessionId }] });
+    await PrintJob.deleteMany({ eventId: claimedSession.eventId, $or: [{ orderId: { $in: orderIds } }, { source: "CASH_SESSION", "document.sessionId": sessionId }] });
     await Order.deleteMany({ cashSessionId: sessionId });
-    await CashSession.deleteOne({ _id: sessionId });
+    await CashSession.deleteOne({ _id: sessionId, "transition.token": token, "transition.type": type });
     revalidatePath("/admin");
     revalidatePath("/admin/orders");
     return { success: true as const };

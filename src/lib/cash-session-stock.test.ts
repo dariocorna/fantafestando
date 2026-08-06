@@ -84,4 +84,18 @@ describe("cash session stock transitions", () => {
         expect(result).toMatchObject({ success: true, approximateOrders: 1 })
         expect(productUpdateOneMock).toHaveBeenCalledWith(expect.objectContaining({ _id: "p1" }), expect.objectContaining({ $inc: { stockQuantity: 2 } }))
     })
+
+    test("treats an explicitly empty adjustment snapshot as exact", async () => {
+        orderFindMock.mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue([{
+            _id: { toString: () => "o1" },
+            stockAdjustments: [],
+            cart: [{ productId: "p1", snapshotName: "Panino", quantity: 2 }]
+        }]) }) })
+
+        const result = await transitionCashSessionStock({ eventId: "e1", sessionId: "s1", token: "t4", target: "REVERTED" })
+
+        expect(result).toMatchObject({ success: true, approximateOrders: 0 })
+        expect(productFindMock).not.toHaveBeenCalled()
+        expect(productUpdateOneMock).not.toHaveBeenCalled()
+    })
 })

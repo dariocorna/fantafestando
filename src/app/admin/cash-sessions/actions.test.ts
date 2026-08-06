@@ -2,15 +2,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
     ensureAdminSessionMock,
+    dbConnectMock,
     cashSessionFindByIdMock,
+    cashSessionFindOneAndUpdateMock,
+    cashSessionUpdateOneMock,
     buildCashSessionPrintDocumentV2Mock,
     orderFindMock,
+    orderExistsMock,
+    transitionCashSessionStockMock,
     productFindMock
 } = vi.hoisted(() => ({
     ensureAdminSessionMock: vi.fn(),
+    dbConnectMock: vi.fn(),
     cashSessionFindByIdMock: vi.fn(),
+    cashSessionFindOneAndUpdateMock: vi.fn(),
+    cashSessionUpdateOneMock: vi.fn(),
     buildCashSessionPrintDocumentV2Mock: vi.fn(),
     orderFindMock: vi.fn(),
+    orderExistsMock: vi.fn(),
+    transitionCashSessionStockMock: vi.fn(),
     productFindMock: vi.fn()
 }));
 
@@ -20,15 +30,22 @@ vi.mock("@/lib/authz", () => ({
 
 vi.mock("@/models/CashSession", () => ({
     default: {
-        findById: cashSessionFindByIdMock
+        findById: cashSessionFindByIdMock,
+        findOneAndUpdate: cashSessionFindOneAndUpdateMock,
+        updateOne: cashSessionUpdateOneMock
     }
 }));
 
 vi.mock("@/models/Order", () => ({
     default: {
-        find: orderFindMock
+        find: orderFindMock,
+        exists: orderExistsMock
     }
 }));
+
+vi.mock("@/lib/mongoose", () => ({ default: dbConnectMock }));
+vi.mock("@/lib/cash-session-stock", () => ({ transitionCashSessionStock: transitionCashSessionStockMock }));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 vi.mock("@/models/Product", () => ({
     default: {
@@ -40,7 +57,7 @@ vi.mock("@/lib/print-report", () => ({
     buildCashSessionPrintDocumentV2: buildCashSessionPrintDocumentV2Mock
 }));
 
-import { getClosedCashSessionPrintDocumentAction } from "./actions";
+import { getClosedCashSessionPrintDocumentAction, setCashSessionTestAction } from "./actions";
 
 describe("getClosedCashSessionPrintDocumentAction", () => {
     beforeEach(() => {
@@ -174,5 +191,47 @@ describe("getClosedCashSessionPrintDocumentAction", () => {
             ])
         }));
         expect(result).toEqual({ title: "MOCK DOCUMENT" });
+    });
+});
+
+describe("setCashSessionTestAction", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        ensureAdminSessionMock.mockResolvedValue({ ok: true, user: { id: "admin-1", role: "ADMIN" } });
+        orderExistsMock.mockResolvedValue(null);
+        transitionCashSessionStockMock.mockResolvedValue({ success: true, approximateOrders: 0 });
+        cashSessionUpdateOneMock.mockResolvedValue({ acknowledged: true, matchedCount: 1 });
+    });
+
+    it("allows only one new token to claim a closed-session transition", async () => {
+        const session = {
+            _id: "session-1",
+            eventId: { toString: () => "event-1" },
+            status: "CLOSED",
+            isTest: false
+        };
+        cashSessionFindByIdMock.mockResolvedValue(session);
+        cashSessionFindOneAndUpdateMock
+            .mockResolvedValueOnce(session)
+            .mockResolvedValueOnce(null);
+
+        const results = await Promise.all([
+            setCashSessionTestAction("session-1", true),
+            setCashSessionTestAction("session-1", true)
+        ]);
+
+        expect(results.filter((result) => result.success)).toHaveLength(1);
+        expect(results.filter((result) => !result.success)).toHaveLength(1);
+        expect(transitionCashSessionStockMock).toHaveBeenCalledTimes(1);
+        expect(cashSessionFindOneAndUpdateMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                _id: "session-1",
+                status: "CLOSED",
+                isTest: { $ne: true },
+                $or: expect.any(Array)
+            }),
+            { $set: { transition: { token: expect.any(String), type: "TO_TEST", status: "IN_PROGRESS" } } },
+            { returnDocument: "after" }
+        );
     });
 });

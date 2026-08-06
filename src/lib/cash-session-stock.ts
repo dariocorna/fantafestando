@@ -17,7 +17,7 @@ type SessionOrder = {
 }
 
 function adjustmentsForOrder(order: SessionOrder): { adjustments: StockAdjustment[]; approximate: boolean } {
-    if (order.stockAdjustments?.length) {
+    if (Array.isArray(order.stockAdjustments)) {
         return {
             adjustments: order.stockAdjustments.map((entry) => ({ ...entry, entityId: entry.entityId.toString() })),
             approximate: false
