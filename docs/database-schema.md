@@ -35,6 +35,7 @@ interface ICategory {
   uiColor: string;              // Semantic color for POS (e.g. "bg-orange-500")
   printOrder: number;           // Sorting order in POS
   printerId?: ObjectId;         // OPTIONAL: Link to IPrinter for comanda routing
+  printKitchenCopyAtCashier: boolean; // Optional department copy on cashier printer
 }
 ```
 
