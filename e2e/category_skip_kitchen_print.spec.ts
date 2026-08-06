@@ -90,6 +90,23 @@ test.describe("Category skip kitchen print", () => {
 
                 return category?.skipKitchenPrint === false;
             }, { timeout: 15000 }).toBe(true);
+
+            await categoryRow.getByLabel("Modifica").click();
+            await expect(editDialog.locator("#printKitchenCopyAtCashier")).not.toBeChecked();
+            await editDialog.locator("#printKitchenCopyAtCashier").check();
+            await editDialog.getByRole("button", { name: "Salva Modifiche", exact: true }).click();
+            await expect(editDialog).toBeHidden();
+            await expect(categoryRow).toContainText("Reparto + cliente in cassa");
+
+            await expect.poll(async () => {
+                await ensureDbConnection();
+                const db = mongoose.connection.db;
+                if (!db) return false;
+                const category = await db.collection("categories").findOne({ name: categoryName }) as {
+                    printKitchenCopyAtCashier?: boolean;
+                } | null;
+                return Boolean(category?.printKitchenCopyAtCashier);
+            }, { timeout: 15000 }).toBe(true);
         } finally {
             await cleanupEventArtifactsByName(eventName);
         }
@@ -198,6 +215,7 @@ test.describe("Category skip kitchen print", () => {
                     printOrder: 0,
                     printerId: kitchenPrinterId,
                     skipKitchenPrint: false,
+                    printKitchenCopyAtCashier: true,
                     createdAt: new Date(),
                     updatedAt: new Date()
                 },
@@ -284,6 +302,13 @@ test.describe("Category skip kitchen print", () => {
                     && sameItems(job, [kitchenShortName])
                 );
 
+                const cashierDepartmentCopy = jobs.filter((job) =>
+                    job.printType === "KITCHEN_ORDER"
+                    && job.destinationHost === "127.0.0.1"
+                    && job.destinationPort === 19100
+                    && sameItems(job, [kitchenShortName])
+                );
+
                 const skippedCategoryJobs = jobs.filter((job) =>
                     job.printType !== "CASHIER_SUMMARY"
                     && sameItems(job, [skippedShortName])
@@ -297,6 +322,7 @@ test.describe("Category skip kitchen print", () => {
                 if (
                     cashierSummary.length !== 1
                     || kitchenDepartmentCopy.length !== 1
+                    || cashierDepartmentCopy.length !== 1
                     || customerKitchenCopy.length !== 1
                     || skippedCategoryJobs.length !== 0
                     || skippedDestinationJobs.length !== 0
@@ -307,6 +333,7 @@ test.describe("Category skip kitchen print", () => {
                 return {
                     cashierSummary,
                     kitchenDepartmentCopy,
+                    cashierDepartmentCopy,
                     customerKitchenCopy
                 };
             };

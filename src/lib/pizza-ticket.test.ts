@@ -86,6 +86,54 @@ describe("dish ticket helpers", () => {
         expect(getNextPizzaOrderNumbersMock).toHaveBeenCalledWith(EVENT_ID, 2);
     });
 
+    test("allocates one number per unit when product or order-line splitting is enabled", async () => {
+        mockProducts([
+            { _id: "prod-calamari", categoryId: "cat-numbered", splitKitchenPrintPerUnit: true },
+            { _id: "prod-arrosticini", categoryId: "cat-numbered", splitKitchenPrintPerUnit: false }
+        ]);
+        mockCategories([{ _id: "cat-numbered" }]);
+
+        const result = await resolveDishTicketsForCart(EVENT_ID, [
+            { productId: "prod-calamari", snapshotName: "Calamari", quantity: 2 },
+            {
+                productId: "prod-arrosticini",
+                snapshotName: "Arrosticini",
+                quantity: 2,
+                splitPrintPerUnit: true
+            }
+        ]);
+
+        expect(result.map((ticket) => [ticket.productId, ticket.pizzaNumber])).toEqual([
+            ["prod-calamari", 77],
+            ["prod-calamari", 78],
+            ["prod-arrosticini", 79],
+            ["prod-arrosticini", 80]
+        ]);
+        expect(getNextPizzaOrderNumbersMock).toHaveBeenCalledWith(EVENT_ID, 4);
+    });
+
+    test("multiplies split fixed-menu components by the menu quantity", async () => {
+        mockProducts([{
+            _id: "prod-calamari",
+            categoryId: "cat-numbered",
+            splitKitchenPrintPerUnit: true
+        }]);
+        mockCategories([{ _id: "cat-numbered" }]);
+
+        const result = await resolveDishTicketsForCart(EVENT_ID, [{
+            productId: "menu-1",
+            quantity: 2,
+            includedComponents: [{
+                productId: "prod-calamari",
+                snapshotName: "Calamari",
+                quantity: 2
+            }]
+        }]);
+
+        expect(result.map((ticket) => ticket.pizzaNumber)).toEqual([77, 78, 79, 80]);
+        expect(getNextPizzaOrderNumbersMock).toHaveBeenCalledWith(EVENT_ID, 4);
+    });
+
     test("reuses retained tickets and allocates only newly added products", async () => {
         mockProducts([
             { _id: "prod-calamari", categoryId: "cat-numbered" },
@@ -137,6 +185,31 @@ describe("dish ticket helpers", () => {
         expect(result).toHaveLength(1);
         expect(result[0].productId).toBe("prod-calamari");
         expect(getNextPizzaOrderNumbersMock).toHaveBeenCalledWith(EVENT_ID, 0);
+    });
+
+    test("retains existing per-unit tickets and allocates only a quantity increase", async () => {
+        mockProducts([{
+            _id: "prod-calamari",
+            categoryId: "cat-numbered",
+            splitKitchenPrintPerUnit: true
+        }]);
+        mockCategories([{ _id: "cat-numbered" }]);
+
+        const result = await resolveDishTicketsForCart(
+            EVENT_ID,
+            [{ productId: "prod-calamari", snapshotName: "Calamari", quantity: 3 }],
+            [
+                { productId: "prod-calamari", snapshotName: "Calamari", pizzaNumber: 13, state: "READY" },
+                { productId: "prod-calamari", snapshotName: "Calamari", pizzaNumber: 14, state: "QUEUED" }
+            ]
+        );
+
+        expect(result.map((ticket) => [ticket.pizzaNumber, ticket.state])).toEqual([
+            [13, "READY"],
+            [14, "QUEUED"],
+            [77, "QUEUED"]
+        ]);
+        expect(getNextPizzaOrderNumbersMock).toHaveBeenCalledWith(EVENT_ID, 1);
     });
 
     test("creates no tickets for standard products or invalid events", async () => {

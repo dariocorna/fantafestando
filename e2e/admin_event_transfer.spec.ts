@@ -152,6 +152,7 @@ async function seedEventTransferFixture(sourceEventName: string, token: string):
     printOrder: 7,
     printerId: kitchenPrinter._id,
     skipKitchenPrint: false,
+    printKitchenCopyAtCashier: true,
     pizzaFlowEnabled: true,
   });
 
@@ -442,6 +443,7 @@ test.describe("Admin event export/import", () => {
     expect(importedCategory).toMatchObject({
       printOrder: 7,
       skipKitchenPrint: false,
+      printKitchenCopyAtCashier: true,
       pizzaFlowEnabled: true,
     });
     expect(importedIngredient).toMatchObject({

@@ -22,6 +22,7 @@ interface AdminPrintJobPayload {
         destinationPort?: number;
         document?: {
             items?: Array<{ name?: string; qty?: number; quantity?: number }>;
+            pizzaNumber?: number;
         };
     }>;
 }
@@ -240,6 +241,7 @@ test.describe("Product split kitchen print", () => {
                 uiColor: "#f97316",
                 printOrder: 0,
                 printerId: kitchenPrinterId,
+                pizzaFlowEnabled: true,
                 createdAt: new Date(),
                 updatedAt: new Date()
             });
@@ -304,7 +306,15 @@ test.describe("Product split kitchen print", () => {
                     && extractQuantities(job)[0] === 1
                 );
 
-                if (cashierSummary.length !== 1 || kitchenJobs.length !== 3 || customerJobs.length !== 3) {
+                const kitchenNumbers = kitchenJobs.map((job) => job.document?.pizzaNumber).filter((value): value is number => typeof value === "number");
+                const customerNumbers = customerJobs.map((job) => job.document?.pizzaNumber).filter((value): value is number => typeof value === "number");
+                if (
+                    cashierSummary.length !== 1
+                    || kitchenJobs.length !== 3
+                    || customerJobs.length !== 3
+                    || new Set(kitchenNumbers).size !== 3
+                    || [...kitchenNumbers].sort((a, b) => a - b).join(",") !== [...customerNumbers].sort((a, b) => a - b).join(",")
+                ) {
                     return null;
                 }
 

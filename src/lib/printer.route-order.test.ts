@@ -785,6 +785,59 @@ describe("PrinterService.routeOrderToPrinters", () => {
         }));
     });
 
+    test("prints the optional department and customer pair on the cashier printer", async () => {
+        mockOrder(buildOrder("order-pizza-cashier-pair", {
+            dishTickets: [{
+                productId: "prod-1",
+                snapshotName: "Calamari",
+                pizzaNumber: 81,
+                state: "QUEUED"
+            }]
+        }));
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([{
+            _id: { toString: () => "prod-1" },
+            categoryId: { toString: () => "cat-pizza" },
+            basePrice: 7,
+            shortName: "CAL"
+        }]);
+        mockCategories([{
+            _id: { toString: () => "cat-pizza" },
+            name: "Friggitoria",
+            pizzaFlowEnabled: true,
+            printKitchenCopyAtCashier: true
+        }]);
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters("order-pizza-cashier-pair", "pos-1");
+        const printedJobs = printComandaSpy.mock.calls.map(([job]) => job);
+        const kitchenJob = printedJobs.find((job) => job.printType === "KITCHEN_ORDER");
+        const customerJob = printedJobs.find((job) => job.printType === "CUSTOMER_ORDER");
+
+        expect(result).toEqual([true, true, true]);
+        expect(kitchenJob).toEqual(expect.objectContaining({
+            ip: "192.168.178.203",
+            printType: "KITCHEN_ORDER",
+            pizzaNumber: 81,
+            pizzaBarcodeValue: "00000819"
+        }));
+        expect(customerJob).toEqual(expect.objectContaining({
+            ip: "192.168.178.203",
+            printType: "CUSTOMER_ORDER",
+            pizzaNumber: 81
+        }));
+        expect(customerJob?.pizzaBarcodeValue).toBeUndefined();
+    });
+
     test("splits pizza and non-pizza kitchen jobs when they share the same printer", async () => {
         mockOrder(buildOrder("order-mixed-pizza", {
             cart: [
@@ -1251,12 +1304,20 @@ describe("PrinterService.routeOrderToPrinters", () => {
 
     test("keeps pizza metadata on each separated kitchen and customer copy", async () => {
         mockOrder(buildOrder("order-pizza-split", {
-            dishTickets: [{
-                productId: "prod-1",
-                snapshotName: "Pizza Margherita",
-                pizzaNumber: 88,
-                state: "QUEUED"
-            }],
+            dishTickets: [
+                {
+                    productId: "prod-1",
+                    snapshotName: "Pizza Margherita",
+                    pizzaNumber: 88,
+                    state: "QUEUED"
+                },
+                {
+                    productId: "prod-1",
+                    snapshotName: "Pizza Margherita",
+                    pizzaNumber: 89,
+                    state: "QUEUED"
+                }
+            ],
             cart: [
                 {
                     productId: "prod-1",
@@ -1309,8 +1370,10 @@ describe("PrinterService.routeOrderToPrinters", () => {
         expect(result).toHaveLength(5);
         expect(kitchenJobs).toHaveLength(2);
         expect(customerJobs).toHaveLength(2);
-        expect(kitchenJobs.every((job) => job.pizzaNumber === 88 && job.pizzaBarcodeValue === "00000888")).toBe(true);
-        expect(customerJobs.every((job) => job.pizzaNumber === 88 && job.pizzaBarcodeValue === undefined)).toBe(true);
+        expect(kitchenJobs.map((job) => job.pizzaNumber)).toEqual([88, 89]);
+        expect(kitchenJobs.map((job) => job.pizzaBarcodeValue)).toEqual(["00000888", "00000895"]);
+        expect(customerJobs.map((job) => job.pizzaNumber)).toEqual([88, 89]);
+        expect(customerJobs.every((job) => job.pizzaBarcodeValue === undefined)).toBe(true);
     });
 
     test("prints the easter egg raster on cashier close and clears the stored binary after success", async () => {
