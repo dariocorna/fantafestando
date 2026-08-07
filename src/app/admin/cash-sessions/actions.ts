@@ -4,6 +4,7 @@ import { ensureAdminSession } from "@/lib/authz";
 import dbConnect from "@/lib/mongoose";
 import { PrinterService } from "@/lib/printer";
 import CashSession from "@/models/CashSession";
+import PosDevice from "@/models/PosDevice";
 import Order from "@/models/Order";
 import Product from "@/models/Product";
 import { buildCashSessionPrintDocumentV2 } from "@/lib/print-report";
@@ -118,7 +119,9 @@ export async function reprintClosedCashSessionAction(sessionId: string) {
     await dbConnect();
     const session = await CashSession.findOne({ _id: sessionId, status: "CLOSED" }).select("eventId posDeviceId").lean() as ({ eventId: { toString(): string }; posDeviceId: { toString(): string } } | null);
     if (!session) return { success: false as const, error: "Sessione chiusa non trovata" };
-    const document = await getClosedCashSessionPrintDocumentAction(sessionId);
+    // without the real device name the reprinted summary identifies the wrong till
+    const posDevice = await PosDevice.findById(session.posDeviceId).select("name").lean() as ({ name?: string } | null);
+    const document = await getClosedCashSessionPrintDocumentAction(sessionId, posDevice?.name);
     const printed = await PrinterService.printCashSessionSummary(
         session.eventId.toString(),
         session.posDeviceId.toString(),
