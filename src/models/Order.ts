@@ -86,6 +86,10 @@ export interface IOrder extends Document {
         quantity: number;
     }>;
     stockEffectStatus?: "APPLIED" | "REVERTED";
+    stockEffectClaim?: {
+        token: string;
+        target: "APPLIED" | "REVERTED";
+    };
     stornoMeta?: {
         status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
         reason?: string;
@@ -224,6 +228,10 @@ const OrderSchema = new Schema<IOrder>({
         quantity: { type: Number, required: true, min: 1 }
     }],
     stockEffectStatus: { type: String, enum: ["APPLIED", "REVERTED"], default: "APPLIED" },
+    stockEffectClaim: {
+        token: { type: String },
+        target: { type: String, enum: ["APPLIED", "REVERTED"] }
+    },
     stornoMeta: {
         status: {
             type: String,

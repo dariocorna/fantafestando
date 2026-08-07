@@ -10,6 +10,7 @@ export interface ICashSession extends Document {
         token: string
         type: "TO_TEST" | "TO_NORMAL" | "CLOSE" | "DELETE"
         status: "IN_PROGRESS" | "FAILED"
+        claimedAt?: Date
         error?: string
     }
     deletionStatus?: "IN_PROGRESS" | "FAILED"
@@ -39,6 +40,7 @@ const CashSessionSchema = new Schema<ICashSession>({
         token: { type: String },
         type: { type: String, enum: ["TO_TEST", "TO_NORMAL", "CLOSE", "DELETE"] },
         status: { type: String, enum: ["IN_PROGRESS", "FAILED"] },
+        claimedAt: { type: Date },
         error: { type: String }
     },
     deletionStatus: { type: String, enum: ["IN_PROGRESS", "FAILED"] },

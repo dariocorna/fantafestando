@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
-const { orderFindMock, orderUpdateOneMock, productFindMock, productUpdateOneMock, ingredientFindMock, ingredientUpdateOneMock } = vi.hoisted(() => ({
+const { orderFindMock, orderUpdateOneMock, orderExistsMock, productFindMock, productUpdateOneMock, productExistsMock, ingredientFindMock, ingredientUpdateOneMock, ingredientExistsMock } = vi.hoisted(() => ({
     orderFindMock: vi.fn(), orderUpdateOneMock: vi.fn(), productFindMock: vi.fn(), productUpdateOneMock: vi.fn(),
-    ingredientFindMock: vi.fn(), ingredientUpdateOneMock: vi.fn()
+    orderExistsMock: vi.fn(), productExistsMock: vi.fn(), ingredientFindMock: vi.fn(), ingredientUpdateOneMock: vi.fn(), ingredientExistsMock: vi.fn()
 }))
 
-vi.mock("@/models/Order", () => ({ default: { find: orderFindMock, updateOne: orderUpdateOneMock } }))
-vi.mock("@/models/Product", () => ({ default: { find: productFindMock, updateOne: productUpdateOneMock } }))
-vi.mock("@/models/Ingredient", () => ({ default: { find: ingredientFindMock, updateOne: ingredientUpdateOneMock } }))
+vi.mock("@/models/Order", () => ({ default: { find: orderFindMock, updateOne: orderUpdateOneMock, exists: orderExistsMock } }))
+vi.mock("@/models/Product", () => ({ default: { find: productFindMock, updateOne: productUpdateOneMock, exists: productExistsMock } }))
+vi.mock("@/models/Ingredient", () => ({ default: { find: ingredientFindMock, updateOne: ingredientUpdateOneMock, exists: ingredientExistsMock } }))
 
 import { transitionCashSessionStock } from "@/lib/cash-session-stock"
 
@@ -20,6 +20,10 @@ describe("cash session stock transitions", () => {
         vi.clearAllMocks()
         ingredientFindMock.mockReturnValue(queryResult([]))
         ingredientUpdateOneMock.mockResolvedValue({ modifiedCount: 0 })
+        orderUpdateOneMock.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 })
+        orderExistsMock.mockResolvedValue(null)
+        productExistsMock.mockResolvedValue(null)
+        ingredientExistsMock.mockResolvedValue(null)
     })
 
     test("resumes a partial crash without decrementing an already processed adjustment twice", async () => {
@@ -43,11 +47,12 @@ describe("cash session stock transitions", () => {
                 crashOnce = false
                 throw new Error("crash simulato")
             }
-            if (key && keys.get(id)?.has(key)) return { modifiedCount: 0 }
+            if (key && keys.get(id)?.has(key)) return { matchedCount: 0, modifiedCount: 0 }
             if (key) keys.get(id)?.add(key)
             if (typeof update.$inc?.stockQuantity === "number") stocks.set(id, (stocks.get(id) || 0) + update.$inc.stockQuantity)
-            return { modifiedCount: 1 }
+            return { matchedCount: 1, modifiedCount: 1 }
         })
+        productExistsMock.mockImplementation(async (query) => keys.get(String(query._id))?.has(String(query.stockOperationKeys)) || null)
 
         await expect(transitionCashSessionStock({ eventId: "e1", sessionId: "s1", token: "t1", target: "APPLIED" })).rejects.toThrow("crash simulato")
         expect(stocks.get("p1")).toBe(1)
@@ -56,7 +61,10 @@ describe("cash session stock transitions", () => {
         await expect(transitionCashSessionStock({ eventId: "e1", sessionId: "s1", token: "t1", target: "APPLIED" })).resolves.toMatchObject({ success: true })
         expect(stocks.get("p1")).toBe(1)
         expect(stocks.get("p2")).toBe(1)
-        expect(orderUpdateOneMock).toHaveBeenCalledWith(expect.anything(), { $set: { stockEffectStatus: "APPLIED" } })
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            expect.objectContaining({ "stockEffectClaim.token": "t1" }),
+            { $set: { stockEffectStatus: "APPLIED" }, $unset: { stockEffectClaim: 1 } }
+        )
     })
 
     test("does not start TEST to normal when aggregate stock is insufficient", async () => {
@@ -96,6 +104,39 @@ describe("cash session stock transitions", () => {
 
         expect(result).toMatchObject({ success: true, approximateOrders: 0 })
         expect(productFindMock).not.toHaveBeenCalled()
+        expect(productUpdateOneMock).not.toHaveBeenCalled()
+    })
+
+    test("does not advance the order when a concurrent stock change rejects the conditional write", async () => {
+        orderFindMock.mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue([{
+            _id: { toString: () => "o1" },
+            stockAdjustments: [{ entityType: "PRODUCT", entityId: "p1", quantity: 2 }],
+            stockEffectStatus: "REVERTED"
+        }]) }) })
+        productFindMock.mockReturnValue(queryResult([{ _id: { toString: () => "p1" }, name: "Panino", stockQuantity: 2 }]))
+        productUpdateOneMock.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 })
+        productExistsMock.mockResolvedValue(null)
+
+        const result = await transitionCashSessionStock({ eventId: "e1", sessionId: "s1", token: "race", target: "APPLIED" })
+
+        expect(result).toMatchObject({ success: false, error: expect.stringContaining("Scorte cambiate") })
+        expect(orderUpdateOneMock).not.toHaveBeenCalledWith(
+            expect.objectContaining({ "stockEffectClaim.token": "race" }),
+            expect.objectContaining({ $set: { stockEffectStatus: "APPLIED" } })
+        )
+    })
+
+    test("does not touch stock when another operation already claimed an order", async () => {
+        orderFindMock.mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue([{
+            _id: { toString: () => "o1" },
+            stockAdjustments: [{ entityType: "PRODUCT", entityId: "p1", quantity: 1 }]
+        }]) }) })
+        productFindMock.mockReturnValue(queryResult([{ _id: { toString: () => "p1" }, stockQuantity: 5 }]))
+        orderUpdateOneMock.mockResolvedValueOnce({ matchedCount: 0, modifiedCount: 0 })
+
+        const result = await transitionCashSessionStock({ eventId: "e1", sessionId: "s1", token: "session", target: "REVERTED" })
+
+        expect(result).toMatchObject({ success: false, error: expect.stringContaining("modifica scorte in corso") })
         expect(productUpdateOneMock).not.toHaveBeenCalled()
     })
 })

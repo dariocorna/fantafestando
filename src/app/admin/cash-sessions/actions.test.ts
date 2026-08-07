@@ -230,7 +230,7 @@ describe("setCashSessionTestAction", () => {
                 isTest: { $ne: true },
                 $or: expect.any(Array)
             }),
-            { $set: { transition: { token: expect.any(String), type: "TO_TEST", status: "IN_PROGRESS" } } },
+            { $set: { transition: { token: expect.any(String), type: "TO_TEST", status: "IN_PROGRESS", claimedAt: expect.any(Date) } } },
             { returnDocument: "after" }
         );
     });

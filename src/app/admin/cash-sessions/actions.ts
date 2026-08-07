@@ -8,7 +8,7 @@ import PrintJob from "@/models/PrintJob";
 import PosDevice from "@/models/PosDevice";
 import dbConnect from "@/lib/mongoose";
 import { transitionCashSessionStock } from "@/lib/cash-session-stock";
-import { randomUUID } from "node:crypto";
+import { buildCashSessionTransitionClaim } from "@/lib/cash-session-transition";
 import { revalidatePath } from "next/cache";
 import { PrinterService } from "@/lib/printer";
 import { buildCashSessionPrintDocumentV2 } from "@/lib/print-report";
@@ -150,21 +150,12 @@ export async function setCashSessionTestAction(sessionId: string, isTest: boolea
     }
 
     const type = isTest ? "TO_TEST" : "TO_NORMAL";
-    const token = session.transition?.type === type && session.transition.token
-        ? session.transition.token
-        : randomUUID();
-    const transitionGuard = session.transition?.type === type && session.transition.token
-        ? { "transition.type": type, "transition.token": token }
-        : {
-            $or: [
-                { transition: { $exists: false } },
-                { transition: null },
-                { "transition.token": { $exists: false } }
-            ]
-        };
+    const claim = buildCashSessionTransitionClaim(session.transition, type);
+    if (!claim.success) return { success: false as const, error: claim.error, shortages: undefined };
+    const { token } = claim;
     const claimedSession = await CashSession.findOneAndUpdate(
-        { _id: sessionId, status: "CLOSED", isTest: { $ne: isTest }, ...transitionGuard },
-        { $set: { transition: { token, type, status: "IN_PROGRESS" } } },
+        { _id: sessionId, status: "CLOSED", isTest: { $ne: isTest }, ...claim.guard },
+        { $set: { transition: claim.transition } },
         { returnDocument: "after" }
     );
     if (!claimedSession) {
@@ -178,14 +169,14 @@ export async function setCashSessionTestAction(sessionId: string, isTest: boolea
     });
     if (!result.success) {
         await CashSession.updateOne(
-            { _id: sessionId, "transition.token": token, "transition.type": type },
-            { $set: { transition: { token, type, status: "FAILED", error: result.error } } }
+            { _id: sessionId, "transition.token": token, "transition.type": type, "transition.claimedAt": claim.transition.claimedAt },
+            { $set: { transition: { ...claim.transition, status: "FAILED", error: result.error } } }
         );
         return { success: false as const, error: result.error, shortages: result.shortages };
     }
 
     const finalized = await CashSession.updateOne(
-        { _id: sessionId, "transition.token": token, "transition.type": type },
+        { _id: sessionId, "transition.token": token, "transition.type": type, "transition.claimedAt": claim.transition.claimedAt },
         {
             $set: { isTest, stockEffectStatus: isTest ? "REVERTED" : "APPLIED" },
             $unset: { transition: 1 }
@@ -209,22 +200,15 @@ export async function deleteCashSessionAction(sessionId: string, confirmation: s
     if (await hasUnrefundedSumUpOrders(sessionId)) return { success: false as const, error: "Storna e rimborsa i pagamenti SumUp prima di eliminare la sessione" };
 
     const type = "DELETE" as const;
-    const token = session.transition?.type === type && session.transition.token ? session.transition.token : randomUUID();
-    const transitionGuard = session.transition?.type === type && session.transition.token
-        ? { "transition.type": type, "transition.token": token }
-        : {
-            $or: [
-                { transition: { $exists: false } },
-                { transition: null },
-                { "transition.token": { $exists: false } }
-            ]
-        };
+    const claim = buildCashSessionTransitionClaim(session.transition, type);
+    if (!claim.success) return claim;
+    const { token } = claim;
     const claimedSession = await CashSession.findOneAndUpdate(
-        { _id: sessionId, status: "CLOSED", ...transitionGuard },
+        { _id: sessionId, status: "CLOSED", ...claim.guard },
         {
             $set: {
                 deletionStatus: "IN_PROGRESS",
-                transition: { token, type, status: "IN_PROGRESS" }
+                transition: claim.transition
             }
         },
         { returnDocument: "after" }
@@ -235,18 +219,18 @@ export async function deleteCashSessionAction(sessionId: string, confirmation: s
         const stockResult = await transitionCashSessionStock({ eventId: claimedSession.eventId.toString(), sessionId, token, target: "REVERTED" });
         if (!stockResult.success) {
             await CashSession.updateOne(
-                { _id: sessionId, "transition.token": token, "transition.type": type },
+                { _id: sessionId, "transition.token": token, "transition.type": type, "transition.claimedAt": claim.transition.claimedAt },
                 {
                     $set: {
                         deletionStatus: "FAILED",
-                        transition: { token, type, status: "FAILED", error: stockResult.error }
+                        transition: { ...claim.transition, status: "FAILED", error: stockResult.error }
                     }
                 }
             );
             return { success: false as const, error: stockResult.error };
         }
         await CashSession.updateOne(
-            { _id: sessionId, "transition.token": token, "transition.type": type },
+            { _id: sessionId, "transition.token": token, "transition.type": type, "transition.claimedAt": claim.transition.claimedAt },
             { $set: { stockEffectStatus: "REVERTED" } }
         );
     }
@@ -254,7 +238,7 @@ export async function deleteCashSessionAction(sessionId: string, confirmation: s
     const orderIds = (await Order.find({ cashSessionId: sessionId }).select("_id").lean() as Array<{ _id: { toString(): string } }>).map((order) => order._id.toString());
     await PrintJob.deleteMany({ eventId: claimedSession.eventId, $or: [{ orderId: { $in: orderIds } }, { source: "CASH_SESSION", "document.sessionId": sessionId }] });
     await Order.deleteMany({ cashSessionId: sessionId });
-    await CashSession.deleteOne({ _id: sessionId, "transition.token": token, "transition.type": type });
+    await CashSession.deleteOne({ _id: sessionId, "transition.token": token, "transition.type": type, "transition.claimedAt": claim.transition.claimedAt });
     revalidatePath("/admin");
     revalidatePath("/admin/orders");
     return { success: true as const };

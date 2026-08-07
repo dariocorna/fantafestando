@@ -16,6 +16,10 @@ type SessionOrder = {
     ingredientPlan?: Array<{ ingredientId?: { toString(): string } | string; quantity: number }>
 }
 
+type TransitionResult =
+    | { success: true }
+    | { success: false; error: string }
+
 function adjustmentsForOrder(order: SessionOrder): { adjustments: StockAdjustment[]; approximate: boolean } {
     if (Array.isArray(order.stockAdjustments)) {
         return {
@@ -68,25 +72,35 @@ export async function transitionCashSessionStock(params: {
         if (shortages.length) return { success: false as const, error: "Scorte insufficienti", shortages }
     }
 
-    for (const { order, adjustments } of plans) {
-        const aggregated = aggregateStockAdjustments(adjustments)
-        for (let index = 0; index < aggregated.length; index += 1) {
-            const adjustment = aggregated[index]
-            const Model = adjustment.entityType === "PRODUCT" ? Product : Ingredient
-            const key = `${params.token}:${order._id.toString()}:${index}`
-            const delta = params.target === "APPLIED" ? -adjustment.quantity : adjustment.quantity
-            const query: Record<string, unknown> = {
-                eventId: params.eventId,
-                _id: adjustment.entityId,
-                stockQuantity: params.target === "APPLIED" ? { $gte: adjustment.quantity } : { $ne: null },
-                stockOperationKeys: { $ne: key }
-            }
-            await Model.updateOne(query, { $inc: { stockQuantity: delta }, $addToSet: { stockOperationKeys: key } })
-        }
-        await Order.updateOne(
-            { _id: order._id, stockEffectStatus: { $ne: params.target } },
-            { $set: { stockEffectStatus: params.target } }
+    for (const { order } of plans) {
+        const claimed = await Order.updateOne(
+            {
+                _id: order._id,
+                status: "PAID",
+                stockEffectStatus: { $ne: params.target },
+                $or: [
+                    { stockEffectClaim: { $exists: false } },
+                    { stockEffectClaim: null },
+                    { "stockEffectClaim.token": params.token, "stockEffectClaim.target": params.target }
+                ]
+            },
+            { $set: { stockEffectClaim: { token: params.token, target: params.target } } }
         )
+        if ((claimed.matchedCount ?? claimed.modifiedCount) !== 1) {
+            return { success: false as const, error: "Un ordine della sessione ha già una modifica scorte in corso" }
+        }
+    }
+
+    for (const { order, adjustments } of plans) {
+        const result = await transitionClaimedOrderStock({
+            eventId: params.eventId,
+            orderId: order._id.toString(),
+            token: params.token,
+            target: params.target,
+            adjustments,
+            releaseClaim: true
+        })
+        if (!result.success) return result
     }
 
     const productIds = total.filter((entry) => entry.entityType === "PRODUCT").map((entry) => entry.entityId)
@@ -97,4 +111,52 @@ export async function transitionCashSessionStock(params: {
         }
     }
     return { success: true as const, approximateOrders: plans.filter((plan) => plan.approximate).length, source }
+}
+
+export async function transitionClaimedOrderStock(params: {
+    eventId: string
+    orderId: string
+    token: string
+    target: "APPLIED" | "REVERTED"
+    adjustments: StockAdjustment[]
+    releaseClaim: boolean
+}): Promise<TransitionResult> {
+    const aggregated = aggregateStockAdjustments(params.adjustments)
+    for (let index = 0; index < aggregated.length; index += 1) {
+        const adjustment = aggregated[index]
+        const Model = adjustment.entityType === "PRODUCT" ? Product : Ingredient
+        const key = `${params.token}:${params.orderId}:${index}`
+        const delta = params.target === "APPLIED" ? -adjustment.quantity : adjustment.quantity
+        const result = await Model.updateOne(
+            {
+                eventId: params.eventId,
+                _id: adjustment.entityId,
+                stockQuantity: params.target === "APPLIED" ? { $gte: adjustment.quantity } : { $ne: null },
+                stockOperationKeys: { $ne: key }
+            },
+            { $inc: { stockQuantity: delta }, $addToSet: { stockOperationKeys: key } }
+        )
+        if ((result.matchedCount ?? result.modifiedCount) !== 1) {
+            const alreadyApplied = await Model.exists({ eventId: params.eventId, _id: adjustment.entityId, stockOperationKeys: key })
+            if (!alreadyApplied) return { success: false, error: "Scorte cambiate durante l'operazione: correggile e riprova" }
+        }
+    }
+
+    const finalized = await Order.updateOne(
+        {
+            _id: params.orderId,
+            stockEffectStatus: { $ne: params.target },
+            "stockEffectClaim.token": params.token,
+            "stockEffectClaim.target": params.target
+        },
+        {
+            $set: { stockEffectStatus: params.target },
+            ...(params.releaseClaim ? { $unset: { stockEffectClaim: 1 } } : {})
+        }
+    )
+    if ((finalized.matchedCount ?? finalized.modifiedCount) !== 1) {
+        const alreadyFinalized = await Order.exists({ _id: params.orderId, stockEffectStatus: params.target })
+        if (!alreadyFinalized) return { success: false, error: "Ordine cambiato durante l'operazione: riprova" }
+    }
+    return { success: true }
 }

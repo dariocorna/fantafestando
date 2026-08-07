@@ -75,7 +75,7 @@ interface ICashSession {
   status: "OPEN" | "CLOSED";
   isTest: boolean;
   stockEffectStatus: "APPLIED" | "REVERTED";
-  transition?: { token: string; type: "TO_TEST" | "TO_NORMAL" | "CLOSE" | "DELETE"; status: "IN_PROGRESS" | "FAILED"; error?: string };
+  transition?: { token: string; type: "TO_TEST" | "TO_NORMAL" | "CLOSE" | "DELETE"; status: "IN_PROGRESS" | "FAILED"; claimedAt?: Date; error?: string };
   deletionStatus?: "IN_PROGRESS" | "FAILED";
   openedAt: Date;
   openingFloatAmount: number;       // Fondo iniziale
@@ -139,6 +139,7 @@ interface IOrder {
   cashSessionId?: ObjectId;
   stockAdjustments?: Array<{ entityType: "PRODUCT" | "INGREDIENT"; entityId: ObjectId; quantity: number }>;
   stockEffectStatus?: "APPLIED" | "REVERTED";
+  stockEffectClaim?: { token: string; target: "APPLIED" | "REVERTED" };
   customer: {
     name?: string;
     table?: string;
