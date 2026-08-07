@@ -33,6 +33,7 @@ import {
     applyStockForPaidOrder,
     validateStockForPendingOrder,
     rollbackStockAdjustments,
+    syncSoldOutFlags,
     type StockAdjustment,
 } from "@/lib/stock-operations"
 import {
@@ -57,7 +58,7 @@ import {
 import { shouldReusePendingIngredientPlan } from "@/lib/pending-ingredient-plan"
 import { ensurePosAccess } from "@/lib/pos-access"
 import { transitionCashSessionStock } from "@/lib/cash-session-stock"
-import { buildCashSessionTransitionClaim, cashSessionTransitionGuard } from "@/lib/cash-session-transition"
+import { buildCashSessionTransitionClaim, cashSessionTransitionGuard, recoverableTransition } from "@/lib/cash-session-transition"
 import {
     claimCashSessionPayment,
     hasPendingSumUpCheckouts,
@@ -94,14 +95,20 @@ export async function updatePosStock(data: {
     eventId: string
     productId: string
     variantName?: string
+    /** absolute value typed by the operator; ignored when stockDelta is given */
     stockQuantity: number | null
+    /** relative change from the +/- controls, applied atomically */
+    stockDelta?: number
 }) {
     const sessionCheck = await ensurePosActionSession()
     if (!sessionCheck.success) return sessionCheck
 
+    const isDelta = typeof data.stockDelta === "number"
     if (!data.eventId || !data.productId || (
-        data.stockQuantity !== null
-        && (!Number.isInteger(data.stockQuantity) || data.stockQuantity < 0)
+        isDelta
+            ? !Number.isInteger(data.stockDelta)
+            : data.stockQuantity !== null
+            && (!Number.isInteger(data.stockQuantity) || data.stockQuantity < 0)
     )) {
         return { success: false as const, error: "Quantità scorte non valida" }
     }
@@ -110,13 +117,21 @@ export async function updatePosStock(data: {
     const activeEvent = await Event.exists({ _id: data.eventId, active: true, archived: { $ne: true } })
     if (!activeEvent) return { success: false as const, error: "Evento attivo non valido" }
 
+    const field = data.variantName ? "variants.$.stockQuantity" : "stockQuantity"
     const query = data.variantName
         ? { _id: data.productId, eventId: data.eventId, "variants.optionName": data.variantName }
         : { _id: data.productId, eventId: data.eventId }
-    const update = data.variantName
-        ? { $set: { "variants.$.stockQuantity": data.stockQuantity } }
-        : { $set: { stockQuantity: data.stockQuantity, isSoldOut: data.stockQuantity === 0 } }
-    const product = await Product.findOneAndUpdate(query, update, { returnDocument: "after" })
+    // a delta is applied with $inc so a concurrent sale or session transition is not
+    // erased by an absolute value computed from a stale client snapshot
+    const trackedQuery = data.variantName
+        ? { ...query, variants: { $elemMatch: { optionName: data.variantName, stockQuantity: { $type: "number" } } } }
+        : { ...query, stockQuantity: { $type: "number" } }
+    const update = isDelta
+        ? { $inc: { [field]: data.stockDelta } }
+        : data.variantName
+            ? { $set: { [field]: data.stockQuantity } }
+            : { $set: { stockQuantity: data.stockQuantity, isSoldOut: data.stockQuantity === 0 } }
+    const product = await Product.findOneAndUpdate(isDelta ? trackedQuery : query, update, { returnDocument: "after" })
         .select("_id stockQuantity isSoldOut variants")
         .lean() as ({
             _id: { toString(): string }
@@ -125,7 +140,32 @@ export async function updatePosStock(data: {
             variants?: Array<{ optionName?: string, priceVariation?: number, stockQuantity?: number | null }>
         } | null)
 
-    if (!product) return { success: false as const, error: "Prodotto o variante non trovato" }
+    if (!product) {
+        return isDelta
+            ? { success: false as const, error: "Imposta prima una scorta numerica per usare +/-" }
+            : { success: false as const, error: "Prodotto o variante non trovato" }
+    }
+
+    if (isDelta) {
+        // $inc can cross zero when a concurrent sale lands first: clamp, then refresh isSoldOut
+        const current = data.variantName
+            ? product.variants?.find((variant) => variant.optionName === data.variantName)?.stockQuantity
+            : product.stockQuantity
+        if (typeof current === "number" && current < 0) {
+            await Product.updateOne(query, { $set: { [field]: 0 } })
+            if (data.variantName) {
+                const variant = product.variants?.find((entry) => entry.optionName === data.variantName)
+                if (variant) variant.stockQuantity = 0
+            } else {
+                product.stockQuantity = 0
+            }
+        }
+        if (!data.variantName) {
+            await syncSoldOutFlags(data.eventId, [product._id.toString()])
+            product.isSoldOut = (product.stockQuantity ?? null) === 0
+        }
+    }
+
     return {
         success: true as const,
         product: {
@@ -705,8 +745,10 @@ function serializeOpenCashSession(session: {
         openingFloatAmount: normalizeCurrencyAmount(session.openingFloatAmount ?? 0),
         openingNotes: session.openingNotes?.trim() || undefined,
         isTest: Boolean(session.isTest),
-        closeFailedError: session.transition?.status === "FAILED"
-            ? session.transition.error || "Chiusura non riuscita"
+        // only the recovery lookup returns a session carrying a transition, and it filters
+        // to recoverable ones, so any transition present here means "close needs a retry"
+        closeFailedError: session.transition
+            ? session.transition.error || "Chiusura interrotta: ripeti la chiusura"
             : undefined
     }
 }
@@ -852,10 +894,11 @@ async function getOpenCashSession(eventId: string, posDeviceId?: string, include
         eventId,
         posDeviceId,
         status: "OPEN",
-        // a FAILED close leaves the register open: only the status lookup may see it, so the
-        // POS keeps the close/retry action while every payment path still refuses the session
+        // a close that failed or died mid-flight leaves the register open: only the status
+        // lookup may see it, so the POS keeps the close/retry action while every payment
+        // path still refuses the session. Same recoverable set as buildCashSessionTransitionClaim.
         ...(includeFailedClose
-            ? { $or: [{ transition: null }, { "transition.status": "FAILED" }] }
+            ? { $or: [{ transition: null }, recoverableTransition()] }
             : { transition: { $exists: false } })
     })
         .sort({ openedAt: -1 })

@@ -52,10 +52,18 @@ function StockRow({ eventId, product, variantName, value, onUpdated }: {
         onUpdated(result.product)
     }
 
-    const delta = (amount: number) => {
-        const next = String(Math.max(0, (draft === "" ? 0 : Number(draft) || 0) + amount))
-        setDraft(next)
-        void save(next)
+    // send the relative change, never an absolute value derived from this stale snapshot
+    const delta = async (amount: number) => {
+        setSaving(true)
+        setError("")
+        const result = await updatePosStock({ eventId, productId: product._id, variantName, stockQuantity: null, stockDelta: amount })
+        setSaving(false)
+        if (!result.success) return setError(result.error)
+        const updated = variantName
+            ? result.product.variants.find((variant) => variant.optionName === variantName)?.stockQuantity ?? null
+            : result.product.stockQuantity
+        setDraft(updated === null ? "" : String(updated))
+        onUpdated(result.product)
     }
 
     return (

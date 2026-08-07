@@ -11,6 +11,20 @@ type ExistingTransition = {
     claimedAt?: Date | string
 } | null | undefined
 
+/**
+ * Matches sessions whose transition can be taken over: the same set
+ * buildCashSessionTransitionClaim treats as not active.
+ */
+export function recoverableTransition(now = new Date()) {
+    return {
+        $or: [
+            { "transition.status": { $ne: "IN_PROGRESS" } },
+            { "transition.claimedAt": null },
+            { "transition.claimedAt": { $lte: new Date(now.getTime() - CASH_SESSION_TRANSITION_LEASE_MS) } }
+        ]
+    }
+}
+
 /** CAS guard: only the owner of this exact claim may finalize or fail the transition. */
 export function cashSessionTransitionGuard(
     sessionId: unknown,

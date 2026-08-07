@@ -138,6 +138,10 @@ export async function setCashSessionTestAction(sessionId: string, isTest: boolea
     if (!session) return { success: false as const, error: "Sessione cassa non trovata" };
     if (Boolean(session.isTest) === isTest) return { success: true as const, approximateOrders: 0 };
 
+    if (isTest && await hasUnrefundedSumUpOrders(sessionId)) {
+        return { success: false as const, error: "Storna e rimborsa i pagamenti SumUp prima di classificare la sessione come TEST" };
+    }
+
     if (session.status === "OPEN") {
         if (isTest && await hasPendingSumUpCheckouts(sessionId)) {
             return { success: false as const, error: "Completa o annulla i pagamenti SumUp in attesa prima di classificare la sessione come TEST" };
@@ -157,10 +161,6 @@ export async function setCashSessionTestAction(sessionId: string, isTest: boolea
         revalidatePath("/admin");
         revalidatePath("/pos");
         return { success: true as const, approximateOrders: 0 };
-    }
-
-    if (isTest && await hasUnrefundedSumUpOrders(sessionId)) {
-        return { success: false as const, error: "Storna e rimborsa i pagamenti SumUp prima di classificare la sessione come TEST" };
     }
 
     const type = isTest ? "TO_TEST" : "TO_NORMAL";

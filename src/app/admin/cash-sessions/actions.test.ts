@@ -237,16 +237,26 @@ describe("setCashSessionTestAction", () => {
 
     it("does not mark an open session TEST while a SumUp checkout is pending", async () => {
         cashSessionFindByIdMock.mockResolvedValue({ _id: "session-1", status: "OPEN", isTest: false });
-        orderExistsMock.mockResolvedValue({ _id: "order-1" });
+        orderExistsMock.mockImplementation(async (query) => query.status === "PENDING" ? { _id: "order-1" } : null);
 
         const result = await setCashSessionTestAction("session-1", true);
 
-        expect(result).toMatchObject({ success: false, error: expect.stringContaining("SumUp") });
+        expect(result).toMatchObject({ success: false, error: expect.stringContaining("in attesa") });
         expect(cashSessionUpdateOneMock).not.toHaveBeenCalled();
         expect(orderExistsMock).toHaveBeenCalledWith({
             cashSessionId: "session-1",
             status: "PENDING",
             sumupCheckoutId: { $exists: true, $ne: "" }
         });
+    });
+
+    it("does not mark an open session TEST while it holds a paid SumUp order", async () => {
+        cashSessionFindByIdMock.mockResolvedValue({ _id: "session-1", status: "OPEN", isTest: false });
+        orderExistsMock.mockImplementation(async (query) => query.status === "PAID" ? { _id: "order-1" } : null);
+
+        const result = await setCashSessionTestAction("session-1", true);
+
+        expect(result).toMatchObject({ success: false, error: expect.stringContaining("rimborsa") });
+        expect(cashSessionUpdateOneMock).not.toHaveBeenCalled();
     });
 });
