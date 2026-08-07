@@ -57,10 +57,11 @@ import {
 import { shouldReusePendingIngredientPlan } from "@/lib/pending-ingredient-plan"
 import { ensurePosAccess } from "@/lib/pos-access"
 import { transitionCashSessionStock } from "@/lib/cash-session-stock"
-import { buildCashSessionTransitionClaim, CASH_SESSION_TRANSITION_LEASE_MS } from "@/lib/cash-session-transition"
+import { buildCashSessionTransitionClaim, cashSessionTransitionGuard } from "@/lib/cash-session-transition"
 import {
     claimCashSessionPayment,
     hasPendingSumUpCheckouts,
+    noActivePaymentClaim,
     refreshCashSessionPaymentClaim,
     releaseCashSessionPaymentClaim,
 } from "@/lib/cash-session-payment-claim"
@@ -854,7 +855,7 @@ async function getOpenCashSession(eventId: string, posDeviceId?: string, include
         // a FAILED close leaves the register open: only the status lookup may see it, so the
         // POS keeps the close/retry action while every payment path still refuses the session
         ...(includeFailedClose
-            ? { $or: [{ transition: { $exists: false } }, { "transition.status": "FAILED" }] }
+            ? { $or: [{ transition: null }, { "transition.status": "FAILED" }] }
             : { transition: { $exists: false } })
     })
         .sort({ openedAt: -1 })
@@ -1086,16 +1087,7 @@ export async function closeCashSession(data: {
             {
                 _id: openSession._id,
                 status: "OPEN",
-                $and: [
-                    transitionClaim.guard,
-                    {
-                        $or: [
-                            { paymentClaim: { $exists: false } },
-                            { paymentClaim: null },
-                            { "paymentClaim.claimedAt": { $lte: new Date(transitionClaim.transition.claimedAt.getTime() - CASH_SESSION_TRANSITION_LEASE_MS) } }
-                        ]
-                    }
-                ]
+                $and: [transitionClaim.guard, noActivePaymentClaim(transitionClaim.transition.claimedAt)]
             },
             { $set: { transition: transitionClaim.transition }, $unset: { paymentClaim: 1 } },
             { returnDocument: "after" }
@@ -1104,7 +1096,7 @@ export async function closeCashSession(data: {
 
         // preflight: nothing is mutated yet, so release the claim instead of leaving a FAILED transition behind
         const releaseTransitionClaim = () => CashSession.updateOne(
-            { _id: claimed._id, "transition.token": transitionToken, "transition.claimedAt": transitionClaim.transition.claimedAt },
+            cashSessionTransitionGuard(claimed._id, transitionClaim.transition),
             { $unset: { transition: 1 } }
         )
 
@@ -1126,7 +1118,7 @@ export async function closeCashSession(data: {
             const stockResult = await transitionCashSessionStock({ eventId: data.eventId, sessionId: claimed._id.toString(), token: transitionToken, target: "REVERTED" })
             if (!stockResult.success) {
                 await CashSession.updateOne(
-                    { _id: claimed._id, "transition.token": transitionToken, "transition.claimedAt": transitionClaim.transition.claimedAt },
+                    cashSessionTransitionGuard(claimed._id, transitionClaim.transition),
                     { $set: { "transition.status": "FAILED", "transition.error": stockResult.error } }
                 )
                 return { success: false, error: stockResult.error }
@@ -1143,12 +1135,7 @@ export async function closeCashSession(data: {
 
         const closedAt = new Date()
         const closedSession = await CashSession.findOneAndUpdate(
-            {
-                _id: claimed._id,
-                status: "OPEN",
-                "transition.token": transitionToken,
-                "transition.claimedAt": transitionClaim.transition.claimedAt
-            },
+            { ...cashSessionTransitionGuard(claimed._id, transitionClaim.transition), status: "OPEN" },
             {
                 $set: {
                     status: "CLOSED",

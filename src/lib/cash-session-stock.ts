@@ -81,7 +81,6 @@ export async function transitionCashSessionStock(params: {
                 status: "PAID",
                 stockEffectStatus: { $ne: params.target },
                 $or: [
-                    { stockEffectClaim: { $exists: false } },
                     { stockEffectClaim: null },
                     { "stockEffectClaim.token": params.token, "stockEffectClaim.target": params.target }
                 ]

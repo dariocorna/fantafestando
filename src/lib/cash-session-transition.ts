@@ -11,6 +11,19 @@ type ExistingTransition = {
     claimedAt?: Date | string
 } | null | undefined
 
+/** CAS guard: only the owner of this exact claim may finalize or fail the transition. */
+export function cashSessionTransitionGuard(
+    sessionId: unknown,
+    transition: { token: string; type: TransitionType; claimedAt: Date }
+) {
+    return {
+        _id: sessionId,
+        "transition.token": transition.token,
+        "transition.type": transition.type,
+        "transition.claimedAt": transition.claimedAt
+    }
+}
+
 export function buildCashSessionTransitionClaim(
     existing: ExistingTransition,
     type: TransitionType,
@@ -23,7 +36,6 @@ export function buildCashSessionTransitionClaim(
             token,
             guard: {
                 $or: [
-                    { transition: { $exists: false } },
                     { transition: null },
                     { "transition.token": { $exists: false } }
                 ]

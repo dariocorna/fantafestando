@@ -11,6 +11,16 @@ export async function hasPendingSumUpCheckouts(sessionId: string) {
     }))
 }
 
+/** Matches sessions whose payment claim is absent or past its lease. */
+export function noActivePaymentClaim(now = new Date()) {
+    return {
+        $or: [
+            { paymentClaim: null },
+            { "paymentClaim.claimedAt": { $lte: new Date(now.getTime() - CASH_SESSION_TRANSITION_LEASE_MS) } }
+        ]
+    }
+}
+
 export async function claimCashSessionPayment(sessionId: string) {
     const token = randomUUID()
     const now = new Date()
@@ -19,11 +29,7 @@ export async function claimCashSessionPayment(sessionId: string) {
             _id: sessionId,
             status: "OPEN",
             transition: { $exists: false },
-            $or: [
-                { paymentClaim: { $exists: false } },
-                { paymentClaim: null },
-                { "paymentClaim.claimedAt": { $lte: new Date(now.getTime() - CASH_SESSION_TRANSITION_LEASE_MS) } }
-            ]
+            ...noActivePaymentClaim(now)
         },
         { $set: { paymentClaim: { token, claimedAt: now } } },
         { returnDocument: "after" }

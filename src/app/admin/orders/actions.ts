@@ -260,7 +260,6 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                 status: "PAID",
                 "stornoMeta.status": "IN_PROGRESS",
                 $or: [
-                    { stockEffectClaim: { $exists: false } },
                     { stockEffectClaim: null },
                     { "stockEffectClaim.token": "STORNO", "stockEffectClaim.target": "REVERTED" }
                 ]
