@@ -197,6 +197,7 @@ interface OpenCashSessionState {
     openingFloatAmount: number
     openingNotes?: string
     isTest: boolean
+    closeFailedError?: string
 }
 
 interface ClosedCashSessionSummaryState {
@@ -2077,6 +2078,7 @@ export default function PosPage() {
                         <div className="flex items-center gap-1.5">
                         <button type="button" onClick={() => setIsCashStatusSheetOpen(true)} className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-bold text-slate-700">
                             Cassa {cashSession?.isTest ? <span className="ml-1 rounded bg-rose-700 px-1.5 py-0.5 text-xs text-white">TEST</span> : null}
+                            {cashSession?.closeFailedError ? <span className="ml-1 rounded bg-amber-600 px-1.5 py-0.5 text-xs text-white">CHIUSURA DA RIPETERE</span> : null}
                         </button>
                         <button type="button" onClick={openPendingOrdersSurface} className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-sm font-bold text-indigo-700">Pendenti</button>
                         <button type="button" onClick={() => handleCodeDialogOpenChange(true)} className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-bold text-slate-700">Codice</button>

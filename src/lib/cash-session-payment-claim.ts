@@ -1,6 +1,15 @@
 import { randomUUID } from "node:crypto"
 import CashSession from "@/models/CashSession"
+import Order from "@/models/Order"
 import { CASH_SESSION_TRANSITION_LEASE_MS } from "@/lib/cash-session-transition"
+
+export async function hasPendingSumUpCheckouts(sessionId: string) {
+    return Boolean(await Order.exists({
+        cashSessionId: sessionId,
+        status: "PENDING",
+        sumupCheckoutId: { $exists: true, $ne: "" }
+    }))
+}
 
 export async function claimCashSessionPayment(sessionId: string) {
     const token = randomUUID()

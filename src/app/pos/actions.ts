@@ -60,6 +60,7 @@ import { transitionCashSessionStock } from "@/lib/cash-session-stock"
 import { buildCashSessionTransitionClaim, CASH_SESSION_TRANSITION_LEASE_MS } from "@/lib/cash-session-transition"
 import {
     claimCashSessionPayment,
+    hasPendingSumUpCheckouts,
     refreshCashSessionPaymentClaim,
     releaseCashSessionPaymentClaim,
 } from "@/lib/cash-session-payment-claim"
@@ -146,6 +147,7 @@ interface OpenCashSessionDto {
     openingFloatAmount: number
     openingNotes?: string
     isTest: boolean
+    closeFailedError?: string
 }
 
 interface CashSessionClosurePreviewDto {
@@ -694,13 +696,17 @@ function serializeOpenCashSession(session: {
     openingFloatAmount?: number
     openingNotes?: string
     isTest?: boolean
+    transition?: { status?: string; error?: string } | null
 }): OpenCashSessionDto {
     return {
         id: session._id.toString(),
         openedAt: (session.openedAt || new Date()).toISOString(),
         openingFloatAmount: normalizeCurrencyAmount(session.openingFloatAmount ?? 0),
         openingNotes: session.openingNotes?.trim() || undefined,
-        isTest: Boolean(session.isTest)
+        isTest: Boolean(session.isTest),
+        closeFailedError: session.transition?.status === "FAILED"
+            ? session.transition.error || "Chiusura non riuscita"
+            : undefined
     }
 }
 
@@ -833,7 +839,7 @@ async function listFailedPrinterGroups(eventId: string, orderId: string): Promis
     return [...groups.values()]
 }
 
-async function getOpenCashSession(eventId: string, posDeviceId?: string): Promise<
+async function getOpenCashSession(eventId: string, posDeviceId?: string, includeFailedClose = false): Promise<
     { success: true, session: OpenCashSessionDto } | { success: false, error: string }
 > {
     if (!eventId || !posDeviceId) {
@@ -845,10 +851,14 @@ async function getOpenCashSession(eventId: string, posDeviceId?: string): Promis
         eventId,
         posDeviceId,
         status: "OPEN",
-        transition: { $exists: false }
+        // a FAILED close leaves the register open: only the status lookup may see it, so the
+        // POS keeps the close/retry action while every payment path still refuses the session
+        ...(includeFailedClose
+            ? { $or: [{ transition: { $exists: false } }, { "transition.status": "FAILED" }] }
+            : { transition: { $exists: false } })
     })
         .sort({ openedAt: -1 })
-        .select("_id openedAt openingFloatAmount openingNotes isTest")
+        .select("_id openedAt openingFloatAmount openingNotes isTest transition")
         .lean() as (
             {
                 _id: { toString(): string } | string
@@ -856,6 +866,7 @@ async function getOpenCashSession(eventId: string, posDeviceId?: string): Promis
                 openingFloatAmount?: number
                 openingNotes?: string
                 isTest?: boolean
+                transition?: { status?: string; error?: string } | null
             } | null
         )
 
@@ -886,7 +897,7 @@ export async function getCashSessionStatus(data: {
             return { success: false, error: capabilitiesResult.error }
         }
 
-        const sessionResult = await getOpenCashSession(data.eventId, data.posDeviceId)
+        const sessionResult = await getOpenCashSession(data.eventId, data.posDeviceId, true)
         if (!sessionResult.success) {
             return { success: true, session: null }
         }
@@ -1091,6 +1102,17 @@ export async function closeCashSession(data: {
         )
         if (!claimed) return { success: false, error: "Chiusura già in corso: riprova tra poco" }
 
+        // preflight: nothing is mutated yet, so release the claim instead of leaving a FAILED transition behind
+        const releaseTransitionClaim = () => CashSession.updateOne(
+            { _id: claimed._id, "transition.token": transitionToken, "transition.claimedAt": transitionClaim.transition.claimedAt },
+            { $unset: { transition: 1 } }
+        )
+
+        if (await hasPendingSumUpCheckouts(claimed._id.toString())) {
+            await releaseTransitionClaim()
+            return { success: false, error: "Completa o annulla i pagamenti SumUp in attesa prima di chiudere la cassa" }
+        }
+
         if (claimed.isTest) {
             const sumUpOrder = await Order.exists({
                 cashSessionId: claimed._id,
@@ -1098,10 +1120,7 @@ export async function closeCashSession(data: {
                 $or: [{ sumupCheckoutId: { $exists: true, $ne: "" } }, { sumupPaymentId: { $exists: true, $ne: "" } }]
             })
             if (sumUpOrder) {
-                await CashSession.updateOne(
-                    { _id: claimed._id, "transition.token": transitionToken, "transition.claimedAt": transitionClaim.transition.claimedAt },
-                    { $set: { "transition.status": "FAILED", "transition.error": "Sono presenti pagamenti SumUp da stornare e rimborsare" } }
-                )
+                await releaseTransitionClaim()
                 return { success: false, error: "La sessione TEST contiene pagamenti SumUp: stornali e rimborsali prima della chiusura" }
             }
             const stockResult = await transitionCashSessionStock({ eventId: data.eventId, sessionId: claimed._id.toString(), token: transitionToken, target: "REVERTED" })

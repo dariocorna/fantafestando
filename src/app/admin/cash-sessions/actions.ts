@@ -9,6 +9,7 @@ import PosDevice from "@/models/PosDevice";
 import dbConnect from "@/lib/mongoose";
 import { transitionCashSessionStock } from "@/lib/cash-session-stock";
 import { buildCashSessionTransitionClaim, CASH_SESSION_TRANSITION_LEASE_MS } from "@/lib/cash-session-transition";
+import { hasPendingSumUpCheckouts } from "@/lib/cash-session-payment-claim";
 import { revalidatePath } from "next/cache";
 import { PrinterService } from "@/lib/printer";
 import { buildCashSessionPrintDocumentV2 } from "@/lib/print-report";
@@ -129,14 +130,6 @@ async function hasUnrefundedSumUpOrders(sessionId: string) {
     }))
 }
 
-async function hasPendingSumUpOrders(sessionId: string) {
-    return Boolean(await Order.exists({
-        cashSessionId: sessionId,
-        status: "PENDING",
-        sumupCheckoutId: { $exists: true, $ne: "" }
-    }))
-}
-
 export async function setCashSessionTestAction(sessionId: string, isTest: boolean) {
     const sessionCheck = await ensureAdminSession();
     if (!sessionCheck.ok) return { success: false as const, error: sessionCheck.error };
@@ -146,7 +139,7 @@ export async function setCashSessionTestAction(sessionId: string, isTest: boolea
     if (Boolean(session.isTest) === isTest) return { success: true as const, approximateOrders: 0 };
 
     if (session.status === "OPEN") {
-        if (isTest && await hasPendingSumUpOrders(sessionId)) {
+        if (isTest && await hasPendingSumUpCheckouts(sessionId)) {
             return { success: false as const, error: "Completa o annulla i pagamenti SumUp in attesa prima di classificare la sessione come TEST" };
         }
         const updated = await CashSession.updateOne(
