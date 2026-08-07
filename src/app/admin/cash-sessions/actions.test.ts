@@ -234,4 +234,19 @@ describe("setCashSessionTestAction", () => {
             { returnDocument: "after" }
         );
     });
+
+    it("does not mark an open session TEST while a SumUp checkout is pending", async () => {
+        cashSessionFindByIdMock.mockResolvedValue({ _id: "session-1", status: "OPEN", isTest: false });
+        orderExistsMock.mockResolvedValue({ _id: "order-1" });
+
+        const result = await setCashSessionTestAction("session-1", true);
+
+        expect(result).toMatchObject({ success: false, error: expect.stringContaining("SumUp") });
+        expect(cashSessionUpdateOneMock).not.toHaveBeenCalled();
+        expect(orderExistsMock).toHaveBeenCalledWith({
+            cashSessionId: "session-1",
+            status: "PENDING",
+            sumupCheckoutId: { $exists: true, $ne: "" }
+        });
+    });
 });
