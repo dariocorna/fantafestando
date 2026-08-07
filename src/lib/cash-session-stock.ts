@@ -60,11 +60,13 @@ export async function transitionCashSessionStock(params: {
         const shortages: Array<{ entityType: string; entityId: string; entityName: string; required: number; available: number }> = []
         for (const entityType of ["PRODUCT", "INGREDIENT"] as const) {
             const Model = entityType === "PRODUCT" ? Product : Ingredient
-            const demands = total.filter((entry) => entry.entityType === entityType)
+            const demands = plans.flatMap(({ order, adjustments }) => aggregateStockAdjustments(adjustments)
+                .map((entry, index) => ({ ...entry, key: `${params.token}:${order._id.toString()}:${index}` }))
+                .filter((entry) => entry.entityType === entityType))
             const docs = await Model.find({ eventId: params.eventId, _id: { $in: demands.map((entry) => entry.entityId) } })
-                .select("_id name stockQuantity").lean() as Array<{ _id: { toString(): string }; name?: string; stockQuantity?: number | null }>
-            const stocks = new Map(docs.map((doc) => [doc._id.toString(), { name: doc.name || doc._id.toString(), quantity: doc.stockQuantity }]))
-            for (const demand of demands) {
+                .select("_id name stockQuantity stockOperationKeys").lean() as Array<{ _id: { toString(): string }; name?: string; stockQuantity?: number | null; stockOperationKeys?: string[] }>
+            const stocks = new Map(docs.map((doc) => [doc._id.toString(), { name: doc.name || doc._id.toString(), quantity: doc.stockQuantity, operationKeys: doc.stockOperationKeys || [] }]))
+            for (const demand of aggregateStockAdjustments(demands.filter((entry) => !stocks.get(entry.entityId)?.operationKeys.includes(entry.key)))) {
                 const stock = stocks.get(demand.entityId)
                 if (typeof stock?.quantity === "number" && stock.quantity < demand.quantity) shortages.push({ ...demand, entityName: stock.name, required: demand.quantity, available: stock.quantity })
             }

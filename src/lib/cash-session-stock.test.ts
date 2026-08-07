@@ -139,4 +139,24 @@ describe("cash session stock transitions", () => {
         expect(result).toMatchObject({ success: false, error: expect.stringContaining("modifica scorte in corso") })
         expect(productUpdateOneMock).not.toHaveBeenCalled()
     })
+
+    test("does not require stock already applied by the same retry token", async () => {
+        orderFindMock.mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue([{
+            _id: { toString: () => "o1" },
+            stockAdjustments: [{ entityType: "PRODUCT", entityId: "p1", quantity: 2 }],
+            stockEffectStatus: "REVERTED"
+        }]) }) })
+        productFindMock.mockReturnValue(queryResult([{
+            _id: { toString: () => "p1" },
+            name: "Panino",
+            stockQuantity: 0,
+            stockOperationKeys: ["retry:o1:0"]
+        }]))
+        productUpdateOneMock.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 })
+        productExistsMock.mockResolvedValue({ _id: "p1" })
+
+        const result = await transitionCashSessionStock({ eventId: "e1", sessionId: "s1", token: "retry", target: "APPLIED" })
+
+        expect(result).toMatchObject({ success: true })
+    })
 })
