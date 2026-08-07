@@ -13,7 +13,8 @@ import "@/models/Peripheral";
 import { PrinterService } from "@/lib/printer";
 import { decryptSecret } from "@/lib/secrets";
 import { refundSumUpTransaction, resolveSumUpTransactionIdByCheckout } from "@/lib/sumup";
-import { rollbackStockAdjustments, type StockAdjustment } from "@/lib/stock-operations";
+import { type StockAdjustment } from "@/lib/stock-operations";
+import { transitionClaimedOrderStock } from "@/lib/cash-session-stock";
 import { revalidatePath } from "next/cache";
 
 interface OrderForStornoProjection {
@@ -32,6 +33,8 @@ interface OrderForStornoProjection {
         ingredientId?: string | { toString(): string }
         quantity?: number
     }>
+    stockAdjustments?: StockAdjustment[]
+    stockEffectStatus?: "APPLIED" | "REVERTED"
     stornoMeta?: {
         status?: "IN_PROGRESS" | "COMPLETED" | "FAILED"
         refundStatus?: "SKIPPED" | "DONE" | "FAILED"
@@ -208,7 +211,7 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
             lockSetPayload["stornoMeta.reason"] = normalizedReason
         }
 
-        const lockedOrder = await Order.findOneAndUpdate(
+        let lockedOrder = await Order.findOneAndUpdate(
             {
                 _id: normalizedOrderId,
                 eventId,
@@ -249,6 +252,29 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
 
             return { success: false, error: "Solo gli ordini pagati possono essere stornati" }
         }
+
+        const stockClaimedOrder = await Order.findOneAndUpdate(
+            {
+                _id: normalizedOrderId,
+                eventId,
+                status: "PAID",
+                "stornoMeta.status": "IN_PROGRESS",
+                $or: [
+                    { stockEffectClaim: null },
+                    { "stockEffectClaim.token": "STORNO", "stockEffectClaim.target": "REVERTED" }
+                ]
+            },
+            { $set: { stockEffectClaim: { token: "STORNO", target: "REVERTED" } } },
+            { returnDocument: "after" }
+        ).lean() as OrderForStornoProjection | null
+        if (!stockClaimedOrder) {
+            await Order.updateOne(
+                { _id: normalizedOrderId, eventId, "stornoMeta.status": "IN_PROGRESS" },
+                { $set: { "stornoMeta.status": "FAILED", "stornoMeta.refundError": "Modifica scorte già in corso" } }
+            )
+            return { success: false, error: "Modifica scorte già in corso per questo ordine: riprova tra poco" }
+        }
+        lockedOrder = stockClaimedOrder
 
         let refundStatus: "SKIPPED" | "DONE" | "FAILED" = lockedOrder.paymentMethod === "CARD" ? "FAILED" : "SKIPPED"
         let refundTransactionId = lockedOrder.stornoMeta?.refundTransactionId?.trim()
@@ -343,9 +369,19 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
             }
         }
 
-        const stockAdjustments = buildStockAdjustmentsFromOrder(lockedOrder)
+        const stockAdjustments = lockedOrder.stockEffectStatus === "REVERTED"
+            ? []
+            : (Array.isArray(lockedOrder.stockAdjustments) ? lockedOrder.stockAdjustments : buildStockAdjustmentsFromOrder(lockedOrder))
         try {
-            await rollbackStockAdjustments(eventId, stockAdjustments)
+            const stockResult = await transitionClaimedOrderStock({
+                eventId,
+                orderId: normalizedOrderId,
+                token: "STORNO",
+                target: "REVERTED",
+                adjustments: stockAdjustments,
+                releaseClaim: false
+            })
+            if (!stockResult.success) throw new Error(stockResult.error)
         } catch (rollbackError) {
             await Order.updateOne(
                 { _id: normalizedOrderId, eventId },
@@ -373,10 +409,12 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                     "stornoMeta.completedAt": new Date(),
                     "stornoMeta.refundRequired": lockedOrder.paymentMethod === "CARD",
                     "stornoMeta.refundStatus": refundStatus,
-                    "stornoMeta.refundTransactionId": refundTransactionId
+                    "stornoMeta.refundTransactionId": refundTransactionId,
+                    stockEffectStatus: "REVERTED"
                 },
                 $unset: {
-                    "stornoMeta.refundError": 1
+                    "stornoMeta.refundError": 1,
+                    stockEffectClaim: 1
                 }
             }
         )

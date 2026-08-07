@@ -75,6 +75,12 @@ test.describe("Admin sessioni cassa", () => {
 
             await openPosAndSelectDevice(page, posName)
             await openCashSession(page, "100")
+            await page.goto("/admin")
+            const openSessionRow = page.getByTestId("cash-sessions-table").locator("tr").filter({ hasText: new RegExp(posName) }).first()
+            await openSessionRow.getByRole("button", { name: "Segna TEST", exact: true }).click()
+            await expect(openSessionRow).toContainText("TEST", { timeout: 15000 })
+            await openPosAndSelectDevice(page, posName)
+            await expect(page.getByText("TEST", { exact: true })).toBeVisible()
             await completeCashOrder(page, productShortName)
             await completeDiscountedCashOrder(page, productShortName, [0])
             await completeDiscountedCashOrder(page, productShortName, [1])
@@ -87,8 +93,9 @@ test.describe("Admin sessioni cassa", () => {
             const row = sessionsTable.locator("tr").filter({ hasText: new RegExp(posName) }).first()
             await expect(row).toBeVisible()
             await expect(row).toContainText(/Chiusa/i)
+            await expect(row).toContainText(/TEST/i)
             await expect(row).toContainText(/120,00\s*€/i)
-            await expect(page.getByTestId("dashboard-kpi-total")).toContainText(/20,00\s*€/)
+            await expect(page.getByTestId("dashboard-kpi-total")).toContainText(/0,00\s*€/)
 
             const anteprimaBtn = row.getByRole("button", { name: "Anteprima" }).first()
             await expect(anteprimaBtn).toBeVisible()
@@ -97,6 +104,7 @@ test.describe("Admin sessioni cassa", () => {
             const previewDialog = page.getByRole("dialog")
             await expect(previewDialog).toBeVisible({ timeout: 5000 })
             await expect(previewDialog).toContainText("Anteprima Chiusura Cassa")
+            await expect(previewDialog).toContainText("SESSIONE TEST - NON CONTABILIZZARE")
             await expect(previewDialog).toContainText(categoryName)
             await expect(previewDialog).toContainText(posName)
             await expect(previewDialog).toContainText(productShortName)
@@ -146,14 +154,14 @@ test.describe("Admin sessioni cassa", () => {
             expect(eventCsvResponse.ok()).toBeTruthy()
             const eventCsvPayload = await eventCsvResponse.text()
             expect(eventCsvPayload).toContain("Tipo riga,Categoria,Prodotto,Descrizione breve")
-            expect(eventCsvPayload).toContain("Staff + Promo Cassa")
+            expect(eventCsvPayload).not.toContain("Staff + Promo Cassa")
 
             const eventXlsResponse = await page.request.get("/admin/export?format=xls")
             expect(eventXlsResponse.ok()).toBeTruthy()
             const eventWorkbook = new ExcelJS.Workbook()
             await eventWorkbook.xlsx.load(await eventXlsResponse.body())
             expect(eventWorkbook.worksheets.map((sheet) => sheet.name)).toContain("Categorie")
-            expect(eventWorkbook.getWorksheet("Vendite")?.getColumn(4).values).toContain("Staff + Promo Cassa")
+            expect(eventWorkbook.getWorksheet("Vendite")?.rowCount).toBe(1)
 
             const jobsResponse = await page.request.get("/api/admin/print-jobs?limit=100")
             expect(jobsResponse.ok()).toBeTruthy()
@@ -185,6 +193,22 @@ test.describe("Admin sessioni cassa", () => {
             await row.getByRole("button", { name: "Ristampa", exact: true }).click()
             await expect(row.getByText(/Riepilogo inviato|Ristampa non riuscita/)).toBeVisible({ timeout: 15000 })
 
+            await row.getByRole("button", { name: "Rendi normale", exact: true }).click()
+            await expect(row.getByRole("button", { name: "Segna TEST", exact: true })).toBeVisible({ timeout: 15000 })
+            await expect(page.getByTestId("dashboard-kpi-total")).toContainText(/20,00\s*€/)
+            const reclassifiedEventCsv = await page.request.get("/admin/export?format=csv")
+            expect(await reclassifiedEventCsv.text()).toContain("Staff + Promo Cassa")
+
+            await row.getByRole("button", { name: "Segna TEST", exact: true }).click()
+            await expect(row.getByRole("button", { name: "Rendi normale", exact: true })).toBeVisible({ timeout: 15000 })
+            await row.getByRole("button", { name: "Rendi normale", exact: true }).click()
+            await expect(row.getByRole("button", { name: "Segna TEST", exact: true })).toBeVisible({ timeout: 15000 })
+
+            await row.getByRole("button", { name: "Elimina", exact: true }).click()
+            const deleteDialog = page.getByRole("dialog").filter({ hasText: "Elimina definitivamente la sessione" })
+            await deleteDialog.getByLabel("Conferma eliminazione sessione").fill("ELIMINA")
+            await deleteDialog.getByRole("button", { name: "Elimina sessione", exact: true }).click()
+            await expect(row).toHaveCount(0, { timeout: 15000 })
         } finally {
             await deleteEvent(page, eventName)
         }

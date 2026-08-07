@@ -155,7 +155,8 @@ export async function syncSoldOutFlags(eventId: string, productIds: string[]) {
 export function aggregateStockAdjustments(adjustments: StockAdjustment[]): StockAdjustment[] {
     const totals = new Map<string, number>()
     for (const adjustment of adjustments) {
-        const entityId = adjustment.entityId?.trim()
+        // persisted adjustments arrive as ObjectId from lean documents, not as string
+        const entityId = String(adjustment.entityId ?? "").trim()
         const quantity = Number(adjustment.quantity)
         if (!entityId || !Number.isFinite(quantity) || quantity <= 0) continue
         const aggregationKey = `${adjustment.entityType}:${entityId}`
@@ -294,7 +295,7 @@ async function decrementTrackedStocksOverride(
         const updated = await Product.findOneAndUpdate(
             { eventId, _id: productId },
             { $inc: { stockQuantity: -requestedQuantity } },
-            { returnDocument: "after" }
+            { returnDocument: "before" }
         ).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
 
         if (!updated) {
@@ -313,15 +314,16 @@ async function decrementTrackedStocksOverride(
         }
 
         // Clamp to 0 if stock went negative
-        const resultStock = normalizeRawTrackedStock(updated.stockQuantity)
-        if (resultStock !== null && resultStock < 0) {
+        const stockBeforeDecrement = normalizeRawTrackedStock(updated.stockQuantity)
+        const stockAfterDecrement = stockBeforeDecrement === null ? null : stockBeforeDecrement - requestedQuantity
+        if (stockAfterDecrement !== null && stockAfterDecrement < 0) {
             await Product.updateOne(
-                { eventId, _id: productId },
+                { eventId, _id: productId, stockQuantity: stockAfterDecrement },
                 { $set: { stockQuantity: 0 } }
             )
         }
 
-        const appliedQty = Math.min(requestedQuantity, isStockTracked(product.stockQuantity) ? product.stockQuantity : requestedQuantity)
+        const appliedQty = Math.min(requestedQuantity, stockBeforeDecrement ?? 0)
         if (appliedQty > 0) {
             applied.push({ entityType: "PRODUCT", entityId: productId, quantity: appliedQty })
         }
@@ -389,7 +391,7 @@ async function decrementTrackedIngredientStocksOverride(
         const updated = await Ingredient.findOneAndUpdate(
             { eventId, _id: ingredientId },
             { $inc: { stockQuantity: -requestedQuantity } },
-            { returnDocument: "after" }
+            { returnDocument: "before" }
         ).select("_id stockQuantity").lean() as ({ _id: string | { toString(): string }, stockQuantity?: number | null } | null)
 
         if (!updated) {
@@ -407,15 +409,16 @@ async function decrementTrackedIngredientStocksOverride(
             }
         }
 
-        const resultStock = normalizeRawTrackedStock(updated.stockQuantity)
-        if (resultStock !== null && resultStock < 0) {
+        const stockBeforeDecrement = normalizeRawTrackedStock(updated.stockQuantity)
+        const stockAfterDecrement = stockBeforeDecrement === null ? null : stockBeforeDecrement - requestedQuantity
+        if (stockAfterDecrement !== null && stockAfterDecrement < 0) {
             await Ingredient.updateOne(
-                { eventId, _id: ingredientId },
+                { eventId, _id: ingredientId, stockQuantity: stockAfterDecrement },
                 { $set: { stockQuantity: 0 } }
             )
         }
 
-        const appliedQty = Math.min(requestedQuantity, isStockTracked(ingredient.stockQuantity) ? ingredient.stockQuantity : requestedQuantity)
+        const appliedQty = Math.min(requestedQuantity, stockBeforeDecrement ?? 0)
         if (appliedQty > 0) {
             applied.push({ entityType: "INGREDIENT", entityId: ingredientId, quantity: appliedQty })
         }

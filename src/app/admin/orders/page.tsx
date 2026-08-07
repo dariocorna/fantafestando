@@ -2,6 +2,7 @@ import { format } from "date-fns";
 import { getAdminContextEvent } from "@/lib/events";
 import dbConnect from "@/lib/mongoose";
 import Order from "@/models/Order";
+import CashSession from "@/models/CashSession";
 import {
     Table,
     TableBody,
@@ -46,9 +47,11 @@ export default async function AdminOrders() {
 
     const eventId = String(contextEvent._id)
     await dbConnect();
+    const excludedSessionIds = (await CashSession.find({ eventId, isTest: true }).select("_id").lean() as Array<{ _id: unknown }>).map((session) => session._id)
     const orders = await Order.find({
         eventId,
-        status: { $in: ["PAID", "CANCELLED"] }
+        status: { $in: ["PAID", "CANCELLED"] },
+        cashSessionId: { $nin: excludedSessionIds }
     })
         .sort({ createdAt: -1 })
         .select("_id status createdAt customer cart totalAmount discountApplied paymentMethod stornoMeta.reason")

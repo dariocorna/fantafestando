@@ -7,13 +7,14 @@ import Product from "@/models/Product"
 import Ingredient from "@/models/Ingredient"
 import CashSession from "@/models/CashSession"
 import PrintJob from "@/models/PrintJob"
+import Event from "@/models/Event"
 import { revalidatePath } from "next/cache"
 import { PrinterService } from "@/lib/printer"
 import { createSumUpCheckout } from "@/lib/sumup"
 import { decryptSecret } from "@/lib/secrets"
 import { getOrderCodeFromOrder, parseOrderNumberInput } from "@/lib/order-code"
 import { resolveDishTicketsForCart } from "@/lib/pizza-ticket"
-import { type StockMode } from "@/lib/inventory"
+import { getStockStatus, type StockMode } from "@/lib/inventory"
 import { computeCashSessionSummary } from "@/lib/cash-session"
 import {
     aggregateOrderProductSales,
@@ -55,8 +56,15 @@ import {
 } from "@/lib/ingredient-plan"
 import { shouldReusePendingIngredientPlan } from "@/lib/pending-ingredient-plan"
 import { ensurePosAccess } from "@/lib/pos-access"
-import Event from "@/models/Event"
-import { getStockStatus } from "@/lib/inventory"
+import { transitionCashSessionStock } from "@/lib/cash-session-stock"
+import { buildCashSessionTransitionClaim, cashSessionTransitionGuard, recoverableTransition } from "@/lib/cash-session-transition"
+import {
+    claimCashSessionPayment,
+    hasPendingSumUpCheckouts,
+    noActivePaymentClaim,
+    refreshCashSessionPaymentClaim,
+    releaseCashSessionPaymentClaim,
+} from "@/lib/cash-session-payment-claim"
 
 interface PrintDispatchSummary {
     attempted: number
@@ -73,7 +81,6 @@ interface FailedPrinterGroup {
     count: number
     jobIds: string[]
 }
-
 
 async function ensurePosActionSession() {
     const sessionCheck = await ensurePosAccess()
@@ -189,6 +196,8 @@ interface OpenCashSessionDto {
     openedAt: string
     openingFloatAmount: number
     openingNotes?: string
+    isTest: boolean
+    closeFailedError?: string
 }
 
 interface CashSessionClosurePreviewDto {
@@ -736,12 +745,20 @@ function serializeOpenCashSession(session: {
     openedAt?: Date
     openingFloatAmount?: number
     openingNotes?: string
+    isTest?: boolean
+    transition?: { status?: string; error?: string } | null
 }): OpenCashSessionDto {
     return {
         id: session._id.toString(),
         openedAt: (session.openedAt || new Date()).toISOString(),
         openingFloatAmount: normalizeCurrencyAmount(session.openingFloatAmount ?? 0),
-        openingNotes: session.openingNotes?.trim() || undefined
+        openingNotes: session.openingNotes?.trim() || undefined,
+        isTest: Boolean(session.isTest),
+        // only the recovery lookup returns a session carrying a transition, and it filters
+        // to recoverable ones, so any transition present here means "close needs a retry"
+        closeFailedError: session.transition
+            ? session.transition.error || "Chiusura interrotta: ripeti la chiusura"
+            : undefined
     }
 }
 
@@ -884,7 +901,7 @@ async function listFailedPrinterGroups(eventId: string, orderId: string): Promis
     return [...groups.values()]
 }
 
-async function getOpenCashSession(eventId: string, posDeviceId?: string): Promise<
+async function getOpenCashSession(eventId: string, posDeviceId?: string, includeFailedClose = false): Promise<
     { success: true, session: OpenCashSessionDto } | { success: false, error: string }
 > {
     if (!eventId || !posDeviceId) {
@@ -895,16 +912,24 @@ async function getOpenCashSession(eventId: string, posDeviceId?: string): Promis
     const openSession = await CashSession.findOne({
         eventId,
         posDeviceId,
-        status: "OPEN"
+        status: "OPEN",
+        // a close that failed or died mid-flight leaves the register open: only the status
+        // lookup may see it, so the POS keeps the close/retry action while every payment
+        // path still refuses the session. Same recoverable set as buildCashSessionTransitionClaim.
+        ...(includeFailedClose
+            ? { $or: [{ transition: null }, recoverableTransition()] }
+            : { transition: { $exists: false } })
     })
         .sort({ openedAt: -1 })
-        .select("_id openedAt openingFloatAmount openingNotes")
+        .select("_id openedAt openingFloatAmount openingNotes isTest transition")
         .lean() as (
             {
                 _id: { toString(): string } | string
                 openedAt?: Date
                 openingFloatAmount?: number
                 openingNotes?: string
+                isTest?: boolean
+                transition?: { status?: string; error?: string } | null
             } | null
         )
 
@@ -935,7 +960,7 @@ export async function getCashSessionStatus(data: {
             return { success: false, error: capabilitiesResult.error }
         }
 
-        const sessionResult = await getOpenCashSession(data.eventId, data.posDeviceId)
+        const sessionResult = await getOpenCashSession(data.eventId, data.posDeviceId, true)
         if (!sessionResult.success) {
             return { success: true, session: null }
         }
@@ -1117,29 +1142,84 @@ export async function closeCashSession(data: {
             return { success: false, error: "Nessuna sessione cassa aperta da chiudere" }
         }
 
+        const transitionClaim = buildCashSessionTransitionClaim(openSession.transition, "CLOSE")
+        if (!transitionClaim.success) return { success: false, error: transitionClaim.error }
+        const transitionToken = transitionClaim.token
+        const claimed = await CashSession.findOneAndUpdate(
+            {
+                _id: openSession._id,
+                status: "OPEN",
+                $and: [transitionClaim.guard, noActivePaymentClaim(transitionClaim.transition.claimedAt)]
+            },
+            { $set: { transition: transitionClaim.transition }, $unset: { paymentClaim: 1 } },
+            { returnDocument: "after" }
+        )
+        if (!claimed) return { success: false, error: "Chiusura già in corso: riprova tra poco" }
+
+        // preflight: nothing is mutated yet, so release the claim instead of leaving a FAILED transition behind
+        const releaseTransitionClaim = () => CashSession.updateOne(
+            cashSessionTransitionGuard(claimed._id, transitionClaim.transition),
+            { $unset: { transition: 1 } }
+        )
+
+        if (await hasPendingSumUpCheckouts(claimed._id.toString())) {
+            await releaseTransitionClaim()
+            return { success: false, error: "Completa o annulla i pagamenti SumUp in attesa prima di chiudere la cassa" }
+        }
+
+        if (claimed.isTest) {
+            const sumUpOrder = await Order.exists({
+                cashSessionId: claimed._id,
+                status: "PAID",
+                $or: [{ sumupCheckoutId: { $exists: true, $ne: "" } }, { sumupPaymentId: { $exists: true, $ne: "" } }]
+            })
+            if (sumUpOrder) {
+                await releaseTransitionClaim()
+                return { success: false, error: "La sessione TEST contiene pagamenti SumUp: stornali e rimborsali prima della chiusura" }
+            }
+            const stockResult = await transitionCashSessionStock({ eventId: data.eventId, sessionId: claimed._id.toString(), token: transitionToken, target: "REVERTED" })
+            if (!stockResult.success) {
+                await CashSession.updateOne(
+                    cashSessionTransitionGuard(claimed._id, transitionClaim.transition),
+                    { $set: { "transition.status": "FAILED", "transition.error": stockResult.error } }
+                )
+                return { success: false, error: stockResult.error }
+            }
+        }
+
         const { computed } = await computeSummaryForCashSession({
             eventId: data.eventId,
             posDeviceId: data.posDeviceId,
-            cashSessionId: openSession._id.toString(),
-            openingFloatAmount: normalizeCurrencyAmount(openSession.openingFloatAmount ?? 0),
+            cashSessionId: claimed._id.toString(),
+            openingFloatAmount: normalizeCurrencyAmount(claimed.openingFloatAmount ?? 0),
             closingCountedCashAmount
         })
 
         const closedAt = new Date()
-        openSession.status = "CLOSED"
-        openSession.closedAt = closedAt
-        openSession.closingCountedCashAmount = closingCountedCashAmount
-        openSession.closingNotes = closingNotes || undefined
-        openSession.paidOrdersCount = computed.paidOrdersCount
-        openSession.cashSalesAmount = computed.cashSalesAmount
-        openSession.cardSalesAmount = computed.cardSalesAmount
-        openSession.otherSalesAmount = computed.otherSalesAmount
-        openSession.expectedCashAmount = computed.expectedCashAmount
-        openSession.varianceAmount = computed.varianceAmount
-        await openSession.save()
+        const closedSession = await CashSession.findOneAndUpdate(
+            { ...cashSessionTransitionGuard(claimed._id, transitionClaim.transition), status: "OPEN" },
+            {
+                $set: {
+                    status: "CLOSED",
+                    stockEffectStatus: claimed.isTest ? "REVERTED" : "APPLIED",
+                    closedAt,
+                    closingCountedCashAmount,
+                    closingNotes: closingNotes || undefined,
+                    paidOrdersCount: computed.paidOrdersCount,
+                    cashSalesAmount: computed.cashSalesAmount,
+                    cardSalesAmount: computed.cardSalesAmount,
+                    otherSalesAmount: computed.otherSalesAmount,
+                    expectedCashAmount: computed.expectedCashAmount,
+                    varianceAmount: computed.varianceAmount
+                },
+                $unset: { transition: 1 }
+            },
+            { returnDocument: "after" }
+        )
+        if (!closedSession) return { success: false, error: "Chiusura interrotta: riprova per completarla" }
 
         const paidOrdersForSession = await Order.find({
-            cashSessionId: openSession._id,
+            cashSessionId: claimed._id,
             status: "PAID"
         }).lean() as ProductConsumptionOrder[]
 
@@ -1190,10 +1270,11 @@ export async function closeCashSession(data: {
 
         try {
             await PrinterService.printCashSessionSummary(data.eventId, data.posDeviceId, {
-                sessionId: openSession._id.toString(),
-                openedAt: openSession.openedAt,
+                sessionId: closedSession._id.toString(),
+                isTest: closedSession.isTest,
+                openedAt: closedSession.openedAt,
                 closedAt,
-                openingFloatAmount: normalizeCurrencyAmount(openSession.openingFloatAmount ?? 0),
+                openingFloatAmount: normalizeCurrencyAmount(closedSession.openingFloatAmount ?? 0),
                 cashSalesAmount: computed.cashSalesAmount,
                 cardSalesAmount: computed.cardSalesAmount,
                 otherSalesAmount: computed.otherSalesAmount,
@@ -1201,7 +1282,7 @@ export async function closeCashSession(data: {
                 closingCountedCashAmount,
                 varianceAmount: computed.varianceAmount,
                 paidOrdersCount: computed.paidOrdersCount,
-                openingNotes: openSession.openingNotes,
+                openingNotes: closedSession.openingNotes,
                 closingNotes: closingNotes || undefined,
                 grossSalesAmount: salesBreakdown.totals.grossAmount,
                 discountSalesAmount: salesBreakdown.totals.discountAmount,
@@ -1220,8 +1301,8 @@ export async function closeCashSession(data: {
         return {
             success: true,
             summary: {
-                sessionId: openSession._id.toString(),
-                openingFloatAmount: normalizeCurrencyAmount(openSession.openingFloatAmount ?? 0),
+                sessionId: closedSession._id.toString(),
+                openingFloatAmount: normalizeCurrencyAmount(closedSession.openingFloatAmount ?? 0),
                 closingCountedCashAmount,
                 paidOrdersCount: computed.paidOrdersCount,
                 cashSalesAmount: computed.cashSalesAmount,
@@ -1261,6 +1342,8 @@ export async function createOrder(data: {
     allowStockOverride?: boolean
 }) {
     let stockAdjustmentsToRollback: StockAdjustment[] = []
+    let paymentClaimToken: string | undefined
+    let paymentClaimSessionId: string | undefined
     try {
         const sessionCheck = await ensurePosActionSession()
         if (!sessionCheck.success) return sessionCheck
@@ -1337,10 +1420,23 @@ export async function createOrder(data: {
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
         const requiresPendingState = computeRequiresPendingState(data.paymentMethod, capabilitiesResult.capabilities)
+        const paymentClaim = await claimCashSessionPayment(sessionResult.session.id)
+        if (!paymentClaim.success) {
+            return { success: false, error: "La cassa è in chiusura o sta completando un altro pagamento", cashSessionRequired: true }
+        }
+        paymentClaimToken = paymentClaim.token
+        paymentClaimSessionId = sessionResult.session.id
+        if (paymentClaim.isTest && requiresPendingState) {
+            await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+            paymentClaimToken = undefined
+            return { success: false, error: "I pagamenti sul terminale SumUp sono bloccati nelle sessioni TEST" }
+        }
 
         if (requiresPendingState) {
             const stockCheckResult = await validateStockForPendingOrder(data.eventId, stockPayload, stockMode, ingredientPlan)
             if (!stockCheckResult.success) {
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+                paymentClaimToken = undefined
                 return {
                     success: false,
                     error: stockCheckResult.error || "Scorte non sufficienti",
@@ -1350,6 +1446,8 @@ export async function createOrder(data: {
         } else {
             const stockApplyResult = await applyStockForPaidOrder(data.eventId, stockPayload, stockMode, ingredientPlan)
             if (!stockApplyResult.success) {
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+                paymentClaimToken = undefined
                 return {
                     success: false,
                     error: stockApplyResult.error || "Scorte non sufficienti",
@@ -1357,6 +1455,13 @@ export async function createOrder(data: {
                 }
             }
             stockAdjustmentsToRollback = stockApplyResult.appliedAdjustments || []
+        }
+        if (!await refreshCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)) {
+            if (stockAdjustmentsToRollback.length > 0) await rollbackStockAdjustments(data.eventId, stockAdjustmentsToRollback)
+            stockAdjustmentsToRollback = []
+            await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+            paymentClaimToken = undefined
+            return { success: false, error: "La sessione cassa è stata chiusa durante il pagamento", cashSessionRequired: true }
         }
 
         const order = await Order.create({
@@ -1375,7 +1480,9 @@ export async function createOrder(data: {
             sumupCheckoutId: requiresPendingState ? undefined : data.sumupCheckoutId,
             posDeviceId: data.posDeviceId,
             cashSessionId: sessionResult.session.id,
-            stockOverrideApproved: Boolean(data.allowStockOverride)
+            stockOverrideApproved: Boolean(data.allowStockOverride),
+            stockAdjustments: stockAdjustmentsToRollback,
+            stockEffectStatus: requiresPendingState ? undefined : "APPLIED"
         })
         stockAdjustmentsToRollback = []
 
@@ -1393,6 +1500,8 @@ export async function createOrder(data: {
                         { _id: order._id, eventId: data.eventId, status: "PENDING" },
                         { $set: { status: "CANCELLED" } }
                     )
+                    await releaseCashSessionPaymentClaim(paymentClaimSessionId || "", paymentClaimToken)
+                    paymentClaimToken = undefined
                     return {
                         success: false,
                         error: sumupResult.error || "Errore durante l'inizializzazione del pagamento elettronico"
@@ -1408,10 +1517,15 @@ export async function createOrder(data: {
                         { _id: order._id, eventId: data.eventId, status: "PENDING" },
                         { $set: { status: "CANCELLED" } }
                     )
+                    await releaseCashSessionPaymentClaim(paymentClaimSessionId || "", paymentClaimToken)
+                    paymentClaimToken = undefined
                     return { success: false, error: "Impossibile associare il checkout SumUp all'ordine" }
                 }
             }
         }
+
+        await releaseCashSessionPaymentClaim(paymentClaimSessionId || "", paymentClaimToken)
+        paymentClaimToken = undefined
 
         let printSummary: PrintDispatchSummary | undefined
 
@@ -1443,6 +1557,13 @@ export async function createOrder(data: {
                 console.error("Create Order rollback error:", rollbackError)
             }
         }
+        if (paymentClaimSessionId && paymentClaimToken) {
+            try {
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+            } catch (releaseError) {
+                console.error("Create Order payment claim release error:", releaseError)
+            }
+        }
         console.error("Create Order Error:", error)
         return { success: false, error: "Failed to create order" }
     }
@@ -1452,6 +1573,12 @@ export async function triggerSumUpPayment(amount: number, eventId: string, posDe
     try {
         const sessionCheck = await ensurePosActionSession()
         if (!sessionCheck.success) return sessionCheck
+
+        const cashSessionResult = await getOpenCashSession(eventId, posDeviceId)
+        if (!cashSessionResult.success) return cashSessionResult
+        if (cashSessionResult.session.isTest) {
+            return { success: false, error: "I pagamenti sul terminale SumUp sono bloccati nelle sessioni TEST" }
+        }
 
         const capabilitiesResult = await getPosPaymentCapabilities(eventId, posDeviceId)
         if (!capabilitiesResult.success) {
@@ -1904,6 +2031,8 @@ export async function completePendingOrderPayment(data: {
     }>
 }) {
     let stockAdjustmentsToRollback: StockAdjustment[] = []
+    let paymentClaimToken: string | undefined
+    let paymentClaimSessionId: string | undefined
     try {
         const sessionCheck = await ensurePosActionSession()
         if (!sessionCheck.success) return sessionCheck
@@ -2154,8 +2283,16 @@ export async function completePendingOrderPayment(data: {
         )
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
+        const paymentClaim = await claimCashSessionPayment(sessionResult.session.id)
+        if (!paymentClaim.success) {
+            return { success: false, error: "La cassa è in chiusura o sta completando un altro pagamento", cashSessionRequired: true }
+        }
+        paymentClaimToken = paymentClaim.token
+        paymentClaimSessionId = sessionResult.session.id
         const stockApplyResult = await applyStockForPaidOrder(data.eventId, currentCart, stockMode, ingredientPlan)
         if (!stockApplyResult.success) {
+            await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+            paymentClaimToken = undefined
             return {
                 success: false,
                 error: stockApplyResult.error || "Scorte non sufficienti",
@@ -2163,6 +2300,13 @@ export async function completePendingOrderPayment(data: {
             }
         }
         stockAdjustmentsToRollback = stockApplyResult.appliedAdjustments || []
+        if (!await refreshCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)) {
+            await rollbackStockAdjustments(data.eventId, stockAdjustmentsToRollback)
+            stockAdjustmentsToRollback = []
+            await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+            paymentClaimToken = undefined
+            return { success: false, error: "La sessione cassa è stata chiusa durante il pagamento", cashSessionRequired: true }
+        }
 
         order.set("cart", pricingResult.pricing.cartWithDiscounts)
         order.set("ingredientPlan", ingredientPlan)
@@ -2177,8 +2321,12 @@ export async function completePendingOrderPayment(data: {
         order.set("posDeviceId", data.posDeviceId || undefined)
         order.set("cashSessionId", sessionResult.session.id)
         order.set("stockOverrideApproved", Boolean(data.allowStockOverride))
+        order.set("stockAdjustments", stockAdjustmentsToRollback)
+        order.set("stockEffectStatus", "APPLIED")
         await order.save()
         stockAdjustmentsToRollback = []
+        await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+        paymentClaimToken = undefined
 
         let printSummary: PrintDispatchSummary | undefined
         try {
@@ -2204,6 +2352,13 @@ export async function completePendingOrderPayment(data: {
                 await rollbackStockAdjustments(data.eventId, stockAdjustmentsToRollback)
             } catch (rollbackError) {
                 console.error("Complete Pending Order rollback error:", rollbackError)
+            }
+        }
+        if (paymentClaimSessionId && paymentClaimToken) {
+            try {
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+            } catch (releaseError) {
+                console.error("Complete Pending Order payment claim release error:", releaseError)
             }
         }
         console.error("Complete Pending Order Error:", error)

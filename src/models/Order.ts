@@ -80,6 +80,16 @@ export interface IOrder extends Document {
     sumupWebhookClaimedAt?: Date;
     posDeviceId?: Types.ObjectId;
     stockOverrideApproved?: boolean;
+    stockAdjustments?: Array<{
+        entityType: "PRODUCT" | "INGREDIENT";
+        entityId: Types.ObjectId;
+        quantity: number;
+    }>;
+    stockEffectStatus?: "APPLIED" | "REVERTED";
+    stockEffectClaim?: {
+        token: string;
+        target: "APPLIED" | "REVERTED";
+    };
     stornoMeta?: {
         status: "IN_PROGRESS" | "COMPLETED" | "FAILED";
         reason?: string;
@@ -212,6 +222,16 @@ const OrderSchema = new Schema<IOrder>({
     posDeviceId: { type: Schema.Types.ObjectId, ref: 'PosDevice' },
     cashSessionId: { type: Schema.Types.ObjectId, ref: 'CashSession' },
     stockOverrideApproved: { type: Boolean, default: false },
+    stockAdjustments: [{
+        entityType: { type: String, enum: ["PRODUCT", "INGREDIENT"], required: true },
+        entityId: { type: Schema.Types.ObjectId, required: true },
+        quantity: { type: Number, required: true, min: 1 }
+    }],
+    stockEffectStatus: { type: String, enum: ["APPLIED", "REVERTED"], default: "APPLIED" },
+    stockEffectClaim: {
+        token: { type: String },
+        target: { type: String, enum: ["APPLIED", "REVERTED"] }
+    },
     stornoMeta: {
         status: {
             type: String,
