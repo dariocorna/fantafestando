@@ -6,14 +6,16 @@ const {
     cashSessionFindByIdMock,
     orderFindMock,
     posDeviceFindByIdMock,
-    printCashSessionSummaryMock
+    printCashSessionSummaryMock,
+    buildCashSessionPrintDocumentV2Mock
 } = vi.hoisted(() => ({
     ensureAdminSessionMock: vi.fn(),
     cashSessionFindOneMock: vi.fn(),
     cashSessionFindByIdMock: vi.fn(),
     orderFindMock: vi.fn(),
     posDeviceFindByIdMock: vi.fn(),
-    printCashSessionSummaryMock: vi.fn()
+    printCashSessionSummaryMock: vi.fn(),
+    buildCashSessionPrintDocumentV2Mock: vi.fn(() => ({ title: "CHIUSURA CASSA" }))
 }));
 
 vi.mock("@/lib/authz", () => ({ ensureAdminSession: ensureAdminSessionMock }));
@@ -25,7 +27,7 @@ vi.mock("@/models/Product", () => ({ default: { find: vi.fn() } }));
 vi.mock("@/models/PrintJob", () => ({ default: {} }));
 vi.mock("@/models/PosDevice", () => ({ default: { findById: posDeviceFindByIdMock } }));
 vi.mock("@/lib/printer", () => ({ PrinterService: { printCashSessionSummary: printCashSessionSummaryMock } }));
-vi.mock("@/lib/print-report", () => ({ buildCashSessionPrintDocumentV2: vi.fn(() => ({ title: "CHIUSURA CASSA" })) }));
+vi.mock("@/lib/print-report", () => ({ buildCashSessionPrintDocumentV2: buildCashSessionPrintDocumentV2Mock }));
 vi.mock("@/lib/product-consumption", () => ({
     aggregateOrderProductSales: vi.fn(() => ({ rows: [], discountSummaries: [], totals: {} })),
     buildProductSalesPrintRows: vi.fn(() => [])
@@ -93,6 +95,20 @@ describe("reprintClosedCashSessionAction", () => {
         const result = await reprintClosedCashSessionAction("session-1");
 
         expect(result).toMatchObject({ success: false, error: expect.stringContaining("Ristampa") });
+    });
+
+    it("names the original till instead of the generic fallback", async () => {
+        cashSessionFindOneMock.mockReturnValue(closedSession());
+        posDeviceFindByIdMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue({ name: "Cassa Birra" }) })
+        });
+
+        await reprintClosedCashSessionAction("session-1");
+
+        expect(posDeviceFindByIdMock).toHaveBeenCalledWith("pos-1");
+        expect(buildCashSessionPrintDocumentV2Mock).toHaveBeenCalledWith(
+            expect.objectContaining({ posDeviceName: "Cassa Birra" })
+        );
     });
 
     it("dispatches the summary to the original printer of the session", async () => {

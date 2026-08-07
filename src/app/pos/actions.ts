@@ -144,8 +144,13 @@ export async function updatePosStock(data: {
             ? product.variants?.find((variant) => variant.optionName === data.variantName)?.stockQuantity
             : product.stockQuantity
         if (typeof current === "number" && current < 0) {
-            // guarded: a concurrent sale or refill may have moved the value back above zero
-            await Product.updateOne({ ...query, [field]: { $lt: 0 } }, { $set: { [field]: 0 } })
+            // guarded: a concurrent sale or refill may have moved the value back above zero.
+            // The positional path is valid only in the update document, so the variant is
+            // selected with $elemMatch and $set resolves $ against that match.
+            const clampQuery = data.variantName
+                ? { _id: data.productId, eventId: data.eventId, variants: { $elemMatch: { optionName: data.variantName, stockQuantity: { $lt: 0 } } } }
+                : { ...query, stockQuantity: { $lt: 0 } }
+            await Product.updateOne(clampQuery, { $set: { [field]: 0 } })
             if (data.variantName) {
                 const variant = product.variants?.find((entry) => entry.optionName === data.variantName)
                 if (variant) variant.stockQuantity = 0
