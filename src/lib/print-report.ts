@@ -15,6 +15,7 @@ export interface PrintDocumentItemRow {
     unitPrice?: number;
     lineTotal?: number;
     groupLabel?: string;
+    categoryName?: string;
     grossAmount?: number;
     discountAmount?: number;
     selectedOptions?: PrintDocumentItemOption[];
@@ -89,6 +90,7 @@ export interface BuildOrderPrintDocumentInput {
 
 export interface BuildCashSessionPrintDocumentInput {
     sessionId: string;
+    isTest?: boolean;
     eventName?: string;
     posDeviceName?: string;
     openedAt?: Date | string;
@@ -225,6 +227,7 @@ function normalizeItems(items: unknown): PrintDocumentItemRow[] {
             const unitPrice = asNumber(item.unitPrice);
             const lineTotal = asNumber(item.lineTotal);
             const groupLabel = asTrimmedString(item.groupLabel);
+            const categoryName = asTrimmedString(item.categoryName);
             const grossAmount = asNumber(item.grossAmount);
             const discountAmount = asNumber(item.discountAmount);
             const selectedOptions = Array.isArray(item.selectedOptions)
@@ -250,6 +253,7 @@ function normalizeItems(items: unknown): PrintDocumentItemRow[] {
                 unitPrice,
                 lineTotal,
                 groupLabel,
+                categoryName,
                 grossAmount,
                 discountAmount,
                 selectedOptions
@@ -457,7 +461,7 @@ export function buildCashSessionPrintDocumentV2(input: BuildCashSessionPrintDocu
         { label: "ORDINI SALDATI", value: String(Math.max(0, Math.floor(input.paidOrdersCount || 0))) }
     ];
 
-    const footerLines: string[] = [];
+    const footerLines: string[] = input.isTest ? ["SESSIONE TEST - NON CONTABILIZZARE"] : [];
     const openingNotes = asTrimmedString(input.openingNotes);
     const closingNotes = asTrimmedString(input.closingNotes);
     if (openingNotes) footerLines.push(`NOTE APERTURA: ${openingNotes}`);
@@ -468,7 +472,7 @@ export function buildCashSessionPrintDocumentV2(input: BuildCashSessionPrintDocu
         schemaVersion: 2,
         kind: "CASH_SESSION_SUMMARY",
         printType: "CASH_SESSION_SUMMARY",
-        title: asTrimmedString(input.title) || "CHIUSURA CASSA",
+        title: asTrimmedString(input.title) || (input.isTest ? "SESSIONE TEST - NON CONTABILIZZARE" : "CHIUSURA CASSA"),
         copyLabel: asTrimmedString(input.copyLabel) || defaultCopyLabel("CASH_SESSION_SUMMARY"),
         referenceCode: sessionId.slice(-8).toUpperCase(),
         createdAt,
@@ -624,7 +628,9 @@ export function buildPreviewLines(document: Record<string, unknown> | PrintDocum
         lines.push(isCashSession ? "DESCRIZIONE         Q.TA   NETTO" : "DESCRIZIONE");
         lines.push(RECEIPT_SEPARATOR);
         let activeGroup: string | null = null;
+        let activeCategory: string | null = null;
         let groupItems: PrintDocumentItemRow[] = [];
+        let categoryItems: PrintDocumentItemRow[] = [];
         const appendCashSessionGroupTotals = () => {
             if (!isCashSession || groupItems.length === 0) return;
             const gross = groupItems.reduce((sum, item) => sum + (item.grossAmount ?? item.lineTotal ?? 0), 0);
@@ -635,8 +641,29 @@ export function buildPreviewLines(document: Record<string, unknown> | PrintDocum
             lines.push(...wrapLine(`SUBTOTALE NETTO: ${formatEuro(net)}`, maxLength));
             lines.push(RECEIPT_SEPARATOR);
         };
+        const appendCashSessionCategoryTotals = () => {
+            if (!isCashSession || categoryItems.length === 0) return;
+            const quantity = categoryItems.reduce((sum, item) => sum + item.qty, 0);
+            const gross = categoryItems.reduce((sum, item) => sum + (item.grossAmount ?? item.lineTotal ?? 0), 0);
+            const discount = categoryItems.reduce((sum, item) => sum + (item.discountAmount ?? 0), 0);
+            const net = categoryItems.reduce((sum, item) => sum + (item.lineTotal ?? 0), 0);
+            lines.push(...wrapLine(`TOTALE CATEGORIA Q.TA: ${quantity}`, maxLength));
+            lines.push(...wrapLine(`LORDO: ${formatEuro(gross)} SCONTO: ${formatEuro(discount)}`, maxLength));
+            lines.push(...wrapLine(`NETTO: ${formatEuro(net)}`, maxLength));
+            lines.push(RECEIPT_SEPARATOR);
+        };
 
         normalized.items.forEach((item) => {
+            const categoryName = item.categoryName || "Non categorizzato";
+            if (isCashSession && activeCategory !== categoryName) {
+                appendCashSessionGroupTotals();
+                appendCashSessionCategoryTotals();
+                activeCategory = categoryName;
+                activeGroup = null;
+                groupItems = [];
+                categoryItems = [];
+                lines.push(...wrapLine(`CATEGORIA: ${categoryName.toUpperCase()}`, maxLength));
+            }
             const groupLabel = item.groupLabel || "DETTAGLIO VENDUTO";
             if (isCashSession && activeGroup !== groupLabel) {
                 appendCashSessionGroupTotals();
@@ -645,6 +672,7 @@ export function buildPreviewLines(document: Record<string, unknown> | PrintDocum
                 lines.push(...wrapLine(groupLabel.toUpperCase(), maxLength));
             }
             groupItems.push(item);
+            categoryItems.push(item);
 
             if (isCashSession) {
                 const descriptionWidth = Math.max(12, maxLength - 13);
@@ -671,7 +699,10 @@ export function buildPreviewLines(document: Record<string, unknown> | PrintDocum
                 lines.push(...wrapLine(`+ ${option.name}`, maxLength));
             });
         });
-        if (isCashSession) appendCashSessionGroupTotals();
+        if (isCashSession) {
+            appendCashSessionGroupTotals();
+            appendCashSessionCategoryTotals();
+        }
         else lines.push(RECEIPT_SEPARATOR);
     }
 

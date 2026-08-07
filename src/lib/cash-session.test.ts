@@ -117,6 +117,18 @@ describe("cash session summary", () => {
         expect(csv).toContain("18.00")
     })
 
+    it("marks TEST cash sessions as non-accounting in csv", () => {
+        const csv = buildCashSessionCsvContent({
+            eventName: "Festa Demo",
+            posDeviceName: "Cassa Test",
+            sessionId: "session-test",
+            status: "CLOSED",
+            isTest: true
+        })
+
+        expect(csv).toContain("Stato,TEST - NON CONTABILIZZARE")
+    })
+
     it("builds xls-compatible cash session report using tab separator", () => {
         const salesBreakdown = aggregateOrderProductSales({
             orders: [{

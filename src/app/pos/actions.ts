@@ -55,13 +55,26 @@ import {
 } from "@/lib/ingredient-plan"
 import { shouldReusePendingIngredientPlan } from "@/lib/pending-ingredient-plan"
 import { ensurePosAccess } from "@/lib/pos-access"
+import Event from "@/models/Event"
+import { getStockStatus } from "@/lib/inventory"
+import { syncSoldOutFlags } from "@/lib/stock-operations"
 
 interface PrintDispatchSummary {
     attempted: number
     succeeded: number
     failed: number
     allSuccessful: boolean
+    failedPrinters: FailedPrinterGroup[]
 }
+
+interface FailedPrinterGroup {
+    key: string
+    name: string
+    error?: string
+    count: number
+    jobIds: string[]
+}
+
 
 async function ensurePosActionSession() {
     const sessionCheck = await ensurePosAccess()
@@ -69,6 +82,97 @@ async function ensurePosActionSession() {
         return { success: false as const, error: sessionCheck.error }
     }
     return { success: true as const }
+}
+
+export async function updatePosStock(data: {
+    eventId: string
+    productId: string
+    variantName?: string
+    /** absolute value typed by the operator; ignored when stockDelta is given */
+    stockQuantity: number | null
+    /** relative change from the +/- controls, applied atomically */
+    stockDelta?: number
+}) {
+    const sessionCheck = await ensurePosActionSession()
+    if (!sessionCheck.success) return sessionCheck
+
+    const isDelta = typeof data.stockDelta === "number"
+    if (!data.eventId || !data.productId || (
+        isDelta
+            ? !Number.isInteger(data.stockDelta)
+            : data.stockQuantity !== null
+            && (!Number.isInteger(data.stockQuantity) || data.stockQuantity < 0)
+    )) {
+        return { success: false as const, error: "Quantità scorte non valida" }
+    }
+
+    await dbConnect()
+    const activeEvent = await Event.exists({ _id: data.eventId, active: true, archived: { $ne: true } })
+    if (!activeEvent) return { success: false as const, error: "Evento attivo non valido" }
+
+    const field = data.variantName ? "variants.$.stockQuantity" : "stockQuantity"
+    const query = data.variantName
+        ? { _id: data.productId, eventId: data.eventId, "variants.optionName": data.variantName }
+        : { _id: data.productId, eventId: data.eventId }
+    // a delta is applied with $inc so a concurrent sale or session transition is not
+    // erased by an absolute value computed from a stale client snapshot
+    const trackedQuery = data.variantName
+        ? { ...query, variants: { $elemMatch: { optionName: data.variantName, stockQuantity: { $type: "number" } } } }
+        : { ...query, stockQuantity: { $type: "number" } }
+    const update = isDelta
+        ? { $inc: { [field]: data.stockDelta } }
+        : data.variantName
+            ? { $set: { [field]: data.stockQuantity } }
+            : { $set: { stockQuantity: data.stockQuantity, isSoldOut: data.stockQuantity === 0 } }
+    const product = await Product.findOneAndUpdate(isDelta ? trackedQuery : query, update, { returnDocument: "after" })
+        .select("_id stockQuantity isSoldOut variants")
+        .lean() as ({
+            _id: { toString(): string }
+            stockQuantity?: number | null
+            isSoldOut?: boolean
+            variants?: Array<{ optionName?: string, priceVariation?: number, stockQuantity?: number | null }>
+        } | null)
+
+    if (!product) {
+        return isDelta
+            ? { success: false as const, error: "Imposta prima una scorta numerica per usare +/-" }
+            : { success: false as const, error: "Prodotto o variante non trovato" }
+    }
+
+    if (isDelta) {
+        // $inc can cross zero when a concurrent sale lands first: clamp, then refresh isSoldOut
+        const current = data.variantName
+            ? product.variants?.find((variant) => variant.optionName === data.variantName)?.stockQuantity
+            : product.stockQuantity
+        if (typeof current === "number" && current < 0) {
+            await Product.updateOne(query, { $set: { [field]: 0 } })
+            if (data.variantName) {
+                const variant = product.variants?.find((entry) => entry.optionName === data.variantName)
+                if (variant) variant.stockQuantity = 0
+            } else {
+                product.stockQuantity = 0
+            }
+        }
+        if (!data.variantName) {
+            await syncSoldOutFlags(data.eventId, [product._id.toString()])
+            product.isSoldOut = (product.stockQuantity ?? null) === 0
+        }
+    }
+
+    return {
+        success: true as const,
+        product: {
+            id: product._id.toString(),
+            stockQuantity: product.stockQuantity ?? null,
+            isSoldOut: Boolean(product.isSoldOut),
+            stockStatus: getStockStatus(product.stockQuantity ?? null, Boolean(product.isSoldOut)),
+            variants: (product.variants || []).map((variant) => ({
+                optionName: variant.optionName || "",
+                priceVariation: Number(variant.priceVariation || 0),
+                stockQuantity: variant.stockQuantity ?? null
+            }))
+        }
+    }
 }
 
 interface OpenCashSessionDto {
@@ -712,8 +816,53 @@ function summarizePrintDispatch(results: boolean[] | undefined): PrintDispatchSu
         attempted,
         succeeded,
         failed,
-        allSuccessful: attempted > 0 && failed === 0
+        allSuccessful: attempted > 0 && failed === 0,
+        failedPrinters: []
     }
+}
+
+const PRINT_RETRY_LEASE_MS = 5 * 60 * 1000
+
+async function recoverStalePrintRetryClaims(eventId: string, orderId: string) {
+    await PrintJob.updateMany(
+        {
+            eventId,
+            orderId,
+            source: "ORDER",
+            status: "QUEUED",
+            retryClaimedAt: { $lte: new Date(Date.now() - PRINT_RETRY_LEASE_MS) }
+        },
+        {
+            $set: { status: "FAILED", errorMessage: "Reinvio interrotto: riprova" },
+            $unset: { retryClaimedAt: 1 }
+        }
+    )
+}
+
+async function listFailedPrinterGroups(eventId: string, orderId: string): Promise<FailedPrinterGroup[]> {
+    await recoverStalePrintRetryClaims(eventId, orderId)
+    const jobs = await PrintJob.find({ eventId, orderId, source: "ORDER", status: "FAILED" })
+        .sort({ createdAt: 1 })
+        .populate("printerId", "name ip port")
+        .select("_id printerId destinationHost destinationPort errorMessage")
+        .lean() as Array<{
+            _id: { toString(): string }
+            printerId?: { _id?: { toString(): string }; name?: string; ip?: string; port?: number } | null
+            destinationHost?: string
+            destinationPort?: number
+            errorMessage?: string
+        }>
+    const groups = new Map<string, FailedPrinterGroup>()
+    for (const job of jobs) {
+        const fallback = `${job.destinationHost || job.printerId?.ip || "stampante"}:${job.destinationPort || job.printerId?.port || 9100}`
+        const key = job.printerId?._id?.toString() || fallback
+        const current = groups.get(key) || { key, name: job.printerId?.name || fallback, count: 0, jobIds: [] }
+        current.count += 1
+        current.jobIds.push(job._id.toString())
+        current.error ||= job.errorMessage
+        groups.set(key, current)
+    }
+    return [...groups.values()]
 }
 
 async function getOpenCashSession(eventId: string, posDeviceId?: string): Promise<
@@ -1258,7 +1407,8 @@ export async function createOrder(data: {
                     attempted: 1,
                     succeeded: 0,
                     failed: 1,
-                    allSuccessful: false
+                    allSuccessful: false,
+            failedPrinters: []
                 }
             }
         }
@@ -2020,7 +2170,8 @@ export async function completePendingOrderPayment(data: {
                 attempted: 1,
                 succeeded: 0,
                 failed: 1,
-                allSuccessful: false
+                allSuccessful: false,
+            failedPrinters: []
             }
         }
 
@@ -2040,37 +2191,46 @@ export async function completePendingOrderPayment(data: {
 }
 
 export async function retryFailedOrderPrintJobs(data: {
-    eventId: string
     orderId: string
+    jobIds: string[]
 }): Promise<
-    { success: true, retried: number, failed: number, attempted: number }
+    { success: true, retried: number, failed: number, attempted: number, failedPrinters: FailedPrinterGroup[] }
     | { success: false, error: string }
 > {
     try {
         const sessionCheck = await ensurePosActionSession()
         if (!sessionCheck.success) return sessionCheck
 
-        if (!data.eventId || !data.orderId) {
+        if (!data.orderId || !Array.isArray(data.jobIds) || data.jobIds.length === 0) {
             return { success: false, error: "Dati mancanti per il reinvio stampa" }
         }
 
         await dbConnect()
+        const order = await Order.findOne({ _id: data.orderId, status: "PAID" }).select("eventId").lean() as ({ eventId: { toString(): string } } | null)
+        if (!order) return { success: false, error: "Ordine pagato non trovato" }
+        const eventId = order.eventId.toString()
+        await recoverStalePrintRetryClaims(eventId, data.orderId)
         const failedJobs = await PrintJob.find({
-            eventId: data.eventId,
+            eventId,
             orderId: data.orderId,
-            status: "FAILED"
+            source: "ORDER",
+            status: "FAILED",
+            _id: { $in: data.jobIds }
         })
             .sort({ createdAt: 1 })
             .select("_id")
             .lean() as Array<{ _id: { toString(): string } | string }>
 
         if (failedJobs.length === 0) {
-            return { success: true, retried: 0, failed: 0, attempted: 0 }
+            return { success: true, retried: 0, failed: 0, attempted: 0, failedPrinters: await listFailedPrinterGroups(eventId, data.orderId) }
         }
 
-        const results = await Promise.all(
-            failedJobs.map((job) => PrinterService.retryPrintJobById(data.eventId, job._id.toString()))
-        )
+        const results = []
+        for (const job of failedJobs) {
+            const result = await PrinterService.retryPrintJobById(eventId, job._id.toString())
+            results.push(result)
+            if (!result.success) break
+        }
 
         const retried = results.filter((result) => result.success).length
         const failed = results.length - retried
@@ -2079,7 +2239,8 @@ export async function retryFailedOrderPrintJobs(data: {
             success: true,
             attempted: results.length,
             retried,
-            failed
+            failed,
+            failedPrinters: await listFailedPrinterGroups(eventId, data.orderId)
         }
     } catch (error) {
         console.error("Retry Failed Order Print Jobs Error:", error)

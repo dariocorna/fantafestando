@@ -103,10 +103,11 @@ export async function GET(request: NextRequest) {
                 shortName: product.shortName,
                 description: product.description,
                 basePrice: product.basePrice,
-                variants: Array.isArray((product as { variants?: Array<{ optionName?: string, priceVariation?: number }> }).variants)
-                    ? ((product as { variants: Array<{ optionName?: string, priceVariation?: number }> }).variants).map((variant) => ({
+                variants: Array.isArray((product as { variants?: Array<{ optionName?: string, priceVariation?: number, stockQuantity?: number | null }> }).variants)
+                    ? ((product as { variants: Array<{ optionName?: string, priceVariation?: number, stockQuantity?: number | null }> }).variants).map((variant) => ({
                         optionName: variant.optionName,
-                        priceVariation: variant.priceVariation
+                        priceVariation: variant.priceVariation,
+                        ...(channel === "pos" ? { stockQuantity: variant.stockQuantity ?? null } : {})
                     }))
                     : [],
                 kind: normalizeProductKind((product as { kind?: string }).kind),

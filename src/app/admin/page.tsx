@@ -85,17 +85,17 @@ export default async function AdminDashboard() {
     const eventId = String(contextEvent._id);
     await dbConnect();
 
-    const [orders, products, cashSessions] = await Promise.all([
+    const cashSessions = await CashSession.find({ eventId })
+        .sort({ openedAt: -1 })
+        .populate({ path: "posDeviceId", select: "_id name" })
+        .select("_id status openedAt closedAt openingFloatAmount closingCountedCashAmount paidOrdersCount expectedCashAmount varianceAmount posDeviceId")
+        .lean() as CashSessionProjection[];
+    const [orders, products] = await Promise.all([
         Order.find({ eventId, status: "PAID" })
             .sort({ createdAt: -1 })
             .select("_id status createdAt totalAmount paymentMethod cart")
             .lean() as Promise<OrderProjection[]>,
-        Product.find({ eventId }).select("_id name").lean() as Promise<ProductProjection[]>,
-        CashSession.find({ eventId })
-            .sort({ openedAt: -1 })
-            .populate({ path: "posDeviceId", select: "_id name" })
-            .select("_id status openedAt closedAt openingFloatAmount closingCountedCashAmount paidOrdersCount expectedCashAmount varianceAmount posDeviceId")
-            .lean() as Promise<CashSessionProjection[]>
+        Product.find({ eventId }).select("_id name").lean() as Promise<ProductProjection[]>
     ]);
 
     const dashboardOrders: DashboardOrderInput[] = orders.map((order) => ({
@@ -182,7 +182,7 @@ export default async function AdminDashboard() {
                         </Link>
                     </Button>
                     <Button asChild variant="outline" size="sm">
-                        <Link href="/admin/export?format=xls">
+                        <Link href="/admin/export?format=xlsx">
                             <Download className="h-4 w-4" />
                             Export Excel
                         </Link>
@@ -342,7 +342,7 @@ export default async function AdminDashboard() {
                                 <TableHead className="text-right">Contato</TableHead>
                                 <TableHead className="text-right">Differenza</TableHead>
                                 <TableHead className="text-right">Ordini</TableHead>
-                                <TableHead className="text-right">Report</TableHead>
+                                <TableHead className="text-right">Report e azioni</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -379,7 +379,7 @@ export default async function AdminDashboard() {
                                             <TableCell className="text-right">{numberFormatter.format(session.paidOrdersCount ?? 0)}</TableCell>
                                             <TableCell className="text-right">
                                                 {isClosed ? (
-                                                    <div className="flex justify-end gap-2">
+                                                    <div className="flex flex-wrap justify-end gap-2">
                                                         <CashSessionPreviewDialog
                                                             sessionId={sessionId}
                                                             posName={getPosDeviceName(session.posDeviceId)}
@@ -394,16 +394,14 @@ export default async function AdminDashboard() {
                                                         </Button>
                                                         <Button asChild variant="outline" size="sm">
                                                             <Link
-                                                                href={`/admin/cash-sessions/export?sessionId=${sessionId}&format=xls`}
+                                                                href={`/admin/cash-sessions/export?sessionId=${sessionId}&format=xlsx`}
                                                                 data-testid={`cash-session-report-xls-${sessionId}`}
                                                             >
-                                                                XLS
+                                                                XLSX
                                                             </Link>
                                                         </Button>
                                                     </div>
-                                                ) : (
-                                                    "-"
-                                                )}
+                                                ) : null}
                                             </TableCell>
                                         </TableRow>
                                     )

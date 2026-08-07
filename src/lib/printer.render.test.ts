@@ -32,8 +32,8 @@ describe("PrinterService renderPrintDocument", () => {
             createdAt: "2026-03-27T22:00:00.000Z",
             headerLines: [],
             items: [
-                { qty: 2, name: "PANINO", groupLabel: "PREZZO PIENO", grossAmount: 10, discountAmount: 0, lineTotal: 10 },
-                { qty: 1, name: "BIBITA", groupLabel: "Staff", grossAmount: 5, discountAmount: 1, lineTotal: 4 }
+                { categoryName: "Cucina", qty: 2, name: "PANINO", groupLabel: "PREZZO PIENO", grossAmount: 10, discountAmount: 0, lineTotal: 10 },
+                { categoryName: "Bar", qty: 1, name: "BIBITA", groupLabel: "Staff", grossAmount: 5, discountAmount: 1, lineTotal: 4 }
             ],
             totals: [
                 { label: "LORDO", value: "15.00 EUR" },
@@ -53,6 +53,10 @@ describe("PrinterService renderPrintDocument", () => {
         expect(printer.setTypeFontB.mock.invocationCallOrder[0]).toBeLessThan(printer.setTypeFontA.mock.invocationCallOrder[0]);
         expect(printer.println).toHaveBeenCalledWith(expect.stringContaining("PANINO"));
         expect(printer.println).toHaveBeenCalledWith(expect.stringContaining("SUBT. SCONTO"));
+        expect(printer.println).toHaveBeenCalledWith(expect.stringContaining("CATEGORIA: CUCINA"));
+        expect(printer.println).toHaveBeenCalledWith(expect.stringContaining("CATEGORIA: BAR"));
+        expect(printer.println).toHaveBeenCalledWith(expect.stringContaining("CAT. Q.TA"));
+        expect(printer.println).toHaveBeenCalledWith(expect.stringContaining("CAT. NETTO"));
         expect(printer.setTextDoubleWidth).not.toHaveBeenCalled();
         expect(printer.setTextDoubleHeight).not.toHaveBeenCalled();
 

@@ -95,7 +95,7 @@ test.describe('Pannello Amministrazione', () => {
         const editCatName = `${catName} EDITED`;
         await page.fill('#cat-edit-name', editCatName);
         await page.click('button:has-text("Salva Modifiche")');
-        await expect(page.getByText(editCatName)).toBeVisible();
+        await expect(page.getByRole('row').filter({ hasText: editCatName }).first()).toBeVisible();
 
         const prodName = `ProdToEdit ${suffix}`;
         await page.click('#new-product-btn');

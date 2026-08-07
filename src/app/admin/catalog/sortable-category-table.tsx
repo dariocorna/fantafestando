@@ -42,6 +42,7 @@ export interface SerializedCategory {
     skipKitchenPrint?: boolean;
     printKitchenCopyAtCashier?: boolean;
     pizzaFlowEnabled?: boolean;
+    pizzaBarcodeEnabled?: boolean;
 }
 
 interface SortableCategoryTableProps {
@@ -139,7 +140,7 @@ export function SortableCategoryTable({
                             <TableCell>
                                 {cat.pizzaFlowEnabled ? (
                                     <span className="rounded-full bg-rose-100 px-2 py-1 text-xs font-bold text-rose-700">
-                                        Numerata
+                                        {cat.pizzaBarcodeEnabled ? "Numerata + barcode" : "Numerata"}
                                     </span>
                                 ) : (
                                     <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
@@ -211,7 +212,7 @@ export function SortableCategoryTable({
                                 <TableCell>
                                     {cat.pizzaFlowEnabled ? (
                                         <span className="rounded-full bg-rose-100 px-2 py-1 text-xs font-bold text-rose-700">
-                                            Numerata
+                                            {cat.pizzaBarcodeEnabled ? "Numerata + barcode" : "Numerata"}
                                         </span>
                                     ) : (
                                         <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
@@ -244,7 +245,8 @@ export function SortableCategoryTable({
                                             printerId: cat.printerId,
                                             skipKitchenPrint: cat.skipKitchenPrint,
                                             printKitchenCopyAtCashier: cat.printKitchenCopyAtCashier,
-                                            pizzaFlowEnabled: cat.pizzaFlowEnabled
+                                            pizzaFlowEnabled: cat.pizzaFlowEnabled,
+                                            pizzaBarcodeEnabled: cat.pizzaBarcodeEnabled
                                         }}
                                         eventId={eventId}
                                         printers={printers}

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import ExcelJS from "exceljs"
 import {
     createAndActivateEvent,
     configureCashPos,
@@ -72,11 +73,12 @@ test.describe("Dashboard statistiche e reportistica", () => {
 
         const xlsResponse = await page.request.get("/admin/export?format=xls")
         expect(xlsResponse.ok()).toBeTruthy()
-        expect(xlsResponse.headers()["content-type"]).toContain("application/vnd.ms-excel")
-        expect(xlsResponse.headers()["content-disposition"]).toContain(".xls")
-        const xlsPayload = await xlsResponse.text()
-        expect(xlsPayload).toContain("Sezione\tValore")
-        expect(xlsPayload).toContain(unsoldName)
+        expect(xlsResponse.headers()["content-type"]).toContain("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        expect(xlsResponse.headers()["content-disposition"]).toContain(".xlsx")
+        const workbook = new ExcelJS.Workbook()
+        await workbook.xlsx.load(await xlsResponse.body())
+        expect(workbook.worksheets.map((sheet) => sheet.name)).toContain("Categorie")
+        expect(workbook.getWorksheet("Sotto soglia")?.getColumn(1).values).toContain(unsoldName)
         } finally {
             await deleteEvent(page, eventName)
         }

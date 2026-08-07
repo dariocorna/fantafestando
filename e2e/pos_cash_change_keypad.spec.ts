@@ -32,6 +32,14 @@ test.describe("POS calcolo resto contanti", () => {
             await openPosAndSelectDevice(page, posName)
             await openCashSession(page, "50")
 
+            await page.getByRole("button", { name: "Scorte", exact: true }).click()
+            const stockDialog = page.getByRole("dialog").filter({ hasText: "Scorte rapide" })
+            await stockDialog.getByLabel("Cerca nelle scorte").fill(productName)
+            await stockDialog.getByLabel(`Scorta ${productName}`).fill("5")
+            await stockDialog.getByRole("button", { name: "Salva", exact: true }).click()
+            await expect(stockDialog.getByText("Inserisci un intero positivo")).toHaveCount(0)
+            await page.keyboard.press("Escape")
+
             await page.locator("button").filter({ hasText: new RegExp(productName) }).first().click()
             if (isMobile) await page.getByTestId("pos-mobile-cart-bar").click()
             await page.getByTestId("pos-pay-cta").click()
@@ -42,6 +50,11 @@ test.describe("POS calcolo resto contanti", () => {
             await expect(changeCard).toBeVisible()
 
             await changeCard.getByRole("button", { name: "20.00 €", exact: true }).click()
+            await expect(changeCard.getByTestId("cash-change-due")).toContainText("Resto 1.50 €")
+
+            await page.keyboard.press("c")
+            await page.keyboard.press("2")
+            await page.keyboard.press("0")
             await expect(changeCard.getByTestId("cash-change-due")).toContainText("Resto 1.50 €")
 
             await changeCard.getByRole("button", { name: "Cancella importo ricevuto" }).click()

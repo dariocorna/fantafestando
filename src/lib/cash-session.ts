@@ -43,6 +43,7 @@ export interface CashSessionReportInput {
     posDeviceName: string
     sessionId: string
     status: "OPEN" | "CLOSED"
+    isTest?: boolean
     openedAt?: Date | string | null
     closedAt?: Date | string | null
     openingFloatAmount?: number | null
@@ -196,7 +197,7 @@ function buildCashSessionExport(
     rows.push(serializeRow(["Evento", normalizeText(report.eventName, "Evento non specificato")], delimiter))
     rows.push(serializeRow(["Postazione cassa", normalizeText(report.posDeviceName, "Postazione non specificata")], delimiter))
     rows.push(serializeRow(["Sessione ID", normalizeId(report.sessionId)], delimiter))
-    rows.push(serializeRow(["Stato", report.status === "CLOSED" ? "Chiusa" : "Aperta"], delimiter))
+    rows.push(serializeRow(["Stato", report.isTest ? "TEST - NON CONTABILIZZARE" : report.status === "CLOSED" ? "Chiusa" : "Aperta"], delimiter))
     rows.push(serializeRow(["Apertura", formatDateTime(report.openedAt, timezone)], delimiter))
     rows.push(serializeRow(["Chiusura", formatDateTime(report.closedAt, timezone)], delimiter))
     rows.push(serializeRow(["Fondo iniziale", normalizeAmount(report.openingFloatAmount).toFixed(2)], delimiter))

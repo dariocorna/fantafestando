@@ -401,6 +401,7 @@ export default async function AdminCatalog() {
         const skipKitchenPrint = formData.get("skipKitchenPrint") === "on";
         const printKitchenCopyAtCashier = formData.get("printKitchenCopyAtCashier") === "on";
         const pizzaFlowEnabled = formData.get("pizzaFlowEnabled") === "on";
+        const pizzaBarcodeEnabled = pizzaFlowEnabled && formData.get("pizzaBarcodeEnabled") === "on";
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
 
@@ -442,7 +443,8 @@ export default async function AdminCatalog() {
             printOrder: nextPrintOrder,
             skipKitchenPrint,
             printKitchenCopyAtCashier,
-            pizzaFlowEnabled
+            pizzaFlowEnabled,
+            pizzaBarcodeEnabled
         });
         revalidateCatalogSurfaces();
         return { success: true };
@@ -613,6 +615,7 @@ export default async function AdminCatalog() {
         const skipKitchenPrint = formData.get("skipKitchenPrint") === "on";
         const printKitchenCopyAtCashier = formData.get("printKitchenCopyAtCashier") === "on";
         const pizzaFlowEnabled = formData.get("pizzaFlowEnabled") === "on";
+        const pizzaBarcodeEnabled = pizzaFlowEnabled && formData.get("pizzaBarcodeEnabled") === "on";
         const normalizedSubmittedEventId = submittedEventId?.trim();
         const scopedEventId = currentEventId;
         if (!id || !name || !scopedEventId) return { error: "Dati categoria non validi" };
@@ -634,7 +637,7 @@ export default async function AdminCatalog() {
 
         await Category.findOneAndUpdate(
             { _id: id, eventId: scopedEventId },
-            { name, uiColor, printerId: printerId || null, skipKitchenPrint, printKitchenCopyAtCashier, pizzaFlowEnabled }
+            { name, uiColor, printerId: printerId || null, skipKitchenPrint, printKitchenCopyAtCashier, pizzaFlowEnabled, pizzaBarcodeEnabled }
         );
         revalidateCatalogSurfaces();
         return { success: true };
@@ -890,6 +893,7 @@ export default async function AdminCatalog() {
                         skipKitchenPrint: Boolean(c.skipKitchenPrint),
                         printKitchenCopyAtCashier: Boolean(c.printKitchenCopyAtCashier),
                         pizzaFlowEnabled: Boolean(c.pizzaFlowEnabled),
+                        pizzaBarcodeEnabled: Boolean(c.pizzaBarcodeEnabled),
                     }))}
                     onReorder={reorderCategories}
                     eventId={currentEventId}
