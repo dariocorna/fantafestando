@@ -135,10 +135,13 @@ export async function POST(req: NextRequest) {
                 }
 
                 const paymentClaim = await claimCashSessionPayment(cashSessionId)
-                if (!paymentClaim.success || paymentClaim.isTest) {
+                if (!paymentClaim.success) {
                     return NextResponse.json({ error: "Cash session is unavailable for SumUp payments" }, { status: 409 })
                 }
                 paymentClaimToken = paymentClaim.token
+                if (paymentClaim.isTest) {
+                    return NextResponse.json({ error: "Cash session is unavailable for SumUp payments" }, { status: 409 })
+                }
 
                 const cartPayload = order.cart.map((item: {
                     productId: string | { toString(): string }

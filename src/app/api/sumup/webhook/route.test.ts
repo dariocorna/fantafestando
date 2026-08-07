@@ -127,4 +127,22 @@ describe("POST /api/sumup/webhook", () => {
             { $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 } }
         );
     });
+
+    test("releases the session claim when a delayed callback reaches a TEST session", async () => {
+        orderFindOneAndUpdateMock.mockResolvedValue({
+            _id: "order-1",
+            eventId: { toString: () => "event-1" },
+            cashSessionId: { toString: () => "session-1" },
+            status: "PENDING",
+            cart: [],
+            ingredientPlan: []
+        });
+        claimCashSessionPaymentMock.mockResolvedValue({ success: true, token: "test-session-claim", isTest: true });
+
+        const response = await POST(webhookRequest());
+
+        expect(response.status).toBe(409);
+        expect(releaseCashSessionPaymentClaimMock).toHaveBeenCalledWith("session-1", "test-session-claim");
+        expect(applyStockForPaidOrderMock).not.toHaveBeenCalled();
+    });
 });
