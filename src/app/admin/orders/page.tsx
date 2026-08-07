@@ -47,7 +47,7 @@ export default async function AdminOrders() {
 
     const eventId = String(contextEvent._id)
     await dbConnect();
-    const excludedSessionIds = (await CashSession.find({ eventId, status: "CLOSED", isTest: true }).select("_id").lean() as Array<{ _id: unknown }>).map((session) => session._id)
+    const excludedSessionIds = (await CashSession.find({ eventId, isTest: true }).select("_id").lean() as Array<{ _id: unknown }>).map((session) => session._id)
     const orders = await Order.find({
         eventId,
         status: { $in: ["PAID", "CANCELLED"] },

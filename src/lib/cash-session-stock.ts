@@ -140,8 +140,9 @@ export async function transitionClaimedOrderStock(params: {
         )
         if ((result.matchedCount ?? result.modifiedCount) !== 1) {
             const alreadyApplied = await Model.exists({ eventId: params.eventId, _id: adjustment.entityId, stockOperationKeys: key })
-            const unlimited = await Model.exists({ eventId: params.eventId, _id: adjustment.entityId, stockQuantity: null })
-            if (!alreadyApplied && !unlimited) return { success: false, error: "Scorte cambiate durante l'operazione: correggile e riprova" }
+            // deleted or unlimited entities are no-op adjustments, like rollbackStockAdjustments
+            const tracked = await Model.exists({ eventId: params.eventId, _id: adjustment.entityId, stockQuantity: { $type: "number" } })
+            if (!alreadyApplied && tracked) return { success: false, error: "Scorte cambiate durante l'operazione: correggile e riprova" }
         }
     }
 

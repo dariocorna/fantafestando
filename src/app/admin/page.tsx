@@ -92,7 +92,7 @@ export default async function AdminDashboard() {
         .populate({ path: "posDeviceId", select: "_id name" })
         .select("_id status isTest openedAt closedAt openingFloatAmount closingCountedCashAmount paidOrdersCount expectedCashAmount varianceAmount posDeviceId")
         .lean() as CashSessionProjection[];
-    const excludedSessionIds = cashSessions.filter((session) => session.status === "CLOSED" && session.isTest).map((session) => session._id);
+    const excludedSessionIds = cashSessions.filter((session) => session.isTest).map((session) => session._id);
     const [orders, products] = await Promise.all([
         Order.find({ eventId, status: "PAID", cashSessionId: { $nin: excludedSessionIds } })
             .sort({ createdAt: -1 })

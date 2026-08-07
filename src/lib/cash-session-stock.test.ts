@@ -115,7 +115,8 @@ describe("cash session stock transitions", () => {
         }]) }) })
         productFindMock.mockReturnValue(queryResult([{ _id: { toString: () => "p1" }, name: "Panino", stockQuantity: 2 }]))
         productUpdateOneMock.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 })
-        productExistsMock.mockResolvedValue(null)
+        // the product still exists with a numeric stock: a real conflict, not a deleted/unlimited no-op
+        productExistsMock.mockImplementation(async (query) => query.stockQuantity ? { _id: "p1" } : null)
 
         const result = await transitionCashSessionStock({ eventId: "e1", sessionId: "s1", token: "race", target: "APPLIED" })
 
@@ -150,6 +151,18 @@ describe("cash session stock transitions", () => {
         productExistsMock.mockImplementation((query) => query.stockQuantity === null ? { _id: "p1" } : null)
 
         await expect(transitionCashSessionStock({ eventId: "e1", sessionId: "s1", token: "unlimited", target: "REVERTED" })).resolves.toMatchObject({ success: true })
+    })
+
+    test("skips a deleted product while reverting a session", async () => {
+        orderFindMock.mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue([{
+            _id: { toString: () => "o1" },
+            stockAdjustments: [{ entityType: "PRODUCT", entityId: "gone", quantity: 1 }]
+        }]) }) })
+        productFindMock.mockReturnValue(queryResult([]))
+        productUpdateOneMock.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 })
+        productExistsMock.mockResolvedValue(null)
+
+        await expect(transitionCashSessionStock({ eventId: "e1", sessionId: "s1", token: "deleted", target: "REVERTED" })).resolves.toMatchObject({ success: true })
     })
 
     test("does not require stock already applied by the same retry token", async () => {
