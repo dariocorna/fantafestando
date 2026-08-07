@@ -186,7 +186,7 @@ export async function setCashSessionTestAction(sessionId: string, isTest: boolea
             { _id: sessionId, "transition.token": token, "transition.type": type, "transition.claimedAt": claim.transition.claimedAt },
             { $set: { transition: { ...claim.transition, status: "FAILED", error: result.error } } }
         );
-        return { success: false as const, error: result.error, shortages: result.shortages };
+        return { success: false as const, error: result.error, shortages: "shortages" in result ? result.shortages : undefined };
     }
 
     const finalized = await CashSession.updateOne(
