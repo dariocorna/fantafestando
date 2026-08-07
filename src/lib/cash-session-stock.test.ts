@@ -140,6 +140,18 @@ describe("cash session stock transitions", () => {
         expect(productUpdateOneMock).not.toHaveBeenCalled()
     })
 
+    test("skips an unlimited product while reverting a session", async () => {
+        orderFindMock.mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue([{
+            _id: { toString: () => "o1" },
+            stockAdjustments: [{ entityType: "PRODUCT", entityId: "p1", quantity: 1 }]
+        }]) }) })
+        productFindMock.mockReturnValue(queryResult([{ _id: { toString: () => "p1" }, stockQuantity: null }]))
+        productUpdateOneMock.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 })
+        productExistsMock.mockImplementation((query) => query.stockQuantity === null ? { _id: "p1" } : null)
+
+        await expect(transitionCashSessionStock({ eventId: "e1", sessionId: "s1", token: "unlimited", target: "REVERTED" })).resolves.toMatchObject({ success: true })
+    })
+
     test("does not require stock already applied by the same retry token", async () => {
         orderFindMock.mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue([{
             _id: { toString: () => "o1" },

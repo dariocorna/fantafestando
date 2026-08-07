@@ -140,7 +140,8 @@ export async function transitionClaimedOrderStock(params: {
         )
         if ((result.matchedCount ?? result.modifiedCount) !== 1) {
             const alreadyApplied = await Model.exists({ eventId: params.eventId, _id: adjustment.entityId, stockOperationKeys: key })
-            if (!alreadyApplied) return { success: false, error: "Scorte cambiate durante l'operazione: correggile e riprova" }
+            const unlimited = await Model.exists({ eventId: params.eventId, _id: adjustment.entityId, stockQuantity: null })
+            if (!alreadyApplied && !unlimited) return { success: false, error: "Scorte cambiate durante l'operazione: correggile e riprova" }
         }
     }
 
