@@ -1,12 +1,18 @@
 "use server";
 
 import { ensureAdminSession } from "@/lib/authz";
-import dbConnect from "@/lib/mongoose";
-import { PrinterService } from "@/lib/printer";
+import { getAdminContextEventId } from "@/lib/events";
 import CashSession from "@/models/CashSession";
-import PosDevice from "@/models/PosDevice";
 import Order from "@/models/Order";
 import Product from "@/models/Product";
+import PrintJob from "@/models/PrintJob";
+import PosDevice from "@/models/PosDevice";
+import dbConnect from "@/lib/mongoose";
+import { transitionCashSessionStock } from "@/lib/cash-session-stock";
+import { buildCashSessionTransitionClaim, cashSessionTransitionGuard } from "@/lib/cash-session-transition";
+import { hasPendingSumUpCheckouts, noActivePaymentClaim } from "@/lib/cash-session-payment-claim";
+import { revalidatePath } from "next/cache";
+import { PrinterService } from "@/lib/printer";
 import { buildCashSessionPrintDocumentV2 } from "@/lib/print-report";
 import {
     aggregateOrderProductSales,
@@ -15,7 +21,7 @@ import {
     type ProductConsumptionOrder
 } from "@/lib/product-consumption";
 
-export async function getClosedCashSessionPrintDocumentAction(sessionId: string, posDeviceName?: string) {
+export async function getClosedCashSessionPrintDocumentAction(sessionId: string, _posDeviceName?: string) {
     const sessionCheck = await ensureAdminSession();
     if (!sessionCheck.ok) {
         throw new Error(sessionCheck.error);
@@ -34,6 +40,9 @@ export async function getClosedCashSessionPrintDocumentAction(sessionId: string,
         cashSessionId: session._id,
         status: "PAID"
     }).lean() as ProductConsumptionOrder[];
+    const posDevice = session.posDeviceId
+        ? await PosDevice.findById(session.posDeviceId).select("name").lean() as ({ name?: string } | null)
+        : null;
 
     const productIds = Array.from(
         new Set(
@@ -86,8 +95,9 @@ export async function getClosedCashSessionPrintDocumentAction(sessionId: string,
 
     const document = buildCashSessionPrintDocumentV2({
         sessionId: session._id.toString(),
+        isTest: Boolean(session.isTest),
         eventName: (session.eventId as { name: string }).name,
-        posDeviceName: posDeviceName || "Sessione Cassa",
+        posDeviceName: posDevice?.name || _posDeviceName || "Sessione Cassa",
         openedAt: session.openedAt.toISOString(),
         closedAt: session.closedAt!.toISOString(),
         openingFloatAmount: session.openingFloatAmount || 0,
@@ -113,15 +123,153 @@ export async function getClosedCashSessionPrintDocumentAction(sessionId: string,
     return document;
 }
 
+async function hasUnrefundedSumUpOrders(sessionId: string) {
+    return Boolean(await Order.exists({
+        cashSessionId: sessionId,
+        status: "PAID",
+        $or: [{ sumupCheckoutId: { $exists: true, $ne: "" } }, { sumupPaymentId: { $exists: true, $ne: "" } }]
+    }))
+}
+
+export async function setCashSessionTestAction(sessionId: string, isTest: boolean) {
+    const sessionCheck = await ensureAdminSession();
+    if (!sessionCheck.ok) return { success: false as const, error: sessionCheck.error };
+    await dbConnect();
+    const session = await CashSession.findById(sessionId);
+    if (!session) return { success: false as const, error: "Sessione cassa non trovata" };
+    if (Boolean(session.isTest) === isTest) return { success: true as const, approximateOrders: 0 };
+
+    if (isTest && await hasUnrefundedSumUpOrders(sessionId)) {
+        return { success: false as const, error: "Storna e rimborsa i pagamenti SumUp prima di classificare la sessione come TEST" };
+    }
+
+    if (session.status === "OPEN") {
+        if (isTest && await hasPendingSumUpCheckouts(sessionId)) {
+            return { success: false as const, error: "Completa o annulla i pagamenti SumUp in attesa prima di classificare la sessione come TEST" };
+        }
+        const updated = await CashSession.updateOne(
+            {
+                _id: sessionId,
+                status: "OPEN",
+                transition: { $exists: false },
+                ...noActivePaymentClaim()
+            },
+            { $set: { isTest }, $unset: { paymentClaim: 1 } }
+        );
+        if ((updated.matchedCount ?? updated.modifiedCount) !== 1) {
+            return { success: false as const, error: "Chiusura o pagamento in corso sulla sessione", shortages: undefined };
+        }
+        revalidatePath("/admin");
+        revalidatePath("/pos");
+        return { success: true as const, approximateOrders: 0 };
+    }
+
+    const type = isTest ? "TO_TEST" : "TO_NORMAL";
+    const claim = buildCashSessionTransitionClaim(session.transition, type);
+    if (!claim.success) return { success: false as const, error: claim.error, shortages: undefined };
+    const { token } = claim;
+    const claimedSession = await CashSession.findOneAndUpdate(
+        { _id: sessionId, status: "CLOSED", isTest: { $ne: isTest }, ...claim.guard },
+        { $set: { transition: claim.transition } },
+        { returnDocument: "after" }
+    );
+    if (!claimedSession) {
+        return { success: false as const, error: "Un'altra transizione è già in corso sulla sessione" };
+    }
+    const result = await transitionCashSessionStock({
+        eventId: claimedSession.eventId.toString(),
+        sessionId,
+        token,
+        target: isTest ? "REVERTED" : "APPLIED"
+    });
+    if (!result.success) {
+        await CashSession.updateOne(
+            cashSessionTransitionGuard(sessionId, claim.transition),
+            { $set: { transition: { ...claim.transition, status: "FAILED", error: result.error } } }
+        );
+        return { success: false as const, error: result.error, shortages: "shortages" in result ? result.shortages : undefined };
+    }
+
+    const finalized = await CashSession.updateOne(
+        cashSessionTransitionGuard(sessionId, claim.transition),
+        {
+            $set: { isTest, stockEffectStatus: isTest ? "REVERTED" : "APPLIED" },
+            $unset: { transition: 1 }
+        }
+    );
+    if (finalized.matchedCount !== 1) {
+        return { success: false as const, error: "Transizione interrotta: riprova per completarla" };
+    }
+    revalidatePath("/admin");
+    revalidatePath("/admin/orders");
+    return { success: true as const, approximateOrders: result.approximateOrders };
+}
+
+export async function deleteCashSessionAction(sessionId: string, confirmation: string) {
+    const sessionCheck = await ensureAdminSession();
+    if (!sessionCheck.ok) return { success: false as const, error: sessionCheck.error };
+    if (confirmation.trim() !== "ELIMINA") return { success: false as const, error: "Digita ELIMINA per confermare" };
+    await dbConnect();
+    // scope every destructive query to the selected event: a foreign session id must not
+    // delete another event's orders and print jobs
+    const eventId = await getAdminContextEventId();
+    if (!eventId) return { success: false as const, error: "Nessuna festa selezionata" };
+    const session = await CashSession.findOne({ _id: sessionId, eventId, status: "CLOSED" });
+    if (!session) return { success: false as const, error: "È possibile eliminare soltanto una sessione chiusa della festa selezionata" };
+    if (await hasUnrefundedSumUpOrders(sessionId)) return { success: false as const, error: "Storna e rimborsa i pagamenti SumUp prima di eliminare la sessione" };
+
+    const type = "DELETE" as const;
+    const claim = buildCashSessionTransitionClaim(session.transition, type);
+    if (!claim.success) return claim;
+    const { token } = claim;
+    const claimedSession = await CashSession.findOneAndUpdate(
+        { _id: sessionId, eventId, status: "CLOSED", ...claim.guard },
+        {
+            $set: {
+                deletionStatus: "IN_PROGRESS",
+                transition: claim.transition
+            }
+        },
+        { returnDocument: "after" }
+    );
+    if (!claimedSession) return { success: false as const, error: "Un'altra transizione è già in corso sulla sessione" };
+
+    if (claimedSession.stockEffectStatus !== "REVERTED") {
+        const stockResult = await transitionCashSessionStock({ eventId: claimedSession.eventId.toString(), sessionId, token, target: "REVERTED" });
+        if (!stockResult.success) {
+            await CashSession.updateOne(
+                cashSessionTransitionGuard(sessionId, claim.transition),
+                {
+                    $set: {
+                        deletionStatus: "FAILED",
+                        transition: { ...claim.transition, status: "FAILED", error: stockResult.error }
+                    }
+                }
+            );
+            return { success: false as const, error: stockResult.error };
+        }
+        await CashSession.updateOne(
+            cashSessionTransitionGuard(sessionId, claim.transition),
+            { $set: { stockEffectStatus: "REVERTED" } }
+        );
+    }
+
+    const orderIds = (await Order.find({ cashSessionId: sessionId }).select("_id").lean() as Array<{ _id: { toString(): string } }>).map((order) => order._id.toString());
+    await PrintJob.deleteMany({ eventId: claimedSession.eventId, $or: [{ orderId: { $in: orderIds } }, { source: "CASH_SESSION", "document.sessionId": sessionId }] });
+    await Order.deleteMany({ cashSessionId: sessionId });
+    await CashSession.deleteOne(cashSessionTransitionGuard(sessionId, claim.transition));
+    revalidatePath("/admin");
+    revalidatePath("/admin/orders");
+    return { success: true as const };
+}
+
 export async function reprintClosedCashSessionAction(sessionId: string) {
     const sessionCheck = await ensureAdminSession();
     if (!sessionCheck.ok) return { success: false as const, error: sessionCheck.error };
     await dbConnect();
     const session = await CashSession.findOne({ _id: sessionId, status: "CLOSED" }).select("eventId posDeviceId").lean() as ({ eventId: { toString(): string }; posDeviceId: { toString(): string } } | null);
     if (!session) return { success: false as const, error: "Sessione chiusa non trovata" };
-    // without the real device name the reprinted summary identifies the wrong till
-    const posDevice = await PosDevice.findById(session.posDeviceId).select("name").lean() as ({ name?: string } | null);
-    const document = await getClosedCashSessionPrintDocumentAction(sessionId, posDevice?.name);
+    const document = await getClosedCashSessionPrintDocumentAction(sessionId);
     const printed = await PrinterService.printCashSessionSummary(
         session.eventId.toString(),
         session.posDeviceId.toString(),

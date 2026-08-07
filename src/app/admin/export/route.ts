@@ -115,8 +115,9 @@ export async function GET(request: NextRequest) {
         const eventId = String(contextEvent._id);
 
         await dbConnect();
+        const excludedSessionIds = (await CashSession.find({ eventId, isTest: true }).select("_id").lean() as Array<{ _id: unknown }>).map((session) => session._id);
         const [orders, products, categories] = await Promise.all([
-            Order.find({ eventId, status: "PAID" })
+            Order.find({ eventId, status: "PAID", cashSessionId: { $nin: excludedSessionIds } })
                 .sort({ createdAt: -1 })
                 .select("_id status createdAt totalAmount discountApplied discountMeta discountComponents pricingMode paymentMethod cart")
                 .lean() as Promise<OrderProjection[]>,

@@ -56,6 +56,7 @@ interface CashSessionProjection {
     paidOrdersCount?: number
     expectedCashAmount?: number
     varianceAmount?: number
+    isTest?: boolean
     posDeviceId?: {
         _id?: unknown
         name?: string
@@ -89,10 +90,11 @@ export default async function AdminDashboard() {
     const cashSessions = await CashSession.find({ eventId })
         .sort({ openedAt: -1 })
         .populate({ path: "posDeviceId", select: "_id name" })
-        .select("_id status openedAt closedAt openingFloatAmount closingCountedCashAmount paidOrdersCount expectedCashAmount varianceAmount posDeviceId")
+        .select("_id status isTest openedAt closedAt openingFloatAmount closingCountedCashAmount paidOrdersCount expectedCashAmount varianceAmount posDeviceId")
         .lean() as CashSessionProjection[];
+    const excludedSessionIds = cashSessions.filter((session) => session.isTest).map((session) => session._id);
     const [orders, products] = await Promise.all([
-        Order.find({ eventId, status: "PAID" })
+        Order.find({ eventId, status: "PAID", cashSessionId: { $nin: excludedSessionIds } })
             .sort({ createdAt: -1 })
             .select("_id status createdAt totalAmount paymentMethod cart")
             .lean() as Promise<OrderProjection[]>,
@@ -363,6 +365,7 @@ export default async function AdminDashboard() {
                                                 <span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${isClosed ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
                                                     {isClosed ? "Chiusa" : "Aperta"}
                                                 </span>
+                                                {session.isTest ? <span className="ml-1 inline-flex rounded-full bg-rose-100 px-2 py-1 text-xs font-black text-rose-700">TEST</span> : null}
                                             </TableCell>
                                             <TableCell className="font-medium">{getPosDeviceName(session.posDeviceId)}</TableCell>
                                             <TableCell>{formatDashboardDateTime(session.openedAt)}</TableCell>
@@ -401,9 +404,11 @@ export default async function AdminDashboard() {
                                                                 XLSX
                                                             </Link>
                                                         </Button>
-                                                        <CashSessionAdminActions sessionId={sessionId} isClosed={isClosed} />
+                                                        <CashSessionAdminActions sessionId={sessionId} isClosed={isClosed} isTest={Boolean(session.isTest)} />
                                                     </div>
-                                                ) : null}
+                                                ) : (
+                                                    <CashSessionAdminActions sessionId={sessionId} isClosed={isClosed} isTest={Boolean(session.isTest)} />
+                                                )}
                                             </TableCell>
                                         </TableRow>
                                     )

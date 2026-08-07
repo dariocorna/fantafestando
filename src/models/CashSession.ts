@@ -4,6 +4,20 @@ export interface ICashSession extends Document {
     eventId: Types.ObjectId
     posDeviceId: Types.ObjectId
     status: "OPEN" | "CLOSED"
+    isTest: boolean
+    stockEffectStatus: "APPLIED" | "REVERTED"
+    transition?: {
+        token: string
+        type: "TO_TEST" | "TO_NORMAL" | "CLOSE" | "DELETE"
+        status: "IN_PROGRESS" | "FAILED"
+        claimedAt?: Date
+        error?: string
+    }
+    paymentClaim?: {
+        token: string
+        claimedAt: Date
+    }
+    deletionStatus?: "IN_PROGRESS" | "FAILED"
     openedAt: Date
     openingFloatAmount: number
     openingNotes?: string
@@ -24,6 +38,20 @@ const CashSessionSchema = new Schema<ICashSession>({
     eventId: { type: Schema.Types.ObjectId, ref: "Event", required: true },
     posDeviceId: { type: Schema.Types.ObjectId, ref: "PosDevice", required: true },
     status: { type: String, enum: ["OPEN", "CLOSED"], default: "OPEN", required: true },
+    isTest: { type: Boolean, default: false, required: true },
+    stockEffectStatus: { type: String, enum: ["APPLIED", "REVERTED"], default: "APPLIED", required: true },
+    transition: {
+        token: { type: String },
+        type: { type: String, enum: ["TO_TEST", "TO_NORMAL", "CLOSE", "DELETE"] },
+        status: { type: String, enum: ["IN_PROGRESS", "FAILED"] },
+        claimedAt: { type: Date },
+        error: { type: String }
+    },
+    paymentClaim: {
+        token: { type: String },
+        claimedAt: { type: Date }
+    },
+    deletionStatus: { type: String, enum: ["IN_PROGRESS", "FAILED"] },
     openedAt: { type: Date, required: true, default: Date.now },
     openingFloatAmount: { type: Number, required: true, min: 0, default: 0 },
     openingNotes: { type: String },

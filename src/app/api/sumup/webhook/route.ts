@@ -9,6 +9,11 @@ import {
     rollbackStockAdjustments,
     type StockAdjustment,
 } from "@/lib/stock-operations";
+import {
+    claimCashSessionPayment,
+    refreshCashSessionPaymentClaim,
+    releaseCashSessionPaymentClaim,
+} from "@/lib/cash-session-payment-claim";
 
 const WEBHOOK_CLAIM_TTL_MS = 5 * 60 * 1000;
 
@@ -121,8 +126,23 @@ export async function POST(req: NextRequest) {
             let appliedAdjustmentsToRollback: StockAdjustment[] = []
             let stockOverrideApproved = preferredMode === "override"
             let paymentCompleted = false
+            let paymentClaimToken: string | undefined
+            const cashSessionId = order.cashSessionId?.toString()
 
             try {
+                if (!cashSessionId) {
+                    return NextResponse.json({ error: "Cash session not found" }, { status: 409 })
+                }
+
+                const paymentClaim = await claimCashSessionPayment(cashSessionId)
+                if (!paymentClaim.success) {
+                    return NextResponse.json({ error: "Cash session is unavailable for SumUp payments" }, { status: 409 })
+                }
+                paymentClaimToken = paymentClaim.token
+                if (paymentClaim.isTest) {
+                    return NextResponse.json({ error: "Cash session is unavailable for SumUp payments" }, { status: 409 })
+                }
+
                 const cartPayload = order.cart.map((item: {
                     productId: string | { toString(): string }
                     quantity: number
@@ -189,6 +209,10 @@ export async function POST(req: NextRequest) {
                     appliedAdjustmentsToRollback = stockResult.appliedAdjustments || []
                 }
 
+                if (!await refreshCashSessionPaymentClaim(cashSessionId, paymentClaimToken)) {
+                    throw new Error("Cash session payment claim lost before payment completion")
+                }
+
                 const sumupPaymentId = extractSumUpTransactionId(payload)
                 const completedOrder = await Order.updateOne(
                     {
@@ -200,6 +224,8 @@ export async function POST(req: NextRequest) {
                         $set: {
                             status: "PAID",
                             stockOverrideApproved,
+                            stockAdjustments: appliedAdjustmentsToRollback,
+                            stockEffectStatus: "APPLIED",
                             ...(sumupPaymentId ? { sumupPaymentId } : {})
                         },
                         $unset: {
@@ -228,6 +254,11 @@ export async function POST(req: NextRequest) {
                 }
                 throw error
             } finally {
+                try {
+                    await releaseCashSessionPaymentClaim(cashSessionId || "", paymentClaimToken)
+                } catch (releaseError) {
+                    console.error("[SumUp Webhook] Cash session payment claim release error:", releaseError);
+                }
                 if (!paymentCompleted) {
                     await Order.updateOne(
                         { _id: order._id, sumupWebhookClaimToken: claimToken },
