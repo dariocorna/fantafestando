@@ -1232,6 +1232,7 @@ export async function closeCashSession(data: {
         try {
             await PrinterService.printCashSessionSummary(data.eventId, data.posDeviceId, {
                 sessionId: closedSession._id.toString(),
+                isTest: closedSession.isTest,
                 openedAt: closedSession.openedAt,
                 closedAt,
                 openingFloatAmount: normalizeCurrencyAmount(closedSession.openingFloatAmount ?? 0),

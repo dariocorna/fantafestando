@@ -65,7 +65,7 @@ function StockRow({ eventId, product, variantName, value, onUpdated }: {
                     <p className={variantName ? "text-sm font-semibold text-slate-700" : "text-base font-black text-slate-900"}>
                         {variantName || product.shortName || product.name}
                     </p>
-                    {variantName ? <p className="text-xs text-slate-500">Variante di {product.shortName || product.name}</p> : null}
+                    {variantName ? <p className="text-xs text-slate-500">Variante di {product.shortName || product.name} · gestione manuale, non scala i consumi automatici</p> : null}
                 </div>
                 <Input
                     aria-label={`Scorta ${variantName || product.name}`}
