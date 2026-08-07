@@ -57,7 +57,6 @@ import { shouldReusePendingIngredientPlan } from "@/lib/pending-ingredient-plan"
 import { ensurePosAccess } from "@/lib/pos-access"
 import Event from "@/models/Event"
 import { getStockStatus } from "@/lib/inventory"
-import { syncSoldOutFlags } from "@/lib/stock-operations"
 
 interface PrintDispatchSummary {
     attempted: number
@@ -145,7 +144,8 @@ export async function updatePosStock(data: {
             ? product.variants?.find((variant) => variant.optionName === data.variantName)?.stockQuantity
             : product.stockQuantity
         if (typeof current === "number" && current < 0) {
-            await Product.updateOne(query, { $set: { [field]: 0 } })
+            // guarded: a concurrent sale or refill may have moved the value back above zero
+            await Product.updateOne({ ...query, [field]: { $lt: 0 } }, { $set: { [field]: 0 } })
             if (data.variantName) {
                 const variant = product.variants?.find((entry) => entry.optionName === data.variantName)
                 if (variant) variant.stockQuantity = 0
@@ -154,8 +154,12 @@ export async function updatePosStock(data: {
             }
         }
         if (!data.variantName) {
-            await syncSoldOutFlags(data.eventId, [product._id.toString()])
-            product.isSoldOut = (product.stockQuantity ?? null) === 0
+            // derive the flag from the stored value: syncSoldOutFlags rewrites stockQuantity and
+            // would reopen the lost-update window this atomic delta exists to close
+            await Product.updateOne({ _id: data.productId, eventId: data.eventId }, [
+                { $set: { isSoldOut: { $and: [{ $ne: ["$stockQuantity", null] }, { $lte: ["$stockQuantity", 0] }] } } }
+            ])
+            product.isSoldOut = typeof product.stockQuantity === "number" && product.stockQuantity <= 0
         }
     }
 
@@ -839,6 +843,16 @@ async function recoverStalePrintRetryClaims(eventId: string, orderId: string) {
     )
 }
 
+/** Never throws: a lookup failure must not turn an already paid order into a failed payment. */
+async function safeFailedPrinterGroups(eventId: string, orderId: string): Promise<FailedPrinterGroup[]> {
+    try {
+        return await listFailedPrinterGroups(eventId, orderId)
+    } catch (error) {
+        console.error("Failed printer groups lookup failed:", error)
+        return []
+    }
+}
+
 async function listFailedPrinterGroups(eventId: string, orderId: string): Promise<FailedPrinterGroup[]> {
     await recoverStalePrintRetryClaims(eventId, orderId)
     const jobs = await PrintJob.find({ eventId, orderId, source: "ORDER", status: "FAILED" })
@@ -1401,7 +1415,7 @@ export async function createOrder(data: {
             try {
                 const printResults = await PrinterService.routeOrderToPrinters(order._id.toString(), data.posDeviceId)
                 printSummary = summarizePrintDispatch(printResults)
-                if (printSummary.failed > 0) printSummary.failedPrinters = await listFailedPrinterGroups(data.eventId, order._id.toString())
+                if (printSummary.failed > 0) printSummary.failedPrinters = await safeFailedPrinterGroups(data.eventId, order._id.toString())
             } catch (printError) {
                 console.error("Order created but printer routing failed:", printError)
                 printSummary = {
@@ -1409,7 +1423,7 @@ export async function createOrder(data: {
                     succeeded: 0,
                     failed: 1,
                     allSuccessful: false,
-                    failedPrinters: await listFailedPrinterGroups(data.eventId, order._id.toString())
+                    failedPrinters: await safeFailedPrinterGroups(data.eventId, order._id.toString())
                 }
             }
         }
@@ -2165,7 +2179,7 @@ export async function completePendingOrderPayment(data: {
         try {
             const printResults = await PrinterService.routeOrderToPrinters(order._id.toString(), data.posDeviceId)
             printSummary = summarizePrintDispatch(printResults)
-            if (printSummary.failed > 0) printSummary.failedPrinters = await listFailedPrinterGroups(data.eventId, order._id.toString())
+            if (printSummary.failed > 0) printSummary.failedPrinters = await safeFailedPrinterGroups(data.eventId, order._id.toString())
         } catch (printError) {
             console.error("Pending order completed but printer routing failed:", printError)
             printSummary = {
@@ -2173,7 +2187,7 @@ export async function completePendingOrderPayment(data: {
                 succeeded: 0,
                 failed: 1,
                 allSuccessful: false,
-                failedPrinters: await listFailedPrinterGroups(data.eventId, order._id.toString())
+                failedPrinters: await safeFailedPrinterGroups(data.eventId, order._id.toString())
             }
         }
 
@@ -2224,7 +2238,7 @@ export async function retryFailedOrderPrintJobs(data: {
             .lean() as Array<{ _id: { toString(): string } | string }>
 
         if (failedJobs.length === 0) {
-            return { success: true, retried: 0, failed: 0, attempted: 0, failedPrinters: await listFailedPrinterGroups(eventId, data.orderId) }
+            return { success: true, retried: 0, failed: 0, attempted: 0, failedPrinters: await safeFailedPrinterGroups(eventId, data.orderId) }
         }
 
         const results = []
@@ -2242,7 +2256,7 @@ export async function retryFailedOrderPrintJobs(data: {
             attempted: results.length,
             retried,
             failed,
-            failedPrinters: await listFailedPrinterGroups(eventId, data.orderId)
+            failedPrinters: await safeFailedPrinterGroups(eventId, data.orderId)
         }
     } catch (error) {
         console.error("Retry Failed Order Print Jobs Error:", error)
