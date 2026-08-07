@@ -8,7 +8,7 @@ import PrintJob from "@/models/PrintJob";
 import PosDevice from "@/models/PosDevice";
 import dbConnect from "@/lib/mongoose";
 import { transitionCashSessionStock } from "@/lib/cash-session-stock";
-import { buildCashSessionTransitionClaim } from "@/lib/cash-session-transition";
+import { buildCashSessionTransitionClaim, CASH_SESSION_TRANSITION_LEASE_MS } from "@/lib/cash-session-transition";
 import { revalidatePath } from "next/cache";
 import { PrinterService } from "@/lib/printer";
 import { buildCashSessionPrintDocumentV2 } from "@/lib/print-report";
@@ -138,8 +138,22 @@ export async function setCashSessionTestAction(sessionId: string, isTest: boolea
     if (Boolean(session.isTest) === isTest) return { success: true as const, approximateOrders: 0 };
 
     if (session.status === "OPEN") {
-        session.isTest = isTest;
-        await session.save();
+        const updated = await CashSession.updateOne(
+            {
+                _id: sessionId,
+                status: "OPEN",
+                transition: { $exists: false },
+                $or: [
+                    { paymentClaim: { $exists: false } },
+                    { paymentClaim: null },
+                    { "paymentClaim.claimedAt": { $lte: new Date(Date.now() - CASH_SESSION_TRANSITION_LEASE_MS) } }
+                ]
+            },
+            { $set: { isTest }, $unset: { paymentClaim: 1 } }
+        );
+        if ((updated.matchedCount ?? updated.modifiedCount) !== 1) {
+            return { success: false as const, error: "Chiusura o pagamento in corso sulla sessione", shortages: undefined };
+        }
         revalidatePath("/admin");
         revalidatePath("/pos");
         return { success: true as const, approximateOrders: 0 };

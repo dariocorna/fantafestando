@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 
 const productStore = new Map<string, { _id: string, eventId: string, name: string, stockQuantity: number | null, isSoldOut?: boolean }>()
 const ingredientStore = new Map<string, { _id: string, eventId: string, name: string, stockQuantity: number | null }>()
+let beforeProductAtomicUpdate: (() => void) | undefined
 
 function selectFields<T extends Record<string, unknown>>(doc: T, fields: string) {
     const keys = fields.split(/\s+/).filter(Boolean)
@@ -25,9 +26,10 @@ vi.mock("@/models/Product", () => ({
                 }
             }
         },
-        async updateOne(query: { _id: string }, update: { $inc?: { stockQuantity: number }, $set?: { stockQuantity?: number | null, isSoldOut?: boolean } }) {
+        async updateOne(query: { _id: string, stockQuantity?: number }, update: { $inc?: { stockQuantity: number }, $set?: { stockQuantity?: number | null, isSoldOut?: boolean } }) {
             const current = productStore.get(query._id)
             if (!current) return { acknowledged: true, matchedCount: 0 }
+            if (typeof query.stockQuantity === "number" && current.stockQuantity !== query.stockQuantity) return { acknowledged: true, matchedCount: 0 }
             if (update.$inc?.stockQuantity) current.stockQuantity = (current.stockQuantity ?? 0) + update.$inc.stockQuantity
             if (update.$set) {
                 if (Object.prototype.hasOwnProperty.call(update.$set, "stockQuantity")) current.stockQuantity = update.$set.stockQuantity ?? null
@@ -36,19 +38,22 @@ vi.mock("@/models/Product", () => ({
             productStore.set(query._id, current)
             return { acknowledged: true, matchedCount: 1 }
         },
-        findOneAndUpdate(query: { _id: string, stockQuantity?: { $gte: number } }, update: { $inc: { stockQuantity: number } }) {
+        findOneAndUpdate(query: { _id: string, stockQuantity?: { $gte: number } }, update: { $inc: { stockQuantity: number } }, options?: { returnDocument?: "before" | "after" }) {
             return {
                 select(fields: string) {
                     return {
                         lean: async () => {
+                            beforeProductAtomicUpdate?.()
+                            beforeProductAtomicUpdate = undefined
                             const current = productStore.get(query._id)
                             if (!current) return null
                             if (query.stockQuantity?.$gte !== undefined && (current.stockQuantity ?? 0) < query.stockQuantity.$gte) {
                                 return null
                             }
+                            const before = { ...current }
                             current.stockQuantity = (current.stockQuantity ?? 0) + update.$inc.stockQuantity
                             productStore.set(query._id, current)
-                            return selectFields(current, fields)
+                            return selectFields(options?.returnDocument === "before" ? before : current, fields)
                         }
                     }
                 }
@@ -71,9 +76,10 @@ vi.mock("@/models/Ingredient", () => ({
                 }
             }
         },
-        async updateOne(query: { _id: string }, update: { $inc?: { stockQuantity: number }, $set?: { stockQuantity?: number | null } }) {
+        async updateOne(query: { _id: string, stockQuantity?: number }, update: { $inc?: { stockQuantity: number }, $set?: { stockQuantity?: number | null } }) {
             const current = ingredientStore.get(query._id)
             if (!current) return { acknowledged: true, matchedCount: 0 }
+            if (typeof query.stockQuantity === "number" && current.stockQuantity !== query.stockQuantity) return { acknowledged: true, matchedCount: 0 }
             if (update.$inc?.stockQuantity) current.stockQuantity = (current.stockQuantity ?? 0) + update.$inc.stockQuantity
             if (update.$set && Object.prototype.hasOwnProperty.call(update.$set, "stockQuantity")) {
                 current.stockQuantity = update.$set.stockQuantity ?? null
@@ -81,7 +87,7 @@ vi.mock("@/models/Ingredient", () => ({
             ingredientStore.set(query._id, current)
             return { acknowledged: true, matchedCount: 1 }
         },
-        findOneAndUpdate(query: { _id: string, stockQuantity?: { $gte: number } }, update: { $inc: { stockQuantity: number } }) {
+        findOneAndUpdate(query: { _id: string, stockQuantity?: { $gte: number } }, update: { $inc: { stockQuantity: number } }, options?: { returnDocument?: "before" | "after" }) {
             return {
                 select(fields: string) {
                     return {
@@ -91,9 +97,10 @@ vi.mock("@/models/Ingredient", () => ({
                             if (query.stockQuantity?.$gte !== undefined && (current.stockQuantity ?? 0) < query.stockQuantity.$gte) {
                                 return null
                             }
+                            const before = { ...current }
                             current.stockQuantity = (current.stockQuantity ?? 0) + update.$inc.stockQuantity
                             ingredientStore.set(query._id, current)
-                            return selectFields(current, fields)
+                            return selectFields(options?.returnDocument === "before" ? before : current, fields)
                         }
                     }
                 }
@@ -108,6 +115,7 @@ describe("stock operations", () => {
     beforeEach(() => {
         productStore.clear()
         ingredientStore.clear()
+        beforeProductAtomicUpdate = undefined
     })
 
     test("decrements tracked ingredient stock when an order is paid", async () => {
@@ -180,6 +188,31 @@ describe("stock operations", () => {
 
         await rollbackStockAdjustments("evt-1", result.appliedAdjustments || [])
         expect(ingredientStore.get("ing-1")?.stockQuantity).toBe(2)
+    })
+
+    test("snapshots the stock actually removed by an override after a concurrent edit", async () => {
+        productStore.set("prod-1", {
+            _id: "prod-1",
+            eventId: "evt-1",
+            name: "Panino",
+            stockQuantity: 5,
+            isSoldOut: false
+        })
+        beforeProductAtomicUpdate = () => {
+            productStore.get("prod-1")!.stockQuantity = 2
+        }
+
+        const result = await applyStockForPaidOrder(
+            "evt-1",
+            [{ productId: "prod-1", snapshotName: "Panino", quantity: 4 }],
+            "override",
+            []
+        )
+
+        expect(result.appliedAdjustments).toEqual([{ entityType: "PRODUCT", entityId: "prod-1", quantity: 2 }])
+        expect(productStore.get("prod-1")?.stockQuantity).toBe(0)
+        await rollbackStockAdjustments("evt-1", result.appliedAdjustments || [])
+        expect(productStore.get("prod-1")?.stockQuantity).toBe(2)
     })
 
     test("rejects pending orders when tracked ingredient stock is insufficient", async () => {

@@ -76,6 +76,7 @@ interface ICashSession {
   isTest: boolean;
   stockEffectStatus: "APPLIED" | "REVERTED";
   transition?: { token: string; type: "TO_TEST" | "TO_NORMAL" | "CLOSE" | "DELETE"; status: "IN_PROGRESS" | "FAILED"; claimedAt?: Date; error?: string };
+  paymentClaim?: { token: string; claimedAt: Date };
   deletionStatus?: "IN_PROGRESS" | "FAILED";
   openedAt: Date;
   openingFloatAmount: number;       // Fondo iniziale

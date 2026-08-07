@@ -56,7 +56,7 @@ export async function buildEventWorkbook(input: { eventName: string; stats: Dash
     return Buffer.from(await workbook.xlsx.writeBuffer())
 }
 
-export async function buildCashSessionWorkbook(report: CashSessionReportInput & { isTest?: boolean }) {
+export async function buildCashSessionWorkbook(report: CashSessionReportInput) {
     const workbook = new ExcelJS.Workbook()
     const sales = report.salesBreakdown || { rows: [], discountSummaries: [], totals: { quantitySold: 0, grossAmount: 0, discountAmount: 0, netAmount: 0 } }
     addSheet(workbook, "Riepilogo", ["Evento", "Postazione", "Sessione", "Stato", "Apertura", "Chiusura", "Ordini", "Fondo", "Contanti", "Carta", "Altro", "Atteso", "Contato", "Differenza"], [[

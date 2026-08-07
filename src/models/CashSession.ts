@@ -13,6 +13,10 @@ export interface ICashSession extends Document {
         claimedAt?: Date
         error?: string
     }
+    paymentClaim?: {
+        token: string
+        claimedAt: Date
+    }
     deletionStatus?: "IN_PROGRESS" | "FAILED"
     openedAt: Date
     openingFloatAmount: number
@@ -42,6 +46,10 @@ const CashSessionSchema = new Schema<ICashSession>({
         status: { type: String, enum: ["IN_PROGRESS", "FAILED"] },
         claimedAt: { type: Date },
         error: { type: String }
+    },
+    paymentClaim: {
+        token: { type: String },
+        claimedAt: { type: Date }
     },
     deletionStatus: { type: String, enum: ["IN_PROGRESS", "FAILED"] },
     openedAt: { type: Date, required: true, default: Date.now },
