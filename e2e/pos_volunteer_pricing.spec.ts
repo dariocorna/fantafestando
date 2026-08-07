@@ -98,7 +98,7 @@ test.describe("POS volunteer pricing", () => {
             await page.click("#new-category-btn");
             await page.fill("#cat-name", categoryName);
             await page.getByRole("button", { name: "Salva Categoria", exact: true }).click();
-            await expect(page.getByText(categoryName)).toBeVisible();
+            await expect(page.getByRole("row").filter({ hasText: categoryName }).first()).toBeVisible();
 
             await createProductWithOptionalVolunteerPrice(page, categoryName, volunteerProductName, "10.00", "7.00");
             await createProductWithOptionalVolunteerPrice(page, categoryName, standardProductName, "5.00");
@@ -163,7 +163,7 @@ test.describe("POS volunteer pricing", () => {
             await page.click("#new-category-btn");
             await page.fill("#cat-name", categoryName);
             await page.getByRole("button", { name: "Salva Categoria", exact: true }).click();
-            await expect(page.getByText(categoryName)).toBeVisible();
+            await expect(page.getByRole("row").filter({ hasText: categoryName }).first()).toBeVisible();
             await createProductWithOptionalVolunteerPrice(page, categoryName, productName, "10.00", "7.00");
             await createPendingVolunteerOrder(eventName, productName, 41);
 

@@ -86,6 +86,7 @@ export interface ProductSalesBreakdownResult {
 export type ProductSalesExportRow = Array<string | number>
 
 export interface ProductSalesPrintRow {
+    categoryName: string
     name: string
     qty: number
     lineTotal: number
@@ -663,15 +664,18 @@ export function buildProductSalesPrintRows(result: ProductSalesBreakdownResult):
     return result.rows
         .slice()
         .sort((left, right) => {
+            if (left.categoryOrder !== right.categoryOrder) return left.categoryOrder - right.categoryOrder
+            const categoryComparison = left.categoryName.localeCompare(right.categoryName, "it")
+            if (categoryComparison !== 0) return categoryComparison
             if (left.pricingRegime !== right.pricingRegime) {
                 return left.pricingRegime === "PREZZO PIENO" ? -1 : 1
             }
             const groupComparison = left.groupLabel.localeCompare(right.groupLabel, "it")
             if (groupComparison !== 0) return groupComparison
-            if (left.categoryOrder !== right.categoryOrder) return left.categoryOrder - right.categoryOrder
             return left.productName.localeCompare(right.productName, "it")
         })
         .map((row) => ({
+            categoryName: row.categoryName,
             name: row.displayName,
             qty: row.quantitySold,
             lineTotal: row.netAmount,

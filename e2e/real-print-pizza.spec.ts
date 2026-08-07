@@ -148,7 +148,8 @@ test.describe("Real Pizza Printing", () => {
                 { printerPort: String(cashierPort) }
             );
             await createCategory(page, pizzaCategoryName, {
-                pizzaFlowEnabled: true
+                pizzaFlowEnabled: true,
+                pizzaBarcodeEnabled: true
             });
             await createProduct(page, pizzaCategoryName, {
                 name: pizzaProductName,

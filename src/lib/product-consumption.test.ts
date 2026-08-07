@@ -411,8 +411,8 @@ describe("aggregateOrderProductSales", () => {
         })
 
         expect(buildProductSalesPrintRows(result)).toEqual([
-            { name: "BREVE", qty: 1, lineTotal: 5, groupLabel: "PREZZO PIENO", grossAmount: 5, discountAmount: 0 },
-            { name: "BREVE", qty: 1, lineTotal: 4, groupLabel: "Staff", grossAmount: 5, discountAmount: 1 }
+            { categoryName: "Non categorizzato", name: "BREVE", qty: 1, lineTotal: 5, groupLabel: "PREZZO PIENO", grossAmount: 5, discountAmount: 0 },
+            { categoryName: "Non categorizzato", name: "BREVE", qty: 1, lineTotal: 4, groupLabel: "Staff", grossAmount: 5, discountAmount: 1 }
         ])
     })
 })

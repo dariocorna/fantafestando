@@ -10,10 +10,10 @@ import Product from "@/models/Product"
 import Category from "@/models/Category"
 import {
     buildCashSessionCsvContent,
-    buildCashSessionXlsCompatibleContent,
     computeCashSessionSummary,
     type CashSessionOrderInput
 } from "@/lib/cash-session"
+import { buildCashSessionWorkbook } from "@/lib/excel-report"
 import { getOrderCodeFromOrder } from "@/lib/order-code"
 import {
     aggregateOrderProductConsumptions,
@@ -40,6 +40,7 @@ interface CashSessionProjection {
     otherSalesAmount?: number
     expectedCashAmount?: number
     varianceAmount?: number
+    isTest?: boolean
 }
 
 interface PosDeviceProjection {
@@ -142,9 +143,9 @@ export async function GET(request: NextRequest) {
         const format = request.nextUrl.searchParams.get("format")?.trim().toLowerCase() || "csv"
         const sessionId = request.nextUrl.searchParams.get("sessionId")?.trim() || ""
 
-        if (format !== "csv" && format !== "xls") {
+        if (!["csv", "xls", "xlsx"].includes(format)) {
             return NextResponse.json(
-                { error: "Formato export non supportato. Usa format=csv oppure format=xls." },
+                { error: "Formato export non supportato. Usa format=csv oppure format=xlsx." },
                 { status: 400 }
             )
         }
@@ -293,26 +294,26 @@ export async function GET(request: NextRequest) {
                 netAmount: normalizeAmount(order.totalAmount),
                 customerName: order.customer?.name || "",
                 customerTable: order.customer?.table || ""
-            }))
+            })),
+            isTest: Boolean(session.isTest)
         }
 
-        const content =
-            format === "xls"
-                ? buildCashSessionXlsCompatibleContent(reportInput, { timezone: "Europe/Rome" })
-                : buildCashSessionCsvContent(reportInput, { timezone: "Europe/Rome" })
+        const isExcel = format === "xls" || format === "xlsx"
+        const content = isExcel
+            ? await buildCashSessionWorkbook(reportInput)
+            : buildCashSessionCsvContent(reportInput, { timezone: "Europe/Rome" })
 
-        const extension = format === "xls" ? "xls" : "csv"
-        const contentType =
-            format === "xls"
-                ? "application/vnd.ms-excel; charset=utf-8"
-                : "text/csv; charset=utf-8"
+        const extension = isExcel ? "xlsx" : "csv"
+        const contentType = isExcel
+            ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            : "text/csv; charset=utf-8"
         const closedAtDate = session.closedAt ? new Date(session.closedAt) : new Date()
         const fileTimestamp = getTimestampTag(closedAtDate)
         const eventSegment = sanitizeFileNameSegment(contextEvent.name || "evento")
         const posSegment = sanitizeFileNameSegment(posDevice?.name || "cassa")
         const filename = `cash-session-${eventSegment}-${posSegment}-${fileTimestamp}.${extension}`
 
-        return new NextResponse(content, {
+        return new NextResponse(typeof content === "string" ? content : new Uint8Array(content), {
             status: 200,
             headers: {
                 "Content-Type": contentType,

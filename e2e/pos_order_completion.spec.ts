@@ -18,7 +18,7 @@ async function createCatalogProduct(page: import("@playwright/test").Page, categ
     await page.click("#new-category-btn")
     await page.fill("#cat-name", categoryName)
     await page.getByRole("button", { name: "Salva Categoria", exact: true }).click()
-    await expect(page.getByText(categoryName)).toBeVisible()
+    await expect(page.getByRole("row").filter({ hasText: categoryName }).first()).toBeVisible()
 
     await page.click("#new-product-btn")
     await page.fill("#prod-name", productName)

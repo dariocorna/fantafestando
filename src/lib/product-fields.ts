@@ -21,3 +21,21 @@ export function validateProductShortName(shortName: string | undefined): string 
     }
     return null;
 }
+
+export function normalizeProductSearchText(value: unknown): string {
+    const serialized = typeof value === "string" ? value : JSON.stringify(value ?? "");
+    return serialized
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLocaleLowerCase("it")
+        .replace(/,/g, ".")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+export function matchesProductSearch(values: unknown[], query: string): boolean {
+    const terms = normalizeProductSearchText(query).split(" ").filter(Boolean);
+    if (terms.length === 0) return true;
+    const haystack = normalizeProductSearchText(values);
+    return terms.every((term) => haystack.includes(term));
+}

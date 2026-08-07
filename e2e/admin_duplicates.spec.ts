@@ -53,7 +53,7 @@ test.describe("Gestione duplicati amministrazione", () => {
         await categoryDialog.locator("#cat-name").fill(categoryName);
         await categoryDialog.getByRole("button", { name: "Salva Categoria", exact: true }).click();
         await expect(categoryDialog).toBeHidden();
-        await expect(page.getByText(categoryName)).toBeVisible();
+        await expect(page.getByRole("row").filter({ hasText: categoryName }).first()).toBeVisible();
 
         await page.click("#new-product-btn");
         const productDialog = page.getByRole("dialog").filter({ hasText: /Aggiungi Prodotto/i }).first();

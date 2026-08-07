@@ -34,6 +34,7 @@ import {
 import { DeleteForm } from "@/components/delete-form";
 import { EditProductDialog } from "@/components/edit-product-dialog";
 import { getStockLabel } from "@/lib/inventory";
+import { matchesProductSearch } from "@/lib/product-fields";
 import type { ProductRecipeIngredientOption, ProductRecipeItemState } from "@/components/product-recipe-editor";
 
 type ProductKind = "STANDARD" | "FIXED_MENU";
@@ -106,27 +107,6 @@ interface ProductTableProps {
     bulkUpdateProductKitchenPrintModeAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>;
 }
 
-function getPrintModeUi(product: SerializedProduct) {
-    if (product.kind === "FIXED_MENU") {
-        return {
-            label: "Derivata dai componenti",
-            className: "bg-sky-100 text-sky-700"
-        };
-    }
-
-    if (product.splitKitchenPrintPerUnit) {
-        return {
-            label: "Separata per unità",
-            className: "bg-amber-100 text-amber-800"
-        };
-    }
-
-    return {
-        label: "Standard",
-        className: "bg-emerald-100 text-emerald-800"
-    };
-}
-
 function getStockToneClass(tone: SerializedProduct["stockTone"]) {
     if (tone === "OUT") return "bg-red-100 text-red-700";
     if (tone === "LOW") return "bg-amber-100 text-amber-700";
@@ -150,11 +130,45 @@ export function ProductTable({
     const [batchMode, setBatchMode] = useState<boolean | null>(null);
     const [batchError, setBatchError] = useState<string | null>(null);
     const [isSubmittingBatch, setIsSubmittingBatch] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [categoryFilter, setCategoryFilter] = useState("");
     const masterCheckboxRef = useRef<HTMLInputElement>(null);
 
-    const eligibleIds = useMemo(
-        () => products.filter((product) => product.kind === "STANDARD").map((product) => product.id),
+    const filteredProducts = useMemo(
+        () => products.filter((product) => (
+            (!categoryFilter || product.categoryId === categoryFilter)
+            && matchesProductSearch([
+                product.name,
+                product.shortName,
+                product.description,
+                product.categoryName,
+                product.basePrice,
+                product.volunteerPrice,
+                product.kind,
+                product.availableOnlyInMenus,
+                product.splitKitchenPrintPerUnit,
+                product.salesChannels,
+                product.salesChannelsLabel,
+                product.stockLabel,
+                product.availabilityLabel,
+                product.availableDays,
+                product.menuSummary,
+                product.recipeSummary,
+                product.menuComponents,
+                product.menuChoiceGroups,
+                product.recipeItems,
+                product.variants
+            ], searchQuery)
+        )),
+        [categoryFilter, products, searchQuery]
+    );
+    const showVariants = useMemo(
+        () => products.some((product) => product.variants.length > 0),
         [products]
+    );
+    const eligibleIds = useMemo(
+        () => filteredProducts.filter((product) => product.kind === "STANDARD").map((product) => product.id),
+        [filteredProducts]
     );
 
     useEffect(() => {
@@ -226,6 +240,28 @@ export function ProductTable({
             <span className="sr-only" data-testid="product-table-ready">
                 {isReady ? "ready" : "loading"}
             </span>
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_260px]">
+                <Input
+                    type="search"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Cerca in tutti i campi del catalogo..."
+                    aria-label="Cerca prodotti"
+                    data-testid="product-search"
+                />
+                <select
+                    value={categoryFilter}
+                    onChange={(event) => setCategoryFilter(event.target.value)}
+                    aria-label="Filtra per categoria"
+                    data-testid="product-category-filter"
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                    <option value="">Tutte le categorie</option>
+                    {categories.map((category) => (
+                        <option key={category.id} value={category.id}>{category.name}</option>
+                    ))}
+                </select>
+            </div>
             {selectedIds.length > 0 ? (
                 <div className="rounded-lg border bg-slate-50 p-3">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -299,21 +335,16 @@ export function ProductTable({
                         <TableHead>Nome</TableHead>
                         <TableHead>Nome breve</TableHead>
                         <TableHead>Categoria</TableHead>
-                        <TableHead>Tipo</TableHead>
-                        <TableHead>Canali</TableHead>
                         <TableHead>Prezzo / Volontari</TableHead>
                         <TableHead>Scorte</TableHead>
                         <TableHead>Disponibilità</TableHead>
-                        <TableHead>Stampa comanda</TableHead>
                         <TableHead>Menu</TableHead>
-                        <TableHead>Ricetta</TableHead>
-                        <TableHead>Varianti</TableHead>
+                        {showVariants ? <TableHead>Varianti</TableHead> : null}
                         <TableHead className="w-[120px]">Azioni</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {products.map((product) => {
-                        const printModeUi = getPrintModeUi(product);
+                    {filteredProducts.map((product) => {
                         const isSelectable = product.kind === "STANDARD";
                         const isSelected = selectedIds.includes(product.id);
 
@@ -336,16 +367,6 @@ export function ProductTable({
                                 <TableCell className="font-medium">{product.name}</TableCell>
                                 <TableCell className="font-medium text-slate-600">{product.shortName || "-"}</TableCell>
                                 <TableCell>{product.categoryName}</TableCell>
-                                <TableCell>
-                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
-                                        {product.kind === "FIXED_MENU" ? "Menu fisso" : "Standard"}
-                                    </span>
-                                </TableCell>
-                                <TableCell>
-                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
-                                        {product.salesChannelsLabel}
-                                    </span>
-                                </TableCell>
                                 <TableCell>{product.priceLabel}</TableCell>
                                 <TableCell>
                                     <span className={`rounded-full px-2 py-1 text-xs font-bold ${getStockToneClass(product.stockTone)}`}>
@@ -355,14 +376,6 @@ export function ProductTable({
                                 <TableCell>
                                     <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
                                         {product.availabilityLabel}
-                                    </span>
-                                </TableCell>
-                                <TableCell>
-                                    <span
-                                        data-testid="product-print-mode"
-                                        className={`rounded-full px-2 py-1 text-xs font-bold ${printModeUi.className}`}
-                                    >
-                                        {printModeUi.label}
                                     </span>
                                 </TableCell>
                                 <TableCell>
@@ -381,12 +394,7 @@ export function ProductTable({
                                         )}
                                     </div>
                                 </TableCell>
-                                <TableCell>
-                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-700">
-                                        {product.kind === "STANDARD" ? product.recipeSummary : "Derivata dai componenti"}
-                                    </span>
-                                </TableCell>
-                                <TableCell>
+                                {showVariants ? <TableCell>
                                     {product.kind === "STANDARD" && !product.availableOnlyInMenus ? (
                                         <div className="flex flex-wrap gap-1">
                                             {product.variants.map((variant, index) => (
@@ -410,7 +418,7 @@ export function ProductTable({
                                     ) : (
                                         <span className="text-xs text-slate-400">Non applicabili</span>
                                     )}
-                                </TableCell>
+                                </TableCell> : null}
                                 <TableCell className="flex gap-2">
                                     <EditProductDialog
                                         product={{
@@ -496,6 +504,13 @@ export function ProductTable({
                             </TableRow>
                         );
                     })}
+                    {filteredProducts.length === 0 ? (
+                        <TableRow>
+                            <TableCell colSpan={showVariants ? 10 : 9} className="py-8 text-center text-muted-foreground">
+                                Nessun prodotto corrisponde ai filtri.
+                            </TableCell>
+                        </TableRow>
+                    ) : null}
                 </TableBody>
             </Table>
 

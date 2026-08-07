@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { dbConnectMock, printJobFindMock, retryPrintJobByIdMock, ensureAuthenticatedSessionMock } = vi.hoisted(() => ({
+const { dbConnectMock, printJobFindMock, printJobUpdateManyMock, orderFindOneMock, productFindOneAndUpdateMock, eventExistsMock, retryPrintJobByIdMock, ensureAuthenticatedSessionMock } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     printJobFindMock: vi.fn(),
+    printJobUpdateManyMock: vi.fn(),
+    orderFindOneMock: vi.fn(),
+    productFindOneAndUpdateMock: vi.fn(),
+    eventExistsMock: vi.fn(),
     retryPrintJobByIdMock: vi.fn(),
     ensureAuthenticatedSessionMock: vi.fn()
 }));
@@ -21,7 +25,8 @@ vi.mock("@/lib/pos-access", () => ({
 
 vi.mock("@/models/PrintJob", () => ({
     default: {
-        find: printJobFindMock
+        find: printJobFindMock,
+        updateMany: printJobUpdateManyMock
     }
 }));
 
@@ -31,21 +36,18 @@ vi.mock("@/lib/printer", () => ({
     }
 }));
 
-vi.mock("@/models/Order", () => ({ default: {} }));
+vi.mock("@/models/Order", () => ({ default: { findOne: orderFindOneMock } }));
 vi.mock("@/models/PosDevice", () => ({ default: {} }));
-vi.mock("@/models/Product", () => ({ default: {} }));
+vi.mock("@/models/Product", () => ({ default: { findOneAndUpdate: productFindOneAndUpdateMock } }));
+vi.mock("@/models/Event", () => ({ default: { exists: eventExistsMock } }));
 vi.mock("@/models/CashSession", () => ({ default: {} }));
 
-import { retryFailedOrderPrintJobs } from "@/app/pos/actions";
+import { retryFailedOrderPrintJobs, updatePosStock } from "@/app/pos/actions";
 
 function mockFindFailedJobs(rows: Array<{ _id: string }>) {
-    printJobFindMock.mockReturnValue({
-        sort: vi.fn().mockReturnValue({
-            select: vi.fn().mockReturnValue({
-                lean: vi.fn().mockResolvedValue(rows)
-            })
-        })
-    });
+    printJobFindMock
+        .mockReturnValueOnce({ sort: vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue(rows) }) }) })
+        .mockReturnValue({ sort: vi.fn().mockReturnValue({ populate: vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue([]) }) }) }) });
 }
 
 describe("retryFailedOrderPrintJobs", () => {
@@ -55,10 +57,12 @@ describe("retryFailedOrderPrintJobs", () => {
             ok: true,
             user: { id: "user-1", username: "cashier", role: "CASHIER" }
         });
+        orderFindOneMock.mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue({ eventId: { toString: () => "evt-1" } }) }) });
+        printJobUpdateManyMock.mockResolvedValue({ modifiedCount: 0 });
     });
 
     test("returns error when event/order ids are missing", async () => {
-        const result = await retryFailedOrderPrintJobs({ eventId: "", orderId: "" });
+        const result = await retryFailedOrderPrintJobs({ orderId: "", jobIds: [] });
         expect(result.success).toBe(false);
         if (!result.success) {
             expect(result.error).toMatch(/Dati mancanti/i);
@@ -68,19 +72,34 @@ describe("retryFailedOrderPrintJobs", () => {
     test("returns success with zero attempts when there are no failed jobs", async () => {
         mockFindFailedJobs([]);
 
-        const result = await retryFailedOrderPrintJobs({ eventId: "evt-1", orderId: "ord-1" });
+        const result = await retryFailedOrderPrintJobs({ orderId: "ord-1", jobIds: ["job-1"] });
         expect(dbConnectMock).toHaveBeenCalledTimes(1);
         expect(printJobFindMock).toHaveBeenCalledWith({
             eventId: "evt-1",
             orderId: "ord-1",
-            status: "FAILED"
+            source: "ORDER",
+            status: "FAILED",
+            _id: { $in: ["job-1"] }
         });
         expect(result).toEqual({
             success: true,
             attempted: 0,
             retried: 0,
-            failed: 0
+            failed: 0,
+            failedPrinters: []
         });
+        expect(printJobUpdateManyMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                eventId: "evt-1",
+                orderId: "ord-1",
+                status: "QUEUED",
+                retryClaimedAt: { $lte: expect.any(Date) }
+            }),
+            {
+                $set: { status: "FAILED", errorMessage: "Reinvio interrotto: riprova" },
+                $unset: { retryClaimedAt: 1 }
+            }
+        );
     });
 
     test("counts partial retry results", async () => {
@@ -90,16 +109,16 @@ describe("retryFailedOrderPrintJobs", () => {
             .mockResolvedValueOnce({ success: false, error: "boom" })
             .mockResolvedValueOnce({ success: true });
 
-        const result = await retryFailedOrderPrintJobs({ eventId: "evt-1", orderId: "ord-1" });
-        expect(retryPrintJobByIdMock).toHaveBeenCalledTimes(3);
+        const result = await retryFailedOrderPrintJobs({ orderId: "ord-1", jobIds: ["job-1", "job-2", "job-3"] });
+        expect(retryPrintJobByIdMock).toHaveBeenCalledTimes(2);
         expect(retryPrintJobByIdMock).toHaveBeenNthCalledWith(1, "evt-1", "job-1");
         expect(retryPrintJobByIdMock).toHaveBeenNthCalledWith(2, "evt-1", "job-2");
-        expect(retryPrintJobByIdMock).toHaveBeenNthCalledWith(3, "evt-1", "job-3");
         expect(result).toEqual({
             success: true,
-            attempted: 3,
-            retried: 2,
-            failed: 1
+            attempted: 2,
+            retried: 1,
+            failed: 1,
+            failedPrinters: []
         });
     });
 
@@ -108,10 +127,38 @@ describe("retryFailedOrderPrintJobs", () => {
             throw new Error("db unavailable");
         });
 
-        const result = await retryFailedOrderPrintJobs({ eventId: "evt-1", orderId: "ord-1" });
+        const result = await retryFailedOrderPrintJobs({ orderId: "ord-1", jobIds: ["job-1"] });
         expect(result.success).toBe(false);
         if (!result.success) {
             expect(result.error).toMatch(/Errore durante il reinvio/i);
         }
+    });
+});
+
+describe("updatePosStock", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        ensureAuthenticatedSessionMock.mockResolvedValue({ ok: true, user: { id: "pos-1", role: "CASHIER" } });
+        eventExistsMock.mockResolvedValue({ _id: "evt-1" });
+    });
+
+    test("rejects invalid quantities before writing", async () => {
+        const result = await updatePosStock({ eventId: "evt-1", productId: "p1", stockQuantity: -1 });
+        expect(result).toMatchObject({ success: false, error: "Quantità scorte non valida" });
+        expect(productFindOneAndUpdateMock).not.toHaveBeenCalled();
+    });
+
+    test("updates a variant through POS access and returns the refreshed stock", async () => {
+        productFindOneAndUpdateMock.mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue({
+            _id: { toString: () => "p1" }, stockQuantity: 8, isSoldOut: false,
+            variants: [{ optionName: "Grande", priceVariation: 1, stockQuantity: 3 }]
+        }) }) });
+        const result = await updatePosStock({ eventId: "evt-1", productId: "p1", variantName: "Grande", stockQuantity: 3 });
+        expect(productFindOneAndUpdateMock).toHaveBeenCalledWith(
+            { _id: "p1", eventId: "evt-1", "variants.optionName": "Grande" },
+            { $set: { "variants.$.stockQuantity": 3 } },
+            { returnDocument: "after" }
+        );
+        expect(result).toMatchObject({ success: true, product: { id: "p1", variants: [{ optionName: "Grande", stockQuantity: 3 }] } });
     });
 });

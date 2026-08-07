@@ -192,6 +192,7 @@ export async function createPosDevice(
 export interface CreateCategoryOptions {
     kitchenPrinterName?: string;
     pizzaFlowEnabled?: boolean;
+    pizzaBarcodeEnabled?: boolean;
     printKitchenCopyAtCashier?: boolean;
 }
 
@@ -230,13 +231,17 @@ export async function createCategory(
         await dialog.getByLabel("Preparazione numerata").check();
     }
 
+    if (options?.pizzaBarcodeEnabled) {
+        await dialog.getByLabel("Stampa barcode piatto").check();
+    }
+
     if (options?.printKitchenCopyAtCashier) {
         await dialog.getByLabel("Stampa anche copia reparto in cassa").check();
     }
 
     await dialog.getByRole("button", { name: "Salva Categoria", exact: true }).click();
     await expect(dialog).toBeHidden();
-    await expect(page.getByText(categoryName)).toBeVisible();
+    await expect(page.getByRole("row").filter({ hasText: categoryName }).first()).toBeVisible();
 }
 
 export async function configureCashPos(

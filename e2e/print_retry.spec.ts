@@ -30,7 +30,7 @@ async function createCatalogProduct(
         await printerSelect.selectOption(printerValue!)
     }
     await categoryDialog.getByRole("button", { name: "Salva Categoria", exact: true }).click()
-    await expect(page.getByText(categoryName)).toBeVisible()
+    await expect(page.getByRole("row").filter({ hasText: categoryName }).first()).toBeVisible()
 
     await page.click("#new-product-btn")
     const productDialog = page.getByRole("dialog").filter({ hasText: /Aggiungi Prodotto/i }).first()
@@ -160,7 +160,7 @@ test.describe("Print Retry Flows", () => {
 
             const feedbackModal = page.getByRole("dialog").filter({ hasText: /Errore stampa|stampa ha errori/i })
             await expect(feedbackModal).toBeVisible({ timeout: 15000 })
-            const retryButton = feedbackModal.getByRole("button", { name: "Riprova stampa", exact: true })
+            const retryButton = feedbackModal.getByRole("button", { name: new RegExp(`Riprova — ${printerName}`) })
             await expect(retryButton).toBeVisible()
             await retryButton.click()
             await expect(
