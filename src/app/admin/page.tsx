@@ -19,6 +19,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { BrandSectionHeader } from "@/components/brand/brand-section-header";
 import { CashSessionPreviewDialog } from "@/components/cash-session-preview-dialog";
+import { CashSessionAdminActions } from "@/components/cash-session-admin-actions";
 
 const currencyFormatter = new Intl.NumberFormat("it-IT", {
     style: "currency",
@@ -400,6 +401,7 @@ export default async function AdminDashboard() {
                                                                 XLSX
                                                             </Link>
                                                         </Button>
+                                                        <CashSessionAdminActions sessionId={sessionId} isClosed={isClosed} />
                                                     </div>
                                                 ) : null}
                                             </TableCell>

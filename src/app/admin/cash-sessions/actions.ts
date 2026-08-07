@@ -1,6 +1,8 @@
 "use server";
 
 import { ensureAdminSession } from "@/lib/authz";
+import dbConnect from "@/lib/mongoose";
+import { PrinterService } from "@/lib/printer";
 import CashSession from "@/models/CashSession";
 import Order from "@/models/Order";
 import Product from "@/models/Product";
@@ -108,4 +110,30 @@ export async function getClosedCashSessionPrintDocumentAction(sessionId: string,
     });
 
     return document;
+}
+
+export async function reprintClosedCashSessionAction(sessionId: string) {
+    const sessionCheck = await ensureAdminSession();
+    if (!sessionCheck.ok) return { success: false as const, error: sessionCheck.error };
+    await dbConnect();
+    const session = await CashSession.findOne({ _id: sessionId, status: "CLOSED" }).select("eventId posDeviceId").lean() as ({ eventId: { toString(): string }; posDeviceId: { toString(): string } } | null);
+    if (!session) return { success: false as const, error: "Sessione chiusa non trovata" };
+    const document = await getClosedCashSessionPrintDocumentAction(sessionId);
+    const printed = await PrinterService.printCashSessionSummary(
+        session.eventId.toString(),
+        session.posDeviceId.toString(),
+        {
+            sessionId,
+            openingFloatAmount: 0,
+            cashSalesAmount: 0,
+            cardSalesAmount: 0,
+            otherSalesAmount: 0,
+            expectedCashAmount: 0,
+            closingCountedCashAmount: 0,
+            varianceAmount: 0,
+            paidOrdersCount: 0
+        },
+        document
+    );
+    return printed ? { success: true as const } : { success: false as const, error: "Ristampa non riuscita" };
 }

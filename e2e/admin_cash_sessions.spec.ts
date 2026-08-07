@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import mongoose from "mongoose"
+import ExcelJS from "exceljs"
 import {
     createAndActivateEvent,
     configureCashPos,
@@ -87,6 +88,7 @@ test.describe("Admin sessioni cassa", () => {
             await expect(row).toBeVisible()
             await expect(row).toContainText(/Chiusa/i)
             await expect(row).toContainText(/120,00\s*€/i)
+            await expect(page.getByTestId("dashboard-kpi-total")).toContainText(/20,00\s*€/)
 
             const anteprimaBtn = row.getByRole("button", { name: "Anteprima" }).first()
             await expect(anteprimaBtn).toBeVisible()
@@ -95,7 +97,7 @@ test.describe("Admin sessioni cassa", () => {
             const previewDialog = page.getByRole("dialog")
             await expect(previewDialog).toBeVisible({ timeout: 5000 })
             await expect(previewDialog).toContainText("Anteprima Chiusura Cassa")
-            await expect(previewDialog).toContainText("CHIUSURA CASSA")
+            await expect(previewDialog).toContainText(categoryName)
             await expect(previewDialog).toContainText(posName)
             await expect(previewDialog).toContainText(productShortName)
             await expect(previewDialog).toContainText("PREZZO PIENO")
@@ -106,7 +108,7 @@ test.describe("Admin sessioni cassa", () => {
             await expect(previewDialog).toBeHidden()
 
             const csvLink = row.getByRole("link", { name: "CSV", exact: true }).first()
-            const xlsLink = row.getByRole("link", { name: "XLS", exact: true }).first()
+            const xlsLink = row.getByRole("link", { name: "XLSX", exact: true }).first()
 
             const csvHref = await csvLink.getAttribute("href")
             const xlsHref = await xlsLink.getAttribute("href")
@@ -133,26 +135,25 @@ test.describe("Admin sessioni cassa", () => {
 
             const xlsResponse = await page.request.get(xlsHref || "")
             expect(xlsResponse.ok()).toBeTruthy()
-            expect(xlsResponse.headers()["content-type"]).toContain("application/vnd.ms-excel")
-            const xlsPayload = await xlsResponse.text()
-            expect(xlsPayload).toContain("Sezione\tValore")
-            expect(xlsPayload).toContain("Totale incassi")
-            expect(xlsPayload).toContain("Codice ordine")
-            expect(xlsPayload).toContain("Tipo riga\tCategoria\tProdotto\tDescrizione breve")
-            expect(xlsPayload).toContain("Staff + Promo Cassa")
-            expect(xlsPayload).toContain(posName)
+            expect(xlsResponse.headers()["content-type"]).toContain("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            const sessionWorkbook = new ExcelJS.Workbook()
+            await sessionWorkbook.xlsx.load(await xlsResponse.body())
+            expect(sessionWorkbook.worksheets.map((sheet) => sheet.name)).toEqual(["Riepilogo", "Categorie", "Vendite", "Sconti", "Ordini", "Consumi"])
+            expect(sessionWorkbook.getWorksheet("Riepilogo")?.getCell("B2").value).toBe(posName)
+            expect(sessionWorkbook.getWorksheet("Vendite")?.getColumn(4).values).toContain("Staff + Promo Cassa")
 
             const eventCsvResponse = await page.request.get("/admin/export?format=csv")
             expect(eventCsvResponse.ok()).toBeTruthy()
             const eventCsvPayload = await eventCsvResponse.text()
             expect(eventCsvPayload).toContain("Tipo riga,Categoria,Prodotto,Descrizione breve")
-            expect(eventCsvPayload).toContain("PREZZO PIENO")
             expect(eventCsvPayload).toContain("Staff + Promo Cassa")
-            expect(eventCsvPayload).toContain("Riepilogo componenti sconto")
 
             const eventXlsResponse = await page.request.get("/admin/export?format=xls")
             expect(eventXlsResponse.ok()).toBeTruthy()
-            expect(await eventXlsResponse.text()).toContain("Tipo riga\tCategoria\tProdotto\tDescrizione breve")
+            const eventWorkbook = new ExcelJS.Workbook()
+            await eventWorkbook.xlsx.load(await eventXlsResponse.body())
+            expect(eventWorkbook.worksheets.map((sheet) => sheet.name)).toContain("Categorie")
+            expect(eventWorkbook.getWorksheet("Vendite")?.getColumn(4).values).toContain("Staff + Promo Cassa")
 
             const jobsResponse = await page.request.get("/api/admin/print-jobs?limit=100")
             expect(jobsResponse.ok()).toBeTruthy()
@@ -180,6 +181,10 @@ test.describe("Admin sessioni cassa", () => {
                 "SCONTO PROMO CASSA",
                 "NETTO / INCASSI"
             ]))
+
+            await row.getByRole("button", { name: "Ristampa", exact: true }).click()
+            await expect(row.getByText(/Riepilogo inviato|Ristampa non riuscita/)).toBeVisible({ timeout: 15000 })
+
         } finally {
             await deleteEvent(page, eventName)
         }

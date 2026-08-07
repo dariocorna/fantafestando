@@ -1401,6 +1401,7 @@ export async function createOrder(data: {
             try {
                 const printResults = await PrinterService.routeOrderToPrinters(order._id.toString(), data.posDeviceId)
                 printSummary = summarizePrintDispatch(printResults)
+                if (printSummary.failed > 0) printSummary.failedPrinters = await listFailedPrinterGroups(data.eventId, order._id.toString())
             } catch (printError) {
                 console.error("Order created but printer routing failed:", printError)
                 printSummary = {
@@ -1408,7 +1409,7 @@ export async function createOrder(data: {
                     succeeded: 0,
                     failed: 1,
                     allSuccessful: false,
-            failedPrinters: []
+                    failedPrinters: await listFailedPrinterGroups(data.eventId, order._id.toString())
                 }
             }
         }
@@ -2164,6 +2165,7 @@ export async function completePendingOrderPayment(data: {
         try {
             const printResults = await PrinterService.routeOrderToPrinters(order._id.toString(), data.posDeviceId)
             printSummary = summarizePrintDispatch(printResults)
+            if (printSummary.failed > 0) printSummary.failedPrinters = await listFailedPrinterGroups(data.eventId, order._id.toString())
         } catch (printError) {
             console.error("Pending order completed but printer routing failed:", printError)
             printSummary = {
@@ -2171,7 +2173,7 @@ export async function completePendingOrderPayment(data: {
                 succeeded: 0,
                 failed: 1,
                 allSuccessful: false,
-            failedPrinters: []
+                failedPrinters: await listFailedPrinterGroups(data.eventId, order._id.toString())
             }
         }
 
