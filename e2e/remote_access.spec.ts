@@ -1,11 +1,12 @@
 import { expect, test } from "@playwright/test";
 import SystemSettings from "../src/models/SystemSettings";
-import { ensureAdminAuthenticated, loginWithCredentials } from "./utils/auth";
+import { loginWithCredentials } from "./utils/auth";
 import { ensureDbConnection } from "./utils/db";
 import { resolveE2ECredentials } from "./utils/users";
 
 const controllerToken = process.env.ORACLE_TUNNEL_CONTROL_TOKEN || "e2e-tunnel-control-token";
 const remotePosMarker = process.env.REMOTE_POS_MARKER_SECRET || "e2e-pos-remote-marker";
+const baseURL = `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT || "3000"}`;
 
 async function resetRemoteAccessSettings() {
   await ensureDbConnection();
@@ -35,17 +36,17 @@ async function resetRemoteAccessSettings() {
   );
 }
 
-test.describe("Accesso remoto e autenticazione POS", () => {
-  test.beforeEach(async ({ page }) => {
+test.describe.serial("Accesso remoto e autenticazione POS", () => {
+  test.beforeEach(async () => {
     await resetRemoteAccessSettings();
-    await ensureAdminAuthenticated(page, "/admin/settings/remote-access");
   });
 
   test.afterEach(async () => {
     await resetRemoteAccessSettings();
   });
 
-  test("configura i proxy e mantiene obbligatorio il login POS remoto", async ({ page, browser }) => {
+  test("configura i proxy e mostra lo stato applicato", async ({ page }) => {
+    await page.goto("/admin/settings/remote-access", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "Accesso remoto" })).toBeVisible();
     await expect(page.getByText(/login non può essere disabilitato/i)).toBeVisible();
     await expect(page.getByText(/chiunque raggiunga la board dalla rete locale/i)).toBeVisible();
@@ -86,15 +87,33 @@ test.describe("Accesso remoto e autenticazione POS", () => {
     await expect(
       page.locator('[data-slot="card"]').filter({ hasText: "Pannello Admin" }).getByText("Applicato: attivo")
     ).toBeVisible();
+  });
 
-    const lanContext = await browser.newContext({ storageState: { cookies: [], origins: [] } });
-    const lanPage = await lanContext.newPage();
-    await lanPage.goto("/pos", { waitUntil: "domcontentloaded" });
-    await expect(lanPage).toHaveURL(/\/pos$/);
-    await expect(lanPage.getByTestId("pos-brand-shell")).toBeVisible();
+  test("consente il POS anonimo in LAN ma richiede login dal proxy remoto", async ({ browser }) => {
+    await SystemSettings.findOneAndUpdate(
+      { singletonKey: "default" },
+      {
+        $set: {
+          "remoteAccess.posEnabled": true,
+          "remoteAccess.appliedPosEnabled": true,
+          "remoteAccess.posLanAuthenticationEnabled": false,
+        },
+      },
+      { upsert: true }
+    );
+
+    const lanContext = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+    const lanResponse = await lanContext.request.get("/pos", {
+      maxRedirects: 0,
+    });
+    expect(lanResponse.status()).toBe(200);
+    const lanHtml = await lanResponse.text();
+    expect(lanHtml).toContain('data-testid="pos-brand-shell"');
+    expect(lanHtml).not.toContain('id="username"');
     await lanContext.close();
 
     const remoteContext = await browser.newContext({
+      baseURL,
       storageState: { cookies: [], origins: [] },
       extraHTTPHeaders: { "x-fantafestando-remote-pos": remotePosMarker },
     });
