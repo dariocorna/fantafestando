@@ -438,12 +438,12 @@ export async function createCategoryAndProducts(
 export async function openPosAndSelectDevice(page: Page, posName: string) {
     await page.goto("/pos");
     await page.evaluate(() => localStorage.removeItem("fantafestando_pos_id"));
-    await page.reload();
-
-    await page.waitForResponse(
+    const initResponse = page.waitForResponse(
         (r) => r.url().includes("/api/pos/init") && r.ok(),
         { timeout: 10000 },
     );
+    await page.reload();
+    await initResponse;
 
     const selectorTitle = page.getByText(/In quale cassa sei\?/i);
     if (await selectorTitle.isVisible()) {
