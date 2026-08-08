@@ -1,4 +1,3 @@
-import { format } from "date-fns";
 import { getAdminContextEvent } from "@/lib/events";
 import dbConnect from "@/lib/mongoose";
 import Order from "@/models/Order";
@@ -13,6 +12,7 @@ import {
 } from "@/components/ui/table";
 import type { IEvent } from "@/models/Event";
 import { OrderRowActions } from "./order-row-actions";
+import { OrderDateTime } from "./order-date-time";
 import { ResetOrdersForm } from "./reset-orders-form";
 
 interface OrderProjection {
@@ -104,7 +104,7 @@ export default async function AdminOrders() {
                             orders.map((order) => (
                                 <TableRow key={String(order._id)}>
                                     <TableCell className="font-medium whitespace-nowrap">
-                                        {format(new Date(order.createdAt as unknown as string), "dd/MM/yyyy HH:mm")}
+                                        <OrderDateTime value={order.createdAt ? new Date(order.createdAt).toISOString() : null} />
                                     </TableCell>
                                     <TableCell>
                                         {order.status === "PAID" ? (
