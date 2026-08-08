@@ -51,6 +51,7 @@ Il branch si crea partendo dal branch di sviluppo principale corrente.
 
 ## Regole Generali
 
+- **SumUp temporaneamente deprecato**: non configurare o abilitare il pagamento automatico SumUp nei rilasci finché il relativo flusso di recupero non è stato validato; il deploy senza supporto SumUp è quello atteso.
 - Utilizzare l'**italiano** come lingua principale per documentazione e testi rivolti all'utente.
 - Mantenere il codice pulito e ben documentato.
 - **Commit atomici**: Realizzare sempre commit piccoli e atomici. **I messaggi di commit devono essere scritti in lingua inglese.** *IMPORTANTE: Esegui i commit in locale, ma non effettuare MAI il `git push` verso il remote a meno che non ti venga esplicitamente richiesto — il push avviene nella Fase 4.*
