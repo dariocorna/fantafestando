@@ -1,26 +1,40 @@
 "use client";
 
 import Link from "next/link";
+import { useRef } from "react";
 import { Workflow } from "lucide-react";
 import { EasterEggComposer } from "@/components/easter-egg-composer";
 import { type ThermalRasterPayload } from "@/lib/easter-egg-raster";
+import { Label } from "@/components/ui/label";
 
 interface PortalEasterEggMobileProps {
     eventId: string;
     eventName: string;
     enabled: boolean;
+    printers: Array<{
+        id: string;
+        name: string;
+        ip: string;
+        port: number;
+    }>;
 }
 
 export function PortalEasterEggMobile({
     eventId,
     eventName,
-    enabled
+    enabled,
+    printers
 }: PortalEasterEggMobileProps) {
+    const printerSelectRef = useRef<HTMLSelectElement>(null);
+
     async function handleSubmitRaster(raster: ThermalRasterPayload) {
         const formData = new FormData();
         formData.set("eventId", eventId);
         formData.set("rasterWidth", String(raster.width));
         formData.set("rasterHeight", String(raster.height));
+        if (printerSelectRef.current?.value) {
+            formData.set("printerId", printerSelectRef.current.value);
+        }
         const rasterBytes = new Uint8Array(raster.data.byteLength);
         rasterBytes.set(raster.data);
         formData.set(
@@ -78,6 +92,27 @@ export function PortalEasterEggMobile({
                         Vai alle impostazioni festa
                     </Link>
                 </div>
+
+                <div className="space-y-2">
+                    <Label htmlFor="easter-egg-printer-id" className="text-xs font-semibold text-slate-600">
+                        Stampante destinazione (facoltativo)
+                    </Label>
+                    <select
+                        ref={printerSelectRef}
+                        id="easter-egg-printer-id"
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        defaultValue=""
+                        disabled={printers.length === 0}
+                    >
+                        <option value="">Predefinita (dal setting festa)</option>
+                        {printers.map((printer) => (
+                            <option key={printer.id} value={printer.id}>
+                                {printer.name} ({printer.ip}:{printer.port})
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
             </div>
 
             <EasterEggComposer
