@@ -11,9 +11,10 @@ import Category from "@/models/Category"
 import {
     buildCashSessionCsvContent,
     computeCashSessionSummary,
-    type CashSessionOrderInput
+    type CashSessionOrderInput,
+    type CashSessionReportInput
 } from "@/lib/cash-session"
-import { buildCashSessionWorkbook } from "@/lib/excel-report"
+import { buildCashSessionsWorkbook, buildCashSessionWorkbook } from "@/lib/excel-report"
 import { getOrderCodeFromOrder } from "@/lib/order-code"
 import {
     aggregateOrderProductConsumptions,
@@ -50,6 +51,7 @@ interface PosDeviceProjection {
 
 interface OrderProjection {
     _id: unknown
+    cashSessionId?: unknown
     pickupNumber?: number
     createdAt?: Date | string
     status?: string
@@ -133,6 +135,65 @@ function normalizeAmount(value: number | null | undefined): number {
     return Number(Math.max(0, Number(value)).toFixed(2))
 }
 
+function buildReportInput(params: {
+    eventName: string
+    session: CashSessionProjection
+    posDeviceName: string
+    paidOrders: OrderProjection[]
+    productById: Map<string, ProductConsumptionCatalogEntry>
+}): CashSessionReportInput {
+    const { eventName, session, posDeviceName, paidOrders, productById } = params
+    const salesBreakdown = aggregateOrderProductSales({ orders: paidOrders, catalogByProductId: productById })
+    const productConsumptions = aggregateOrderProductConsumptions({ orders: paidOrders, catalogByProductId: productById })
+    const computedFallback = computeCashSessionSummary({
+        openingFloatAmount: normalizeAmount(session.openingFloatAmount),
+        closingCountedCashAmount: normalizeAmount(session.closingCountedCashAmount),
+        orders: paidOrders.map((order): CashSessionOrderInput => ({
+            status: order.status,
+            paymentMethod: order.paymentMethod,
+            totalAmount: order.totalAmount
+        }))
+    })
+
+    return {
+        eventName,
+        posDeviceName,
+        sessionId: String(session._id),
+        status: "CLOSED",
+        openedAt: session.openedAt || null,
+        closedAt: session.closedAt || null,
+        openingFloatAmount: normalizeAmount(session.openingFloatAmount),
+        closingCountedCashAmount: normalizeAmount(session.closingCountedCashAmount),
+        paidOrdersCount: session.paidOrdersCount ?? computedFallback.paidOrdersCount,
+        cashSalesAmount: session.cashSalesAmount ?? computedFallback.cashSalesAmount,
+        cardSalesAmount: session.cardSalesAmount ?? computedFallback.cardSalesAmount,
+        otherSalesAmount: session.otherSalesAmount ?? computedFallback.otherSalesAmount,
+        expectedCashAmount: session.expectedCashAmount ?? computedFallback.expectedCashAmount,
+        varianceAmount: session.varianceAmount ?? computedFallback.varianceAmount,
+        openingNotes: session.openingNotes || "",
+        closingNotes: session.closingNotes || "",
+        salesBreakdown,
+        productConsumptions: productConsumptions.map((metric) => ({
+            productId: metric.productId || metric.productKey,
+            productName: metric.productName,
+            quantityConsumed: metric.quantityConsumed,
+            revenueAmount: metric.revenueAmount
+        })),
+        orders: paidOrders.map((order) => ({
+            id: String(order._id),
+            orderCode: getOrderCodeFromOrder({ pickupNumber: order.pickupNumber, _id: String(order._id) }),
+            createdAt: order.createdAt || null,
+            paymentMethod: order.paymentMethod || "OTHER",
+            totalAmount: normalizeAmount(order.totalAmount),
+            discountAmount: normalizeAmount(order.discountApplied),
+            netAmount: normalizeAmount(order.totalAmount),
+            customerName: order.customer?.name || "",
+            customerTable: order.customer?.table || ""
+        })),
+        isTest: Boolean(session.isTest)
+    }
+}
+
 export async function GET(request: NextRequest) {
     try {
         const sessionCheck = await ensureAdminSession()
@@ -141,7 +202,9 @@ export async function GET(request: NextRequest) {
         }
 
         const format = request.nextUrl.searchParams.get("format")?.trim().toLowerCase() || "csv"
-        const sessionId = request.nextUrl.searchParams.get("sessionId")?.trim() || ""
+        const requestedSessionIds = request.nextUrl.searchParams.getAll("sessionId")
+            .map((value) => value.trim().toLowerCase())
+        const sessionIds = Array.from(new Set(requestedSessionIds))
 
         if (!["csv", "xls", "xlsx"].includes(format)) {
             return NextResponse.json(
@@ -150,9 +213,17 @@ export async function GET(request: NextRequest) {
             )
         }
 
-        if (!isObjectIdLike(sessionId)) {
+        if (requestedSessionIds.length === 0 || sessionIds.some((sessionId) => !isObjectIdLike(sessionId))) {
             return NextResponse.json(
                 { error: "Sessione cassa non valida" },
+                { status: 400 }
+            )
+        }
+
+        const isExcel = format === "xls" || format === "xlsx"
+        if (sessionIds.length > 1 && !isExcel) {
+            return NextResponse.json(
+                { error: "L'export aggregato di più sessioni è disponibile solo in formato XLSX" },
                 { status: 400 }
             )
         }
@@ -168,40 +239,44 @@ export async function GET(request: NextRequest) {
         const eventId = String(contextEvent._id)
 
         await dbConnect()
-        const session = await CashSession.findOne({
-            _id: sessionId,
+        const foundSessions = await CashSession.find({
+            _id: { $in: sessionIds },
             eventId
         })
-            .lean() as CashSessionProjection | null
+            .lean() as CashSessionProjection[]
 
-        if (!session) {
+        if (foundSessions.length !== sessionIds.length) {
             return NextResponse.json(
                 { error: "Sessione cassa non trovata per la festa selezionata" },
                 { status: 404 }
             )
         }
 
-        if (session.status !== "CLOSED") {
+        if (foundSessions.some((session) => session.status !== "CLOSED")) {
             return NextResponse.json(
                 { error: "Il report è disponibile solo per sessioni cassa chiuse" },
                 { status: 400 }
             )
         }
 
-        const [posDevice, paidOrders] = await Promise.all([
-            session.posDeviceId
-                ? PosDevice.findOne({
-                    _id: session.posDeviceId,
-                    eventId
-                }).select("_id name").lean() as Promise<PosDeviceProjection | null>
-                : Promise.resolve(null),
+        const sessionsById = new Map(foundSessions.map((session) => [String(session._id), session] as const))
+        const sessions = sessionIds.map((sessionId) => sessionsById.get(sessionId)!)
+        const posDeviceIds = Array.from(new Set(
+            sessions.map((session) => session.posDeviceId ? String(session.posDeviceId) : "").filter(Boolean)
+        ))
+
+        const [posDevices, paidOrders] = await Promise.all([
+            posDeviceIds.length > 0
+                ? PosDevice.find({ _id: { $in: posDeviceIds }, eventId })
+                    .select("_id name").lean() as Promise<PosDeviceProjection[]>
+                : Promise.resolve([] as PosDeviceProjection[]),
             Order.find({
                 eventId,
-                cashSessionId: session._id,
+                cashSessionId: { $in: sessionIds },
                 status: "PAID"
             })
                 .sort({ createdAt: -1 })
-                .select("_id pickupNumber createdAt status paymentMethod totalAmount discountApplied discountMeta discountComponents pricingMode customer cart")
+                .select("_id cashSessionId pickupNumber createdAt status paymentMethod totalAmount discountApplied discountMeta discountComponents pricingMode customer cart")
                 .lean() as Promise<OrderProjection[]>
         ])
 
@@ -238,80 +313,42 @@ export async function GET(request: NextRequest) {
                 categoryOrder: category?.printOrder
             })
         })
-        const salesBreakdown = aggregateOrderProductSales({
-            orders: paidOrders,
-            catalogByProductId: productById
+        const posDeviceById = new Map(posDevices.map((posDevice) => [String(posDevice._id), posDevice] as const))
+        const ordersBySessionId = new Map<string, OrderProjection[]>()
+        paidOrders.forEach((order) => {
+            const sessionId = order.cashSessionId ? String(order.cashSessionId) : ""
+            if (!ordersBySessionId.has(sessionId)) ordersBySessionId.set(sessionId, [])
+            ordersBySessionId.get(sessionId)!.push(order)
         })
-        const productConsumptions = aggregateOrderProductConsumptions({
-            orders: paidOrders,
-            catalogByProductId: productById
-        })
-
-        const computedFallback = computeCashSessionSummary({
-            openingFloatAmount: normalizeAmount(session.openingFloatAmount),
-            closingCountedCashAmount: normalizeAmount(session.closingCountedCashAmount),
-            orders: paidOrders.map((order): CashSessionOrderInput => ({
-                status: order.status,
-                paymentMethod: order.paymentMethod,
-                totalAmount: order.totalAmount
-            }))
-        })
-
-        const reportInput = {
+        const reportInputs = sessions.map((session) => buildReportInput({
             eventName: contextEvent.name || "Festa",
-            posDeviceName: posDevice?.name?.trim() || "Postazione non specificata",
-            sessionId: String(session._id),
-            status: "CLOSED" as const,
-            openedAt: session.openedAt || null,
-            closedAt: session.closedAt || null,
-            openingFloatAmount: normalizeAmount(session.openingFloatAmount),
-            closingCountedCashAmount: normalizeAmount(session.closingCountedCashAmount),
-            paidOrdersCount: session.paidOrdersCount ?? computedFallback.paidOrdersCount,
-            cashSalesAmount: session.cashSalesAmount ?? computedFallback.cashSalesAmount,
-            cardSalesAmount: session.cardSalesAmount ?? computedFallback.cardSalesAmount,
-            otherSalesAmount: session.otherSalesAmount ?? computedFallback.otherSalesAmount,
-            expectedCashAmount: session.expectedCashAmount ?? computedFallback.expectedCashAmount,
-            varianceAmount: session.varianceAmount ?? computedFallback.varianceAmount,
-            openingNotes: session.openingNotes || "",
-            closingNotes: session.closingNotes || "",
-            salesBreakdown,
-            productConsumptions: productConsumptions.map((metric) => ({
-                productId: metric.productId || metric.productKey,
-                productName: metric.productName,
-                quantityConsumed: metric.quantityConsumed,
-                revenueAmount: metric.revenueAmount
-            })),
-            orders: paidOrders.map((order) => ({
-                id: String(order._id),
-                orderCode: getOrderCodeFromOrder({
-                    pickupNumber: order.pickupNumber,
-                    _id: String(order._id)
-                }),
-                createdAt: order.createdAt || null,
-                paymentMethod: order.paymentMethod || "OTHER",
-                totalAmount: normalizeAmount(order.totalAmount),
-                discountAmount: normalizeAmount(order.discountApplied),
-                netAmount: normalizeAmount(order.totalAmount),
-                customerName: order.customer?.name || "",
-                customerTable: order.customer?.table || ""
-            })),
-            isTest: Boolean(session.isTest)
-        }
+            session,
+            posDeviceName: session.posDeviceId
+                ? posDeviceById.get(String(session.posDeviceId))?.name?.trim() || "Postazione non specificata"
+                : "Postazione non specificata",
+            paidOrders: ordersBySessionId.get(String(session._id)) || [],
+            productById
+        }))
 
-        const isExcel = format === "xls" || format === "xlsx"
         const content = isExcel
-            ? await buildCashSessionWorkbook(reportInput)
-            : buildCashSessionCsvContent(reportInput, { timezone: "Europe/Rome" })
+            ? reportInputs.length > 1
+                ? await buildCashSessionsWorkbook(reportInputs)
+                : await buildCashSessionWorkbook(reportInputs[0])
+            : buildCashSessionCsvContent(reportInputs[0], { timezone: "Europe/Rome" })
 
         const extension = isExcel ? "xlsx" : "csv"
         const contentType = isExcel
             ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             : "text/csv; charset=utf-8"
+        const session = sessions[0]
+        const firstPosDevice = session.posDeviceId ? posDeviceById.get(String(session.posDeviceId)) : undefined
         const closedAtDate = session.closedAt ? new Date(session.closedAt) : new Date()
         const fileTimestamp = getTimestampTag(closedAtDate)
         const eventSegment = sanitizeFileNameSegment(contextEvent.name || "evento")
-        const posSegment = sanitizeFileNameSegment(posDevice?.name || "cassa")
-        const filename = `cash-session-${eventSegment}-${posSegment}-${fileTimestamp}.${extension}`
+        const posSegment = sanitizeFileNameSegment(firstPosDevice?.name || "cassa")
+        const filename = reportInputs.length > 1
+            ? `cash-sessions-${eventSegment}-${getTimestampTag(new Date())}.xlsx`
+            : `cash-session-${eventSegment}-${posSegment}-${fileTimestamp}.${extension}`
 
         return new NextResponse(typeof content === "string" ? content : new Uint8Array(content), {
             status: 200,
