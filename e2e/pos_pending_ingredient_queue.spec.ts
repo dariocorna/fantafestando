@@ -1,66 +1,20 @@
 import { expect, test, type Page } from "@playwright/test";
+import Category from "@/models/Category";
+import Ingredient from "@/models/Ingredient";
+import Peripheral from "@/models/Peripheral";
+import PosDevice from "@/models/PosDevice";
+import Printer from "@/models/Printer";
+import Product from "@/models/Product";
 import {
-    configureCashPos,
-    createAndActivateEvent,
-    createCategory,
+    createActiveEventDirect,
     deleteEvent,
     dismissFeedbackModal,
     localPrinterIp,
     openCashSessionIfRequired,
     openPosAndSelectDevice,
+    setAdminEventContextCookie,
     uniqueSuffix,
 } from "./utils/fixtures";
-
-async function createIngredient(page: Page, ingredient: {
-    name: string;
-    shortName?: string;
-    stockQuantity?: string;
-    active?: boolean;
-}) {
-    await page.goto("/admin/catalog");
-    await page.click("#new-ingredient-btn");
-    const dialog = page.getByRole("dialog").filter({ hasText: /Aggiungi Ingrediente/i }).first();
-    await expect(dialog).toBeVisible();
-    await dialog.locator("#ingredient-name").fill(ingredient.name);
-    if (ingredient.shortName) {
-        await dialog.locator("#ingredient-short-name").fill(ingredient.shortName);
-    }
-    if (ingredient.stockQuantity) {
-        await dialog.locator("#ingredient-stock-quantity").fill(ingredient.stockQuantity);
-    }
-    if (ingredient.active === false) {
-        await dialog.getByLabel("Ingrediente attivo").uncheck();
-    }
-    await dialog.getByRole("button", { name: "Salva Ingrediente", exact: true }).click();
-    await expect(dialog).toBeHidden();
-    await expect(page.getByText(ingredient.name)).toBeVisible();
-}
-
-async function createProductWithRecipe(page: Page, input: {
-    categoryName: string;
-    name: string;
-    price: string;
-    recipe?: Array<{ ingredientName: string; quantity: number }>;
-}) {
-    await page.goto("/admin/catalog");
-    await page.click("#new-product-btn");
-    const dialog = page.getByRole("dialog").filter({ hasText: /Aggiungi Prodotto/i }).first();
-    await expect(dialog).toBeVisible();
-
-    await dialog.locator("#prod-name").fill(input.name);
-    await dialog.locator('select[name="categoryId"]').selectOption({ label: input.categoryName });
-    await dialog.getByLabel("Prezzo Base (€)").fill(input.price);
-
-    for (const [index, recipeItem] of (input.recipe || []).entries()) {
-        await dialog.getByRole("button", { name: "Aggiungi ingrediente", exact: true }).click();
-        await dialog.locator(`[aria-label="Ingrediente ricetta ${index + 1}"]`).selectOption({ label: recipeItem.ingredientName });
-        await dialog.locator(`[aria-label="Quantità ingrediente ricetta ${index + 1}"]`).fill(String(recipeItem.quantity));
-    }
-
-    await dialog.getByRole("button", { name: "Salva Prodotto", exact: true }).click();
-    await expect(dialog).toBeHidden();
-    await expect(page.getByText(input.name)).toBeVisible();
-}
 
 async function createWebOrderAndGetCode(
     page: Page,
@@ -154,34 +108,68 @@ test.describe.serial("POS - ingredienti in coda", () => {
         const sideProduct = `Contorno ${suffix}`;
         const legacyProduct = `Bibita ${suffix}`;
 
-        await createAndActivateEvent(page, eventName);
+        const { eventId } = await createActiveEventDirect(eventName);
         createdEvents.push(eventName);
-        await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName);
-        await createCategory(page, categoryName);
-        await createIngredient(page, { name: ingredientPotatoes, stockQuantity: "5" });
-        await createIngredient(page, { name: ingredientFish, stockQuantity: "2" });
-        await createProductWithRecipe(page, {
-            categoryName,
-            name: fishProduct,
-            price: "8.00",
-            recipe: [
-                { ingredientName: ingredientFish, quantity: 1 },
-                { ingredientName: ingredientPotatoes, quantity: 1 },
-            ]
-        });
-        await createProductWithRecipe(page, {
-            categoryName,
-            name: sideProduct,
-            price: "3.00",
-            recipe: [
-                { ingredientName: ingredientPotatoes, quantity: 2 },
-            ]
-        });
-        await createProductWithRecipe(page, {
-            categoryName,
-            name: legacyProduct,
-            price: "2.00",
-        });
+        await setAdminEventContextCookie(page, eventId);
+
+        const [printer, cashBox, category, potatoes, fish] = await Promise.all([
+            Printer.create({
+                eventId,
+                name: printerName,
+                ip: localPrinterIp(),
+                port: 19100,
+                isVirtual: false,
+                type: "CASHIER",
+            }),
+            Peripheral.create({
+                eventId,
+                name: cashBoxName,
+                type: "CASH_BOX",
+                config: {},
+            }),
+            Category.create({
+                eventId,
+                name: categoryName,
+                uiColor: "#2563eb",
+                printOrder: 0,
+            }),
+            Ingredient.create({ eventId, name: ingredientPotatoes, stockQuantity: 5 }),
+            Ingredient.create({ eventId, name: ingredientFish, stockQuantity: 2 }),
+        ]);
+
+        await Promise.all([
+            PosDevice.create({
+                eventId,
+                name: posName,
+                printerId: printer._id,
+                cashBoxId: cashBox._id,
+            }),
+            Product.insertMany([
+                {
+                    eventId,
+                    categoryId: category._id,
+                    name: fishProduct,
+                    basePrice: 8,
+                    recipeItems: [
+                        { ingredientId: fish._id, quantity: 1 },
+                        { ingredientId: potatoes._id, quantity: 1 },
+                    ],
+                },
+                {
+                    eventId,
+                    categoryId: category._id,
+                    name: sideProduct,
+                    basePrice: 3,
+                    recipeItems: [{ ingredientId: potatoes._id, quantity: 2 }],
+                },
+                {
+                    eventId,
+                    categoryId: category._id,
+                    name: legacyProduct,
+                    basePrice: 2,
+                },
+            ]),
+        ]);
 
         const firstOrderCode = await createWebOrderAndGetCode(page, [
             { name: fishProduct, quantity: 1 },
