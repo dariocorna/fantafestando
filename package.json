@@ -42,7 +42,6 @@
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "date-fns": "^4.1.0",
     "escpos-parser": "^0.2.0",
     "exceljs": "^4.4.0",
     "framer-motion": "^12.34.3",
