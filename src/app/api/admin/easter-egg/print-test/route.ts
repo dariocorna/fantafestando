@@ -55,7 +55,16 @@ export async function POST(request: NextRequest) {
                 type?: "CASHIER" | "KITCHEN";
             }>;
 
-        const printer = selectBestEasterEggPrinter(printers, event.settings?.defaultCashierPrinterIp);
+        const requestedPrinterId = String(formData.get("printerId") || "").trim();
+        const explicitPrinter = requestedPrinterId
+            ? printers.find((candidate) => String(candidate._id) === requestedPrinterId)
+            : null;
+
+        if (requestedPrinterId && !explicitPrinter) {
+            return NextResponse.json({ error: "Stampante selezionata non trovata" }, { status: 400 });
+        }
+
+        const printer = explicitPrinter || selectBestEasterEggPrinter(printers, event.settings?.defaultCashierPrinterIp);
         if (!printer?.ip?.trim()) {
             return NextResponse.json({ error: "Nessuna stampante configurata per la festa corrente." }, { status: 400 });
         }
