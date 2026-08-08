@@ -1,7 +1,8 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefer-offline --fetch-retries=5 --fetch-timeout=600000
 
 FROM node:20-alpine AS builder
 WORKDIR /app
