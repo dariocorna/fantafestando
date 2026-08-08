@@ -1,17 +1,19 @@
 import { expect, test, type Page } from "@playwright/test";
 import { getPizzaBarcodeValue } from "@/lib/pizza-barcode";
-import { ensureAdminAuthenticated } from "./utils/auth";
+import Category from "@/models/Category";
+import Order from "@/models/Order";
+import Peripheral from "@/models/Peripheral";
+import PosDevice from "@/models/PosDevice";
+import Printer from "@/models/Printer";
+import Product from "@/models/Product";
 import {
-    configureCashPos,
-    createAndActivateEvent,
-    createCategory,
-    createPrinter,
-    createProduct,
+    createActiveEventDirect,
     deleteEvent,
     dismissFeedbackModal,
     localPrinterIp,
     openCashSessionIfRequired,
     openPosAndSelectDevice,
+    setAdminEventContextCookie,
     uniqueSuffix,
 } from "./utils/fixtures";
 
@@ -24,6 +26,79 @@ interface PrintJobsPayload {
             pizzaBarcodeValue?: string;
         };
     }>;
+}
+
+interface PizzaFlowCategorySeed {
+    name: string;
+    pizzaBarcodeEnabled?: boolean;
+    printer?: { name: string; port: number };
+    product: { name: string; shortName: string; basePrice: number };
+}
+
+async function seedPizzaFlowEvent(page: Page, options: {
+    eventName: string;
+    cashierPrinterName: string;
+    cashBoxName: string;
+    posName: string;
+    categories: PizzaFlowCategorySeed[];
+}) {
+    const { eventId } = await createActiveEventDirect(options.eventName);
+    await setAdminEventContextCookie(page, eventId);
+
+    const [printers, cashBox] = await Promise.all([
+        Printer.insertMany([
+            {
+                eventId,
+                name: options.cashierPrinterName,
+                ip: localPrinterIp(),
+                port: 19100,
+                isVirtual: false,
+                type: "CASHIER",
+            },
+            ...options.categories.flatMap((category) => category.printer ? [{
+                eventId,
+                name: category.printer.name,
+                ip: localPrinterIp(),
+                port: category.printer.port,
+                isVirtual: false,
+                type: "KITCHEN" as const,
+            }] : []),
+        ]),
+        Peripheral.create({
+            eventId,
+            name: options.cashBoxName,
+            type: "CASH_BOX",
+            config: {},
+        }),
+    ]);
+    const printerIds = new Map(printers.map((printer) => [printer.name, printer._id]));
+
+    await PosDevice.create({
+        eventId,
+        name: options.posName,
+        printerId: printerIds.get(options.cashierPrinterName),
+        cashBoxId: cashBox._id,
+    });
+
+    const categories = await Category.insertMany(options.categories.map((category, index) => ({
+        eventId,
+        name: category.name,
+        uiColor: "#f97316",
+        printOrder: index,
+        printerId: category.printer ? printerIds.get(category.printer.name) : undefined,
+        pizzaFlowEnabled: true,
+        pizzaBarcodeEnabled: Boolean(category.pizzaBarcodeEnabled),
+    })));
+
+    const products = await Product.insertMany(options.categories.map((category, index) => ({
+        eventId,
+        categoryId: categories[index]._id,
+        name: category.product.name,
+        shortName: category.product.shortName,
+        basePrice: category.product.basePrice,
+    })));
+
+    return { eventId, products };
 }
 
 async function createWebOrderAndGetOrderData(
@@ -127,37 +202,26 @@ test.describe.serial("Flusso preparazioni numerate", () => {
         const pizzaShortName = `PZ${suffix.slice(-4)}`;
         const calamariShortName = `CAL${suffix.slice(-4)}`;
 
-        await ensureAdminAuthenticated(page, "/admin");
-        await createAndActivateEvent(page, eventName);
         createdEvents.push(eventName);
-        await configureCashPos(page, cashierPrinterName, localPrinterIp(), cashBoxName, posName);
-        await createPrinter(page, pizzaPrinterName, localPrinterIp(), {
-            printerType: "KITCHEN",
-            printerPort: "19101"
-        });
-        await createPrinter(page, calamariPrinterName, localPrinterIp(), {
-            printerType: "KITCHEN",
-            printerPort: "19102"
-        });
-        await createCategory(page, pizzaCategoryName, {
-            kitchenPrinterName: pizzaPrinterName,
-            pizzaFlowEnabled: true,
-            pizzaBarcodeEnabled: true
-        });
-        await createCategory(page, calamariCategoryName, {
-            kitchenPrinterName: calamariPrinterName,
-            pizzaFlowEnabled: true,
-            pizzaBarcodeEnabled: true
-        });
-        await createProduct(page, pizzaCategoryName, {
-            name: pizzaProductName,
-            shortName: pizzaShortName,
-            price: "8.00"
-        });
-        await createProduct(page, calamariCategoryName, {
-            name: calamariProductName,
-            shortName: calamariShortName,
-            price: "9.00"
+        await seedPizzaFlowEvent(page, {
+            eventName,
+            cashierPrinterName,
+            cashBoxName,
+            posName,
+            categories: [
+                {
+                    name: pizzaCategoryName,
+                    pizzaBarcodeEnabled: true,
+                    printer: { name: pizzaPrinterName, port: 19101 },
+                    product: { name: pizzaProductName, shortName: pizzaShortName, basePrice: 8 },
+                },
+                {
+                    name: calamariCategoryName,
+                    pizzaBarcodeEnabled: true,
+                    printer: { name: calamariPrinterName, port: 19102 },
+                    product: { name: calamariProductName, shortName: calamariShortName, basePrice: 9 },
+                },
+            ],
         });
 
         const { code, orderId, accessToken } = await createWebOrderAndGetOrderData(page, [
@@ -243,9 +307,9 @@ test.describe.serial("Flusso preparazioni numerate", () => {
 
         await page.goto("/pizza-monitor");
         await expect(page.getByText("Monitor preparazioni", { exact: true })).toBeVisible();
-        await expect(page.getByText("Piatto pronto per il ritiro", { exact: true })).toBeVisible();
         await expect(page.getByTestId(`pizza-monitor-number-${pizzaTicket.pizzaNumber}`)).toBeVisible({ timeout: 15000 });
         await expect(page.getByTestId(`pizza-monitor-number-${calamariTicket.pizzaNumber}`)).toBeVisible();
+        await expect(page.getByText("Piatto pronto per il ritiro", { exact: true })).toBeVisible();
     });
 
     test("permette di rimuovere manualmente ticket in coda e ticket pronti", async ({ page, isMobile }) => {
@@ -262,65 +326,70 @@ test.describe.serial("Flusso preparazioni numerate", () => {
         const pizzaProductName = `Margherita ${suffix}`;
         const pizzaShortName = `PZ${suffix.slice(-4)}`;
 
-        await ensureAdminAuthenticated(page, "/admin");
-        await createAndActivateEvent(page, eventName);
         createdEvents.push(eventName);
-        await configureCashPos(page, cashierPrinterName, localPrinterIp(), cashBoxName, posName);
-        await createPrinter(page, kitchenPrinterName, localPrinterIp(), {
-            printerType: "KITCHEN",
-            printerPort: "19101"
-        });
-        await createCategory(page, pizzaCategoryName, {
-            kitchenPrinterName,
-            pizzaFlowEnabled: true
-        });
-        await createProduct(page, pizzaCategoryName, {
-            name: pizzaProductName,
-            shortName: pizzaShortName,
-            price: "8.00"
+        const { eventId, products } = await seedPizzaFlowEvent(page, {
+            eventName,
+            cashierPrinterName,
+            cashBoxName,
+            posName,
+            categories: [{
+                name: pizzaCategoryName,
+                printer: { name: kitchenPrinterName, port: 19101 },
+                product: { name: pizzaProductName, shortName: pizzaShortName, basePrice: 8 },
+            }],
         });
 
-        const { code, orderId, accessToken } = await createWebOrderAndGetOrderData(page, [
-            { name: pizzaProductName, quantity: 1 }
-        ]);
-
-        const summaryResponse = await page.request.get(`/api/public/orders/${orderId}/summary?code=${encodeURIComponent(accessToken)}`);
-        expect(summaryResponse.ok()).toBe(true);
-        const summaryPayload = await summaryResponse.json() as { summary?: { dishTickets?: Array<{ pizzaNumber: number }> } };
-        const pizzaNumber = summaryPayload.summary?.dishTickets?.[0]?.pizzaNumber;
-        expect(pizzaNumber).toBeTruthy();
-        if (!pizzaNumber) throw new Error("Numero piatto mancante");
-
-        await openPosAndSelectDevice(page, posName);
-        await openCashSessionIfRequired(page);
-        await page.getByRole("button", { name: /Carica ordine da codice/i }).click();
-        const pendingDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i }).first();
-        await expect(pendingDialog).toBeVisible();
-        await pendingDialog.getByRole("textbox").fill(code);
-        await pendingDialog.getByRole("button", { name: "Carica", exact: true }).click();
-
-        await expect(page.getByText(new RegExp(`^Codice ${code}$`, "i"))).toBeVisible({ timeout: 15000 });
-        await page.getByRole("button", { name: "PAGA ORA", exact: true }).click();
-        const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i }).first();
-        await expect(checkoutDialog).toBeVisible();
-        await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click();
-        await expect(checkoutDialog).toBeHidden({ timeout: 15000 });
-        await dismissFeedbackModal(page);
+        const pizzaNumber = 1;
+        await Order.create({
+            eventId,
+            pickupNumber: 1,
+            status: "PAID",
+            totalAmount: 8,
+            cart: [{
+                productId: products[0]._id,
+                snapshotName: pizzaProductName,
+                quantity: 1,
+                unitBasePrice: 8,
+                lineTotal: 8,
+                selectedOptions: [],
+            }],
+            dishTickets: [{
+                productId: products[0]._id,
+                snapshotName: pizzaProductName,
+                pizzaNumber,
+                state: "QUEUED",
+            }],
+        });
 
         await page.goto("/pizza-console");
         await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
+        const queuedRemoval = page.waitForResponse((response) =>
+            response.url().endsWith("/api/pizza-console/remove")
+            && response.request().method() === "POST"
+        );
         await page.getByTestId(`pizza-console-remove-queued-${pizzaNumber}`).click();
+        expect((await queuedRemoval).ok()).toBe(true);
         await expect(page.getByTestId(`pizza-console-queued-${pizzaNumber}`)).toHaveCount(0);
 
+        const scan = page.waitForResponse((response) =>
+            response.url().endsWith("/api/pizza-console/scan")
+            && response.request().method() === "POST"
+        );
         await page.getByTestId("pizza-console-scanner-input").fill(getPizzaBarcodeValue(pizzaNumber));
         await page.getByTestId("pizza-console-scanner-input").press("Enter");
+        expect((await scan).ok()).toBe(true);
         await expect(page.getByTestId(`pizza-console-ready-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
 
         await page.goto("/pizza-monitor");
         await expect(page.getByTestId(`pizza-monitor-number-${pizzaNumber}`)).toBeVisible({ timeout: 15000 });
 
         await page.goto("/pizza-console");
+        const readyRemoval = page.waitForResponse((response) =>
+            response.url().endsWith("/api/pizza-console/remove")
+            && response.request().method() === "POST"
+        );
         await page.getByTestId(`pizza-console-remove-ready-${pizzaNumber}`).click();
+        expect((await readyRemoval).ok()).toBe(true);
         await expect(page.getByTestId(`pizza-console-ready-${pizzaNumber}`)).toHaveCount(0);
 
         await page.goto("/pizza-monitor");
@@ -340,18 +409,17 @@ test.describe.serial("Flusso preparazioni numerate", () => {
         const pizzaProductName = `Margherita ${suffix}`;
         const pizzaShortName = `PZ${suffix.slice(-4)}`;
 
-        await ensureAdminAuthenticated(page, "/admin");
-        await createAndActivateEvent(page, eventName);
         createdEvents.push(eventName);
-        await configureCashPos(page, cashierPrinterName, localPrinterIp(), cashBoxName, posName);
-        await createCategory(page, pizzaCategoryName, {
-            pizzaFlowEnabled: true,
-            pizzaBarcodeEnabled: true
-        });
-        await createProduct(page, pizzaCategoryName, {
-            name: pizzaProductName,
-            shortName: pizzaShortName,
-            price: "8.00"
+        await seedPizzaFlowEvent(page, {
+            eventName,
+            cashierPrinterName,
+            cashBoxName,
+            posName,
+            categories: [{
+                name: pizzaCategoryName,
+                pizzaBarcodeEnabled: true,
+                product: { name: pizzaProductName, shortName: pizzaShortName, basePrice: 8 },
+            }],
         });
 
         const { code, orderId, accessToken } = await createWebOrderAndGetOrderData(page, [
