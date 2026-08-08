@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test"
 import ExcelJS from "exceljs"
+import Event from "../src/models/Event"
+import Order from "../src/models/Order"
+import Product from "../src/models/Product"
 import {
     createAndActivateEvent,
     configureCashPos,
@@ -30,55 +33,86 @@ test.describe("Dashboard statistiche e reportistica", () => {
         const unsoldName = `Unsold ${suffix}`
 
         try {
-        await createAndActivateEvent(page, eventName)
-        await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName)
-        await createCategoryAndProducts(page, categoryName, [
-            { name: bestsellerName, price: "4.00" },
-            { name: supportingName, price: "3.00" },
-            { name: unsoldName, price: "6.50" },
-        ])
+            await createAndActivateEvent(page, eventName)
 
-        await openPosAndSelectDevice(page, posName)
-        await openCashSessionIfRequired(page)
-        await completeCashOrder(page, [
-            { name: bestsellerName, quantity: 2 },
-            { name: supportingName, quantity: 1 },
-        ])
+            const event = await Event.findOne({ name: eventName }).select("_id").lean<{ _id: string } | null>()
+            expect(event?._id).toBeTruthy()
+            const eventId = String(event!._id)
 
-        await page.goto("/admin")
+            await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName)
+            await createCategoryAndProducts(page, categoryName, [
+                { name: bestsellerName, price: "4.00" },
+                { name: supportingName, price: "3.00" },
+                { name: unsoldName, price: "6.50" },
+            ])
 
-        await expect(page.getByRole("heading", { name: /Dashboard Statistiche/i })).toBeVisible()
-        await expect(page.getByTestId("dashboard-kpi-total")).toContainText(/11,00\s*€/)
-        await expect(page.getByTestId("dashboard-kpi-cash")).toContainText(/11,00\s*€/)
-        await expect(page.getByTestId("dashboard-kpi-card")).toContainText(/0,00\s*€/)
-        await expect(page.getByTestId("dashboard-kpi-orders")).toContainText(/^1$/)
-        await expect(page.getByTestId("dashboard-kpi-average")).toContainText(/11,00\s*€/)
+            const supportingProduct = await Product.findOne({ eventId, name: supportingName }).select("_id").lean<{ _id: string } | null>()
+            expect(supportingProduct?._id).toBeTruthy()
 
-        const bestsellerRow = page.locator("tr").filter({ hasText: bestsellerName }).first()
-        await expect(bestsellerRow).toBeVisible()
-        await expect(bestsellerRow).toContainText("2")
+            const yesterday = new Date()
+            yesterday.setDate(yesterday.getDate() - 1)
+            yesterday.setHours(12, 0, 0, 0)
+            await Order.create({
+                eventId,
+                status: "PAID",
+                paymentMethod: "CASH",
+                totalAmount: 6.5,
+                createdAt: yesterday,
+                cart: [{
+                    productId: supportingProduct!._id,
+                    snapshotName: supportingName,
+                    quantity: 1,
+                    selectedOptions: [],
+                }],
+            })
 
-        const unsoldRow = page.locator("tr").filter({ hasText: unsoldName }).first()
-        await expect(unsoldRow).toBeVisible()
-        await expect(unsoldRow).toContainText("0")
+            await openPosAndSelectDevice(page, posName)
+            await openCashSessionIfRequired(page)
+            await completeCashOrder(page, [
+                { name: bestsellerName, quantity: 2 },
+                { name: supportingName, quantity: 1 },
+            ])
 
-        const csvResponse = await page.request.get("/admin/export?format=csv")
-        expect(csvResponse.ok()).toBeTruthy()
-        expect(csvResponse.headers()["content-type"]).toContain("text/csv")
-        expect(csvResponse.headers()["content-disposition"]).toContain(".csv")
-        const csvPayload = await csvResponse.text()
-        expect(csvPayload).toContain("Incasso totale")
-        expect(csvPayload).toContain(bestsellerName)
-        expect(csvPayload).toContain("11.00")
+            await page.goto("/admin")
 
-        const xlsResponse = await page.request.get("/admin/export?format=xls")
-        expect(xlsResponse.ok()).toBeTruthy()
-        expect(xlsResponse.headers()["content-type"]).toContain("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        expect(xlsResponse.headers()["content-disposition"]).toContain(".xlsx")
-        const workbook = new ExcelJS.Workbook()
-        await workbook.xlsx.load(await xlsResponse.body())
-        expect(workbook.worksheets.map((sheet) => sheet.name)).toContain("Categorie")
-        expect(workbook.getWorksheet("Sotto soglia")?.getColumn(1).values).toContain(unsoldName)
+            await expect(page.getByRole("heading", { name: /Dashboard Statistiche/i })).toBeVisible()
+            await expect(page.getByTestId("dashboard-kpi-total")).toContainText(/17,50\s*€/)
+            await expect(page.getByTestId("dashboard-kpi-cash")).toContainText(/17,50\s*€/)
+            await expect(page.getByTestId("dashboard-kpi-card")).toContainText(/0,00\s*€/)
+            await expect(page.getByTestId("dashboard-kpi-orders")).toContainText(/^2$/)
+            await expect(page.getByTestId("dashboard-kpi-average")).toContainText(/8,75\s*€/)
+
+            await expect(page.getByTestId("dashboard-today-kpi-total")).toContainText(/11,00\s*€/)
+            await expect(page.getByTestId("dashboard-today-kpi-cash")).toContainText(/11,00\s*€/)
+            await expect(page.getByTestId("dashboard-today-kpi-card")).toContainText(/0,00\s*€/)
+            await expect(page.getByTestId("dashboard-today-kpi-orders")).toContainText(/^1$/)
+            await expect(page.getByTestId("dashboard-today-kpi-average")).toContainText(/11,00\s*€/)
+
+            const bestsellerRow = page.locator("tr").filter({ hasText: bestsellerName }).first()
+            await expect(bestsellerRow).toBeVisible()
+            await expect(bestsellerRow).toContainText("2")
+
+            const unsoldRow = page.locator("tr").filter({ hasText: unsoldName }).first()
+            await expect(unsoldRow).toBeVisible()
+            await expect(unsoldRow).toContainText("0")
+
+            const csvResponse = await page.request.get("/admin/export?format=csv")
+            expect(csvResponse.ok()).toBeTruthy()
+            expect(csvResponse.headers()["content-type"]).toContain("text/csv")
+            expect(csvResponse.headers()["content-disposition"]).toContain(".csv")
+            const csvPayload = await csvResponse.text()
+            expect(csvPayload).toContain("Incasso totale")
+            expect(csvPayload).toContain(bestsellerName)
+            expect(csvPayload).toContain("17.50")
+
+            const xlsResponse = await page.request.get("/admin/export?format=xls")
+            expect(xlsResponse.ok()).toBeTruthy()
+            expect(xlsResponse.headers()["content-type"]).toContain("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            expect(xlsResponse.headers()["content-disposition"]).toContain(".xlsx")
+            const workbook = new ExcelJS.Workbook()
+            await workbook.xlsx.load(await xlsResponse.body())
+            expect(workbook.worksheets.map((sheet) => sheet.name)).toContain("Categorie")
+            expect(workbook.getWorksheet("Sotto soglia")?.getColumn(1).values).toContain(unsoldName)
         } finally {
             await deleteEvent(page, eventName)
         }

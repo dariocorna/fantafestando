@@ -3,6 +3,7 @@ import {
     buildDashboardCsvContent,
     buildDashboardXlsCompatibleContent,
     computeDashboardStats,
+    filterDashboardOrdersByLocalDay,
     formatDashboardDateTime,
     normalizePaymentMethod
 } from "./dashboard-stats"
@@ -179,6 +180,54 @@ describe("dashboard stats helpers", () => {
         expect(stats.bestSellers).toEqual([])
         expect(stats.underperforming).toEqual([])
         expect(stats.paidOrders).toEqual([])
+    })
+
+    it.each([
+        {
+            season: "summer time",
+            referenceDate: "2026-08-08T12:00:00.000Z",
+            before: "2026-08-07T21:59:59.999Z",
+            start: "2026-08-07T22:00:00.000Z",
+            end: "2026-08-08T21:59:59.999Z",
+            after: "2026-08-08T22:00:00.000Z"
+        },
+        {
+            season: "winter time",
+            referenceDate: "2026-01-15T12:00:00.000Z",
+            before: "2026-01-14T22:59:59.999Z",
+            start: "2026-01-14T23:00:00.000Z",
+            end: "2026-01-15T22:59:59.999Z",
+            after: "2026-01-15T23:00:00.000Z"
+        },
+        {
+            season: "spring DST transition",
+            referenceDate: "2026-03-29T12:00:00.000Z",
+            before: "2026-03-28T22:59:59.999Z",
+            start: "2026-03-28T23:00:00.000Z",
+            end: "2026-03-29T21:59:59.999Z",
+            after: "2026-03-29T22:00:00.000Z"
+        },
+        {
+            season: "autumn DST transition",
+            referenceDate: "2026-10-25T12:00:00.000Z",
+            before: "2026-10-24T21:59:59.999Z",
+            start: "2026-10-24T22:00:00.000Z",
+            end: "2026-10-25T22:59:59.999Z",
+            after: "2026-10-25T23:00:00.000Z"
+        }
+    ])("filters orders on Rome calendar-day boundaries in $season", ({ referenceDate, before, start, end, after }) => {
+        const orders = [
+            { id: "before", createdAt: before },
+            { id: "start", createdAt: start },
+            { id: "end", createdAt: end },
+            { id: "after", createdAt: after },
+            { id: "invalid", createdAt: "invalid" }
+        ]
+
+        expect(filterDashboardOrdersByLocalDay(orders, referenceDate).map((order) => order.id)).toEqual([
+            "start",
+            "end"
+        ])
     })
 
     it("builds csv and xls-compatible exports", () => {

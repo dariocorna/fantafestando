@@ -9,10 +9,12 @@ import "@/models/PosDevice";
 import type { IEvent } from "@/models/Event";
 import {
     computeDashboardStats,
+    filterDashboardOrdersByLocalDay,
     formatDashboardDateTime,
     getPaymentMethodLabel,
     type DashboardOrderInput,
-    type DashboardProductInput
+    type DashboardProductInput,
+    type DashboardSummary
 } from "@/lib/dashboard-stats";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -74,6 +76,46 @@ function getPosDeviceName(value: CashSessionProjection["posDeviceId"]): string {
     return withName.name?.trim() || "Postazione non trovata"
 }
 
+function buildSummaryKpis(summary: DashboardSummary, testIdPrefix: string, totalDescription: string) {
+    return [
+        {
+            title: "Incasso Totale",
+            value: formatCurrency(summary.totalRevenue),
+            description: totalDescription,
+            icon: <Wallet className="h-4 w-4 text-slate-500" />,
+            testId: `${testIdPrefix}-total`
+        },
+        {
+            title: "Incasso Contanti",
+            value: formatCurrency(summary.cashRevenue),
+            description: "Pagamenti CASH",
+            icon: <ArrowDownRight className="h-4 w-4 text-emerald-600" />,
+            testId: `${testIdPrefix}-cash`
+        },
+        {
+            title: "Incasso Carta / POS",
+            value: formatCurrency(summary.cardRevenue),
+            description: "Pagamenti elettronici",
+            icon: <CreditCard className="h-4 w-4 text-blue-600" />,
+            testId: `${testIdPrefix}-card`
+        },
+        {
+            title: "Ordini Saldati",
+            value: numberFormatter.format(summary.paidOrdersCount),
+            description: "Totale operazioni concluse",
+            icon: <Receipt className="h-4 w-4 text-violet-600" />,
+            testId: `${testIdPrefix}-orders`
+        },
+        {
+            title: "Ticket Medio",
+            value: formatCurrency(summary.averageTicket),
+            description: "Incasso medio per ordine",
+            icon: <ArrowUpRight className="h-4 w-4 text-amber-600" />,
+            testId: `${testIdPrefix}-average`
+        }
+    ]
+}
+
 export default async function AdminDashboard() {
     const contextEvent = await getAdminContextEvent() as IEvent | null;
 
@@ -129,42 +171,23 @@ export default async function AdminDashboard() {
         underperformingLimit: 8,
         underperformingThreshold: 1
     });
-
-    const kpis = [
+    const todayStats = computeDashboardStats({
+        orders: filterDashboardOrdersByLocalDay(dashboardOrders),
+        products: dashboardProducts,
+        bestSellerLimit: 8,
+        underperformingLimit: 8,
+        underperformingThreshold: 1
+    });
+    const kpiSections = [
         {
-            title: "Incasso Totale",
-            value: formatCurrency(stats.summary.totalRevenue),
-            description: "Ordini saldati evento corrente",
-            icon: <Wallet className="h-4 w-4 text-slate-500" />,
-            testId: "dashboard-kpi-total"
+            id: "dashboard-event-totals",
+            title: "Totale Festa",
+            kpis: buildSummaryKpis(stats.summary, "dashboard-kpi", "Ordini saldati evento corrente")
         },
         {
-            title: "Incasso Contanti",
-            value: formatCurrency(stats.summary.cashRevenue),
-            description: "Pagamenti CASH",
-            icon: <ArrowDownRight className="h-4 w-4 text-emerald-600" />,
-            testId: "dashboard-kpi-cash"
-        },
-        {
-            title: "Incasso Carta / POS",
-            value: formatCurrency(stats.summary.cardRevenue),
-            description: "Pagamenti elettronici",
-            icon: <CreditCard className="h-4 w-4 text-blue-600" />,
-            testId: "dashboard-kpi-card"
-        },
-        {
-            title: "Ordini Saldati",
-            value: numberFormatter.format(stats.summary.paidOrdersCount),
-            description: "Totale operazioni concluse",
-            icon: <Receipt className="h-4 w-4 text-violet-600" />,
-            testId: "dashboard-kpi-orders"
-        },
-        {
-            title: "Ticket Medio",
-            value: formatCurrency(stats.summary.averageTicket),
-            description: "Incasso medio per ordine",
-            icon: <ArrowUpRight className="h-4 w-4 text-amber-600" />,
-            testId: "dashboard-kpi-average"
+            id: "dashboard-today-totals",
+            title: "Totale Serata (oggi)",
+            kpis: buildSummaryKpis(todayStats.summary, "dashboard-today-kpi", "Ordini saldati nella giornata")
         }
     ];
 
@@ -194,24 +217,29 @@ export default async function AdminDashboard() {
                 </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                {kpis.map((kpi) => (
-                    <Card key={kpi.title} className="border-[#d9e6f8] shadow-sm">
-                        <CardHeader className="pb-2">
-                            <div className="flex items-center justify-between">
-                                <CardTitle className="text-sm font-medium">{kpi.title}</CardTitle>
-                                {kpi.icon}
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="text-2xl font-black tracking-tight" data-testid={kpi.testId}>
-                                {kpi.value}
-                            </div>
-                            <CardDescription>{kpi.description}</CardDescription>
-                        </CardContent>
-                    </Card>
-                ))}
-            </div>
+            {kpiSections.map((section) => (
+                <section key={section.id} aria-labelledby={section.id} className="space-y-3">
+                    <h2 id={section.id} className="text-lg font-bold">{section.title}</h2>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                        {section.kpis.map((kpi) => (
+                            <Card key={kpi.title} className="border-[#d9e6f8] shadow-sm">
+                                <CardHeader className="pb-2">
+                                    <div className="flex items-center justify-between">
+                                        <CardTitle className="text-sm font-medium">{kpi.title}</CardTitle>
+                                        {kpi.icon}
+                                    </div>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="text-2xl font-black tracking-tight" data-testid={kpi.testId}>
+                                        {kpi.value}
+                                    </div>
+                                    <CardDescription>{kpi.description}</CardDescription>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                </section>
+            ))}
 
             <div className="grid gap-6 xl:grid-cols-2">
                 <Card className="border-[#d9e6f8] shadow-sm">

@@ -192,6 +192,28 @@ export function formatDashboardDateTime(
     }).format(new Date(dateMs))
 }
 
+export function filterDashboardOrdersByLocalDay(
+    orders: DashboardOrderInput[],
+    referenceDate: Date | string = new Date(),
+    timezone = "Europe/Rome"
+): DashboardOrderInput[] {
+    const referenceDateMs = parseDateToMs(referenceDate)
+    if (referenceDateMs === null) return []
+
+    const formatter = new Intl.DateTimeFormat("it-IT", {
+        timeZone: timezone,
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+    })
+    const referenceDay = formatter.format(new Date(referenceDateMs))
+
+    return orders.filter((order) => {
+        const createdAtMs = parseDateToMs(order.createdAt)
+        return createdAtMs !== null && formatter.format(new Date(createdAtMs)) === referenceDay
+    })
+}
+
 export function computeDashboardStats(options: ComputeDashboardStatsOptions): DashboardStatsResult {
     const bestSellerLimit = sanitizeLimit(options.bestSellerLimit)
     const underperformingLimit = sanitizeLimit(options.underperformingLimit)
