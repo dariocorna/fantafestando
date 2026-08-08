@@ -22,6 +22,10 @@ interface PrintJobListItem {
     document?: {
         title?: string;
     };
+    printer?: {
+        id: string;
+        name: string;
+    } | null;
 }
 
 async function setRangeValue(locator: Locator, value: number) {
@@ -251,9 +255,17 @@ test.describe.serial("Portal Easter Egg", () => {
             await createAndActivateEvent(page, eventName, { portalEasterEggEnabled: true });
             eventCreated = true;
             await provisionVirtualPrinters(eventName);
+            const selectedPrinterName = `Photo Printer ${uniqueSuffix()}`;
+            const { printerId: selectedPrinterId } = await createVirtualPrinterDirect({
+                eventName,
+                printerName: selectedPrinterName,
+                type: "KITCHEN",
+                emulatorSlot: 2
+            });
 
             await page.goto("/admin/easter-egg");
             await expect(page.getByText("Nessuna foto caricata")).toBeVisible({ timeout: 15000 });
+            await page.getByLabel("Stampante destinazione (facoltativo)").selectOption(selectedPrinterId);
 
             await page.getByTestId("portal-easter-egg-file-input").setInputFiles({
                 name: "admin-easter-egg.jpg",
@@ -275,6 +287,8 @@ test.describe.serial("Portal Easter Egg", () => {
                     job.source === "MANUAL_TEST"
                     && job.printType === "EASTER_EGG_IMAGE"
                     && job.status === "SENT"
+                    && job.printer?.id === selectedPrinterId
+                    && job.printer.name === selectedPrinterName
                 );
             }, {
                 timeout: 15000
