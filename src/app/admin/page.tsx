@@ -20,6 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { BrandSectionHeader } from "@/components/brand/brand-section-header";
 import { CashSessionPreviewDialog } from "@/components/cash-session-preview-dialog";
 import { CashSessionAdminActions } from "@/components/cash-session-admin-actions";
+import { CashSessionsMultiExportForm } from "@/components/cash-sessions-multi-export-form";
 
 const currencyFormatter = new Intl.NumberFormat("it-IT", {
     style: "currency",
@@ -332,10 +333,11 @@ export default async function AdminDashboard() {
                     <CardTitle>Sessioni Cassa</CardTitle>
                     <CardDescription>Storico aperture/chiusure postazioni cassa con download report.</CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                     <Table data-testid="cash-sessions-table">
                         <TableHeader>
                             <TableRow>
+                                <TableHead className="w-10"><span className="sr-only">Seleziona</span></TableHead>
                                 <TableHead>Stato</TableHead>
                                 <TableHead>Postazione</TableHead>
                                 <TableHead>Apertura</TableHead>
@@ -351,7 +353,7 @@ export default async function AdminDashboard() {
                         <TableBody>
                             {cashSessions.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={10} className="text-center text-muted-foreground">
+                                    <TableCell colSpan={11} className="text-center text-muted-foreground">
                                         Nessuna sessione cassa registrata.
                                     </TableCell>
                                 </TableRow>
@@ -361,6 +363,19 @@ export default async function AdminDashboard() {
                                     const isClosed = session.status === "CLOSED"
                                     return (
                                         <TableRow key={sessionId} data-testid={`cash-session-row-${sessionId}`}>
+                                            <TableCell>
+                                                {isClosed ? (
+                                                    <input
+                                                        type="checkbox"
+                                                        name="sessionId"
+                                                        value={sessionId}
+                                                        form="cash-sessions-multi-export"
+                                                        aria-label={`Seleziona sessione ${getPosDeviceName(session.posDeviceId)}, apertura ${formatDashboardDateTime(session.openedAt)}, chiusura ${formatDashboardDateTime(session.closedAt)}`}
+                                                        data-testid={`cash-session-select-${sessionId}`}
+                                                        className="h-4 w-4 accent-primary"
+                                                    />
+                                                ) : null}
+                                            </TableCell>
                                             <TableCell>
                                                 <span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${isClosed ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
                                                     {isClosed ? "Chiusa" : "Aperta"}
@@ -416,6 +431,7 @@ export default async function AdminDashboard() {
                             )}
                         </TableBody>
                     </Table>
+                    <CashSessionsMultiExportForm hasClosedSessions={cashSessions.some((session) => session.status === "CLOSED")} />
                 </CardContent>
             </Card>
         </div>

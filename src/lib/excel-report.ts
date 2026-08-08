@@ -41,6 +41,49 @@ function salesRows(sales: ProductSalesBreakdownResult): Cell[][] {
     return sales.rows.map((row) => [row.categoryName, row.displayName, row.pricingRegime, row.discountLabel, row.quantitySold, row.grossAmount, row.discountAmount, row.netAmount])
 }
 
+function toCents(value: number | null | undefined) {
+    return Number.isFinite(value) ? Math.round(Number(value) * 100) : 0
+}
+
+function fromCents(value: number) {
+    return Number((value / 100).toFixed(2))
+}
+
+function sumMoney(reports: CashSessionReportInput[], amount: (report: CashSessionReportInput) => number | null | undefined) {
+    return fromCents(reports.reduce((total, report) => total + toCents(amount(report)), 0))
+}
+
+function cashSessionCategoryRows(reports: CashSessionReportInput[]): Cell[][] {
+    const rows: Cell[][] = []
+    for (const report of reports) {
+        const sales = report.salesBreakdown || { rows: [], discountSummaries: [], totals: { quantitySold: 0, grossAmount: 0, discountAmount: 0, netAmount: 0 } }
+        const categories = new Map<string, { quantity: number; gross: number; discount: number; net: number }>()
+        for (const sale of sales.rows) {
+            const current = categories.get(sale.categoryName) || { quantity: 0, gross: 0, discount: 0, net: 0 }
+            current.quantity += sale.quantitySold
+            current.gross += toCents(sale.grossAmount)
+            current.discount += toCents(sale.discountAmount)
+            current.net += toCents(sale.netAmount)
+            categories.set(sale.categoryName, current)
+        }
+        for (const [category, value] of categories) {
+            rows.push([report.sessionId, report.posDeviceName, category, value.quantity, fromCents(value.gross), fromCents(value.discount), fromCents(value.net)])
+        }
+        rows.push([
+            report.sessionId, report.posDeviceName, "TOTALE SESSIONE", sales.totals.quantitySold,
+            fromCents(toCents(sales.totals.grossAmount)), fromCents(toCents(sales.totals.discountAmount)), fromCents(toCents(sales.totals.netAmount))
+        ])
+    }
+    rows.push([
+        "", "", "TOTALE COMPLESSIVO",
+        reports.reduce((total, report) => total + Number(report.salesBreakdown?.totals.quantitySold || 0), 0),
+        sumMoney(reports, (report) => report.salesBreakdown?.totals.grossAmount),
+        sumMoney(reports, (report) => report.salesBreakdown?.totals.discountAmount),
+        sumMoney(reports, (report) => report.salesBreakdown?.totals.netAmount)
+    ])
+    return rows
+}
+
 export async function buildEventWorkbook(input: { eventName: string; stats: DashboardStatsResult; sales: ProductSalesBreakdownResult }) {
     const workbook = new ExcelJS.Workbook()
     addSheet(workbook, "Riepilogo", ["Evento", "Generato il", "Ordini", "Incasso totale", "Contanti", "Carta", "Altro", "Scontrino medio"], [[
@@ -70,5 +113,31 @@ export async function buildCashSessionWorkbook(report: CashSessionReportInput) {
     addSheet(workbook, "Sconti", ["Sconto", "Tipo", "Valore", "Ordini", "Importo sconto"], sales.discountSummaries.map((row) => [row.label, row.mode, row.value, row.ordersCount, row.discountAmount]))
     addSheet(workbook, "Ordini", ["Data", "Codice", "ID", "Pagamento", "Cliente", "Tavolo", "Sconto", "Netto"], (report.orders || []).map((row) => [row.createdAt ? new Date(row.createdAt) : null, row.orderCode || "", row.id || "", row.paymentMethod || "OTHER", row.customerName || "", row.customerTable || "", Number(row.discountAmount || 0), Number(row.netAmount ?? row.totalAmount ?? 0)]))
     addSheet(workbook, "Consumi", ["ID prodotto", "Prodotto", "Quantità", "Ricavo"], (report.productConsumptions || []).map((row) => [row.productId || "", row.productName, row.quantityConsumed, row.revenueAmount]))
+    return Buffer.from(await workbook.xlsx.writeBuffer())
+}
+
+export async function buildCashSessionsWorkbook(reports: CashSessionReportInput[]) {
+    const workbook = new ExcelJS.Workbook()
+    const summaryRows: Cell[][] = reports.map((report) => [
+        report.eventName, report.posDeviceName, report.sessionId, report.isTest ? "TEST - NON CONTABILIZZARE" : report.status,
+        report.openedAt ? new Date(report.openedAt) : null, report.closedAt ? new Date(report.closedAt) : null, Number(report.paidOrdersCount || 0),
+        Number(report.openingFloatAmount || 0), Number(report.cashSalesAmount || 0), Number(report.cardSalesAmount || 0), Number(report.otherSalesAmount || 0),
+        Number(report.expectedCashAmount || 0), Number(report.closingCountedCashAmount || 0), Number(report.varianceAmount || 0)
+    ])
+    summaryRows.push([
+        "TOTALE SESSIONI SELEZIONATE", "", "", reports.some((report) => report.isTest) ? "INCLUDE SESSIONI TEST - NON CONTABILIZZARE" : "TOTALE",
+        null, null, reports.reduce((total, report) => total + Number(report.paidOrdersCount || 0), 0),
+        sumMoney(reports, (report) => report.openingFloatAmount), sumMoney(reports, (report) => report.cashSalesAmount),
+        sumMoney(reports, (report) => report.cardSalesAmount), sumMoney(reports, (report) => report.otherSalesAmount),
+        sumMoney(reports, (report) => report.expectedCashAmount), sumMoney(reports, (report) => report.closingCountedCashAmount),
+        sumMoney(reports, (report) => report.varianceAmount)
+    ])
+
+    addSheet(workbook, "Riepilogo", ["Evento", "Postazione", "Sessione", "Stato", "Apertura", "Chiusura", "Ordini", "Fondo", "Contanti", "Carta", "Altro", "Atteso", "Contato", "Differenza"], summaryRows)
+    addSheet(workbook, "Categorie", ["Sessione", "Postazione", "Categoria", "Quantità", "Lordo", "Sconto", "Netto"], cashSessionCategoryRows(reports))
+    addSheet(workbook, "Vendite", ["Sessione", "Postazione", "Categoria", "Prodotto", "Regime", "Sconto", "Quantità", "Lordo", "Sconto importo", "Netto"], reports.flatMap((report) => salesRows(report.salesBreakdown || { rows: [], discountSummaries: [], totals: { quantitySold: 0, grossAmount: 0, discountAmount: 0, netAmount: 0 } }).map((row) => [report.sessionId, report.posDeviceName, ...row])))
+    addSheet(workbook, "Sconti", ["Sessione", "Postazione", "Sconto", "Tipo", "Valore", "Ordini", "Importo sconto"], reports.flatMap((report) => (report.salesBreakdown?.discountSummaries || []).map((row) => [report.sessionId, report.posDeviceName, row.label, row.mode, row.value, row.ordersCount, row.discountAmount])))
+    addSheet(workbook, "Ordini", ["Sessione", "Postazione", "Data", "Codice", "ID", "Pagamento", "Cliente", "Tavolo", "Sconto", "Netto"], reports.flatMap((report) => (report.orders || []).map((row) => [report.sessionId, report.posDeviceName, row.createdAt ? new Date(row.createdAt) : null, row.orderCode || "", row.id || "", row.paymentMethod || "OTHER", row.customerName || "", row.customerTable || "", Number(row.discountAmount || 0), Number(row.netAmount ?? row.totalAmount ?? 0)])))
+    addSheet(workbook, "Consumi", ["Sessione", "Postazione", "ID prodotto", "Prodotto", "Quantità", "Ricavo"], reports.flatMap((report) => (report.productConsumptions || []).map((row) => [report.sessionId, report.posDeviceName, row.productId || "", row.productName, row.quantityConsumed, row.revenueAmount])))
     return Buffer.from(await workbook.xlsx.writeBuffer())
 }
