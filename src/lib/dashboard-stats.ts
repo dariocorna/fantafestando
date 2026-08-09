@@ -15,6 +15,7 @@ export interface DashboardOrderInput {
     id?: string | null
     status?: string | null
     createdAt?: Date | string | null
+    paidAt?: Date | string | null
     totalAmount?: number | null
     paymentMethod?: string | null
     cart?: DashboardOrderItemInput[] | null
@@ -70,6 +71,7 @@ export interface ComputeDashboardStatsOptions {
 export interface DashboardExportOptions {
     eventName: string
     timezone?: string
+    intervalLabel?: string
     salesBreakdown?: ProductSalesBreakdownResult
 }
 
@@ -210,8 +212,8 @@ export function filterDashboardOrdersByLocalDay(
     const referenceDay = formatter.format(new Date(referenceDateMs))
 
     return orders.filter((order) => {
-        const createdAtMs = parseDateToMs(order.createdAt)
-        return createdAtMs !== null && formatter.format(new Date(createdAtMs)) === referenceDay
+        const occurredAtMs = parseDateToMs(order.paidAt ?? order.createdAt)
+        return occurredAtMs !== null && formatter.format(new Date(occurredAtMs)) === referenceDay
     })
 }
 
@@ -282,10 +284,11 @@ export function computeDashboardStats(options: ComputeDashboardStatsOptions): Da
         else otherRevenueCents += amountCents
 
         const orderId = normalizeProductId(order.id) || `order-${index + 1}`
-        const createdAtMs = parseDateToMs(order.createdAt) ?? 0
+        const occurredAt = order.paidAt ?? order.createdAt
+        const createdAtMs = parseDateToMs(occurredAt) ?? 0
         paidOrders.push({
             orderId,
-            createdAt: toIsoDate(order.createdAt),
+            createdAt: toIsoDate(occurredAt),
             createdAtMs,
             paymentMethod,
             totalAmount: fromCents(amountCents),
@@ -366,6 +369,9 @@ function buildDashboardExport(
     rows.push(serializeRow(["Sezione", "Valore"], delimiter))
     rows.push(serializeRow(["Evento", eventName], delimiter))
     rows.push(serializeRow(["Generato il", formatDashboardDateTime(stats.generatedAt, timezone)], delimiter))
+    if (exportOptions.intervalLabel) {
+        rows.push(serializeRow(["Intervallo", exportOptions.intervalLabel], delimiter))
+    }
     rows.push(serializeRow(["Incasso totale", stats.summary.totalRevenue.toFixed(2)], delimiter))
     rows.push(serializeRow(["Incasso contanti", stats.summary.cashRevenue.toFixed(2)], delimiter))
     rows.push(serializeRow(["Incasso elettronico", stats.summary.cardRevenue.toFixed(2)], delimiter))

@@ -13,6 +13,7 @@ import {
     type DashboardOrderInput,
     type DashboardProductInput
 } from "@/lib/dashboard-stats";
+import { filterDashboardOrdersByTimeRange, resolveDashboardTimeRange } from "@/lib/dashboard-time-range";
 import { aggregateOrderProductSales } from "@/lib/product-consumption";
 import { buildEventWorkbook } from "@/lib/excel-report";
 
@@ -22,6 +23,7 @@ interface OrderProjection {
     _id: unknown
     status?: string
     createdAt?: Date | string
+    paidAt?: Date | string
     totalAmount?: number
     discountApplied?: number
     discountMeta?: {
@@ -89,6 +91,10 @@ function getTimestampTag(value: Date): string {
     return `${yyyy}${mm}${dd}-${hh}${min}`;
 }
 
+function getFirstSearchParam(value: string | null): string | null {
+    return value?.trim() || null
+}
+
 export async function GET(request: NextRequest) {
     try {
         const sessionCheck = await ensureAdminSession();
@@ -113,13 +119,26 @@ export async function GET(request: NextRequest) {
         }
 
         const eventId = String(contextEvent._id);
+        const activeRange = resolveDashboardTimeRange({
+            mode: getFirstSearchParam(request.nextUrl.searchParams.get("range")),
+            from: getFirstSearchParam(request.nextUrl.searchParams.get("from")),
+            to: getFirstSearchParam(request.nextUrl.searchParams.get("to")),
+            timezone: contextEvent.settings?.timezone
+        })
+        const timezone = activeRange.timezone
+        if (!activeRange.isValid) {
+            return NextResponse.json(
+                { error: activeRange.error || "Intervallo non valido" },
+                { status: 400 }
+            )
+        }
 
         await dbConnect();
         const excludedSessionIds = (await CashSession.find({ eventId, isTest: true }).select("_id").lean() as Array<{ _id: unknown }>).map((session) => session._id);
         const [orders, products, categories] = await Promise.all([
             Order.find({ eventId, status: "PAID", cashSessionId: { $nin: excludedSessionIds } })
                 .sort({ createdAt: -1 })
-                .select("_id status createdAt totalAmount discountApplied discountMeta discountComponents pricingMode paymentMethod cart")
+                .select("_id status createdAt paidAt totalAmount discountApplied discountMeta discountComponents pricingMode paymentMethod cart")
                 .lean() as Promise<OrderProjection[]>,
             Product.find({ eventId })
                 .select("_id name shortName basePrice categoryId")
@@ -133,6 +152,7 @@ export async function GET(request: NextRequest) {
             id: String(order._id),
             status: order.status || "PAID",
             createdAt: order.createdAt || null,
+            paidAt: order.paidAt || null,
             totalAmount: order.totalAmount ?? 0,
             paymentMethod: order.paymentMethod || "OTHER",
             cart: Array.isArray(order.cart)
@@ -149,8 +169,18 @@ export async function GET(request: NextRequest) {
             name: product.name
         }));
 
+        const filteredDashboardOrders = filterDashboardOrdersByTimeRange(dashboardOrders, activeRange)
+        const filteredOrders = orders.filter((order) => {
+            const occurredAt = order.paidAt || order.createdAt
+            const occurredAtMs = occurredAt ? new Date(occurredAt).getTime() : Number.NaN
+            if (!Number.isFinite(occurredAtMs)) return false
+            if (activeRange.startMs !== null && occurredAtMs < activeRange.startMs) return false
+            if (activeRange.endMs !== null && occurredAtMs >= activeRange.endMs) return false
+            return true
+        })
+
         const stats = computeDashboardStats({
-            orders: dashboardOrders,
+            orders: filteredDashboardOrders,
             products: dashboardProducts,
             bestSellerLimit: 100,
             underperformingLimit: 100,
@@ -168,14 +198,14 @@ export async function GET(request: NextRequest) {
             }];
         }));
         const salesBreakdown = aggregateOrderProductSales({
-            orders,
+            orders: filteredOrders,
             catalogByProductId
         });
 
         const isExcel = format === "xls" || format === "xlsx";
         const content = isExcel
-            ? await buildEventWorkbook({ eventName: contextEvent.name, stats, sales: salesBreakdown })
-            : buildDashboardCsvContent(stats, { eventName: contextEvent.name, salesBreakdown });
+            ? await buildEventWorkbook({ eventName: contextEvent.name, stats, sales: salesBreakdown, intervalLabel: activeRange.label, timezone })
+            : buildDashboardCsvContent(stats, { eventName: contextEvent.name, timezone, intervalLabel: activeRange.label, salesBreakdown });
 
         const extension = isExcel ? "xlsx" : "csv";
         const contentType = isExcel
