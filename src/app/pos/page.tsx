@@ -538,6 +538,7 @@ export default function PosPage() {
     const [isDiscountSheetOpen, setIsDiscountSheetOpen] = useState(false)
     const [isQuickStockOpen, setIsQuickStockOpen] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
+    const [isCheckoutOutcomeUnknown, setIsCheckoutOutcomeUnknown] = useState(false)
     const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD">("CASH")
     const [cashReceivedInput, setCashReceivedInput] = useState("")
     const [isCashKeypadExpanded, setIsCashKeypadExpanded] = useState(false)
@@ -1436,7 +1437,28 @@ export default function PosPage() {
         setIsCartSheetOpen(false)
     }
 
+    const handleCheckoutInterruption = (error: unknown) => {
+        console.error("Checkout response interrupted:", error)
+        setIsProcessing(false)
+        setIsCheckoutOutcomeUnknown(true)
+        showFeedbackModal(
+            "Non confermare di nuovo: l'ordine potrebbe essere già registrato. Verifica prima in Ordini: se è pagato, usa il Monitor stampa; se è pendente, ricaricalo e completa il pagamento.",
+            "error",
+            "Esito ordine non verificato"
+        )
+    }
+
+    const discardUnknownCheckout = () => {
+        resetCheckoutForm()
+        resetPendingOrder()
+        setStockShortages([])
+        setIsCheckoutOutcomeUnknown(false)
+        setIsCheckoutOpen(false)
+    }
+
     const handleCheckout = async (allowStockOverride = false) => {
+        if (isCheckoutOutcomeUnknown) return
+
         if (!activeEvent?._id) {
             showFeedbackModal("Evento non disponibile")
             return
@@ -1512,7 +1534,11 @@ export default function PosPage() {
                 lineDiscounts: [],
                 pricingMode: isVolunteerMode ? "VOLUNTEER" : "STANDARD",
                 cart: cartPayload
+            }).catch((error) => {
+                handleCheckoutInterruption(error)
+                return null
             })
+            if (!completionResult) return
 
             if (completionResult.success) {
                 setRecentPendingOrders((prev) => prev.filter((order) => order.id !== completedPendingOrderId))
@@ -1563,7 +1589,12 @@ export default function PosPage() {
             allowStockOverride
         }
 
-        const result = await createOrder(orderData)
+        const result = await createOrder(orderData).catch((error) => {
+            handleCheckoutInterruption(error)
+            return null
+        })
+        if (!result) return
+
         if (result.success) {
             resetCheckoutForm()
             setIsCheckoutOpen(false)
@@ -1594,6 +1625,7 @@ export default function PosPage() {
     }
 
     const checkoutDisabled = isProcessing
+        || isCheckoutOutcomeUnknown
         || isCashSessionLoading
         || !selectedPosDeviceId
         || !cashSession
@@ -3170,12 +3202,29 @@ export default function PosPage() {
                                             type="button"
                                             className="rounded-xl bg-amber-600 hover:bg-amber-700"
                                             onClick={() => void handleCheckout(true)}
-                                            disabled={isProcessing}
+                                            disabled={isProcessing || isCheckoutOutcomeUnknown}
                                         >
                                             Prosegui comunque
                                         </Button>
                                     </div>
                                 </div>
+                        ) : null}
+                        {isCheckoutOutcomeUnknown ? (
+                            <div
+                                role="alert"
+                                data-testid="checkout-outcome-unknown"
+                                className="rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm font-bold text-rose-800 lg:col-span-2"
+                            >
+                                <p>Conferma bloccata: verifica prima l&apos;ordine in Ordini.</p>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="mt-2 w-full border-rose-300 bg-white text-rose-800 hover:bg-rose-100"
+                                    onClick={discardUnknownCheckout}
+                                >
+                                    Svuota e avvia nuovo ordine
+                                </Button>
+                            </div>
                         ) : null}
                     </div>
                     <div className="flex shrink-0 gap-2 border-t bg-white p-3 dark:bg-slate-950 sm:px-4">
