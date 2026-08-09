@@ -2,6 +2,12 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.23.0] - 2026-08-09
+
+### Added
+
+- Il POS ricorda per ogni postazione il metodo di pagamento dell'ultimo ordine completato e lo ripropone al checkout successivo.
+
 ## [0.22.2] - 2026-08-09
 
 ### Fixed

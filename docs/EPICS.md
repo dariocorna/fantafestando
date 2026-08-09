@@ -218,10 +218,11 @@ La UI del POS riflette le periferiche effettivamente associate al Punto Cassa se
 - Se il POS ha un `paymentTerminalId`, viene mostrato il bottone "Paga con POS (SumUp)".
 - Se il POS ha un `cashBoxId`, viene mostrato il bottone "Paga in Contanti".
 - Supporto pagamento elettronico manuale (senza terminale fisico) per separazione contabile contanti/elettronico.
+- Memoria locale per postazione dell'ultimo metodo di pagamento completato, riutilizzato come default al checkout successivo.
 - Logica di pagamento estratta in modulo dedicato `src/lib/payment-logic.ts`.
 
-**Test E2E**: `e2e/pos_electronic_payment.spec.ts`.
-**Issue collegata**: `#14` (chiusa).
+**Test E2E**: `e2e/pos_electronic_payment.spec.ts`, `e2e/pos_payment_preference.spec.ts`.
+**Issue collegate**: `#14`, `#124`.
 
 ---
 
