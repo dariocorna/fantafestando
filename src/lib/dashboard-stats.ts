@@ -52,6 +52,7 @@ export interface DashboardPaidOrderMetric {
 export interface DashboardStatsResult {
     generatedAt: string
     summary: DashboardSummary
+    soldProducts: DashboardProductMetric[]
     bestSellers: DashboardProductMetric[]
     underperforming: DashboardProductMetric[]
     paidOrders: DashboardPaidOrderMetric[]
@@ -292,7 +293,7 @@ export function computeDashboardStats(options: ComputeDashboardStatsOptions): Da
         })
     })
 
-    const bestSellers: DashboardProductMetric[] = Array.from(salesByProductId.entries())
+    const soldProducts: DashboardProductMetric[] = Array.from(salesByProductId.entries())
         .map(([productId, acc]) => ({
             productId,
             productName: productNameById.get(productId) || normalizeProductName(acc.fallbackName),
@@ -304,7 +305,8 @@ export function computeDashboardStats(options: ComputeDashboardStatsOptions): Da
             if (b.ordersCount !== a.ordersCount) return b.ordersCount - a.ordersCount
             return a.productName.localeCompare(b.productName, "it")
         })
-        .slice(0, bestSellerLimit)
+
+    const bestSellers = soldProducts.slice(0, bestSellerLimit)
 
     const underperforming: DashboardProductMetric[] = Array.from(productNameById.entries())
         .map(([productId, productName]) => {
@@ -339,6 +341,7 @@ export function computeDashboardStats(options: ComputeDashboardStatsOptions): Da
     return {
         generatedAt: new Date().toISOString(),
         summary,
+        soldProducts,
         bestSellers,
         underperforming,
         paidOrders: paidOrders.map((metric) => ({

@@ -241,6 +241,64 @@ export default async function AdminDashboard() {
                 </section>
             ))}
 
+            <Card className="border-[#d9e6f8] shadow-sm" data-testid="dashboard-evening-products">
+                <CardHeader>
+                    <CardTitle>Prodotti venduti nella serata</CardTitle>
+                    <CardDescription>Quantità vendute oggi, dal prodotto più richiesto.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {todayStats.soldProducts.length === 0 ? (
+                        <p className="text-center text-muted-foreground" data-testid="dashboard-evening-products-empty">
+                            Nessun prodotto venduto nella serata.
+                        </p>
+                    ) : (
+                        <div className="space-y-3">
+                            <ol className="divide-y" data-testid="dashboard-evening-products-top">
+                                {todayStats.soldProducts.slice(0, 5).map((metric, index) => (
+                                    <li
+                                        key={metric.productId}
+                                        className="grid grid-cols-[3rem_1fr_auto] items-center gap-3 py-3"
+                                        data-testid="dashboard-evening-product-row"
+                                    >
+                                        <span className="font-semibold text-muted-foreground">#{index + 1}</span>
+                                        <span className="font-medium">{metric.productName}</span>
+                                        <span className="font-semibold" data-testid="dashboard-evening-product-quantity">
+                                            {numberFormatter.format(metric.quantitySold)}
+                                        </span>
+                                    </li>
+                                ))}
+                            </ol>
+                            {todayStats.soldProducts.length > 5 && (
+                                <details className="group" data-testid="dashboard-evening-products-details">
+                                    <summary
+                                        className="w-fit cursor-pointer font-semibold text-primary"
+                                        data-testid="dashboard-evening-products-toggle"
+                                    >
+                                        <span className="group-open:hidden">Mostra tutti</span>
+                                        <span className="hidden group-open:inline">Riduci</span>
+                                    </summary>
+                                    <ol className="mt-3 divide-y" start={6}>
+                                        {todayStats.soldProducts.slice(5).map((metric, index) => (
+                                            <li
+                                                key={metric.productId}
+                                                className="grid grid-cols-[3rem_1fr_auto] items-center gap-3 py-3"
+                                                data-testid="dashboard-evening-product-row"
+                                            >
+                                                <span className="font-semibold text-muted-foreground">#{index + 6}</span>
+                                                <span className="font-medium">{metric.productName}</span>
+                                                <span className="font-semibold" data-testid="dashboard-evening-product-quantity">
+                                                    {numberFormatter.format(metric.quantitySold)}
+                                                </span>
+                                            </li>
+                                        ))}
+                                    </ol>
+                                </details>
+                            )}
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
             <div className="grid gap-6 xl:grid-cols-2">
                 <Card className="border-[#d9e6f8] shadow-sm">
                     <CardHeader>
