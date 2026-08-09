@@ -6,6 +6,7 @@ export interface IOrder extends Document {
     cashSessionId?: Types.ObjectId;
     pickupNumber?: number;
     status: "PENDING" | "PAID" | "CANCELLED";
+    paidAt?: Date;
     customer: {
         name?: string;
         table?: string;
@@ -118,6 +119,7 @@ const OrderSchema = new Schema<IOrder>({
     eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
     pickupNumber: { type: Number, min: 1 },
     status: { type: String, enum: ["PENDING", "PAID", "CANCELLED"], default: "PENDING" },
+    paidAt: { type: Date },
     customer: {
         name: { type: String },
         table: { type: String }

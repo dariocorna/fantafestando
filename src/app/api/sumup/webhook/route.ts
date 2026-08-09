@@ -214,6 +214,7 @@ export async function POST(req: NextRequest) {
                 }
 
                 const sumupPaymentId = extractSumUpTransactionId(payload)
+                const paidAt = new Date()
                 const completedOrder = await Order.updateOne(
                     {
                         _id: order._id,
@@ -223,6 +224,7 @@ export async function POST(req: NextRequest) {
                     {
                         $set: {
                             status: "PAID",
+                            paidAt,
                             stockOverrideApproved,
                             stockAdjustments: appliedAdjustmentsToRollback,
                             stockEffectStatus: "APPLIED",

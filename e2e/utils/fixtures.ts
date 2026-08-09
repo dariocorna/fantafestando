@@ -74,6 +74,7 @@ export async function createAndActivateEvent(
     await setAdminEventContextCookie(page, eventId);
     await page.goto("/admin/settings", { waitUntil: "domcontentloaded" });
     await expect(page.getByText(new RegExp(`Impostazioni Festa: ${eventName}`))).toBeVisible({ timeout: 15000 });
+    return { eventId };
 }
 
 export async function selectEventContext(page: Page, eventName: string) {
