@@ -211,6 +211,7 @@ export default async function AdminDashboard({
     const exportParams = buildDashboardFilterParams(activeRange.mode, activeRange.startInput, activeRange.endInput)
     const csvExportHref = `/admin/export?format=csv&${exportParams.toString()}`
     const xlsxExportHref = `/admin/export?format=xlsx&${exportParams.toString()}`
+    const pdfExportHref = `/admin/export?format=pdf&${exportParams.toString()}`
 
     return (
         <div className="space-y-6" data-testid="admin-dashboard-brand-shell">
@@ -223,7 +224,7 @@ export default async function AdminDashboard({
                         {formatDashboardDateTime(stats.generatedAt, timezone)}
                     </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                     {activeRange.isValid ? (
                         <>
                             <Button asChild variant="outline" size="sm">
@@ -238,6 +239,12 @@ export default async function AdminDashboard({
                                     Export Excel
                                 </Link>
                             </Button>
+                            <Button asChild variant="outline" size="sm">
+                                <Link href={pdfExportHref}>
+                                    <Download className="h-4 w-4" />
+                                    Export PDF
+                                </Link>
+                            </Button>
                         </>
                     ) : (
                         <>
@@ -248,6 +255,10 @@ export default async function AdminDashboard({
                             <Button variant="outline" size="sm" disabled>
                                 <Download className="h-4 w-4" />
                                 Export Excel
+                            </Button>
+                            <Button variant="outline" size="sm" disabled>
+                                <Download className="h-4 w-4" />
+                                Export PDF
                             </Button>
                         </>
                     )}
@@ -279,6 +290,8 @@ export default async function AdminDashboard({
                                 type="datetime-local"
                                 name="from"
                                 defaultValue={activeRange.startInput}
+                                aria-invalid={activeRange.error ? true : undefined}
+                                aria-describedby={activeRange.error ? "dashboard-time-range-error-message" : undefined}
                                 className="rounded-md border bg-background px-3 py-2"
                             />
                         </label>
@@ -288,13 +301,20 @@ export default async function AdminDashboard({
                                 type="datetime-local"
                                 name="to"
                                 defaultValue={activeRange.endInput}
+                                aria-invalid={activeRange.error ? true : undefined}
+                                aria-describedby={activeRange.error ? "dashboard-time-range-error-message" : undefined}
                                 className="rounded-md border bg-background px-3 py-2"
                             />
                         </label>
                         <Button type="submit" variant="outline">Applica filtro</Button>
                     </form>
                     {activeRange.error && (
-                        <p className="text-sm font-medium text-destructive" data-testid="dashboard-time-range-error">
+                        <p
+                            id="dashboard-time-range-error-message"
+                            role="alert"
+                            className="text-sm font-medium text-destructive"
+                            data-testid="dashboard-time-range-error"
+                        >
                             {activeRange.error}
                         </p>
                     )}
