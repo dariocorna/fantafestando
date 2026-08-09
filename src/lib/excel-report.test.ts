@@ -24,6 +24,7 @@ describe("xlsx reports", () => {
             stats: {
                 generatedAt: "2026-08-06T12:00:00.000Z",
                 summary: { totalRevenue: 10, cashRevenue: 10, cardRevenue: 0, otherRevenue: 0, paidOrdersCount: 1, averageTicket: 10 },
+                soldProducts: [{ productId: "p1", productName: "Birra", quantitySold: 2, ordersCount: 1 }],
                 bestSellers: [{ productId: "p1", productName: "Birra", quantitySold: 2, ordersCount: 1 }],
                 underperforming: [],
                 paidOrders: [{ orderId: "o1", createdAt: "2026-08-06T12:00:00.000Z", paymentMethod: "CASH", totalAmount: 10, itemCount: 2 }]

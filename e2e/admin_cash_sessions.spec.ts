@@ -316,6 +316,9 @@ test.describe("Admin sessioni cassa", () => {
             await expect(row).toContainText(/TEST/i)
             await expect(row).toContainText(/120,00\s*€/i)
             await expect(page.getByTestId("dashboard-kpi-total")).toContainText(/0,00\s*€/)
+            const eveningProducts = page.getByTestId("dashboard-evening-products")
+            await expect(eveningProducts.getByTestId("dashboard-evening-products-empty")).toBeVisible()
+            await expect(eveningProducts.getByText(productName, { exact: true })).toHaveCount(0)
 
             const anteprimaBtn = row.getByRole("button", { name: "Anteprima" }).first()
             await expect(anteprimaBtn).toBeVisible()
@@ -416,6 +419,9 @@ test.describe("Admin sessioni cassa", () => {
             await row.getByRole("button", { name: "Rendi normale", exact: true }).click()
             await expect(row.getByRole("button", { name: "Segna TEST", exact: true })).toBeVisible({ timeout: 15000 })
             await expect(page.getByTestId("dashboard-kpi-total")).toContainText(/20,00\s*€/)
+            const eveningProductRow = eveningProducts.getByTestId("dashboard-evening-product-row").filter({ hasText: productName })
+            await expect(eveningProductRow).toBeVisible()
+            await expect(eveningProductRow.getByTestId("dashboard-evening-product-quantity")).toHaveText("4")
             const reclassifiedEventCsv = await page.request.get("/admin/export?format=csv")
             expect(await reclassifiedEventCsv.text()).toContain("Staff + Promo Cassa")
 
