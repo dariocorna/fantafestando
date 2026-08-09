@@ -2,6 +2,12 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.20.1] - 2026-08-09
+
+### Fixed
+
+- Ripristinati il retry POS dei job di stampa falliti e la ristampa dal riepilogo ordini, con esiti coerenti all'invio reale.
+
 ## [0.16.0] - 2026-07-26
 
 ### Added
