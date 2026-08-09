@@ -396,6 +396,27 @@ describe("aggregateOrderProductSales", () => {
         expect(rows.every((row) => row.length <= 12)).toBe(true)
     })
 
+    it("keeps category subtotals separate when display names match", () => {
+        const result = aggregateOrderProductSales({
+            orders: [{
+                totalAmount: 3,
+                cart: [
+                    { productId: "p1", quantity: 1, lineTotal: 1 },
+                    { productId: "p2", quantity: 1, lineTotal: 2 }
+                ]
+            }],
+            catalogByProductId: new Map([
+                ["p1", { name: "Acqua", categoryKey: "cat-a", categoryName: "Bar", categoryOrder: 1 }],
+                ["p2", { name: "Birra", categoryKey: "cat-b", categoryName: "Bar", categoryOrder: 1 }]
+            ])
+        })
+
+        expect(buildProductSalesExportRows(result).filter((row) => row[0] === "TOTALE CATEGORIA")).toEqual([
+            ["TOTALE CATEGORIA", "Bar", "", "", "", "", "", "", 1, "1.00", "0.00", "1.00"],
+            ["TOTALE CATEGORIA", "Bar", "", "", "", "", "", "", 1, "2.00", "0.00", "2.00"]
+        ])
+    })
+
     it("builds compact print rows with full price before discount groups", () => {
         const result = aggregateOrderProductSales({
             orders: [

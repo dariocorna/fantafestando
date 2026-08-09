@@ -275,17 +275,37 @@ test.describe("Dashboard statistiche e reportistica", () => {
             expect(String(workbook.getWorksheet("Riepilogo")?.getCell("B2").value || "")).toContain("Intervallo personalizzato")
             expect(workbook.getWorksheet("Sotto soglia")?.getColumn(1).values).toContain(unsoldName)
 
+            const customPdfResponse = await page.request.get(`/admin/export?format=pdf&range=custom&from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}`)
+            expect(customPdfResponse.ok()).toBeTruthy()
+            expect(customPdfResponse.headers()["content-type"]).toBe("application/pdf")
+            expect(customPdfResponse.headers()["content-disposition"]).toMatch(
+                /^attachment; filename="report-Dashboard-Event-.+-\d{8}-\d{4}\.pdf"$/
+            )
+            expect((await customPdfResponse.body()).subarray(0, 5).toString()).toBe("%PDF-")
+
             await fromInput.fill(customTo)
             await toInput.fill(customFrom)
             await page.getByRole("button", { name: "Applica filtro" }).click()
 
             await expect(page.getByTestId("dashboard-time-range-error")).toHaveText("La data finale deve essere successiva a quella iniziale.")
+            await expect(page.getByRole("alert")).toHaveText("La data finale deve essere successiva a quella iniziale.")
+            await expect(fromInput).toHaveAttribute("aria-invalid", "true")
+            await expect(fromInput).toHaveAttribute("aria-describedby", "dashboard-time-range-error-message")
+            await expect(toInput).toHaveAttribute("aria-invalid", "true")
+            await expect(toInput).toHaveAttribute("aria-describedby", "dashboard-time-range-error-message")
             await expect(page.getByRole("button", { name: "Export CSV" })).toBeDisabled()
             await expect(page.getByRole("button", { name: "Export Excel" })).toBeDisabled()
+            await expect(page.getByRole("button", { name: "Export PDF" })).toBeDisabled()
 
             const invalidExportResponse = await page.request.get(`/admin/export?format=csv&range=custom&from=${encodeURIComponent(customTo)}&to=${encodeURIComponent(customFrom)}`)
             expect(invalidExportResponse.status()).toBe(400)
             expect(await invalidExportResponse.json()).toEqual({
+                error: "La data finale deve essere successiva a quella iniziale."
+            })
+
+            const invalidPdfResponse = await page.request.get(`/admin/export?format=pdf&range=custom&from=${encodeURIComponent(customTo)}&to=${encodeURIComponent(customFrom)}`)
+            expect(invalidPdfResponse.status()).toBe(400)
+            expect(await invalidPdfResponse.json()).toEqual({
                 error: "La data finale deve essere successiva a quella iniziale."
             })
 
