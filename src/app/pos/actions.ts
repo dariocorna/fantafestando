@@ -1467,6 +1467,7 @@ export async function createOrder(data: {
         const order = await Order.create({
             eventId: data.eventId,
             status: requiresPendingState ? "PENDING" : "PAID",
+            paidAt: requiresPendingState ? undefined : new Date(),
             customer: data.customer,
             totalAmount: payableAmount,
             discountApplied: pricingResult.pricing.discountApplied,
@@ -2317,6 +2318,7 @@ export async function completePendingOrderPayment(data: {
         order.set("discountComponents", pricingResult.pricing.discountComponents)
         order.set("pricingMode", pendingPricingMode === "VOLUNTEER" ? "VOLUNTEER" : "STANDARD")
         order.status = "PAID"
+        order.set("paidAt", new Date())
         order.paymentMethod = data.paymentMethod
         order.set("posDeviceId", data.posDeviceId || undefined)
         order.set("cashSessionId", sessionResult.session.id)

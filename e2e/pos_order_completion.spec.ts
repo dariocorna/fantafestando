@@ -1,4 +1,6 @@
 import { test, expect } from "@playwright/test"
+import Order from "../src/models/Order"
+import { ensureDbConnection } from "./utils/db"
 import {
     createAndActivateEvent,
     configureCashPos,
@@ -95,7 +97,7 @@ test.describe("POS - Completamento ordine da codice", () => {
         const overrideTableCode = "C12"
         const customTableName = "VIP TERRAZZA 1"
 
-        await createAndActivateEvent(page, eventName, {
+        const { eventId } = await createAndActivateEvent(page, eventName, {
             askTable: true,
             predefinedTables: [tableCode, overrideTableCode, "A01"],
         })
@@ -149,5 +151,11 @@ test.describe("POS - Completamento ordine da codice", () => {
 
         await page.goto("/admin/orders")
         await expect(page.getByText(productName)).toBeVisible()
+
+        await ensureDbConnection()
+        const completedOrder = await Order.findOne({ eventId, pickupNumber: Number(orderCode), status: "PAID" })
+            .select("paidAt")
+            .lean<{ paidAt?: Date } | null>()
+        expect(completedOrder?.paidAt).toBeInstanceOf(Date)
     })
 })

@@ -99,6 +99,7 @@ describe("POST /api/sumup/webhook", () => {
             expect.objectContaining({
                 $set: expect.objectContaining({
                     status: "PAID",
+                    paidAt: expect.any(Date),
                     stockAdjustments: [],
                     stockEffectStatus: "APPLIED"
                 })
