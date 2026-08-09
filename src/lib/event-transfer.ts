@@ -67,6 +67,7 @@ type ExportedEventSettings = {
     thresholdBase: number;
   };
   defaultCashierPrinterIp?: string;
+  timezone?: string;
   quickDiscountPresets?: Array<{
     label: string;
     type: "PERCENT" | "FIXED";
@@ -343,6 +344,7 @@ async function exportEventSettingsWithAssets(
     portalEasterEggProcessing:
       settings.portalEasterEggProcessing as ExportedEventSettings["portalEasterEggProcessing"],
     defaultCashierPrinterIp: normalizeOptionalString(settings.defaultCashierPrinterIp),
+    timezone: normalizeOptionalString(settings.timezone) || "Europe/Rome",
     quickDiscountPresets: Array.isArray(settings.quickDiscountPresets)
       ? (settings.quickDiscountPresets as ExportedEventSettings["quickDiscountPresets"])
       : [],
@@ -675,6 +677,7 @@ export async function importEventTransferBundle(
         portalEasterEggCrop: importedSettings.portalEasterEggCrop,
         portalEasterEggProcessing: importedSettings.portalEasterEggProcessing,
         defaultCashierPrinterIp: importedSettings.defaultCashierPrinterIp,
+        timezone: importedSettings.timezone || "Europe/Rome",
         quickDiscountPresets: Array.isArray(importedSettings.quickDiscountPresets)
           ? importedSettings.quickDiscountPresets
           : [],

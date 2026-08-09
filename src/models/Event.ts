@@ -39,6 +39,7 @@ export interface IEvent extends Document {
         quickStaffDiscountLabel?: string;
         quickStaffDiscountType?: "PERCENT" | "FIXED";
         quickStaffDiscountValue?: number;
+        timezone?: string;
     };
     predefinedTables: string[];
 }
@@ -75,7 +76,8 @@ const EventSchema = new Schema<IEvent>({
         quickStaffDiscountEnabled: { type: Boolean, default: false },
         quickStaffDiscountLabel: { type: String, default: "Staff" },
         quickStaffDiscountType: { type: String, enum: ["PERCENT", "FIXED"], default: "PERCENT" },
-        quickStaffDiscountValue: { type: Number, min: 0, default: 50 }
+        quickStaffDiscountValue: { type: Number, min: 0, default: 50 },
+        timezone: { type: String, trim: true, default: "Europe/Rome" }
     },
     predefinedTables: { type: [String], default: [] }
 }, {

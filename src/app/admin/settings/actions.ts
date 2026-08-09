@@ -247,6 +247,15 @@ async function requireAdminAuthorization() {
     return null;
 }
 
+function isValidTimezone(value: string): boolean {
+    try {
+        new Intl.DateTimeFormat("it-IT", { timeZone: value }).format(new Date())
+        return true
+    } catch {
+        return false
+    }
+}
+
 export interface PortalEasterEggActionState {
     success?: string;
     error?: string;
@@ -472,6 +481,7 @@ export async function updateEventSettingsAction(formData: FormData) {
     const askTable = formData.get("askTable") === "on";
     const portalEasterEggEnabled = formData.get("portalEasterEggEnabled") === "on";
     const posCatalogLayoutRaw = ((formData.get("posCatalogLayout") as string | null) || "").trim();
+    const timezone = ((formData.get("timezone") as string | null) || "").trim() || "Europe/Rome";
     const defaultCashierPrinterIp = formData.get("defaultCashierPrinterIp") as string;
     const quickDiscountPresetsRaw = (formData.get("quickDiscountPresets") as string | null)?.trim() || "";
     const menuHeaderLogoFile = formData.get("menuHeaderLogoFile");
@@ -484,6 +494,9 @@ export async function updateEventSettingsAction(formData: FormData) {
     const distinctPredefinedTablesCount = normalizedInputTables.length;
 
     if (!eventId) return { error: "Event ID obbligatorio" };
+    if (!isValidTimezone(timezone)) {
+        return { error: "Fuso orario non valido. Usa un identificatore IANA, ad esempio Europe/Rome." }
+    }
 
     const posCatalogLayout = normalizePosCatalogLayout(posCatalogLayoutRaw);
 
@@ -579,6 +592,7 @@ export async function updateEventSettingsAction(formData: FormData) {
         "settings.askTable": askTable,
         "settings.portalEasterEggEnabled": portalEasterEggEnabled,
         "settings.posCatalogLayout": posCatalogLayout,
+        "settings.timezone": timezone,
         "settings.defaultCashierPrinterIp": defaultCashierPrinterIp,
         "settings.quickDiscountPresets": quickDiscountPresets,
         "settings.quickStaffDiscountEnabled": legacyQuickDiscount.quickStaffDiscountEnabled,
@@ -686,6 +700,7 @@ export async function cloneEventAction(formData: FormData) {
             receiptHeaderLogoUrl: sourceEvent.settings?.receiptHeaderLogoUrl,
             portalEasterEggEnabled: sourceEvent.settings?.portalEasterEggEnabled ?? false,
             defaultCashierPrinterIp: sourceEvent.settings?.defaultCashierPrinterIp,
+            timezone: sourceEvent.settings?.timezone || "Europe/Rome",
             quickDiscountPresets,
             quickStaffDiscountEnabled: legacyQuickDiscount.quickStaffDiscountEnabled,
             quickStaffDiscountLabel: legacyQuickDiscount.quickStaffDiscountLabel,

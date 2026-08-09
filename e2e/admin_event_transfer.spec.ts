@@ -100,6 +100,7 @@ async function seedEventTransferFixture(sourceEventName: string, token: string):
         thresholdBase: 134,
       },
       defaultCashierPrinterIp: "127.0.0.21",
+      timezone: "America/New_York",
       quickDiscountPresets: [
         { label: "Happy Hour", type: "PERCENT", value: 15 },
       ],
@@ -349,6 +350,7 @@ test.describe("Admin event export/import", () => {
         portalEasterEggEnabled?: boolean;
         portalEasterEggImageUrl?: string;
         defaultCashierPrinterIp?: string;
+        timezone?: string;
         quickDiscountPresets?: Array<{ label: string; value: number }>;
         quickStaffDiscountEnabled?: boolean;
         quickStaffDiscountLabel?: string;
@@ -367,6 +369,7 @@ test.describe("Admin event export/import", () => {
       posCatalogLayout: "MODERN_TABS",
       portalEasterEggEnabled: true,
       defaultCashierPrinterIp: "127.0.0.21",
+      timezone: "America/New_York",
       quickStaffDiscountEnabled: true,
       quickStaffDiscountLabel: "Crew",
       quickStaffDiscountType: "FIXED",
