@@ -398,9 +398,10 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
 - POS più leggibile con titoli su due righe, tastiera fisica per il calcolo resto ed editor rapido delle scorte.
 - Errori di stampa raggruppati per stampante e retry atomico dei soli job falliti.
 - Retry POS e ristampa dal riepilogo ordini corretti con recupero immediato dei job interrotti ed esito reale mostrato all'operatore.
+- Checkout POS recuperato dopo una risposta interrotta, senza consentire una seconda contabilizzazione accidentale dell'ordine incerto.
 - Sessioni TEST reversibili: incidono durante l'apertura, vengono escluse e ripristinano le scorte alla chiusura; eliminazione sicura delle sessioni chiuse.
 - Riepiloghi per categoria, ristampa dalla dashboard e workbook `.xlsx` multi-sheet reali.
 - Selezione di più sessioni cassa chiuse per generare un unico workbook `.xlsx` aggregato e tracciabile per postazione.
 
 **Test principali**: unit test catalogo, scorte, stampa, transizioni sessione e workbook; flussi Playwright POS/Admin.
-**Issue collegate**: `#107`, `#116`.
+**Issue collegate**: `#106`, `#107`, `#116`.
