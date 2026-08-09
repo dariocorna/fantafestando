@@ -113,7 +113,6 @@ export function BackupManager({
     startTransition(async () => {
       const result = await saveBackupPolicyAction(formData);
       applyResult(result);
-      router.refresh();
     });
   }
 
@@ -122,7 +121,6 @@ export function BackupManager({
     startTransition(async () => {
       const result = await runConfiguredBackupNowAction();
       applyResult(result);
-      router.refresh();
     });
   }
 
