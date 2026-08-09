@@ -2,6 +2,12 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.22.1] - 2026-08-09
+
+### Fixed
+
+- Ripristinato il POS dopo una risposta di checkout interrotta, con esito incerto esplicito e blocco anti-duplicazione fino all'avvio sicuro di un nuovo ordine.
+
 ## [0.22.0] - 2026-08-09
 
 ### Added
