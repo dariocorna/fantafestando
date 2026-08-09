@@ -44,6 +44,7 @@ import { buildCashReceivedSuggestions, formatCents, normalizeCashReceivedInput, 
 import { PosQuickStockDialog } from "@/components/pos-quick-stock-dialog"
 
 const POS_TOUCH_BREAKPOINT = 1024
+const POS_PAYMENT_METHOD_STORAGE_PREFIX = "fantafestando_pos_payment_method:"
 
 interface ICategory {
     _id: string
@@ -631,6 +632,10 @@ export default function PosPage() {
                 const savedPosId = localStorage.getItem('fantafestando_pos_id')
                 const isSavedPosValid = savedPosId && data.posDevices.some((d: IPosDevice) => d._id === savedPosId)
                 if (isSavedPosValid) {
+                    const savedPaymentMethod = localStorage.getItem(`${POS_PAYMENT_METHOD_STORAGE_PREFIX}${savedPosId}`)
+                    if (savedPaymentMethod === "CASH" || savedPaymentMethod === "CARD") {
+                        setPaymentMethod(savedPaymentMethod)
+                    }
                     setSelectedPosDeviceId(savedPosId)
                     await loadCashSessionStatusFor(data.event._id, savedPosId)
                 } else {
@@ -654,6 +659,13 @@ export default function PosPage() {
     }, [])
 
     const selectPosDevice = (id: string) => {
+        const savedPaymentMethod = localStorage.getItem(`${POS_PAYMENT_METHOD_STORAGE_PREFIX}${id}`)
+        const selectedDevice = posDevices.find((device) => device._id === id)
+        setPaymentMethod(
+            savedPaymentMethod === "CASH" || savedPaymentMethod === "CARD"
+                ? savedPaymentMethod
+                : getPeripheralRef(selectedDevice?.cashBoxId) ? "CASH" : "CARD"
+        )
         setSelectedPosDeviceId(id)
         localStorage.setItem('fantafestando_pos_id', id)
         setIsPosSelectorOpen(false)
@@ -1038,11 +1050,11 @@ export default function PosPage() {
         setOrderCode("")
     }
 
-    const resetCheckoutForm = () => {
+    const resetCheckoutForm = (nextPaymentMethod?: "CASH" | "CARD") => {
         setCart([])
         setCustomerName("")
         setTableNumber("")
-        setPaymentMethod(cashAvailable ? "CASH" : "CARD")
+        setPaymentMethod(nextPaymentMethod ?? (cashAvailable ? "CASH" : "CARD"))
         setCashReceivedInput("")
         setIsCashKeypadExpanded(false)
         setIsVolunteerMode(false)
@@ -1541,8 +1553,9 @@ export default function PosPage() {
             if (!completionResult) return
 
             if (completionResult.success) {
+                localStorage.setItem(`${POS_PAYMENT_METHOD_STORAGE_PREFIX}${selectedPosDeviceId}`, effectivePaymentMethod)
                 setRecentPendingOrders((prev) => prev.filter((order) => order.id !== completedPendingOrderId))
-                resetCheckoutForm()
+                resetCheckoutForm(effectivePaymentMethod)
                 resetPendingOrder()
                 setIsCheckoutOpen(false)
                 setIsCartSheetOpen(false)
@@ -1596,7 +1609,10 @@ export default function PosPage() {
         if (!result) return
 
         if (result.success) {
-            resetCheckoutForm()
+            if (result.paymentCompleted) {
+                localStorage.setItem(`${POS_PAYMENT_METHOD_STORAGE_PREFIX}${selectedPosDeviceId}`, effectivePaymentMethod)
+            }
+            resetCheckoutForm(effectivePaymentMethod)
             setIsCheckoutOpen(false)
             setIsCartSheetOpen(false)
             setStockShortages([])

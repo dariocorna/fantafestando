@@ -1549,7 +1549,12 @@ export async function createOrder(data: {
         }
 
         revalidatePath("/admin/orders")
-        return { success: true, orderId: order._id.toString(), printSummary }
+        return {
+            success: true,
+            orderId: order._id.toString(),
+            paymentCompleted: order.status === "PAID",
+            printSummary
+        }
     } catch (error) {
         if (stockAdjustmentsToRollback.length > 0) {
             try {
