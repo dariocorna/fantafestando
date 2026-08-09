@@ -225,6 +225,21 @@ La UI del POS riflette le periferiche effettivamente associate al Punto Cassa se
 
 ---
 
+## ✅ Epica GitHub #118: Filtri temporali dashboard e report
+
+Filtro temporale condiviso per dashboard statistiche ed export amministrativi.
+
+- Viste rapide **Tempo reale**, **Serata corrente** e **Intera festa** con indicazione sempre visibile dell'intervallo attivo.
+- Intervallo personalizzato con data/ora iniziale e finale, validazione errori e blocco export su input non valido.
+- Aggiornamento automatico della dashboard in modalità realtime senza ricaricamento manuale.
+- Applicazione coerente del filtro a KPI, prodotti venduti, classifiche, ordini esportati e riepiloghi CSV/XLSX.
+- Calcolo basato su `paidAt` quando disponibile, con fallback agli ordini storici e uso del fuso orario configurato per l'evento.
+
+**Test E2E**: `e2e/admin_dashboard_stats.spec.ts`.
+**Issue collegata**: `#118` (chiusa).
+
+---
+
 ## ⬜ Epica 15: (Futuro) Notifiche e Alerting
 
 - Notifica in tempo reale al cassiere quando un ordine WebApp viene creato.
