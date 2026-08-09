@@ -28,8 +28,15 @@ test.describe("Dashboard statistiche e reportistica", () => {
         const cashBoxName = `CashBox ${suffix}`
         const posName = `POS ${suffix}`
         const categoryName = `Dashboard Cat ${suffix}`
-        const bestsellerName = `Best Seller ${suffix}`
-        const supportingName = `Supporting ${suffix}`
+        const soldProducts = [
+            { name: `Sold 1 ${suffix}`, quantity: 6 },
+            { name: `Sold 2 ${suffix}`, quantity: 5 },
+            { name: `Sold 3 ${suffix}`, quantity: 4 },
+            { name: `Sold 4 ${suffix}`, quantity: 3 },
+            { name: `Sold 5 ${suffix}`, quantity: 2 },
+            { name: `Sold 6 ${suffix}`, quantity: 1 },
+        ]
+        const previousDayName = `Previous Day ${suffix}`
         const unsoldName = `Unsold ${suffix}`
 
         try {
@@ -41,13 +48,13 @@ test.describe("Dashboard statistiche e reportistica", () => {
 
             await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName)
             await createCategoryAndProducts(page, categoryName, [
-                { name: bestsellerName, price: "4.00" },
-                { name: supportingName, price: "3.00" },
-                { name: unsoldName, price: "6.50" },
+                ...soldProducts.map(({ name }) => ({ name, price: "1.00" })),
+                { name: previousDayName, price: "2.50" },
+                { name: unsoldName, price: "3.00" },
             ])
 
-            const supportingProduct = await Product.findOne({ eventId, name: supportingName }).select("_id").lean<{ _id: string } | null>()
-            expect(supportingProduct?._id).toBeTruthy()
+            const previousDayProduct = await Product.findOne({ eventId, name: previousDayName }).select("_id").lean<{ _id: string } | null>()
+            expect(previousDayProduct?._id).toBeTruthy()
 
             const yesterday = new Date()
             yesterday.setDate(yesterday.getDate() - 1)
@@ -56,11 +63,11 @@ test.describe("Dashboard statistiche e reportistica", () => {
                 eventId,
                 status: "PAID",
                 paymentMethod: "CASH",
-                totalAmount: 6.5,
+                totalAmount: 2.5,
                 createdAt: yesterday,
                 cart: [{
-                    productId: supportingProduct!._id,
-                    snapshotName: supportingName,
+                    productId: previousDayProduct!._id,
+                    snapshotName: previousDayName,
                     quantity: 1,
                     selectedOptions: [],
                 }],
@@ -68,33 +75,55 @@ test.describe("Dashboard statistiche e reportistica", () => {
 
             await openPosAndSelectDevice(page, posName)
             await openCashSessionIfRequired(page)
-            await completeCashOrder(page, [
-                { name: bestsellerName, quantity: 2 },
-                { name: supportingName, quantity: 1 },
-            ])
+            await completeCashOrder(page, soldProducts)
 
             await page.goto("/admin")
 
             await expect(page.getByRole("heading", { name: /Dashboard Statistiche/i })).toBeVisible()
-            await expect(page.getByTestId("dashboard-kpi-total")).toContainText(/17,50\s*€/)
-            await expect(page.getByTestId("dashboard-kpi-cash")).toContainText(/17,50\s*€/)
+            await expect(page.getByTestId("dashboard-kpi-total")).toContainText(/23,50\s*€/)
+            await expect(page.getByTestId("dashboard-kpi-cash")).toContainText(/23,50\s*€/)
             await expect(page.getByTestId("dashboard-kpi-card")).toContainText(/0,00\s*€/)
             await expect(page.getByTestId("dashboard-kpi-orders")).toContainText(/^2$/)
-            await expect(page.getByTestId("dashboard-kpi-average")).toContainText(/8,75\s*€/)
+            await expect(page.getByTestId("dashboard-kpi-average")).toContainText(/11,75\s*€/)
 
-            await expect(page.getByTestId("dashboard-today-kpi-total")).toContainText(/11,00\s*€/)
-            await expect(page.getByTestId("dashboard-today-kpi-cash")).toContainText(/11,00\s*€/)
+            await expect(page.getByTestId("dashboard-today-kpi-total")).toContainText(/21,00\s*€/)
+            await expect(page.getByTestId("dashboard-today-kpi-cash")).toContainText(/21,00\s*€/)
             await expect(page.getByTestId("dashboard-today-kpi-card")).toContainText(/0,00\s*€/)
             await expect(page.getByTestId("dashboard-today-kpi-orders")).toContainText(/^1$/)
-            await expect(page.getByTestId("dashboard-today-kpi-average")).toContainText(/11,00\s*€/)
+            await expect(page.getByTestId("dashboard-today-kpi-average")).toContainText(/21,00\s*€/)
 
-            const bestsellerRow = page.locator("tr").filter({ hasText: bestsellerName }).first()
+            const bestsellerRow = page.locator("tr").filter({ hasText: soldProducts[0].name }).first()
             await expect(bestsellerRow).toBeVisible()
-            await expect(bestsellerRow).toContainText("2")
+            await expect(bestsellerRow).toContainText("6")
 
             const unsoldRow = page.locator("tr").filter({ hasText: unsoldName }).first()
             await expect(unsoldRow).toBeVisible()
             await expect(unsoldRow).toContainText("0")
+
+            const eveningProducts = page.getByTestId("dashboard-evening-products")
+            const eveningRows = eveningProducts.getByTestId("dashboard-evening-product-row")
+            await expect(eveningProducts.getByText("Prodotti venduti nella serata", { exact: true })).toBeVisible()
+            await expect(eveningRows).toHaveCount(6)
+            for (let index = 0; index < soldProducts.length; index += 1) {
+                const row = eveningRows.nth(index)
+                await expect(row).toContainText(soldProducts[index].name)
+                await expect(row.getByTestId("dashboard-evening-product-quantity")).toHaveText(String(soldProducts[index].quantity))
+                if (index < 5) await expect(row).toBeVisible()
+                else await expect(row).toBeHidden()
+            }
+            await expect(eveningProducts.getByText(previousDayName, { exact: true })).toHaveCount(0)
+            await expect(eveningProducts.getByText(unsoldName, { exact: true })).toHaveCount(0)
+
+            const eveningProductsToggle = eveningProducts.getByTestId("dashboard-evening-products-toggle")
+            await expect(eveningProducts.getByText("Mostra tutti", { exact: true })).toBeVisible()
+            await expect(eveningProducts.getByText("Riduci", { exact: true })).toBeHidden()
+            await eveningProductsToggle.click()
+            await expect(eveningRows.nth(5)).toBeVisible()
+            await expect(eveningProducts.getByText("Mostra tutti", { exact: true })).toBeHidden()
+            await expect(eveningProducts.getByText("Riduci", { exact: true })).toBeVisible()
+            await eveningProductsToggle.click()
+            await expect(eveningRows.nth(5)).toBeHidden()
+            await expect(eveningProducts.getByText("Mostra tutti", { exact: true })).toBeVisible()
 
             const csvResponse = await page.request.get("/admin/export?format=csv")
             expect(csvResponse.ok()).toBeTruthy()
@@ -102,8 +131,8 @@ test.describe("Dashboard statistiche e reportistica", () => {
             expect(csvResponse.headers()["content-disposition"]).toContain(".csv")
             const csvPayload = await csvResponse.text()
             expect(csvPayload).toContain("Incasso totale")
-            expect(csvPayload).toContain(bestsellerName)
-            expect(csvPayload).toContain("17.50")
+            expect(csvPayload).toContain(soldProducts[0].name)
+            expect(csvPayload).toContain("23.50")
 
             const xlsResponse = await page.request.get("/admin/export?format=xls")
             expect(xlsResponse.ok()).toBeTruthy()

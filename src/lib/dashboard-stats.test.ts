@@ -112,6 +112,51 @@ describe("dashboard stats helpers", () => {
         ])
     })
 
+    it("returns every sold product in deterministic order while keeping best sellers limited", () => {
+        const stats = computeDashboardStats({
+            orders: [
+                {
+                    id: "paid",
+                    status: "PAID",
+                    cart: [
+                        { productId: "p1", quantity: 5 },
+                        { productId: "p2", quantity: 4 },
+                        { productId: "p3", quantity: 3 },
+                        { productId: "p4", quantity: 2 },
+                        { productId: "p5", quantity: 2 },
+                        { productId: "p6", quantity: 1 }
+                    ]
+                },
+                {
+                    id: "pending",
+                    status: "PENDING",
+                    cart: [{ productId: "p7", quantity: 99 }]
+                }
+            ],
+            products: [
+                { id: "p1", name: "Uno" },
+                { id: "p2", name: "Due" },
+                { id: "p3", name: "Tre" },
+                { id: "p4", name: "Zuppa" },
+                { id: "p5", name: "Acqua" },
+                { id: "p6", name: "Sei" },
+                { id: "p7", name: "Solo pendente" },
+                { id: "p8", name: "Invenduto" }
+            ],
+            bestSellerLimit: 5
+        })
+
+        expect(stats.soldProducts.map((metric) => metric.productId)).toEqual([
+            "p1",
+            "p2",
+            "p3",
+            "p5",
+            "p4",
+            "p6"
+        ])
+        expect(stats.bestSellers).toEqual(stats.soldProducts.slice(0, 5))
+    })
+
     it("classifies underperforming products including unsold ones", () => {
         const stats = computeDashboardStats({
             orders: [
@@ -177,6 +222,7 @@ describe("dashboard stats helpers", () => {
             paidOrdersCount: 0,
             averageTicket: 0
         })
+        expect(stats.soldProducts).toEqual([])
         expect(stats.bestSellers).toEqual([])
         expect(stats.underperforming).toEqual([])
         expect(stats.paidOrders).toEqual([])

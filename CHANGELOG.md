@@ -2,6 +2,12 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.21.0] - 2026-08-09
+
+### Added
+
+- Aggiunto alla dashboard il riepilogo espandibile dei prodotti venduti nella serata corrente, con esclusione delle sessioni TEST.
+
 ## [0.20.1] - 2026-08-09
 
 ### Fixed

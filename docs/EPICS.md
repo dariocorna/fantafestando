@@ -149,6 +149,7 @@ Rifattorizzazione dell'architettura hardware per supportare periferiche modulari
 - Calcolo incassi totali live per la serata attiva.
 - Dashboard con metriche: incasso contanti vs. carte (SumUp).
 - Tracciamento vendite prodotti (Best Seller, Sotto Performanti).
+- Riepilogo espandibile di tutti i prodotti venduti nella serata corrente.
 - Export CSV/Excel per rendicontazione di fine festa.
 - Sezione **Sessioni Cassa** in admin con storico aperture/chiusure per postazione.
 - Download report sessione cassa (CSV/XLS) dal pannello admin.
@@ -156,6 +157,8 @@ Rifattorizzazione dell'architettura hardware per supportare periferiche modulari
 - Stampa automatica riepilogo chiusura sulla stampante associata alla postazione cassa.
 
 **Test E2E**: `e2e/admin_dashboard_stats.spec.ts`, `e2e/admin_cash_sessions.spec.ts`, `e2e/pos_cash_session.spec.ts`.
+
+**Issue collegate**: `#117`.
 
 ---
 
