@@ -2,6 +2,12 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.22.2] - 2026-08-09
+
+### Fixed
+
+- Corretto il ripristino dei backup runtime su Docker consentendo lo staging atomico degli upload nel volume persistente.
+
 ## [0.22.1] - 2026-08-09
 
 ### Fixed
