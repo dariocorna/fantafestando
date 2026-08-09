@@ -30,6 +30,7 @@ interface ActiveEventSettingsFormProps {
                 type: "PERCENT" | "FIXED";
                 value: number;
             }>;
+            timezone?: string;
             quickStaffDiscountEnabled?: boolean;
             quickStaffDiscountLabel?: string;
             quickStaffDiscountType?: "PERCENT" | "FIXED";
@@ -461,6 +462,25 @@ function ActiveEventSettingsFormInner({ event }: ActiveEventSettingsFormProps) {
                             <option value="COMPACT_COLUMNS">Compatto a colonne (attuale)</option>
                             <option value="MODERN_TABS">Moderno con categorie in alto</option>
                         </select>
+                    </div>
+
+                    <div className="space-y-2 rounded-md border p-4 shadow-sm">
+                        <Label htmlFor="timezone" className="text-sm font-medium">
+                            Fuso orario evento
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                            Usa un identificatore IANA, ad esempio <code>Europe/Rome</code>.
+                        </p>
+                        <Input
+                            id="timezone"
+                            name="timezone"
+                            type="text"
+                            defaultValue={event.settings?.timezone || "Europe/Rome"}
+                            placeholder="Europe/Rome"
+                            autoCapitalize="off"
+                            autoCorrect="off"
+                            spellCheck={false}
+                        />
                     </div>
 
                     <div className="space-y-3 rounded-md border p-4 shadow-sm sm:col-span-2">

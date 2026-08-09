@@ -33,7 +33,8 @@ describe("ActiveEventSettingsForm", () => {
                 posCatalogLayout: "COMPACT_COLUMNS" as const,
                 menuHeaderLogoUrl: "",
                 receiptHeaderLogoUrl: "",
-                quickDiscountPresets: []
+                quickDiscountPresets: [],
+                timezone: "Europe/Rome"
             }
         };
 
@@ -77,7 +78,8 @@ describe("ActiveEventSettingsForm", () => {
                 receiptHeaderLogoUrl: "/uploads/receipt-headers/event-a.png",
                 quickDiscountPresets: [
                     { label: "Staff", type: "PERCENT" as const, value: 50 }
-                ]
+                ],
+                timezone: "Europe/Rome"
             }
         };
         const secondEvent = {
@@ -93,7 +95,8 @@ describe("ActiveEventSettingsForm", () => {
                 receiptHeaderLogoUrl: "",
                 quickDiscountPresets: [
                     { label: "Promo", type: "FIXED" as const, value: 2 }
-                ]
+                ],
+                timezone: "America/New_York"
             }
         };
 
@@ -103,6 +106,7 @@ describe("ActiveEventSettingsForm", () => {
         expect(screen.getByLabelText(/Chiedi Nome Cliente/i)).toBeChecked();
         expect(screen.getByLabelText(/Chiedi Numero Tavolo/i)).not.toBeChecked();
         expect(screen.getByLabelText(/Layout Catalogo POS/i)).toHaveValue("MODERN_TABS");
+        expect(screen.getByLabelText(/Fuso orario evento/i)).toHaveValue("Europe/Rome");
         expect(screen.getByAltText(/Anteprima logo header menu/i)).toHaveAttribute("src", "/uploads/menu-headers/event-a.jpg");
         expect(screen.getByAltText(/Anteprima header scontrino/i)).toHaveAttribute("src", "/uploads/receipt-headers/event-a.png");
         expect(screen.getByText("/uploads/menu-headers/event-a.jpg")).toBeInTheDocument();
@@ -116,6 +120,7 @@ describe("ActiveEventSettingsForm", () => {
             expect(screen.getByLabelText(/Chiedi Nome Cliente/i)).not.toBeChecked();
             expect(screen.getByLabelText(/Chiedi Numero Tavolo/i)).toBeChecked();
             expect(screen.getByLabelText(/Layout Catalogo POS/i)).toHaveValue("COMPACT_COLUMNS");
+            expect(screen.getByLabelText(/Fuso orario evento/i)).toHaveValue("America/New_York");
             expect(screen.getByAltText(/Anteprima logo header menu/i)).toHaveAttribute("src", "/uploads/menu-headers/event-b.png");
         });
 
@@ -146,7 +151,8 @@ describe("ActiveEventSettingsForm", () => {
                 posCatalogLayout: "MODERN_TABS" as const,
                 menuHeaderLogoUrl: "/uploads/menu-headers/event-a.png",
                 receiptHeaderLogoUrl: "/uploads/receipt-headers/event-a.png",
-                quickDiscountPresets: []
+                quickDiscountPresets: [],
+                timezone: "Europe/Rome"
             }
         };
         const secondEvent = {
@@ -160,7 +166,8 @@ describe("ActiveEventSettingsForm", () => {
                 posCatalogLayout: "COMPACT_COLUMNS" as const,
                 menuHeaderLogoUrl: "/uploads/menu-headers/event-b.png",
                 receiptHeaderLogoUrl: "/uploads/receipt-headers/event-b.png",
-                quickDiscountPresets: []
+                quickDiscountPresets: [],
+                timezone: "America/New_York"
             }
         };
 
@@ -195,4 +202,40 @@ describe("ActiveEventSettingsForm", () => {
         expect(screen.queryByText("/uploads/receipt-headers/saved-a.png")).not.toBeInTheDocument();
         expect(screen.queryByText(/Modifiche salvate/i)).not.toBeInTheDocument();
     });
+
+    it("submits the configured timezone with the settings form", async () => {
+        updateEventSettingsActionMock.mockResolvedValue({
+            success: true,
+            menuHeaderLogoUrl: "",
+            receiptHeaderLogoUrl: ""
+        });
+
+        render(<ActiveEventSettingsForm event={{
+            _id: "event-timezone",
+            active: true,
+            predefinedTables: [],
+            settings: {
+                askName: false,
+                askTable: false,
+                portalEasterEggEnabled: false,
+                posCatalogLayout: "COMPACT_COLUMNS",
+                menuHeaderLogoUrl: "",
+                receiptHeaderLogoUrl: "",
+                quickDiscountPresets: [],
+                timezone: "Europe/Rome"
+            }
+        }} />);
+
+        fireEvent.change(screen.getByLabelText(/Fuso orario evento/i), {
+            target: { value: "America/New_York" }
+        });
+        fireEvent.click(screen.getByRole("button", { name: /Salva Impostazioni/i }));
+
+        await waitFor(() => {
+            expect(updateEventSettingsActionMock).toHaveBeenCalledTimes(1);
+        });
+
+        const submittedFormData = updateEventSettingsActionMock.mock.calls[0][0] as FormData
+        expect(submittedFormData.get("timezone")).toBe("America/New_York")
+    })
 });

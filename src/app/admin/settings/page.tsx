@@ -24,6 +24,7 @@ export default async function AdminSettings() {
           menuHeaderLogoUrl: contextEvent.settings?.menuHeaderLogoUrl || "",
           receiptHeaderLogoUrl: contextEvent.settings?.receiptHeaderLogoUrl || "",
           quickDiscountPresets: resolveQuickDiscountPresetsFromSettings(contextEvent.settings),
+          timezone: contextEvent.settings?.timezone || "Europe/Rome",
           quickStaffDiscountEnabled: contextEvent.settings?.quickStaffDiscountEnabled ?? false,
           quickStaffDiscountLabel: contextEvent.settings?.quickStaffDiscountLabel || "Staff",
           quickStaffDiscountType: contextEvent.settings?.quickStaffDiscountType || "PERCENT",
