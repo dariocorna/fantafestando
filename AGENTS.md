@@ -49,6 +49,13 @@ Il branch si crea partendo dal branch di sviluppo principale corrente.
 > **📋 Stato del Progetto**: Per una mappa dettagliata di tutte le epiche completate e pianificate, consultare **[`docs/EPICS.md`](docs/EPICS.md)** prima di iniziare qualsiasi lavoro.
 
 
+## Code Review Rules
+
+### Bugfix mirati
+
+- Nei bugfix, considerare bloccante ogni refactor non indispensabile: correggere la causa nel punto condiviso più piccolo possibile e preservare i comportamenti, i contratti e i flussi adiacenti.
+
+
 ## Regole Generali
 
 - **SumUp temporaneamente deprecato**: non configurare o abilitare il pagamento automatico SumUp nei rilasci finché il relativo flusso di recupero non è stato validato; il deploy senza supporto SumUp è quello atteso.
