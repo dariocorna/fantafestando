@@ -20,6 +20,8 @@ describe("xlsx reports", () => {
     test("creates the event workbook with tabular sheets and numeric money cells", async () => {
         const buffer = await buildEventWorkbook({
             eventName: "Festa",
+            intervalLabel: "Tempo reale · dalle 09/08/2026, 10:00",
+            timezone: "America/New_York",
             sales,
             stats: {
                 generatedAt: "2026-08-06T12:00:00.000Z",
@@ -33,6 +35,10 @@ describe("xlsx reports", () => {
         const workbook = new ExcelJS.Workbook()
         await workbook.xlsx.load(buffer)
         expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(["Riepilogo", "Categorie", "Vendite", "Sconti", "Ordini", "Top prodotti", "Sotto soglia"])
+        expect(workbook.getWorksheet("Riepilogo")?.getRow(1).values).toEqual([undefined, "Evento", "Intervallo", "Generato il", "Ordini", "Incasso totale", "Contanti", "Carta", "Altro", "Scontrino medio"])
+        expect(workbook.getWorksheet("Riepilogo")?.getCell("B2").value).toBe("Tempo reale · dalle 09/08/2026, 10:00")
+        expect(workbook.getWorksheet("Riepilogo")?.getCell("C2").value).toBe("06/08/2026, 08:00")
+        expect(workbook.getWorksheet("Ordini")?.getCell("A2").value).toBe("06/08/2026, 08:00")
         expect(workbook.getWorksheet("Categorie")?.getRow(1).values).toEqual([undefined, "Categoria", "Quantità", "Lordo", "Sconto", "Netto"])
         expect(workbook.getWorksheet("Categorie")?.getCell("B2").value).toBe(2)
         expect(workbook.getWorksheet("Categorie")?.getCell("C2").value).toBe(10)

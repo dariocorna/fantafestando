@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowDownRight, ArrowUpRight, CreditCard, Download, Receipt, Wallet } from "lucide-react";
+import { AdminDashboardRealtimeRefresh } from "@/components/admin-dashboard-realtime-refresh";
 import { getAdminContextEvent } from "@/lib/events";
 import dbConnect from "@/lib/mongoose";
 import Order from "@/models/Order";
@@ -9,13 +10,13 @@ import "@/models/PosDevice";
 import type { IEvent } from "@/models/Event";
 import {
     computeDashboardStats,
-    filterDashboardOrdersByLocalDay,
     formatDashboardDateTime,
     getPaymentMethodLabel,
     type DashboardOrderInput,
     type DashboardProductInput,
     type DashboardSummary
 } from "@/lib/dashboard-stats";
+import { filterDashboardOrdersByTimeRange, resolveDashboardTimeRange, type DashboardTimeRangeMode } from "@/lib/dashboard-time-range";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -35,6 +36,7 @@ interface OrderProjection {
     _id: unknown
     status?: string
     createdAt?: Date | string
+    paidAt?: Date | string
     totalAmount?: number
     paymentMethod?: string
     cart?: Array<{
@@ -116,7 +118,26 @@ function buildSummaryKpis(summary: DashboardSummary, testIdPrefix: string, total
     ]
 }
 
-export default async function AdminDashboard() {
+function getFirstSearchParam(value: string | string[] | undefined): string | null {
+    if (Array.isArray(value)) return value[0]?.trim() || null
+    return value?.trim() || null
+}
+
+function buildDashboardFilterParams(mode: DashboardTimeRangeMode, from?: string, to?: string): URLSearchParams {
+    const params = new URLSearchParams()
+    params.set("range", mode)
+    if (mode === "custom") {
+        if (from) params.set("from", from)
+        if (to) params.set("to", to)
+    }
+    return params
+}
+
+export default async function AdminDashboard({
+    searchParams
+}: {
+    searchParams?: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>
+}) {
     const contextEvent = await getAdminContextEvent() as IEvent | null;
 
     if (!contextEvent) {
@@ -128,6 +149,16 @@ export default async function AdminDashboard() {
     }
 
     const eventId = String(contextEvent._id);
+    const resolvedSearchParams = await Promise.resolve(searchParams ?? {})
+    const activeRange = resolveDashboardTimeRange({
+        mode: getFirstSearchParam(resolvedSearchParams.range),
+        from: getFirstSearchParam(resolvedSearchParams.from),
+        to: getFirstSearchParam(resolvedSearchParams.to),
+        timezone: contextEvent.settings?.timezone
+    })
+    const timezone = activeRange.timezone
+    const configuredRefreshMs = Number(process.env.DASHBOARD_REALTIME_REFRESH_MS ?? "15000")
+    const realtimeRefreshMs = Number.isFinite(configuredRefreshMs) ? Math.max(1000, configuredRefreshMs) : 15000
     await dbConnect();
 
     const cashSessions = await CashSession.find({ eventId })
@@ -139,7 +170,7 @@ export default async function AdminDashboard() {
     const [orders, products] = await Promise.all([
         Order.find({ eventId, status: "PAID", cashSessionId: { $nin: excludedSessionIds } })
             .sort({ createdAt: -1 })
-            .select("_id status createdAt totalAmount paymentMethod cart")
+            .select("_id status createdAt paidAt totalAmount paymentMethod cart")
             .lean() as Promise<OrderProjection[]>,
         Product.find({ eventId }).select("_id name").lean() as Promise<ProductProjection[]>
     ]);
@@ -148,6 +179,7 @@ export default async function AdminDashboard() {
         id: String(order._id),
         status: order.status || "PAID",
         createdAt: order.createdAt || null,
+        paidAt: order.paidAt || null,
         totalAmount: order.totalAmount ?? 0,
         paymentMethod: order.paymentMethod || "OTHER",
         cart: Array.isArray(order.cart)
@@ -164,97 +196,147 @@ export default async function AdminDashboard() {
         name: product.name
     }));
 
+    const filteredOrders = filterDashboardOrdersByTimeRange(dashboardOrders, activeRange)
     const stats = computeDashboardStats({
-        orders: dashboardOrders,
+        orders: filteredOrders,
         products: dashboardProducts,
         bestSellerLimit: 8,
         underperformingLimit: 8,
         underperformingThreshold: 1
     });
-    const todayStats = computeDashboardStats({
-        orders: filterDashboardOrdersByLocalDay(dashboardOrders),
-        products: dashboardProducts,
-        bestSellerLimit: 8,
-        underperformingLimit: 8,
-        underperformingThreshold: 1
-    });
-    const kpiSections = [
-        {
-            id: "dashboard-event-totals",
-            title: "Totale Festa",
-            kpis: buildSummaryKpis(stats.summary, "dashboard-kpi", "Ordini saldati evento corrente")
-        },
-        {
-            id: "dashboard-today-totals",
-            title: "Totale Serata (oggi)",
-            kpis: buildSummaryKpis(todayStats.summary, "dashboard-today-kpi", "Ordini saldati nella giornata")
-        }
-    ];
+    const kpis = buildSummaryKpis(stats.summary, "dashboard-kpi", `Ordini saldati · ${activeRange.label}`)
+    const realtimeHref = `/admin?${buildDashboardFilterParams("realtime").toString()}`
+    const eveningHref = `/admin?${buildDashboardFilterParams("evening").toString()}`
+    const eventHref = `/admin?${buildDashboardFilterParams("event").toString()}`
+    const exportParams = buildDashboardFilterParams(activeRange.mode, activeRange.startInput, activeRange.endInput)
+    const csvExportHref = `/admin/export?format=csv&${exportParams.toString()}`
+    const xlsxExportHref = `/admin/export?format=xlsx&${exportParams.toString()}`
 
     return (
         <div className="space-y-6" data-testid="admin-dashboard-brand-shell">
+            <AdminDashboardRealtimeRefresh enabled={activeRange.isRealtime && activeRange.isValid} intervalMs={realtimeRefreshMs} />
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
                     <BrandSectionHeader title="Dashboard Statistiche" />
                     <p className="text-muted-foreground">
                         Festa: <span className="font-semibold text-foreground">{contextEvent.name}</span> · Aggiornata alle{" "}
-                        {formatDashboardDateTime(stats.generatedAt)}
+                        {formatDashboardDateTime(stats.generatedAt, timezone)}
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    <Button asChild variant="outline" size="sm">
-                        <Link href="/admin/export?format=csv">
-                            <Download className="h-4 w-4" />
-                            Export CSV
-                        </Link>
-                    </Button>
-                    <Button asChild variant="outline" size="sm">
-                        <Link href="/admin/export?format=xlsx">
-                            <Download className="h-4 w-4" />
-                            Export Excel
-                        </Link>
-                    </Button>
+                    {activeRange.isValid ? (
+                        <>
+                            <Button asChild variant="outline" size="sm">
+                                <Link href={csvExportHref}>
+                                    <Download className="h-4 w-4" />
+                                    Export CSV
+                                </Link>
+                            </Button>
+                            <Button asChild variant="outline" size="sm">
+                                <Link href={xlsxExportHref}>
+                                    <Download className="h-4 w-4" />
+                                    Export Excel
+                                </Link>
+                            </Button>
+                        </>
+                    ) : (
+                        <>
+                            <Button variant="outline" size="sm" disabled>
+                                <Download className="h-4 w-4" />
+                                Export CSV
+                            </Button>
+                            <Button variant="outline" size="sm" disabled>
+                                <Download className="h-4 w-4" />
+                                Export Excel
+                            </Button>
+                        </>
+                    )}
                 </div>
             </div>
 
-            {kpiSections.map((section) => (
-                <section key={section.id} aria-labelledby={section.id} className="space-y-3">
-                    <h2 id={section.id} className="text-lg font-bold">{section.title}</h2>
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                        {section.kpis.map((kpi) => (
-                            <Card key={kpi.title} className="border-[#d9e6f8] shadow-sm">
-                                <CardHeader className="pb-2">
-                                    <div className="flex items-center justify-between">
-                                        <CardTitle className="text-sm font-medium">{kpi.title}</CardTitle>
-                                        {kpi.icon}
-                                    </div>
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="text-2xl font-black tracking-tight" data-testid={kpi.testId}>
-                                        {kpi.value}
-                                    </div>
-                                    <CardDescription>{kpi.description}</CardDescription>
-                                </CardContent>
-                            </Card>
-                        ))}
+            <Card className="border-[#d9e6f8] shadow-sm" data-testid="dashboard-time-range">
+                <CardHeader>
+                    <CardTitle>Intervallo dati</CardTitle>
+                    <CardDescription data-testid="dashboard-time-range-label">{activeRange.label}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="flex flex-wrap gap-2">
+                        <Button asChild variant={activeRange.mode === "realtime" ? "default" : "outline"} size="sm">
+                            <Link href={realtimeHref}>Tempo reale</Link>
+                        </Button>
+                        <Button asChild variant={activeRange.mode === "evening" ? "default" : "outline"} size="sm">
+                            <Link href={eveningHref}>Serata corrente</Link>
+                        </Button>
+                        <Button asChild variant={activeRange.mode === "event" ? "default" : "outline"} size="sm">
+                            <Link href={eventHref}>Intera festa</Link>
+                        </Button>
                     </div>
-                </section>
-            ))}
+                    <form method="GET" className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
+                        <input type="hidden" name="range" value="custom" />
+                        <label className="grid gap-1 text-sm font-medium">
+                            Dal
+                            <input
+                                type="datetime-local"
+                                name="from"
+                                defaultValue={activeRange.startInput}
+                                className="rounded-md border bg-background px-3 py-2"
+                            />
+                        </label>
+                        <label className="grid gap-1 text-sm font-medium">
+                            Al
+                            <input
+                                type="datetime-local"
+                                name="to"
+                                defaultValue={activeRange.endInput}
+                                className="rounded-md border bg-background px-3 py-2"
+                            />
+                        </label>
+                        <Button type="submit" variant="outline">Applica filtro</Button>
+                    </form>
+                    {activeRange.error && (
+                        <p className="text-sm font-medium text-destructive" data-testid="dashboard-time-range-error">
+                            {activeRange.error}
+                        </p>
+                    )}
+                </CardContent>
+            </Card>
+
+            <section aria-labelledby="dashboard-filtered-totals" className="space-y-3">
+                <h2 id="dashboard-filtered-totals" className="text-lg font-bold">Statistiche intervallo attivo</h2>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                    {kpis.map((kpi) => (
+                        <Card key={kpi.title} className="border-[#d9e6f8] shadow-sm">
+                            <CardHeader className="pb-2">
+                                <div className="flex items-center justify-between">
+                                    <CardTitle className="text-sm font-medium">{kpi.title}</CardTitle>
+                                    {kpi.icon}
+                                </div>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-black tracking-tight" data-testid={kpi.testId}>
+                                    {kpi.value}
+                                </div>
+                                <CardDescription>{kpi.description}</CardDescription>
+                            </CardContent>
+                        </Card>
+                    ))}
+                </div>
+            </section>
 
             <Card className="border-[#d9e6f8] shadow-sm" data-testid="dashboard-evening-products">
                 <CardHeader>
-                    <CardTitle>Prodotti venduti nella serata</CardTitle>
-                    <CardDescription>Quantità vendute oggi, dal prodotto più richiesto.</CardDescription>
+                    <CardTitle>Prodotti venduti nell&apos;intervallo</CardTitle>
+                    <CardDescription>{activeRange.label}</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    {todayStats.soldProducts.length === 0 ? (
+                    {stats.soldProducts.length === 0 ? (
                         <p className="text-center text-muted-foreground" data-testid="dashboard-evening-products-empty">
-                            Nessun prodotto venduto nella serata.
+                            Nessun prodotto venduto nell&apos;intervallo selezionato.
                         </p>
                     ) : (
                         <div className="space-y-3">
                             <ol className="divide-y" data-testid="dashboard-evening-products-top">
-                                {todayStats.soldProducts.slice(0, 5).map((metric, index) => (
+                                {stats.soldProducts.slice(0, 5).map((metric, index) => (
                                     <li
                                         key={metric.productId}
                                         className="grid grid-cols-[3rem_1fr_auto] items-center gap-3 py-3"
@@ -268,7 +350,7 @@ export default async function AdminDashboard() {
                                     </li>
                                 ))}
                             </ol>
-                            {todayStats.soldProducts.length > 5 && (
+                            {stats.soldProducts.length > 5 && (
                                 <details className="group" data-testid="dashboard-evening-products-details">
                                     <summary
                                         className="w-fit cursor-pointer font-semibold text-primary"
@@ -278,7 +360,7 @@ export default async function AdminDashboard() {
                                         <span className="hidden group-open:inline">Riduci</span>
                                     </summary>
                                     <ol className="mt-3 divide-y" start={6}>
-                                        {todayStats.soldProducts.slice(5).map((metric, index) => (
+                                        {stats.soldProducts.slice(5).map((metric, index) => (
                                             <li
                                                 key={metric.productId}
                                                 className="grid grid-cols-[3rem_1fr_auto] items-center gap-3 py-3"
@@ -401,7 +483,7 @@ export default async function AdminDashboard() {
                             ) : (
                                 stats.paidOrders.slice(0, 10).map((order) => (
                                     <TableRow key={order.orderId}>
-                                        <TableCell className="font-medium">{formatDashboardDateTime(order.createdAt)}</TableCell>
+                                        <TableCell className="font-medium">{formatDashboardDateTime(order.createdAt, timezone)}</TableCell>
                                         <TableCell className="font-mono text-xs">{order.orderId}</TableCell>
                                         <TableCell>{getPaymentMethodLabel(order.paymentMethod)}</TableCell>
                                         <TableCell className="text-right">{numberFormatter.format(order.itemCount)}</TableCell>
@@ -456,7 +538,7 @@ export default async function AdminDashboard() {
                                                         name="sessionId"
                                                         value={sessionId}
                                                         form="cash-sessions-multi-export"
-                                                        aria-label={`Seleziona sessione ${getPosDeviceName(session.posDeviceId)}, apertura ${formatDashboardDateTime(session.openedAt)}, chiusura ${formatDashboardDateTime(session.closedAt)}`}
+                                                        aria-label={`Seleziona sessione ${getPosDeviceName(session.posDeviceId)}, apertura ${formatDashboardDateTime(session.openedAt, timezone)}, chiusura ${formatDashboardDateTime(session.closedAt, timezone)}`}
                                                         data-testid={`cash-session-select-${sessionId}`}
                                                         className="h-4 w-4 accent-primary"
                                                     />
@@ -469,8 +551,8 @@ export default async function AdminDashboard() {
                                                 {session.isTest ? <span className="ml-1 inline-flex rounded-full bg-rose-100 px-2 py-1 text-xs font-black text-rose-700">TEST</span> : null}
                                             </TableCell>
                                             <TableCell className="font-medium">{getPosDeviceName(session.posDeviceId)}</TableCell>
-                                            <TableCell>{formatDashboardDateTime(session.openedAt)}</TableCell>
-                                            <TableCell>{formatDashboardDateTime(session.closedAt)}</TableCell>
+                                            <TableCell>{formatDashboardDateTime(session.openedAt, timezone)}</TableCell>
+                                            <TableCell>{formatDashboardDateTime(session.closedAt, timezone)}</TableCell>
                                             <TableCell className="text-right">{formatCurrency(session.openingFloatAmount ?? 0)}</TableCell>
                                             <TableCell className="text-right">
                                                 {isClosed ? formatCurrency(session.expectedCashAmount ?? 0) : "-"}

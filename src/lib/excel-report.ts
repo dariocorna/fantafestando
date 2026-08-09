@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs"
-import type { DashboardStatsResult } from "@/lib/dashboard-stats"
+import { formatDashboardDateTime, type DashboardStatsResult } from "@/lib/dashboard-stats"
 import type { CashSessionReportInput } from "@/lib/cash-session"
 import type { ProductSalesBreakdownResult } from "@/lib/product-consumption"
 
@@ -84,16 +84,16 @@ function cashSessionCategoryRows(reports: CashSessionReportInput[]): Cell[][] {
     return rows
 }
 
-export async function buildEventWorkbook(input: { eventName: string; stats: DashboardStatsResult; sales: ProductSalesBreakdownResult }) {
+export async function buildEventWorkbook(input: { eventName: string; stats: DashboardStatsResult; sales: ProductSalesBreakdownResult; intervalLabel?: string; timezone?: string }) {
     const workbook = new ExcelJS.Workbook()
-    addSheet(workbook, "Riepilogo", ["Evento", "Generato il", "Ordini", "Incasso totale", "Contanti", "Carta", "Altro", "Scontrino medio"], [[
-        input.eventName, new Date(input.stats.generatedAt), input.stats.summary.paidOrdersCount, input.stats.summary.totalRevenue,
+    addSheet(workbook, "Riepilogo", ["Evento", "Intervallo", "Generato il", "Ordini", "Incasso totale", "Contanti", "Carta", "Altro", "Scontrino medio"], [[
+        input.eventName, input.intervalLabel || "Intera festa", formatDashboardDateTime(input.stats.generatedAt, input.timezone), input.stats.summary.paidOrdersCount, input.stats.summary.totalRevenue,
         input.stats.summary.cashRevenue, input.stats.summary.cardRevenue, input.stats.summary.otherRevenue, input.stats.summary.averageTicket
     ]])
     addSheet(workbook, "Categorie", ["Categoria", "Quantità", "Lordo", "Sconto", "Netto"], categoryRows(input.sales))
     addSheet(workbook, "Vendite", ["Categoria", "Prodotto", "Regime", "Sconto", "Quantità", "Lordo", "Sconto importo", "Netto"], salesRows(input.sales))
     addSheet(workbook, "Sconti", ["Sconto", "Tipo", "Valore", "Ordini", "Importo sconto"], input.sales.discountSummaries.map((row) => [row.label, row.mode, row.value, row.ordersCount, row.discountAmount]))
-    addSheet(workbook, "Ordini", ["Data", "ID ordine", "Pagamento", "Articoli", "Totale"], input.stats.paidOrders.map((row) => [row.createdAt ? new Date(row.createdAt) : null, row.orderId, row.paymentMethod, row.itemCount, row.totalAmount]))
+    addSheet(workbook, "Ordini", ["Data", "ID ordine", "Pagamento", "Articoli", "Totale"], input.stats.paidOrders.map((row) => [row.createdAt ? formatDashboardDateTime(row.createdAt, input.timezone) : null, row.orderId, row.paymentMethod, row.itemCount, row.totalAmount]))
     addSheet(workbook, "Top prodotti", ["Prodotto", "Quantità", "Ordini"], input.stats.bestSellers.map((row) => [row.productName, row.quantitySold, row.ordersCount]))
     addSheet(workbook, "Sotto soglia", ["Prodotto", "Quantità", "Ordini"], input.stats.underperforming.map((row) => [row.productName, row.quantitySold, row.ordersCount]))
     return Buffer.from(await workbook.xlsx.writeBuffer())

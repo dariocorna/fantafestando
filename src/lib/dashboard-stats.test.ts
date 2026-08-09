@@ -276,6 +276,25 @@ describe("dashboard stats helpers", () => {
         ])
     })
 
+    it("filters local-day statistics using paidAt when available", () => {
+        const orders = [
+            {
+                id: "delayed-paid",
+                createdAt: "2026-08-08T20:00:00.000Z",
+                paidAt: "2026-08-09T08:15:00.000Z"
+            },
+            {
+                id: "old-paid",
+                createdAt: "2026-08-09T08:00:00.000Z",
+                paidAt: "2026-08-08T18:00:00.000Z"
+            }
+        ]
+
+        expect(filterDashboardOrdersByLocalDay(orders, "2026-08-09T12:00:00.000Z").map((order) => order.id)).toEqual([
+            "delayed-paid"
+        ])
+    })
+
     it("builds csv and xls-compatible exports", () => {
         const stats = computeDashboardStats({
             orders: [
