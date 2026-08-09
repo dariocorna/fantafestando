@@ -2,6 +2,18 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.22.0] - 2026-08-09
+
+### Added
+
+- Aggiunti alla dashboard e agli export i filtri temporali condivisi con viste rapide Tempo reale, Serata corrente, Intera festa e intervallo personalizzato.
+- Introdotto l'aggiornamento automatico della dashboard in modalità Tempo reale e la validazione degli intervalli locali sui cambi d'ora del fuso evento.
+
+### Fixed
+
+- Allineato il calcolo temporale dei report al momento effettivo di pagamento tramite `paidAt`, con fallback sugli ordini storici e propagazione del fuso orario evento in clonazione/import.
+- Preservato il messaggio di esito del salvataggio policy e del backup manuale evitando refresh automatici concorrenti con l'aggiornamento locale.
+
 ## [0.21.0] - 2026-08-09
 
 ### Added
