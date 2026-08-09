@@ -3,6 +3,7 @@ import dbConnect from "../src/lib/mongoose"
 import Event from "../src/models/Event"
 import Printer from "../src/models/Printer"
 import PrintJob from "../src/models/PrintJob"
+import Order from "../src/models/Order"
 import {
     createAndActivateEvent,
     configureCashPos,
@@ -86,6 +87,79 @@ async function createCatalogProduct(
 }
 
 test.describe("Print Retry Flows", () => {
+    test("pos checkout recovers from an interrupted response without duplicating the order", async ({ page }) => {
+        test.setTimeout(90000)
+        const suffix = uniqueSuffix()
+        const eventName = `Recover Checkout ${suffix}`
+        const printerName = `Recover Printer ${suffix}`
+        const cashBoxName = `Recover CashBox ${suffix}`
+        const posName = `Recover POS ${suffix}`
+        const categoryName = `Recover Cat ${suffix}`
+        const productName = `Recover Product ${suffix}`
+        const shortName = "RTR-SHORT"
+
+        let postHandled = false
+        const routePattern = "**/pos"
+
+        try {
+            await createAndActivateEvent(page, eventName)
+            await configureCashPos(page, printerName, "127.0.0.1", cashBoxName, posName, { printerPort: "19100" })
+            await createCatalogProduct(page, categoryName, productName, undefined, shortName)
+
+            await openPosAndSelectDevice(page, posName)
+            await openCashSessionIfRequired(page)
+            await page.locator("button").filter({ hasText: shortName }).first().click()
+            await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()
+            const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i })
+            await expect(checkoutDialog).toBeVisible()
+
+            await page.route(routePattern, async (route) => {
+                if (!postHandled && route.request().method() === "POST") {
+                    postHandled = true
+                    await route.fetch()
+                    await route.abort("connectionreset")
+                    return
+                }
+                await route.continue()
+            })
+            const postRequestFailed = page.waitForEvent("requestfailed", (request) =>
+                request.url().includes("/pos") && request.method() === "POST"
+            )
+
+            await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click()
+            await postRequestFailed
+
+            const feedbackModal = page.getByRole("dialog").filter({ hasText: "Esito ordine non verificato" })
+            await expect(feedbackModal).toBeVisible()
+            await feedbackModal.getByRole("button", { name: "OK", exact: true }).click()
+
+            await expect(checkoutDialog).toBeVisible()
+            await expect(checkoutDialog.getByTestId("checkout-outcome-unknown")).toBeVisible()
+            const confirmButton = checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true })
+            const cancelButton = checkoutDialog.getByRole("button", { name: "ANNULLA", exact: true })
+            await expect(confirmButton).toBeDisabled()
+            await expect(cancelButton).toBeEnabled()
+            await expect(confirmButton.locator("svg")).toHaveCount(0)
+
+            await dbConnect()
+            const event = await Event.findOne({ name: eventName }).select("_id").lean() as { _id: unknown } | null
+            expect(event).toBeTruthy()
+            const paidOrders = await Order.countDocuments({
+                eventId: event!._id,
+                status: "PAID",
+                "cart.snapshotName": shortName
+            })
+            expect(paidOrders).toBe(1)
+
+            await checkoutDialog.getByRole("button", { name: "Svuota e avvia nuovo ordine" }).click()
+            await expect(checkoutDialog).toBeHidden()
+            await expect(page.getByTestId("pos-pay-cta").first()).toBeDisabled()
+        } finally {
+            await page.unroute(routePattern).catch(() => undefined)
+            await deleteEvent(page, eventName)
+        }
+    })
+
     test("admin monitor supports retry flow for failed jobs", async ({ page }) => {
         test.setTimeout(90000)
         const suffix = uniqueSuffix()
