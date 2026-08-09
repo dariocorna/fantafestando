@@ -1208,14 +1208,45 @@ export default function PosPage() {
 
         if (result.attempted === 0) {
             setRetryPrintsFeedback("Nessun job fallito da reinviare per questo ordine.")
+        } else if (result.retried === 0) {
+            setRetryPrintsFeedback(`Reinvio non riuscito: 0/${result.attempted} job inviati.`)
         } else if (result.failed > 0) {
             setRetryPrintsFeedback(`Reinvio completato parzialmente: ${result.retried}/${result.attempted} inviati.`)
         } else {
             setRetryPrintsFeedback(`Reinvio completato: ${result.retried}/${result.attempted} job inviati.`)
         }
-        setFeedbackModal((current) => current.action?.type === "RETRY_FAILED_PRINTS"
-            ? { ...current, action: { ...current.action, failedPrinters: result.failedPrinters } }
-            : current)
+        setFeedbackModal((current) => {
+            if (current.action?.type !== "RETRY_FAILED_PRINTS") return current
+            const preservedFailedPrinters = result.failed === 0
+                ? current.action.failedPrinters.filter((failedPrinter) => failedPrinter.key !== printer.key)
+                : current.action.failedPrinters
+            if (result.failed === 0 && result.failedPrinters.length === 0 && preservedFailedPrinters.length === 0) {
+                return {
+                    ...current,
+                    tone: "success",
+                    title: "Stampe inviate",
+                    message: "Tutte le stampe fallite sono state reinviate correttamente.",
+                    action: undefined
+                }
+            }
+            const failedPrinters = result.failedPrinters.length > 0
+                ? result.failedPrinters
+                : preservedFailedPrinters
+            if (failedPrinters.length === 0) {
+                return {
+                    ...current,
+                    message: `${result.failed} ${result.failed === 1 ? "stampa non è stata inviata" : "stampe non sono state inviate"}. Riprova.`
+                }
+            }
+
+            const remainingCount = failedPrinters.reduce((total, printer) => total + printer.count, 0)
+            const remainingPrinters = failedPrinters.map((printer) => printer.name).join(", ")
+            return {
+                ...current,
+                message: `Restano ${remainingCount} ${remainingCount === 1 ? "stampa" : "stampe"} da reinviare${remainingPrinters ? ` su: ${remainingPrinters}` : ""}.`,
+                action: { ...current.action, failedPrinters }
+            }
+        })
     }
 
     const handleCodeDialogOpenChange = (open: boolean) => {

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { Binary } from "bson";
+import mongoose from "mongoose";
 import { getThermalContentWidth } from "@/lib/easter-egg-config";
 
 const { dbConnectMock, printJobFindOneAndUpdateMock, printJobUpdateOneMock, orderFindOneMock } = vi.hoisted(() => ({
@@ -47,6 +48,10 @@ describe("PrinterService.retryPrintJobById", () => {
                 lean: vi.fn().mockResolvedValue(null)
             })
         });
+    });
+
+    test("registers the Printer model required by populate", () => {
+        expect(mongoose.models.Printer).toBeDefined();
     });
 
     test("returns validation error when ids are missing", async () => {
@@ -99,11 +104,10 @@ describe("PrinterService.retryPrintJobById", () => {
             {
                 $set: {
                     status: "SENT",
-                    errorMessage: undefined,
                     rawCapturePath: "/tmp/receipt.raw",
                     automaticRetryCount: 1
                 },
-                $unset: { retryClaimedAt: 1 }
+                $unset: { errorMessage: 1, retryClaimedAt: 1 }
             }
         );
     });
@@ -170,14 +174,35 @@ describe("PrinterService.retryPrintJobById", () => {
         ).mockRejectedValue(new Error("render failed"));
 
         const result = await PrinterService.retryPrintJobById("evt-1", "job-1");
+        const retryClaimedAt = printJobFindOneAndUpdateMock.mock.calls[0][1].$set.retryClaimedAt;
 
         expect(result).toEqual({ success: false, error: "Reinvio stampa interrotto" });
         expect(printJobUpdateOneMock).toHaveBeenCalledWith(
-            { _id: "job-1" },
-            expect.objectContaining({
-                $set: expect.objectContaining({ status: "FAILED", errorMessage: "Reinvio stampa interrotto" }),
+            { _id: "job-1", eventId: "evt-1", status: "QUEUED", retryClaimedAt },
+            {
+                $set: { status: "FAILED", errorMessage: "Reinvio stampa interrotto" },
                 $unset: { retryClaimedAt: 1 }
+            }
+        );
+    });
+
+    test("returns a claimed job to FAILED when populate fails", async () => {
+        printJobFindOneAndUpdateMock.mockReturnValue({
+            populate: vi.fn().mockReturnValue({
+                lean: vi.fn().mockRejectedValue(new Error("populate failed"))
             })
+        });
+
+        const result = await PrinterService.retryPrintJobById("evt-1", "job-1");
+        const retryClaimedAt = printJobFindOneAndUpdateMock.mock.calls[0][1].$set.retryClaimedAt;
+
+        expect(result).toEqual({ success: false, error: "Reinvio stampa interrotto" });
+        expect(printJobUpdateOneMock).toHaveBeenCalledWith(
+            { _id: "job-1", eventId: "evt-1", status: "QUEUED", retryClaimedAt },
+            {
+                $set: { status: "FAILED", errorMessage: "Reinvio stampa interrotto" },
+                $unset: { retryClaimedAt: 1 }
+            }
         );
     });
 

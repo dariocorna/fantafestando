@@ -186,10 +186,10 @@ describe("PrinterService.printComanda connection retry", () => {
             {
                 $set: {
                     status: "SENT",
-                    errorMessage: undefined,
                     rawCapturePath: undefined,
                     automaticRetryCount: 0
-                }
+                },
+                $unset: { errorMessage: 1 }
             }
         );
     });
@@ -227,10 +227,10 @@ describe("PrinterService.printComanda connection retry", () => {
             {
                 $set: {
                     status: "SENT",
-                    errorMessage: undefined,
                     rawCapturePath: undefined,
                     automaticRetryCount: 2
-                }
+                },
+                $unset: { errorMessage: 1 }
             }
         );
     });
@@ -290,10 +290,10 @@ describe("PrinterService.printComanda connection retry", () => {
             {
                 $set: {
                     status: "SENT",
-                    errorMessage: undefined,
                     rawCapturePath: undefined,
                     automaticRetryCount: 0
-                }
+                },
+                $unset: { errorMessage: 1 }
             }
         );
     });
