@@ -17,7 +17,10 @@ export function OrderRowActions(props: {
             const result = await reprintOrderById(props.orderId)
             if (!result.success) {
                 window.alert(result.error || "Ristampa non riuscita")
+                return
             }
+
+            window.alert("Ristampa inviata correttamente")
         })
     }
 

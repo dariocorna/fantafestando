@@ -1,4 +1,8 @@
 import { test, expect } from "@playwright/test"
+import dbConnect from "../src/lib/mongoose"
+import Event from "../src/models/Event"
+import Printer from "../src/models/Printer"
+import PrintJob from "../src/models/PrintJob"
 import {
     createAndActivateEvent,
     configureCashPos,
@@ -7,6 +11,45 @@ import {
     openCashSessionIfRequired,
     uniqueSuffix,
 } from "./utils/fixtures"
+
+interface OrderPrintJob {
+    _id: { toString(): string } | string
+    status: "QUEUED" | "SENT" | "FAILED"
+    printType: string
+    destinationHost: string
+    destinationPort: number
+    copies: number
+}
+
+async function listOrderPrintJobs(eventName: string, itemName: string): Promise<OrderPrintJob[]> {
+    await dbConnect()
+    const event = await Event.findOne({ name: eventName }).select("_id").lean() as { _id: unknown } | null
+    if (!event?._id) return []
+
+    return await PrintJob.find({
+        eventId: event._id,
+        source: "ORDER",
+        "document.items.name": itemName
+    })
+        .sort({ createdAt: 1 })
+        .select("status printType destinationHost destinationPort copies")
+        .lean() as unknown as OrderPrintJob[]
+}
+
+async function restorePrinter(eventName: string, printerName: string, port = 19100) {
+    await dbConnect()
+    const event = await Event.findOne({ name: eventName }).select("_id").lean() as { _id: unknown } | null
+    if (!event?._id) throw new Error(`Evento non trovato: ${eventName}`)
+    const result = await Printer.updateOne(
+        { eventId: event._id, name: printerName },
+        { $set: { ip: "127.0.0.1", port } }
+    )
+    if (result.matchedCount !== 1) throw new Error(`Stampante non trovata: ${printerName}`)
+}
+
+function printFingerprint(job: OrderPrintJob) {
+    return `${job.printType}|${job.destinationHost}:${job.destinationPort}|${job.copies}`
+}
 
 async function createCatalogProduct(
     page: import("@playwright/test").Page,
@@ -106,7 +149,7 @@ test.describe("Print Retry Flows", () => {
             const failedJobButton = page.locator("button").filter({ hasText: /FAILED/ }).first()
             await failedJobButton.click()
             await page.getByRole("button", { name: "Reinvia job fallito" }).click()
-            await expect(page.getByText(/Reinvio/i)).toBeVisible()
+            await expect(page.getByText("Invio stampa fallito")).toBeVisible({ timeout: 15000 })
 
             // Ripristina la stampante cassa verso emulatore raggiungibile e ritenta il retry
             await page.getByRole("tab", { name: "Stampanti" }).click()
@@ -123,9 +166,10 @@ test.describe("Print Retry Flows", () => {
             }
 
             await page.getByRole("tab", { name: "Monitor Stampa" }).click()
-            await failedJobButton.click()
+            await page.locator("button").filter({ hasText: /FAILED/ }).first().click()
             await page.getByRole("button", { name: "Reinvia job fallito" }).click()
-            await expect(page.getByText(/Reinvio/i)).toBeVisible()
+            await expect(page.getByRole("button", { name: /^SENT / }).first()).toBeVisible()
+            await expect(page.getByText(/Errore:.*Printer not reachable/)).not.toBeVisible()
         } finally {
             await deleteEvent(page, eventName)
         }
@@ -162,10 +206,165 @@ test.describe("Print Retry Flows", () => {
             await expect(feedbackModal).toBeVisible({ timeout: 15000 })
             const retryButton = feedbackModal.getByRole("button", { name: new RegExp(`Riprova — ${printerName}`) })
             await expect(retryButton).toBeVisible()
+            await restorePrinter(eventName, printerName)
             await retryButton.click()
-            await expect(
-                feedbackModal.locator("p").filter({ hasText: /Reinvio completato|Reinvio non riuscito|Nessun job fallito/i }).first()
-            ).toBeVisible({ timeout: 15000 })
+            const successModal = page.getByRole("dialog").filter({ hasText: "Stampe inviate" })
+            await expect(successModal).toBeVisible({ timeout: 15000 })
+            await expect(successModal.getByText(/Reinvio completato: \d+\/\d+ job inviati/)).toBeVisible()
+            await expect(page.getByText(/Pagamento registrato, ma/)).not.toBeVisible()
+            await expect(successModal.getByRole("button", { name: /Riprova/ })).toHaveCount(0)
+            await expect.poll(async () => {
+                const jobs = await listOrderPrintJobs(eventName, shortName)
+                return jobs.length > 0 && jobs.every((job) => job.status === "SENT")
+            }).toBe(true)
+        } finally {
+            await deleteEvent(page, eventName)
+        }
+    })
+
+    test("admin order summary reprints the original routed copies", async ({ page }) => {
+        test.setTimeout(90000)
+
+        const suffix = uniqueSuffix()
+        const eventName = `Order Reprint ${suffix}`
+        const printerName = `Reprint Printer ${suffix}`
+        const cashBoxName = `Reprint Cash ${suffix}`
+        const posName = `Reprint POS ${suffix}`
+        const categoryName = `Reprint Cat ${suffix}`
+        const productName = `Reprint Product ${suffix}`
+        const shortName = "REPRINT-SHORT"
+
+        try {
+            await createAndActivateEvent(page, eventName)
+            await configureCashPos(page, printerName, "127.0.0.1", cashBoxName, posName, { printerPort: "19100" })
+            await createCatalogProduct(page, categoryName, productName, undefined, shortName)
+
+            await openPosAndSelectDevice(page, posName)
+            await openCashSessionIfRequired(page)
+            await page.locator("button").filter({ hasText: shortName }).first().click()
+            await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()
+            const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i })
+            await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click()
+            await expect(checkoutDialog).toBeHidden({ timeout: 15000 })
+
+            const completionDialog = page.getByRole("dialog").filter({ hasText: /Ordine completato|Operazione completata/i })
+            if (await completionDialog.isVisible({ timeout: 5000 }).catch(() => false)) {
+                await completionDialog.getByRole("button", { name: "OK", exact: true }).click()
+            }
+
+            await expect.poll(
+                async () => (await listOrderPrintJobs(eventName, shortName)).length,
+                { timeout: 15000 }
+            ).toBe(2)
+            const originalJobs = await listOrderPrintJobs(eventName, shortName)
+            const originalIds = new Set(originalJobs.map((job) => job._id.toString()))
+
+            await page.goto("/admin/orders")
+            const orderRow = page.getByRole("row").filter({ hasText: shortName }).first()
+            const alertPromise = page.waitForEvent("dialog")
+            await orderRow.getByTitle("Ristampa comanda").click()
+            const alert = await alertPromise
+            expect(alert.message()).toBe("Ristampa inviata correttamente")
+            await alert.accept()
+
+            await expect.poll(async () => {
+                const jobs = await listOrderPrintJobs(eventName, shortName)
+                return jobs.filter((job) => !originalIds.has(job._id.toString())).length
+            }, { timeout: 15000 }).toBe(originalJobs.length)
+
+            const allJobs = await listOrderPrintJobs(eventName, shortName)
+            const reprintJobs = allJobs.filter((job) => !originalIds.has(job._id.toString()))
+            expect(reprintJobs.every((job) => job.status === "SENT")).toBe(true)
+            expect(reprintJobs.map(printFingerprint).sort()).toEqual(originalJobs.map(printFingerprint).sort())
+        } finally {
+            await deleteEvent(page, eventName)
+        }
+    })
+
+    test("admin order summary retries only failed copies after a partial reprint", async ({ page }) => {
+        test.setTimeout(90000)
+
+        const suffix = uniqueSuffix()
+        const eventName = `Partial Reprint ${suffix}`
+        const cashierPrinterName = `Partial Cashier ${suffix}`
+        const kitchenPrinterName = `Partial Kitchen ${suffix}`
+        const cashBoxName = `Partial Cash ${suffix}`
+        const posName = `Partial POS ${suffix}`
+        const categoryName = `Partial Cat ${suffix}`
+        const productName = `Partial Product ${suffix}`
+        const shortName = "PARTIAL-REPRINT"
+
+        try {
+            await createAndActivateEvent(page, eventName)
+            await configureCashPos(page, cashierPrinterName, "127.0.0.1", cashBoxName, posName, { printerPort: "19100" })
+
+            await dbConnect()
+            const event = await Event.findOne({ name: eventName }).select("_id").lean() as { _id: unknown } | null
+            expect(event?._id).toBeTruthy()
+            await Printer.create({
+                eventId: event!._id,
+                name: kitchenPrinterName,
+                ip: "127.0.0.1",
+                port: 19101,
+                type: "KITCHEN"
+            })
+            await createCatalogProduct(page, categoryName, productName, kitchenPrinterName, shortName)
+
+            await openPosAndSelectDevice(page, posName)
+            await openCashSessionIfRequired(page)
+            await page.locator("button").filter({ hasText: shortName }).first().click()
+            await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()
+            const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i })
+            await checkoutDialog.getByRole("button", { name: "CONFERMA", exact: true }).click()
+            await expect(checkoutDialog).toBeHidden({ timeout: 15000 })
+
+            const completionDialog = page.getByRole("dialog").filter({ hasText: /Ordine completato|Operazione completata/i })
+            if (await completionDialog.isVisible({ timeout: 5000 }).catch(() => false)) {
+                await completionDialog.getByRole("button", { name: "OK", exact: true }).click()
+            }
+
+            await expect.poll(async () => {
+                const jobs = await listOrderPrintJobs(eventName, shortName)
+                return jobs.length >= 3 && jobs.every((job) => job.status === "SENT")
+            }, { timeout: 15000 }).toBe(true)
+            const originalJobs = await listOrderPrintJobs(eventName, shortName)
+            const originalIds = new Set(originalJobs.map((job) => job._id.toString()))
+
+            await restorePrinter(eventName, kitchenPrinterName, 19199)
+            await page.goto("/admin/orders")
+            const orderRow = page.getByRole("row").filter({ hasText: shortName }).first()
+
+            const partialAlertPromise = page.waitForEvent("dialog")
+            await orderRow.getByTitle("Ristampa comanda").click()
+            const partialAlert = await partialAlertPromise
+            expect(partialAlert.message()).toContain("verranno reinviate solo le copie fallite")
+            await partialAlert.accept()
+
+            await expect.poll(async () => {
+                const jobs = await listOrderPrintJobs(eventName, shortName)
+                return jobs.filter((job) => !originalIds.has(job._id.toString())).length
+            }, { timeout: 30000 }).toBe(originalJobs.length)
+            const afterPartial = await listOrderPrintJobs(eventName, shortName)
+            const reprintJobs = afterPartial.filter((job) => !originalIds.has(job._id.toString()))
+            expect(reprintJobs.some((job) => job.status === "FAILED")).toBe(true)
+            expect(reprintJobs.some((job) => job.status === "SENT")).toBe(true)
+            const reprintIds = reprintJobs.map((job) => job._id.toString()).sort()
+
+            await restorePrinter(eventName, kitchenPrinterName, 19101)
+            const successAlertPromise = page.waitForEvent("dialog")
+            await orderRow.getByTitle("Ristampa comanda").click()
+            const successAlert = await successAlertPromise
+            expect(successAlert.message()).toBe("Ristampa inviata correttamente")
+            await successAlert.accept()
+
+            await expect.poll(async () => {
+                const jobs = await listOrderPrintJobs(eventName, shortName)
+                const retriedJobs = jobs.filter((job) => reprintIds.includes(job._id.toString()))
+                return retriedJobs.length === reprintIds.length && retriedJobs.every((job) => job.status === "SENT")
+            }, { timeout: 15000 }).toBe(true)
+            const finalJobs = await listOrderPrintJobs(eventName, shortName)
+            expect(finalJobs).toHaveLength(afterPartial.length)
+            expect(finalJobs.filter((job) => !originalIds.has(job._id.toString())).map((job) => job._id.toString()).sort()).toEqual(reprintIds)
         } finally {
             await deleteEvent(page, eventName)
         }

@@ -7,6 +7,7 @@ import Order from "@/models/Order";
 import Product from "@/models/Product";
 import Category from "@/models/Category";
 import PosDevice from "@/models/PosDevice";
+import "@/models/Printer";
 import Event from "@/models/Event";
 import PrintJobModel, { type PrintJobSource, type PrintJobType } from "@/models/PrintJob";
 import mongoose from "mongoose";
@@ -1087,15 +1088,18 @@ export class PrinterService {
     ) {
         if (!id) return;
         try {
+            const unset: Record<string, 1> = {};
             const update: Record<string, unknown> = {
                 $set: {
                     status: updates.status,
-                    errorMessage: updates.errorMessage || undefined,
                     rawCapturePath: updates.rawCapturePath || undefined,
-                    automaticRetryCount: updates.automaticRetryCount ?? 0
+                    automaticRetryCount: updates.automaticRetryCount ?? 0,
+                    ...(updates.status === "FAILED" ? { errorMessage: updates.errorMessage || undefined } : {})
                 }
             };
-            if (updates.clearRetryClaim) update.$unset = { retryClaimedAt: 1 };
+            if (updates.status === "SENT") unset.errorMessage = 1;
+            if (updates.clearRetryClaim) unset.retryClaimedAt = 1;
+            if (Object.keys(unset).length > 0) update.$unset = unset;
             await PrintJobModel.updateOne(
                 { _id: id },
                 update
@@ -2132,9 +2136,12 @@ export class PrinterService {
         }
 
         await dbConnect();
+        const retryClaimedAt = new Date();
+
+        try {
         const job = await PrintJobModel.findOneAndUpdate(
             { _id: jobId, eventId, status: "FAILED" },
-            { $set: { status: "QUEUED", retryClaimedAt: new Date() } },
+            { $set: { status: "QUEUED", retryClaimedAt } },
             { returnDocument: "after" }
         )
             .populate("printerId", "ip port isVirtual emulatorSlot")
@@ -2162,7 +2169,6 @@ export class PrinterService {
             return { success: false, error: "Job non disponibile o già acquisito" } as const;
         }
 
-        try {
         const document = (job.document && typeof job.document === "object")
             ? job.document as Record<string, unknown>
             : {};
@@ -2298,11 +2304,17 @@ export class PrinterService {
             : { success: false, error: "Invio stampa fallito" } as const;
         } catch (error) {
             console.error(`Retry print job ${jobId} failed unexpectedly:`, error);
-            await this.updatePrintJobLog(job._id.toString(), {
-                status: "FAILED",
-                errorMessage: "Reinvio stampa interrotto",
-                clearRetryClaim: true
-            });
+            try {
+                await PrintJobModel.updateOne(
+                    { _id: jobId, eventId, status: "QUEUED", retryClaimedAt },
+                    {
+                        $set: { status: "FAILED", errorMessage: "Reinvio stampa interrotto" },
+                        $unset: { retryClaimedAt: 1 }
+                    }
+                );
+            } catch (updateError) {
+                console.error(`Unable to recover retry claim for print job ${jobId}:`, updateError);
+            }
             return { success: false, error: "Reinvio stampa interrotto" } as const;
         }
     }

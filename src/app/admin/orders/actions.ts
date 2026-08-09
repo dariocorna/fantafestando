@@ -105,9 +105,72 @@ export async function reprintOrderById(orderId: string) {
         return { success: false, error: "Ordine non valido" }
     }
 
-    await PrinterService.routeOrderToPrinters(normalizedOrderId);
-    revalidatePath("/admin/orders");
-    return { success: true };
+    try {
+        const eventId = await getAdminContextEventId()
+        if (!eventId) {
+            return { success: false, error: "Nessuna festa selezionata nel contesto admin" }
+        }
+
+        await dbConnect()
+        const order = await Order.findOne({
+            _id: normalizedOrderId,
+            eventId,
+            status: "PAID"
+        }).select("posDeviceId").lean() as ({
+            posDeviceId?: string | { toString(): string }
+        } | null)
+        if (!order) {
+            return { success: false, error: "Ordine pagato non trovato nella festa selezionata" }
+        }
+
+        const failedJobs = await PrintJob.find({
+            eventId,
+            orderId: normalizedOrderId,
+            source: "ORDER",
+            status: "FAILED"
+        })
+            .sort({ createdAt: 1 })
+            .select("_id")
+            .lean() as Array<{ _id: string | { toString(): string } }>
+
+        if (failedJobs.length > 0) {
+            const retryResults = []
+            for (const job of failedJobs) {
+                retryResults.push(await PrinterService.retryPrintJobById(eventId, job._id.toString()))
+            }
+
+            revalidatePath("/admin/orders")
+            const failedCount = retryResults.filter((result) => !result.success).length
+            if (failedCount > 0) {
+                return {
+                    success: false,
+                    error: `Reinvio non completato: ${failedCount} ${failedCount === 1 ? "copia non inviata" : "copie non inviate"}. Riprova.`
+                }
+            }
+
+            return { success: true }
+        }
+
+        const printResults = await PrinterService.routeOrderToPrinters(
+            normalizedOrderId,
+            order.posDeviceId?.toString()
+        )
+        if (!printResults?.length) {
+            return { success: false, error: "Nessuna stampa generata per l'ordine" }
+        }
+        if (printResults.some((printed) => !printed)) {
+            return {
+                success: false,
+                error: "Ristampa non completata. Riprova: verranno reinviate solo le copie fallite."
+            }
+        }
+
+        revalidatePath("/admin/orders")
+        return { success: true }
+    } catch (error) {
+        console.error("Order reprint error:", error)
+        return { success: false, error: "Errore interno durante la ristampa dell'ordine" }
+    }
 }
 
 export async function reprintOrder(formData: FormData) {

@@ -151,10 +151,10 @@ describe("PrinterService.printRasterImage", () => {
             {
                 $set: {
                     status: "SENT",
-                    errorMessage: undefined,
                     rawCapturePath: expect.stringContaining("/tmp/fantafestando-printer-captures/"),
                     automaticRetryCount: 0
-                }
+                },
+                $unset: { errorMessage: 1 }
             }
         );
     });
