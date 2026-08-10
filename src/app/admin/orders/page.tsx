@@ -1,7 +1,10 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getAdminContextEvent } from "@/lib/events";
 import dbConnect from "@/lib/mongoose";
 import Order from "@/models/Order";
 import CashSession from "@/models/CashSession";
+import { Button } from "@/components/ui/button";
 import {
     Table,
     TableBody,
@@ -14,6 +17,8 @@ import type { IEvent } from "@/models/Event";
 import { OrderRowActions } from "./order-row-actions";
 import { OrderDateTime } from "./order-date-time";
 import { ResetOrdersForm } from "./reset-orders-form";
+
+const ORDERS_PER_PAGE = 50
 
 interface OrderProjection {
     _id: unknown
@@ -35,7 +40,11 @@ function getPaymentMethodLabel(paymentMethod?: "CASH" | "CARD" | "OTHER") {
     return "Altro"
 }
 
-export default async function AdminOrders() {
+export default async function AdminOrders({
+    searchParams
+}: {
+    searchParams?: Promise<Record<string, string | string[] | undefined>>
+}) {
     const contextEvent = await getAdminContextEvent() as IEvent | null
     if (!contextEvent) {
         return (
@@ -46,20 +55,45 @@ export default async function AdminOrders() {
     }
 
     const eventId = String(contextEvent._id)
+    const resolvedSearchParams: Record<string, string | string[] | undefined> = searchParams
+        ? await searchParams
+        : {}
+    const rawPage = Array.isArray(resolvedSearchParams.page) ? resolvedSearchParams.page[0] : resolvedSearchParams.page
+    const parsedPage = Number(rawPage)
+    const requestedPage = rawPage && /^\d+$/.test(rawPage) && Number.isSafeInteger(parsedPage) && parsedPage > 0
+        ? parsedPage
+        : 1
     await dbConnect();
     const excludedSessionIds = (await CashSession.find({ eventId, isTest: true }).select("_id").lean() as Array<{ _id: unknown }>).map((session) => session._id)
-    const orders = await Order.find({
-        eventId,
+    const orderFilter = {
+        eventId: contextEvent._id,
         status: { $in: ["PAID", "CANCELLED"] },
         cashSessionId: { $nin: excludedSessionIds }
-    })
-        .sort({ createdAt: -1 })
+    }
+    const [totalOrders, revenueSummary] = await Promise.all([
+        Order.countDocuments(orderFilter),
+        Order.aggregate<{ totalRevenue: number }>([
+            { $match: { ...orderFilter, status: "PAID" } },
+            { $group: { _id: null, totalRevenue: { $sum: "$totalAmount" } } }
+        ])
+    ])
+    const totalPages = Math.max(1, Math.ceil(totalOrders / ORDERS_PER_PAGE))
+    const currentPage = Math.min(requestedPage, totalPages)
+    const hasCanonicalPageParam = currentPage === 1
+        ? resolvedSearchParams.page === undefined
+        : typeof resolvedSearchParams.page === "string" && resolvedSearchParams.page === String(currentPage)
+    if (!hasCanonicalPageParam) {
+        redirect(currentPage === 1 ? "/admin/orders" : `/admin/orders?page=${currentPage}`)
+    }
+    const orders = await Order.find(orderFilter)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((currentPage - 1) * ORDERS_PER_PAGE)
+        .limit(ORDERS_PER_PAGE)
         .select("_id status createdAt customer cart totalAmount discountApplied paymentMethod stornoMeta.reason")
         .lean() as OrderProjection[]
-
-    const totalRevenue = orders
-        .filter((order) => order.status === "PAID")
-        .reduce((acc, order) => acc + order.totalAmount, 0)
+    const totalRevenue = revenueSummary[0]?.totalRevenue ?? 0
+    const firstOrder = totalOrders === 0 ? 0 : (currentPage - 1) * ORDERS_PER_PAGE + 1
+    const lastOrder = Math.min(currentPage * ORDERS_PER_PAGE, totalOrders)
 
     return (
         <div className="space-y-6">
@@ -149,6 +183,41 @@ export default async function AdminOrders() {
                     </TableBody>
                 </Table>
             </div>
+
+            {totalPages > 1 ? (
+                <nav aria-label="Paginazione storico ordini" className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-muted-foreground">
+                        Ordini {firstOrder}–{lastOrder} di {totalOrders}
+                    </p>
+                    <div className="flex items-center gap-3">
+                        {currentPage > 1 ? (
+                            <Button asChild variant="outline" size="sm">
+                                <Link href={currentPage === 2 ? "/admin/orders" : `/admin/orders?page=${currentPage - 1}`} aria-label="Pagina precedente">
+                                    Precedente
+                                </Link>
+                            </Button>
+                        ) : (
+                            <Button variant="outline" size="sm" disabled aria-label="Pagina precedente">
+                                Precedente
+                            </Button>
+                        )}
+                        <span className="text-sm font-medium" aria-current="page">
+                            Pagina {currentPage} di {totalPages}
+                        </span>
+                        {currentPage < totalPages ? (
+                            <Button asChild variant="outline" size="sm">
+                                <Link href={`/admin/orders?page=${currentPage + 1}`} aria-label="Pagina successiva">
+                                    Successiva
+                                </Link>
+                            </Button>
+                        ) : (
+                            <Button variant="outline" size="sm" disabled aria-label="Pagina successiva">
+                                Successiva
+                            </Button>
+                        )}
+                    </div>
+                </nav>
+            ) : null}
         </div>
     );
 }
