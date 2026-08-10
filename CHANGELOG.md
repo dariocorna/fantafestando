@@ -2,6 +2,17 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.25.0] - 2026-08-10
+
+### Changed
+
+- Ampliata la header desktop del POS con menu contestuale per selezione, apertura e chiusura cassa e con i preset sconto integrati; rimossi dal carrello i controlli duplicati e il conteggio reparti/prodotti.
+- Semplificati gli indicatori quantità sulle card prodotto mostrando solo il numero, senza prefisso `x`.
+
+### Fixed
+
+- Mantenuti sempre visibili gli avvisi delle sessioni TEST e delle chiusure da ripetere; il menu cassa ora si richiude dopo un comando o un click esterno.
+
 ## [0.24.0] - 2026-08-10
 
 ### Added
