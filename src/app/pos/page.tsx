@@ -41,7 +41,7 @@ import { buildMenuConfigurationKey, type MenuSelectionInput } from "@/lib/fixed-
 import { useIsMobile } from "@/hooks/use-mobile"
 import { buildProductQuantityMap, decrementProductQuantityInCart, replaceSingleCartUnit } from "@/lib/pos-cart"
 import { buildCashReceivedSuggestions, formatCents, normalizeCashReceivedInput, toCents } from "@/lib/cash-change"
-import { PosQuickStockDialog } from "@/components/pos-quick-stock-dialog"
+import { PosInlineStockEditor } from "@/components/pos-inline-stock-editor"
 
 const POS_TOUCH_BREAKPOINT = 1024
 const POS_PAYMENT_METHOD_STORAGE_PREFIX = "fantafestando_pos_payment_method:"
@@ -268,6 +268,15 @@ function getPeripheralRef(value: IPosDevice["paymentTerminalId"] | IPosDevice["c
 
 type ProductCardVariant = "mobile" | "modern" | "compact"
 
+function resolveProductPriceLabel(product: IProduct, useVolunteerPrice: boolean) {
+    const effectivePrice = useVolunteerPrice && typeof product.volunteerPrice === "number"
+        ? product.volunteerPrice
+        : product.basePrice
+    return useVolunteerPrice && typeof product.volunteerPrice === "number"
+        ? `Vol. ${effectivePrice.toFixed(2)} €`
+        : `${effectivePrice.toFixed(2)} €`
+}
+
 interface PosProductCardProps {
     product: IProduct
     displayName: string
@@ -307,12 +316,7 @@ function PosProductCard({
     const shouldShowTouchDecrement = showTouchDecrement && hasQuantity
     const usesDesktopQuantityControl = variant !== "mobile" && shouldShowTouchDecrement
     const quantityControlInset = Math.max(56, 40 + String(quantity).length * 10)
-    const effectivePrice = useVolunteerPrice && typeof product.volunteerPrice === "number"
-        ? product.volunteerPrice
-        : product.basePrice
-    const priceLabel = useVolunteerPrice && typeof product.volunteerPrice === "number"
-        ? `Vol. ${effectivePrice.toFixed(2)} €`
-        : `${effectivePrice.toFixed(2)} €`
+    const priceLabel = resolveProductPriceLabel(product, useVolunteerPrice)
     const instructionsId = "pos-product-card-instructions"
     const addLabel = `${displayName}, ${priceLabel}, quantita nel carrello ${quantity}. Aggiungi una unita`
     const decrementLabel = `Rimuovi una unità di ${displayName}. Quantità nel carrello ${quantity}`
@@ -556,7 +560,7 @@ export default function PosPage() {
     const [activeEvent, setActiveEvent] = useState<IEvent | null>(null)
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
     const [isDiscountSheetOpen, setIsDiscountSheetOpen] = useState(false)
-    const [isQuickStockOpen, setIsQuickStockOpen] = useState(false)
+    const [isStockMode, setIsStockMode] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
     const [isCheckoutOutcomeUnknown, setIsCheckoutOutcomeUnknown] = useState(false)
     const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD">("CASH")
@@ -879,6 +883,7 @@ export default function PosPage() {
             selectedOptionLabels?: string[]
         }
     ) => {
+        if (isStockMode) return
         const displayName = resolveProductDisplayName(product)
         const nextQuantity = (productQuantityById.get(product._id) ?? 0) + 1
         setCart((prev: CartItem[]) => {
@@ -905,6 +910,7 @@ export default function PosPage() {
     }
 
     const openCartItemContext = (item: CartItem) => {
+        if (isStockMode) return
         setContextLineId(item.lineId)
         setContextPrintFeedback(null)
         setContextDraft({
@@ -925,7 +931,7 @@ export default function PosPage() {
     }
 
     const applyCartItemContext = () => {
-        if (!contextItem) return
+        if (isStockMode || !contextItem) return
         const contextNotes = buildContextKitchenNotes(contextDraft, contextProduct)
         contextLineSequenceRef.current += 1
         const editedItem: CartItem = {
@@ -971,6 +977,7 @@ export default function PosPage() {
     }
 
     const addToCart = (product: IProduct) => {
+        if (isStockMode) return
         if (product.requiresConfiguration) {
             setConfiguringProduct(product)
             return
@@ -979,6 +986,7 @@ export default function PosPage() {
     }
 
     const decrementProductFromCatalog = (product: IProduct) => {
+        if (isStockMode) return
         const currentQuantity = productQuantityById.get(product._id) ?? 0
         if (currentQuantity <= 0) return
 
@@ -993,6 +1001,7 @@ export default function PosPage() {
     }
 
     const addDiscountPresetToCart = (preset: QuickDiscountPreset) => {
+        if (isStockMode) return
         if (isVolunteerMode) {
             showFeedbackModal("Disattiva la modalità volontari prima di applicare altri sconti", "info")
             return
@@ -1045,10 +1054,12 @@ export default function PosPage() {
     }
 
     const removeFromCart = (lineId: string) => {
+        if (isStockMode) return
         setCart((prev: CartItem[]) => prev.filter((i: CartItem) => i.lineId !== lineId))
     }
 
     const increaseCartItemQuantity = (lineId: string) => {
+        if (isStockMode) return
         setCart((prev: CartItem[]) => prev.map((item) => (
             item.lineId === lineId && !item.isDiscount
                 ? { ...item, quantity: item.quantity + 1 }
@@ -1057,6 +1068,7 @@ export default function PosPage() {
     }
 
     const decreaseCartItemQuantity = (lineId: string) => {
+        if (isStockMode) return
         setCart((prev: CartItem[]) => prev.map((item) => {
             if (item.lineId !== lineId || item.isDiscount) return item
             if (item.quantity <= 1) return item
@@ -1065,6 +1077,7 @@ export default function PosPage() {
     }
 
     const resetPendingOrder = () => {
+        if (isStockMode) return
         setLoadedPendingOrder(null)
         setOrderCode("")
     }
@@ -1103,6 +1116,7 @@ export default function PosPage() {
     }
 
     const openPendingOrdersSurface = () => {
+        if (isStockMode) return
         setIsPendingOrdersSheetOpen(true)
         void loadRecentPendingOrdersForDialog()
     }
@@ -1189,6 +1203,23 @@ export default function PosPage() {
         setProducts((current) => current.map((product) => product._id === updated.id
             ? { ...product, ...updated, _id: product._id }
             : product))
+    }
+
+    const toggleStockMode = () => {
+        if (isCashSessionActionLoading || isCloseCashSessionPreviewLoading) return
+        const nextStockMode = !isStockMode
+        if (nextStockMode) {
+            setIsCheckoutOpen(false)
+            setConfiguringProduct(null)
+            setContextLineId(null)
+            setIsDiscountSheetOpen(false)
+            setIsCodeDialogOpen(false)
+            setIsPendingOrdersSheetOpen(false)
+            setIsCashStatusSheetOpen(false)
+            setIsOpenCashDialogOpen(false)
+            setIsCloseCashDialogOpen(false)
+        }
+        setIsStockMode(nextStockMode)
     }
 
     const showFeedbackModal = (
@@ -1282,6 +1313,7 @@ export default function PosPage() {
     }
 
     const handleCodeDialogOpenChange = (open: boolean) => {
+        if (open && isStockMode) return
         setIsCodeDialogOpen(open)
         if (open) {
             void loadRecentPendingOrdersForDialog()
@@ -1289,6 +1321,7 @@ export default function PosPage() {
     }
 
     const handleOpenCashSession = async () => {
+        if (isStockMode) return
         if (!activeEventId || !selectedPosDeviceId) {
             showFeedbackModal("Seleziona prima una cassa")
             return
@@ -1322,6 +1355,7 @@ export default function PosPage() {
     }
 
     const handleOpenCloseCashDialog = async () => {
+        if (isStockMode) return
         if (!activeEventId || !selectedPosDeviceId) {
             showFeedbackModal("Seleziona prima una cassa")
             return
@@ -1354,6 +1388,7 @@ export default function PosPage() {
     }
 
     const handleCloseCashSession = async () => {
+        if (isStockMode) return
         if (!activeEventId || !selectedPosDeviceId) {
             showFeedbackModal("Seleziona prima una cassa")
             return
@@ -1393,7 +1428,7 @@ export default function PosPage() {
     }
 
     const handleCheckoutDialogOpenChange = (open: boolean) => {
-        if (isProcessing) return
+        if (isProcessing || (open && isStockMode)) return
         setIsCheckoutOpen(open)
         if (!open) {
             setCashReceivedInput("")
@@ -1410,6 +1445,7 @@ export default function PosPage() {
         rawCode?: string,
         options?: { skipDraftConfirmation?: boolean }
     ) => {
+        if (isStockMode) return
         if (!activeEvent?._id) {
             showFeedbackModal("Evento non disponibile")
             return
@@ -1488,7 +1524,7 @@ export default function PosPage() {
     }
 
     const handleCheckout = async (allowStockOverride = false) => {
-        if (isCheckoutOutcomeUnknown) return
+        if (isStockMode || isCheckoutOutcomeUnknown) return
 
         if (!activeEvent?._id) {
             showFeedbackModal("Evento non disponibile")
@@ -1660,6 +1696,7 @@ export default function PosPage() {
     }
 
     const checkoutDisabled = isProcessing
+        || isStockMode
         || isCheckoutOutcomeUnknown
         || isCashSessionLoading
         || !selectedPosDeviceId
@@ -1726,8 +1763,9 @@ export default function PosPage() {
                     <button
                         type="button"
                         aria-label={`Rimuovi ${item.name} dal carrello`}
+                        disabled={isStockMode}
                         onClick={() => removeFromCart(item.lineId)}
-                        className="flex h-11 w-11 items-center justify-center rounded-md text-red-500 hover:bg-red-50"
+                        className="flex h-11 w-11 items-center justify-center rounded-md text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                         <Trash2 size={18} />
                     </button>
@@ -1739,8 +1777,9 @@ export default function PosPage() {
                             <button
                                 type="button"
                                 aria-label={`Modifica dettagli ${item.name}`}
+                                disabled={isStockMode}
                                 onClick={() => openCartItemContext(item)}
-                                className="flex h-11 w-11 items-center justify-center rounded-md text-indigo-600 hover:bg-indigo-50"
+                                className="flex h-11 w-11 items-center justify-center rounded-md text-indigo-600 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                                 <Settings2 size={18} />
                             </button>
@@ -1748,7 +1787,7 @@ export default function PosPage() {
                                 <button
                                     type="button"
                                     aria-label={`Diminuisci quantità ${item.name}`}
-                                    disabled={item.quantity <= 1}
+                                    disabled={isStockMode || item.quantity <= 1}
                                     className="flex h-11 w-11 items-center justify-center text-2xl font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-35"
                                     onClick={() => decreaseCartItemQuantity(item.lineId)}
                                 >
@@ -1760,7 +1799,8 @@ export default function PosPage() {
                                 <button
                                     type="button"
                                     aria-label={`Aumenta quantità ${item.name}`}
-                                    className="flex h-11 w-11 items-center justify-center text-2xl font-black text-slate-700"
+                                    disabled={isStockMode}
+                                    className="flex h-11 w-11 items-center justify-center text-2xl font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-35"
                                     onClick={() => increaseCartItemQuantity(item.lineId)}
                                 >
                                     +
@@ -1780,7 +1820,9 @@ export default function PosPage() {
                     <p className="text-xs font-bold uppercase tracking-widest text-indigo-500">Ordine WebApp Caricato</p>
                     <p className="text-base font-black text-indigo-700">Codice {loadedPendingOrder.code}</p>
                     <p className="mt-1 text-xs font-semibold text-indigo-600">
-                        Carrello precompilato: puoi aggiungere/rimuovere prodotti prima della chiusura.
+                        {isStockMode
+                            ? "Carrello in sola lettura durante la modifica scorte."
+                            : "Carrello precompilato: puoi aggiungere/rimuovere prodotti prima della chiusura."}
                     </p>
                     {loadedPendingOrder.easterEggAttached ? (
                         <p className="mt-2 inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-amber-800">
@@ -1791,7 +1833,8 @@ export default function PosPage() {
                 <button
                     type="button"
                     aria-label="Rimuovi ordine caricato"
-                    className="flex h-11 w-11 items-center justify-center rounded-md text-indigo-500 hover:bg-indigo-100 hover:text-indigo-700"
+                    disabled={isStockMode}
+                    className="flex h-11 w-11 items-center justify-center rounded-md text-indigo-500 hover:bg-indigo-100 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
                     onClick={resetPendingOrder}
                     title="Rimuovi ordine caricato"
                 >
@@ -1818,6 +1861,7 @@ export default function PosPage() {
                         type="checkbox"
                         aria-label="Modalità volontari"
                         checked={isVolunteerMode}
+                        disabled={isStockMode}
                         onChange={(event) => {
                             setIsVolunteerMode(event.target.checked)
                             if (event.target.checked) {
@@ -1851,7 +1895,7 @@ export default function PosPage() {
                                         setIsDiscountSheetOpen(false)
                                     }
                                 }}
-                                disabled={isVolunteerMode || productCartItems.length === 0 || isPresetApplied}
+                                disabled={isStockMode || isVolunteerMode || productCartItems.length === 0 || isPresetApplied}
                                 className="inline-flex min-h-12 w-full items-center gap-2 rounded-md border border-emerald-300 bg-white px-3 py-2 text-left shadow-sm transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                                 <span className="min-w-0 flex-1 text-sm font-black leading-tight text-emerald-900">
@@ -1953,6 +1997,8 @@ export default function PosPage() {
                             return (
                                 <button
                                     key={order.id}
+                                    type="button"
+                                    disabled={isStockMode}
                                     className={`w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-indigo-50 hover:border-indigo-200 dark:hover:bg-indigo-950/40 ${isOlderThanOneHour ? "bg-slate-50 border-slate-200 opacity-70 dark:bg-slate-900" : "bg-white border-slate-200 dark:bg-slate-800"}`}
                                     onClick={() => void handleLoadOrderByCode(order.code)}
                                 >
@@ -1980,6 +2026,11 @@ export default function PosPage() {
 
     const cartContent = (
         <>
+            {isStockMode ? (
+                <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-black text-amber-900" role="status">
+                    Carrello in sola lettura · termina la modalità scorte per modificarlo
+                </p>
+            ) : null}
             {loadedPendingOrderBanner}
             {cart.length === 0 ? (
                 <div className="flex h-full min-h-[240px] flex-col items-center justify-center space-y-3 text-slate-400 opacity-50">
@@ -2046,7 +2097,20 @@ export default function PosPage() {
                                 : categoryColorWithAlpha(selectedModernCategory.uiColor, 0.14)
                         const cardBorderColor = stockStatus === "OUT" ? "#dc2626" : selectedModernCategoryTheme.base
 
-                        return (
+                        return isStockMode ? (
+                            <PosInlineStockEditor
+                                key={product._id}
+                                eventId={activeEvent?._id || ""}
+                                product={product}
+                                displayName={resolveProductDisplayName(product)}
+                                priceLabel={resolveProductPriceLabel(product, isVolunteerMode)}
+                                stockLabel={showStockPill ? stockLabel : undefined}
+                                variant="mobile"
+                                borderColor={cardBorderColor}
+                                backgroundColor={cardBackground}
+                                onUpdated={handleStockUpdated}
+                            />
+                        ) : (
                             <PosProductCard
                                 key={product._id}
                                 product={product}
@@ -2122,7 +2186,8 @@ export default function PosPage() {
                         <button
                             type="button"
                             onClick={openPendingOrdersSurface}
-                            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-black text-indigo-700"
+                            disabled={isStockMode}
+                            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-black text-indigo-700 disabled:cursor-not-allowed disabled:opacity-45"
                         >
                             <Clock3 size={14} />
                             Pendenti
@@ -2130,7 +2195,8 @@ export default function PosPage() {
                         <button
                             type="button"
                             onClick={() => handleCodeDialogOpenChange(true)}
-                            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-black text-slate-700"
+                            disabled={isStockMode}
+                            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-45"
                         >
                             <Search size={14} />
                             Codice
@@ -2138,25 +2204,33 @@ export default function PosPage() {
                         <button
                             type="button"
                             onClick={() => setIsDiscountSheetOpen(true)}
-                            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700"
+                            disabled={isStockMode}
+                            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700 disabled:cursor-not-allowed disabled:opacity-45"
                         >
                             <Banknote size={14} />
                             Prezzi e sconti
                         </button>
                         <button
                             type="button"
-                            onClick={() => setIsQuickStockOpen(true)}
-                            className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-black text-amber-800"
+                            onClick={toggleStockMode}
+                            aria-pressed={isStockMode}
+                            className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-sm font-black ${isStockMode ? "border-amber-700 bg-amber-700 text-white" : "border-amber-200 bg-amber-50 text-amber-800"}`}
                         >
                             <PackageOpen size={14} />
-                            Scorte
+                            {isStockMode ? "Termina scorte" : "Scorte"}
                         </button>
                     </div>
+                    {isStockMode ? (
+                        <div className="mt-2 rounded-xl border-2 border-amber-400 bg-amber-50 px-3 py-2 text-sm font-black text-amber-900" role="status" data-testid="pos-stock-mode-banner">
+                            Modalità scorte attiva · il catalogo non aggiunge al carrello
+                        </div>
+                    ) : null}
                     {isVolunteerMode ? (
                         <button
                             type="button"
                             onClick={() => setIsDiscountSheetOpen(true)}
-                            className="mt-2 flex min-h-11 w-full items-center justify-between rounded-xl border border-emerald-300 bg-emerald-100 px-3 py-2 text-sm font-black text-emerald-900"
+                            disabled={isStockMode}
+                            className="mt-2 flex min-h-11 w-full items-center justify-between rounded-xl border border-emerald-300 bg-emerald-100 px-3 py-2 text-sm font-black text-emerald-900 disabled:cursor-not-allowed disabled:opacity-45"
                         >
                             <span>Prezzi volontari attivi</span>
                             <span className="text-xs uppercase tracking-wider">Modifica</span>
@@ -2209,12 +2283,26 @@ export default function PosPage() {
                             Cassa {cashSession?.isTest ? <span className="ml-1 rounded bg-rose-700 px-1.5 py-0.5 text-xs text-white">TEST</span> : null}
                             {cashSession?.closeFailedError ? <span className="ml-1 rounded bg-amber-600 px-1.5 py-0.5 text-xs text-white">CHIUSURA DA RIPETERE</span> : null}
                         </button>
-                        <button type="button" onClick={openPendingOrdersSurface} className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-sm font-bold text-indigo-700">Pendenti</button>
-                        <button type="button" onClick={() => handleCodeDialogOpenChange(true)} className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-bold text-slate-700">Codice</button>
-                        <button type="button" onClick={() => setIsQuickStockOpen(true)} className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-sm font-bold text-amber-800"><PackageOpen size={15} />Scorte</button>
+                        <button type="button" onClick={openPendingOrdersSurface} disabled={isStockMode} className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-sm font-bold text-indigo-700 disabled:cursor-not-allowed disabled:opacity-45">Pendenti</button>
+                        <button type="button" onClick={() => handleCodeDialogOpenChange(true)} disabled={isStockMode} className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-45">Codice</button>
+                        <button
+                            type="button"
+                            onClick={toggleStockMode}
+                            aria-pressed={isStockMode}
+                            className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm font-bold ${isStockMode ? "border-amber-700 bg-amber-700 text-white" : "border-amber-200 bg-amber-50 text-amber-800"}`}
+                        >
+                            <PackageOpen size={15} />
+                            {isStockMode ? "Termina scorte" : "Scorte"}
+                        </button>
                         </div>
                     </div>
                 </div>
+
+                {isStockMode ? (
+                    <div className="shrink-0 border-b-2 border-amber-400 bg-amber-50 px-3 py-2 text-sm font-black text-amber-900" role="status" data-testid="pos-stock-mode-banner">
+                        Modalità scorte attiva · il catalogo non aggiunge al carrello
+                    </div>
+                ) : null}
 
                 <div className="flex-1 overflow-y-auto p-3 text-slate-800">
                     <div className="space-y-2">
@@ -2301,7 +2389,22 @@ export default function PosPage() {
                                                         : categoryColorWithAlpha(selectedModernCategory.uiColor, 0.14)
                                                     const cardBorderColor = stockStatus === "OUT" ? "#dc2626" : selectedModernCategoryTheme.base
 
-                                                    return (
+                                                    return isStockMode ? (
+                                                        <PosInlineStockEditor
+                                                            key={p._id}
+                                                            eventId={activeEvent?._id || ""}
+                                                            product={p}
+                                                            displayName={resolveProductDisplayName(p)}
+                                                            priceLabel={resolveProductPriceLabel(p, isVolunteerMode)}
+                                                            stockLabel={showStockPill ? stockLabel : undefined}
+                                                            variant="modern"
+                                                            borderColor={cardBorderColor}
+                                                            backgroundColor={stockStatus === "OUT"
+                                                                ? "rgba(254, 226, 226, 0.88)"
+                                                                : stripedBackground}
+                                                            onUpdated={handleStockUpdated}
+                                                        />
+                                                    ) : (
                                                         <PosProductCard
                                                             key={p._id}
                                                             product={p}
@@ -2329,7 +2432,7 @@ export default function PosPage() {
                             ) : (
                                 <div
                                     className="grid content-start gap-1"
-                                    style={{ gridTemplateColumns: `repeat(${categoryColumnsCount}, minmax(0, 1fr))` }}
+                                    style={{ gridTemplateColumns: isStockMode ? "minmax(0, 1fr)" : `repeat(${categoryColumnsCount}, minmax(0, 1fr))` }}
                                 >
                                     {compactCategoryGroups.map((categoryGroup) => {
                                         const groupProductCount = categoryGroup.reduce((count, category) => count + (productsByCategory[category._id] || []).length, 0)
@@ -2395,7 +2498,21 @@ export default function PosPage() {
                                                                             ? "inset 0 0 0 1px rgba(185, 28, 28, 0.5)"
                                                                             : `inset 0 0 0 1px ${strongInset}`
 
-                                                                        return (
+                                                                        return isStockMode ? (
+                                                                            <PosInlineStockEditor
+                                                                                key={p._id}
+                                                                                eventId={activeEvent?._id || ""}
+                                                                                product={p}
+                                                                                displayName={resolveProductDisplayName(p)}
+                                                                                priceLabel={resolveProductPriceLabel(p, isVolunteerMode)}
+                                                                                stockLabel={showStockPill ? stockLabel : undefined}
+                                                                                variant="modern"
+                                                                                borderColor={cardBorderColor}
+                                                                                backgroundColor={cardBackground}
+                                                                                boxShadow={cardBoxShadow}
+                                                                                onUpdated={handleStockUpdated}
+                                                                            />
+                                                                        ) : (
                                                                             <PosProductCard
                                                                                 key={p._id}
                                                                                 product={p}
@@ -2451,7 +2568,8 @@ export default function PosPage() {
                     </button>
                     <button
                         onClick={() => handleCodeDialogOpenChange(true)}
-                        className="mt-2 inline-flex items-center gap-2 rounded-md border border-[#d9e6f8] bg-[#eef5ff] px-2.5 py-1.5 text-xs font-bold text-[var(--brand-blue-700)] transition-colors hover:bg-[#e4efff]"
+                        disabled={isStockMode}
+                        className="mt-2 inline-flex items-center gap-2 rounded-md border border-[#d9e6f8] bg-[#eef5ff] px-2.5 py-1.5 text-xs font-bold text-[var(--brand-blue-700)] transition-colors hover:bg-[#e4efff] disabled:cursor-not-allowed disabled:opacity-45"
                     >
                         <Search size={14} />
                         Carica ordine da codice
@@ -2479,7 +2597,7 @@ export default function PosPage() {
                                     variant="outline"
                                     className="border-emerald-300 bg-white font-black text-emerald-700"
                                     onClick={() => void handleOpenCloseCashDialog()}
-                                    disabled={isCashSessionLoading || isCashSessionActionLoading || isCloseCashSessionPreviewLoading || isProcessing}
+                                    disabled={isStockMode || isCashSessionLoading || isCashSessionActionLoading || isCloseCashSessionPreviewLoading || isProcessing}
                                 >
                                     <Wallet size={14} />
                                     Chiudi Cassa
@@ -2490,7 +2608,7 @@ export default function PosPage() {
                                     size="sm"
                                     className="bg-rose-600 font-black text-white hover:bg-rose-700"
                                     onClick={() => setIsOpenCashDialogOpen(true)}
-                                    disabled={isCashSessionLoading || isCashSessionActionLoading}
+                                    disabled={isStockMode || isCashSessionLoading || isCashSessionActionLoading}
                                 >
                                     <Wallet size={14} />
                                     Apri Cassa
@@ -2513,7 +2631,8 @@ export default function PosPage() {
                             <User size={18} className="text-slate-400" />
                             <input
                                 aria-label="Nome cliente"
-                                className="w-full border-none bg-transparent text-sm font-bold outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-blue-700)]"
+                                className="w-full border-none bg-transparent text-sm font-bold outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-blue-700)] disabled:cursor-not-allowed disabled:opacity-45"
+                                disabled={isStockMode}
                                 placeholder="Nome..."
                                 value={customerName}
                                 onChange={(e) => setCustomerName(e.target.value)}
@@ -2534,6 +2653,11 @@ export default function PosPage() {
 
                 {/* Elementi Carrello */}
                 <div className="min-h-32 flex-1 space-y-2 overflow-y-auto p-3" data-testid="pos-desktop-cart-items">
+                    {isStockMode ? (
+                        <p className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs font-black text-amber-900" role="status">
+                            Carrello in sola lettura · termina la modalità scorte per modificarlo
+                        </p>
+                    ) : null}
                     {loadedPendingOrder ? (
                         <div className="space-y-2 rounded-md border border-indigo-200 bg-indigo-50 p-3">
                             <div className="flex items-start justify-between gap-2">
@@ -2541,7 +2665,9 @@ export default function PosPage() {
                                     <p className="text-xs uppercase font-bold tracking-widest text-indigo-500">Ordine WebApp Caricato</p>
                                     <p className="text-base font-black text-indigo-700">Codice {loadedPendingOrder.code}</p>
                                     <p className="text-xs font-semibold text-indigo-600 mt-1">
-                                        Carrello precompilato: puoi aggiungere/rimuovere prodotti prima della chiusura.
+                                        {isStockMode
+                                            ? "Carrello in sola lettura durante la modifica scorte."
+                                            : "Carrello precompilato: puoi aggiungere/rimuovere prodotti prima della chiusura."}
                                     </p>
                                     {loadedPendingOrder.easterEggAttached ? (
                                         <p className="mt-2 inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-amber-800">
@@ -2552,7 +2678,8 @@ export default function PosPage() {
                                 <button
                                     type="button"
                                     aria-label="Rimuovi ordine caricato"
-                                    className="flex h-11 w-11 items-center justify-center rounded-md text-indigo-500 hover:bg-indigo-100 hover:text-indigo-700"
+                                    disabled={isStockMode}
+                                    className="flex h-11 w-11 items-center justify-center rounded-md text-indigo-500 hover:bg-indigo-100 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
                                     onClick={resetPendingOrder}
                                     title="Rimuovi ordine caricato"
                                 >
@@ -2588,13 +2715,18 @@ export default function PosPage() {
                     </div>
                     <button
                         onClick={() => setIsCheckoutOpen(true)}
-                        disabled={productCartItems.length === 0 || !selectedPosDeviceId || !cashSession || isProcessing || isCashSessionLoading}
+                        disabled={isStockMode || productCartItems.length === 0 || !selectedPosDeviceId || !cashSession || isProcessing || isCashSessionLoading}
                         className="brand-cta-primary flex w-full items-center justify-center gap-2 rounded-md py-3 text-base font-black transition-all active:scale-[0.98] hover:brightness-105 disabled:bg-slate-200 disabled:text-slate-400"
                         data-testid="pos-pay-cta"
                     >
                         <CheckCircle2 size={22} />
                         PAGA ORA
                     </button>
+                    {isStockMode ? (
+                        <p className="text-center text-xs font-black uppercase tracking-wider text-amber-700">
+                            Pagamento sospeso durante la modifica scorte
+                        </p>
+                    ) : null}
                 {!cashSession ? (
                     <p className="text-center text-xs font-black uppercase tracking-widest text-rose-600">
                         Incasso bloccato: cassa non aperta
@@ -2658,11 +2790,16 @@ export default function PosPage() {
                                 setIsCartSheetOpen(false)
                                 setIsCheckoutOpen(true)
                             }}
-                            disabled={productCartItems.length === 0 || !selectedPosDeviceId || !cashSession || isProcessing || isCashSessionLoading}
+                            disabled={isStockMode || productCartItems.length === 0 || !selectedPosDeviceId || !cashSession || isProcessing || isCashSessionLoading}
                         >
                             <CheckCircle2 size={22} />
                             PAGA ORA
                         </Button>
+                        {isStockMode ? (
+                            <p className="text-center text-xs font-black uppercase tracking-wider text-amber-700">
+                                Pagamento sospeso durante la modifica scorte
+                            </p>
+                        ) : null}
                         {!cashSession ? (
                             <p className="text-center text-xs font-black uppercase tracking-widest text-rose-600">
                                 Incasso bloccato: cassa non aperta
@@ -2743,7 +2880,7 @@ export default function PosPage() {
                                     setIsCashStatusSheetOpen(false)
                                     void handleOpenCloseCashDialog()
                                 }}
-                                disabled={isCashSessionLoading || isCashSessionActionLoading || isCloseCashSessionPreviewLoading || isProcessing}
+                                disabled={isStockMode || isCashSessionLoading || isCashSessionActionLoading || isCloseCashSessionPreviewLoading || isProcessing}
                             >
                                 <Wallet size={14} />
                                 Chiudi Cassa
@@ -2756,7 +2893,7 @@ export default function PosPage() {
                                     setIsCashStatusSheetOpen(false)
                                     setIsOpenCashDialogOpen(true)
                                 }}
-                                disabled={isCashSessionLoading || isCashSessionActionLoading}
+                                disabled={isStockMode || isCashSessionLoading || isCashSessionActionLoading}
                             >
                                 <Wallet size={14} />
                                 Apri Cassa
@@ -3597,15 +3734,6 @@ export default function PosPage() {
                     </DialogContent>
                 </Dialog>
             )}
-
-            <PosQuickStockDialog
-                open={isQuickStockOpen}
-                onOpenChange={setIsQuickStockOpen}
-                eventId={activeEvent?._id || ""}
-                categories={categories}
-                products={products}
-                onUpdated={handleStockUpdated}
-            />
 
             {/* Modal Selezione Punto Cassa */}
             <Dialog open={isPosSelectorOpen} onOpenChange={setIsPosSelectorOpen}>
