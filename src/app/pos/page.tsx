@@ -333,7 +333,7 @@ function PosProductCard({
             data-testid={`pos-product-quantity-${product._id}`}
             aria-hidden="true"
         >
-            x{quantity}
+            {quantity}
         </span>
     ) : null
 
@@ -375,7 +375,7 @@ function PosProductCard({
             ) : (
                 <>
                     <span className="text-xs leading-none">-1</span>
-                    <span className="text-lg leading-none tabular-nums">x{quantity}</span>
+                    <span className="text-lg leading-none tabular-nums">{quantity}</span>
                 </>
             )}
         </button>
