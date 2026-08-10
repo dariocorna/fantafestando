@@ -2,6 +2,25 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [0.24.0] - 2026-08-10
+
+### Added
+
+- Aggiunta al POS la modalità scorte inline: le quantità si modificano direttamente nelle card catalogo, mentre carrello e operazioni di cassa restano bloccati fino all'uscita dalla modalità.
+- Aggiunto alla dashboard l'export PDF professionale A4 multipagina, con KPI, pagamenti, vendite per categoria e prodotto, intervallo attivo, header, footer e numerazione pagine.
+
+### Changed
+
+- Spostata la selezione del prezzo volontari nell'area sconti e resa più evidente la distinzione tra prezzo pieno e scontato, lontano dal pulsante di pagamento.
+- Aumentata la leggibilità del POS con quantità e prezzi del carrello più grandi e indicatori quantità più evidenti sulle card prodotto, senza ridurre i font del menu.
+- Paginato lo storico ordini admin a 50 righe, mantenendo totale evento, esclusione delle sessioni TEST e URL canonici per le pagine non valide.
+- Allineati i riepiloghi per categoria di PDF, CSV ed Excel tramite l'identità stabile della categoria, anche quando più categorie condividono lo stesso nome.
+
+### Fixed
+
+- Sostituiti i comandi rapidi scorte instabili con il salvataggio esplicito della quantità assoluta e aggiunti feedback accessibili di esito/errore.
+- Associati gli errori degli intervalli dashboard ai campi data e annunciati alle tecnologie assistive; tutti gli export restano disabilitati finché l'intervallo non è valido.
+
 ## [0.23.0] - 2026-08-09
 
 ### Added
