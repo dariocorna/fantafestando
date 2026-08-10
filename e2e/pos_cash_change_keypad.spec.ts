@@ -33,12 +33,12 @@ test.describe("POS calcolo resto contanti", () => {
             await openCashSession(page, "50")
 
             await page.getByRole("button", { name: "Scorte", exact: true }).click()
-            const stockDialog = page.getByRole("dialog").filter({ hasText: "Scorte rapide" })
-            await stockDialog.getByLabel("Cerca nelle scorte").fill(productName)
-            await stockDialog.getByLabel(`Scorta ${productName}`).fill("5")
-            await stockDialog.getByRole("button", { name: "Salva", exact: true }).click()
-            await expect(stockDialog.getByText("Inserisci un intero positivo")).toHaveCount(0)
-            await page.keyboard.press("Escape")
+            await expect(page.getByTestId("pos-stock-mode-banner")).toBeVisible()
+            const stockEditor = page.getByRole("region", { name: `Modifica scorte ${productName}` })
+            await stockEditor.getByRole("spinbutton", { name: `Scorta ${productName}`, exact: true }).fill("5")
+            await stockEditor.getByRole("button", { name: `Salva scorta ${productName}`, exact: true }).click()
+            await expect(stockEditor.getByRole("status")).toHaveText(`Scorta ${productName} aggiornata a 5`)
+            await page.getByRole("button", { name: "Termina scorte", exact: true }).click()
 
             await page.locator("button").filter({ hasText: new RegExp(productName) }).first().click()
             if (isMobile) await page.getByTestId("pos-mobile-cart-bar").click()
