@@ -109,7 +109,7 @@ test.describe("POS - Completamento ordine da codice", () => {
         await openPosAndSelectDevice(page, posName)
         await openCashSessionIfRequired(page)
 
-        await page.getByRole("button", { name: /Carica ordine da codice/i }).click()
+        await page.getByRole("button", { name: "Codice", exact: true }).click()
         const loadDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i })
         await loadDialog.getByRole("textbox").fill(orderCode)
         await loadDialog.getByRole("button", { name: /Carica/i, exact: true }).click()
@@ -145,7 +145,7 @@ test.describe("POS - Completamento ordine da codice", () => {
         await dismissFeedbackModal(page)
         await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible()
 
-        await page.getByRole("button", { name: /Carica ordine da codice/i }).click()
+        await page.getByRole("button", { name: "Codice", exact: true }).click()
         const pendingDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i })
         await expect(pendingDialog.getByText(/Nessun ordine pendente disponibile/i)).toBeVisible()
 

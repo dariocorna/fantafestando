@@ -459,7 +459,9 @@ export async function openPosAndSelectDevice(page: Page, posName: string) {
 export async function openCashSession(page: Page, openingFloatAmount: string) {
     const openButton = page.getByRole("button", { name: /Apri Cassa/i });
     if (!(await openButton.isVisible())) {
-        await page.getByRole("button", { name: "Cassa chiusa", exact: true }).click();
+        const desktopCashMenu = page.getByTestId("pos-desktop-cash-menu-trigger");
+        if (await desktopCashMenu.isVisible()) await desktopCashMenu.click();
+        else await page.getByRole("button", { name: "Cassa chiusa", exact: true }).click();
     }
     await openButton.click();
     const openDialog = page.getByRole("dialog").filter({ hasText: /Apertura Cassa/i });
@@ -467,24 +469,34 @@ export async function openCashSession(page: Page, openingFloatAmount: string) {
     await openDialog.locator("#opening-float-amount").fill(openingFloatAmount);
     await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click();
     await expect(openDialog).toBeHidden({ timeout: 15000 });
-    await expect(page.getByRole("button", { name: /Chiudi Cassa|Cassa aperta/i })).toBeVisible({ timeout: 15000 });
+    const desktopCashMenu = page.getByTestId("pos-desktop-cash-menu-trigger");
+    if (await desktopCashMenu.isVisible()) await expect(desktopCashMenu).toContainText("APERTA", { timeout: 15000 });
+    else await expect(page.getByRole("button", { name: /Chiudi Cassa|Cassa aperta/i })).toBeVisible({ timeout: 15000 });
 }
 
 export async function openCashSessionIfRequired(page: Page, openingFloatAmount = "0") {
     const openButton = page.getByRole("button", { name: /Apri Cassa/i });
     const mobileClosedButton = page.getByRole("button", { name: "Cassa chiusa", exact: true });
+    const desktopCashMenu = page.getByTestId("pos-desktop-cash-menu-trigger");
+    if (!(await openButton.isVisible()) && !(await mobileClosedButton.isVisible()) && await desktopCashMenu.isVisible()) {
+        await desktopCashMenu.click();
+    }
     if (!(await openButton.isVisible()) && !(await mobileClosedButton.isVisible())) return;
     await openCashSession(page, openingFloatAmount);
 }
 
 export async function closeCashSession(page: Page, countedCash: string) {
-    await page.getByRole("button", { name: /Chiudi Cassa/i }).click();
+    const closeButton = page.getByRole("button", { name: /Chiudi Cassa/i });
+    if (!(await closeButton.isVisible())) await page.getByTestId("pos-desktop-cash-menu-trigger").click();
+    await closeButton.click();
     const closeDialog = page.getByRole("dialog").filter({ hasText: /Chiusura Cassa/i });
     await expect(closeDialog).toBeVisible();
     await closeDialog.locator("#closing-counted-cash").fill(countedCash);
     await expect(closeDialog.getByRole("button", { name: "CONFERMA CHIUSURA", exact: true })).toBeEnabled();
     await closeDialog.getByRole("button", { name: "CONFERMA CHIUSURA", exact: true }).click();
-    await expect(page.getByRole("button", { name: /Apri Cassa/i })).toBeVisible();
+    const desktopCashMenu = page.getByTestId("pos-desktop-cash-menu-trigger");
+    if (await desktopCashMenu.isVisible()) await expect(desktopCashMenu).toContainText("CHIUSA");
+    else await expect(page.getByRole("button", { name: /Apri Cassa/i })).toBeVisible();
 }
 
 export async function dismissFeedbackModal(page: Page) {

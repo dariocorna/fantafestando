@@ -32,7 +32,7 @@ test.describe("RBAC accesso admin senza sessione iniziale", () => {
             targetPath: "/admin"
         });
 
-        await expect(page.getByText("Stato Cassa")).toBeVisible();
+        await expect(page.getByTestId("pos-brand-shell")).toBeVisible();
         await expect(page.getByTestId("admin-event-selector")).toHaveCount(0);
     });
 

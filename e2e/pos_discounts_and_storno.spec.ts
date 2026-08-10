@@ -96,7 +96,6 @@ test.describe("POS sconti e storno ordine", () => {
             await addProductsToCart(page, [productA, productB])
             const panel = page.locator("#pos-discount-presets")
             await expect(panel).toBeVisible()
-            await expect(panel.getByText("Prezzi e sconti", { exact: true })).toBeVisible()
             const discountsBox = await page.getByTestId("pos-desktop-discounts").boundingBox()
             const cartBox = await page.getByTestId("pos-desktop-cart-items").boundingBox()
             expect(discountsBox).not.toBeNull()
@@ -119,6 +118,7 @@ test.describe("POS sconti e storno ordine", () => {
             await completeCheckout(page)
 
             await closeCashSession(page, "66")
+            await page.getByTestId("pos-desktop-cash-menu-trigger").click()
             await expect(page.getByText("Ultima chiusura", { exact: true })).toBeVisible()
             const payCtaBox = await page.getByTestId("pos-pay-cta").boundingBox()
             expect(payCtaBox).not.toBeNull()

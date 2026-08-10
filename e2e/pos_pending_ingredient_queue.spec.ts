@@ -182,7 +182,7 @@ test.describe.serial("POS - ingredienti in coda", () => {
         await openPosAndSelectDevice(page, posName);
         await openCashSessionIfRequired(page);
 
-        await page.getByRole("button", { name: /Carica ordine da codice/i }).click();
+        await page.getByRole("button", { name: "Codice", exact: true }).click();
         const pendingDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i }).first();
         await expect(pendingDialog).toBeVisible();
         await expect(pendingDialog.getByText(/Ingredienti in coda/i)).toBeVisible();
@@ -210,7 +210,7 @@ test.describe.serial("POS - ingredienti in coda", () => {
         await expect(checkoutDialog).toBeHidden({ timeout: 15000 });
         await dismissFeedbackModal(page);
 
-        await page.getByRole("button", { name: /Carica ordine da codice/i }).click();
+        await page.getByRole("button", { name: "Codice", exact: true }).click();
         await expect(pendingDialog).toBeVisible();
         await expect(pendingDialog.locator('[data-testid^="pending-ingredient-card-"]').filter({ hasText: ingredientFish })).toHaveCount(0);
         await expect(pendingDialog.locator('[data-testid^="pending-ingredient-card-"]').filter({ hasText: legacyProduct })).toHaveCount(0);

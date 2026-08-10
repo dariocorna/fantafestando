@@ -36,11 +36,11 @@ test.describe("Selezione Punto Cassa POS", () => {
         const firstDevice = await getFirstPosButton(page);
         await firstDevice.click();
         await expect(page.getByText(/In quale cassa sei\?/i)).toBeHidden();
-        await expect(page.getByRole("button", { name: /Postazione:/i })).toBeVisible();
+        await expect(page.getByTestId("pos-desktop-cash-menu-trigger")).toBeVisible();
 
         await page.reload();
         await expect(page.getByText(/In quale cassa sei\?/i)).toBeHidden();
-        await expect(page.getByRole("button", { name: /Postazione:/i })).toBeVisible();
+        await expect(page.getByTestId("pos-desktop-cash-menu-trigger")).toBeVisible();
     });
 
     test("cambio postazione tramite interfaccia", async ({ page }) => {
@@ -62,7 +62,14 @@ test.describe("Selezione Punto Cassa POS", () => {
             await expect(selectorTitle).toBeHidden();
         }
 
-        await page.getByRole("button", { name: /Postazione:/i }).click();
+        const cashMenu = page.getByTestId("pos-desktop-cash-menu");
+        await page.getByTestId("pos-desktop-cash-menu-trigger").click();
+        await expect(cashMenu).toHaveAttribute("open", "");
+        await page.locator("h1").click();
+        await expect(cashMenu).not.toHaveAttribute("open", "");
+        await page.getByTestId("pos-desktop-cash-menu-trigger").click();
+        await page.getByRole("button", { name: /Cambia cassa/i }).click();
+        await expect(cashMenu).not.toHaveAttribute("open", "");
         await expect(page.getByText(/In quale cassa sei\?/i)).toBeVisible();
     });
 });
