@@ -29,6 +29,7 @@ test.describe("POS apertura e chiusura cassa", () => {
         await createCategoryAndProducts(page, categoryName, [{ name: productName, price: "5.00" }])
 
         await openPosAndSelectDevice(page, posName)
+        await page.getByTestId("pos-desktop-cash-menu-trigger").click()
 
         await expect(page.getByText(/Chiusa\. Apri la cassa per iniziare gli incassi\./i)).toBeVisible()
         await expect(page.getByRole("button", { name: "PAGA ORA", exact: true })).toBeDisabled()
@@ -39,6 +40,8 @@ test.describe("POS apertura e chiusura cassa", () => {
         await expect(openDialog).toBeVisible()
         await openDialog.locator("#opening-float-amount").fill("50")
         await openDialog.getByRole("button", { name: "APRI CASSA", exact: true }).click()
+        await expect(page.getByTestId("pos-desktop-cash-menu-trigger")).toContainText("APERTA")
+        await page.getByTestId("pos-desktop-cash-menu-trigger").click()
         await expect(page.getByRole("button", { name: /Chiudi Cassa/i })).toBeVisible()
 
         await expect(page.getByText(/Aperta alle/i)).toBeVisible()
@@ -47,6 +50,7 @@ test.describe("POS apertura e chiusura cassa", () => {
         await completeCashOrder(page, productName)
 
         // Close cash session and verify summary
+        await page.getByTestId("pos-desktop-cash-menu-trigger").click()
         await page.getByRole("button", { name: /Chiudi Cassa/i }).click()
         const closeDialog = page.getByRole("dialog").filter({ hasText: /Chiusura Cassa/i })
         await expect(closeDialog).toBeVisible()
@@ -56,6 +60,8 @@ test.describe("POS apertura e chiusura cassa", () => {
         await closeDialog.locator("#closing-counted-cash").fill("55")
         await expect(closeDialog.getByRole("button", { name: "CONFERMA CHIUSURA", exact: true })).toBeEnabled()
         await closeDialog.getByRole("button", { name: "CONFERMA CHIUSURA", exact: true }).click()
+        await expect(page.getByTestId("pos-desktop-cash-menu-trigger")).toContainText("CHIUSA")
+        await page.getByTestId("pos-desktop-cash-menu-trigger").click()
         await expect(page.getByRole("button", { name: /Apri Cassa/i })).toBeVisible()
 
         await expect(page.getByText(/Chiusa\. Apri la cassa per iniziare gli incassi\./i)).toBeVisible()

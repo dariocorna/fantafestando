@@ -203,7 +203,7 @@ async function createMenuOrder(page: Page, productName: string) {
 }
 
 async function loadPendingOrderOnPos(page: Page, orderCode: string) {
-    await page.getByRole("button", { name: /Carica ordine da codice/i }).click();
+    await page.getByRole("button", { name: "Codice", exact: true }).click();
     const loadDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i });
     await loadDialog.getByRole("textbox").fill(orderCode);
     await loadDialog.getByRole("button", { name: /Carica/i, exact: true }).click();

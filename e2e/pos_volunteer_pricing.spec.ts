@@ -114,7 +114,6 @@ test.describe("POS volunteer pricing", () => {
             await expect(page.getByText(/25\.00 €/).first()).toBeVisible();
 
             const pricingPanel = page.getByTestId("pos-discount-presets");
-            await expect(pricingPanel.getByText("Prezzi e sconti", { exact: true })).toBeVisible();
             await expect(pricingPanel.getByLabel("Modalità volontari")).toBeVisible();
             await expect(page.getByTestId("pos-pay-cta").locator("..").getByLabel("Modalità volontari")).toHaveCount(0);
             await page.getByLabel("Modalità volontari").check();
@@ -174,7 +173,7 @@ test.describe("POS volunteer pricing", () => {
             await openPosAndSelectDevice(page, posName);
             await openCashSessionIfRequired(page);
 
-            await page.getByRole("button", { name: /Carica ordine da codice/i }).click();
+            await page.getByRole("button", { name: "Codice", exact: true }).click();
             const loadDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i });
             await loadDialog.getByRole("textbox").fill("41");
             await loadDialog.getByRole("button", { name: /Carica/i, exact: true }).click();

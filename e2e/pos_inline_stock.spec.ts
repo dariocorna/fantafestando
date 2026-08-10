@@ -96,7 +96,9 @@ test.describe("POS modalità scorte inline", () => {
                 await expect(cashStatusSheet.getByRole("button", { name: "Chiudi Cassa", exact: true })).toBeDisabled()
                 await page.keyboard.press("Escape")
             } else {
-                await expect(page.getByTestId("pos-desktop-scroll-region").getByRole("button", { name: "Chiudi Cassa", exact: true })).toBeDisabled()
+                const closeCashButton = page.getByTestId("pos-desktop-cash-menu").getByRole("button", { name: "Chiudi Cassa", exact: true })
+                if (!(await closeCashButton.isVisible())) await page.getByTestId("pos-desktop-cash-menu-trigger").click()
+                await expect(closeCashButton).toBeDisabled()
             }
 
             const stockProductSection = page.locator(`[data-testid="stock-product-${setup.productId}"]`)

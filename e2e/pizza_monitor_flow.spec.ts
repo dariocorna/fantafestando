@@ -253,7 +253,7 @@ test.describe.serial("Flusso preparazioni numerate", () => {
 
         await openPosAndSelectDevice(page, posName);
         await openCashSessionIfRequired(page);
-        await page.getByRole("button", { name: /Carica ordine da codice/i }).click();
+        await page.getByRole("button", { name: "Codice", exact: true }).click();
         const pendingDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i }).first();
         await expect(pendingDialog).toBeVisible();
         await pendingDialog.getByRole("textbox").fill(code);
@@ -435,7 +435,7 @@ test.describe.serial("Flusso preparazioni numerate", () => {
 
         await openPosAndSelectDevice(page, posName);
         await openCashSessionIfRequired(page);
-        await page.getByRole("button", { name: /Carica ordine da codice/i }).click();
+        await page.getByRole("button", { name: "Codice", exact: true }).click();
         const pendingDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i }).first();
         await expect(pendingDialog).toBeVisible();
         await pendingDialog.getByRole("textbox").fill(code);

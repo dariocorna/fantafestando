@@ -1847,15 +1847,25 @@ export default function PosPage() {
     const discountsSurfaceContent = (
         <section
             id={isMobilePos ? "pos-mobile-discount-presets" : "pos-discount-presets"}
-            className="space-y-2 rounded-lg border-2 border-emerald-200 bg-emerald-50/60 p-2.5"
+            className={isMobilePos
+                ? "space-y-2 rounded-lg border-2 border-emerald-200 bg-emerald-50/60 p-2.5"
+                : "flex min-w-0 items-stretch gap-2"
+            }
             data-testid={isMobilePos ? "pos-mobile-discount-presets" : "pos-discount-presets"}
         >
-            <div className="flex items-center justify-between gap-3">
+            <div className={isMobilePos
+                ? "flex items-center justify-between gap-3"
+                : "flex shrink-0 items-stretch gap-2"
+            }>
                 <div>
-                    <p className="text-sm font-black uppercase tracking-[0.08em] text-emerald-900">Prezzi e sconti</p>
-                    <p className="text-xs font-semibold text-emerald-700">Modificatori del carrello</p>
+                    {isMobilePos ? (
+                        <>
+                            <p className="text-sm font-black uppercase tracking-[0.08em] text-emerald-900">Prezzi e sconti</p>
+                            <p className="text-xs font-semibold text-emerald-700">Modificatori del carrello</p>
+                        </>
+                    ) : null}
                 </div>
-                <label className="inline-flex min-h-11 items-center gap-2 rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-black text-emerald-800">
+                <label className="inline-flex min-h-12 items-center gap-2 rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-black text-emerald-800">
                     <span>Volontari</span>
                     <input
                         type="checkbox"
@@ -1872,14 +1882,14 @@ export default function PosPage() {
                 </label>
             </div>
             {quickDiscountPresets.length === 0 ? (
-                <div className="border border-dashed border-emerald-300 bg-white px-3 py-3 text-center">
+                <div className="min-w-0 flex-1 border border-dashed border-emerald-300 bg-white px-3 py-3 text-center">
                     <p className="text-sm font-black text-slate-700">Nessun preset sconto configurato</p>
                     <p className="mt-1 text-xs font-semibold text-slate-500">
                         Configura i preset da Admin &gt; Impostazioni.
                     </p>
                 </div>
             ) : (
-                <div className="grid gap-2">
+                <div className={isMobilePos ? "grid gap-2" : "flex min-w-0 flex-1 gap-2 overflow-x-auto"}>
                     {quickDiscountPresets.map((preset, index) => {
                         const previewAmount = computePresetDiscountAmount(preset, discountBaseAmount)
                         const isPresetApplied = discountCartItems.some((item) => isSameDiscountPreset(item, preset))
@@ -1896,7 +1906,7 @@ export default function PosPage() {
                                     }
                                 }}
                                 disabled={isStockMode || isVolunteerMode || productCartItems.length === 0 || isPresetApplied}
-                                className="inline-flex min-h-12 w-full items-center gap-2 rounded-md border border-emerald-300 bg-white px-3 py-2 text-left shadow-sm transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                className={`inline-flex min-h-12 items-center gap-2 rounded-md border border-emerald-300 bg-white px-3 py-2 text-left shadow-sm transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 ${isMobilePos ? "w-full" : "min-w-52 flex-1"}`}
                             >
                                 <span className="min-w-0 flex-1 text-sm font-black leading-tight text-emerald-900">
                                     {preset.label}
@@ -2270,34 +2280,109 @@ export default function PosPage() {
                 </div>
             </div>
             ) : (
-            <div className="flex h-full">
+            <div className="flex h-full flex-col">
+            <header className="relative z-30 shrink-0 border-b border-[#d9e6f8] bg-white shadow-sm">
+                <div className="flex items-center gap-3 px-3 py-2">
+                    <h1 className="min-w-0 flex-1 truncate text-lg font-black uppercase tracking-tight text-[var(--brand-ink)]">
+                        {activeEvent?.name || "Cassa FantaFestando"}
+                    </h1>
+                    <button type="button" onClick={openPendingOrdersSurface} disabled={isStockMode} className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-700 disabled:cursor-not-allowed disabled:opacity-45">Pendenti</button>
+                    <button type="button" onClick={() => handleCodeDialogOpenChange(true)} disabled={isStockMode} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-45">Codice</button>
+                    <button
+                        type="button"
+                        onClick={toggleStockMode}
+                        aria-pressed={isStockMode}
+                        className={`rounded-md border px-3 py-2 text-sm font-bold ${isStockMode ? "border-amber-700 bg-amber-700 text-white" : "border-amber-200 bg-amber-50 text-amber-800"}`}
+                    >
+                        {isStockMode ? "Termina scorte" : "Scorte"}
+                    </button>
+                    <details
+                        className="group relative"
+                        data-testid="pos-desktop-cash-menu"
+                        onBlur={(event) => {
+                            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.removeAttribute("open")
+                        }}
+                    >
+                        <summary data-testid="pos-desktop-cash-menu-trigger" className={`flex min-h-10 min-w-52 cursor-pointer list-none items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm font-black marker:content-none ${cashSession ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-rose-300 bg-rose-50 text-rose-800"}`}>
+                            <span className="min-w-0 truncate">{selectedPosDevice?.name || "Seleziona cassa"}</span>
+                            <span className="flex shrink-0 items-center gap-1 text-xs">
+                                {cashSession?.isTest ? <span className="rounded bg-rose-700 px-1.5 py-0.5 text-white">TEST</span> : null}
+                                {cashSession?.closeFailedError ? <span className="rounded bg-amber-600 px-1.5 py-0.5 text-white">CHIUSURA DA RIPETERE</span> : null}
+                                <span>{cashSession ? "APERTA" : "CHIUSA"} ▾</span>
+                            </span>
+                        </summary>
+                        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-80 space-y-3 rounded-lg border border-[#d9e6f8] bg-white p-3 text-slate-800 shadow-xl">
+                            <button
+                                type="button"
+                                onClick={(event) => {
+                                    event.currentTarget.closest("details")?.removeAttribute("open")
+                                    setIsPosSelectorOpen(true)
+                                }}
+                                className="w-full rounded-md border border-[#d9e6f8] bg-[#eef5ff] px-3 py-2 text-left text-sm font-black text-[var(--brand-blue-700)] hover:bg-[#e4efff]"
+                            >
+                                {selectedPosDevice ? `Cambia cassa · ${selectedPosDevice.name}` : "Seleziona cassa"}
+                            </button>
+                            <div className={`rounded-md border p-3 ${cashSession ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
+                                <p className={`text-[10px] font-black uppercase tracking-widest ${cashSession ? "text-emerald-700" : "text-rose-700"}`}>Stato cassa</p>
+                                {isCashSessionLoading ? (
+                                    <p className="mt-1 text-xs font-semibold text-slate-500">Caricamento sessione...</p>
+                                ) : cashSession ? (
+                                    <p className="mt-1 text-xs font-semibold text-emerald-700">
+                                        Aperta alle {formatSessionDateTime(cashSession.openedAt)} · Fondo {formatEuro(cashSession.openingFloatAmount)}
+                                    </p>
+                                ) : (
+                                    <p className="mt-1 text-xs font-semibold text-rose-700">Chiusa. Apri la cassa per iniziare gli incassi.</p>
+                                )}
+                            </div>
+                            {lastClosedSummary ? (
+                                <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-600">
+                                    <p className="font-black uppercase tracking-widest text-slate-500">Ultima chiusura</p>
+                                    <p className="mt-1">Chiusa alle {formatSessionDateTime(lastClosedSummary.closedAt)}</p>
+                                    <p>Atteso: {formatEuro(lastClosedSummary.expectedCashAmount)} · Contato: {formatEuro(lastClosedSummary.closingCountedCashAmount)}</p>
+                                    <p className={lastClosedSummary.varianceAmount === 0 ? "text-emerald-700" : "text-amber-700"}>
+                                        Differenza: {formatEuro(lastClosedSummary.varianceAmount)}
+                                    </p>
+                                </div>
+                            ) : null}
+                            {cashSession ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-11 w-full border-emerald-300 bg-white font-black text-emerald-700"
+                                    onClick={(event) => {
+                                        event.currentTarget.closest("details")?.removeAttribute("open")
+                                        void handleOpenCloseCashDialog()
+                                    }}
+                                    disabled={isStockMode || isCashSessionLoading || isCashSessionActionLoading || isCloseCashSessionPreviewLoading || isProcessing}
+                                >
+                                    Chiudi Cassa
+                                </Button>
+                            ) : (
+                                <Button
+                                    type="button"
+                                    className="h-11 w-full bg-rose-600 font-black text-white hover:bg-rose-700"
+                                    onClick={(event) => {
+                                        event.currentTarget.closest("details")?.removeAttribute("open")
+                                        setIsOpenCashDialogOpen(true)
+                                    }}
+                                    disabled={isStockMode || isCashSessionLoading || isCashSessionActionLoading || !selectedPosDeviceId}
+                                >
+                                    Apri Cassa
+                                </Button>
+                            )}
+                            {cashSession?.isTest ? <p className="rounded bg-rose-700 px-2 py-1 text-center text-xs font-black text-white">SESSIONE TEST</p> : null}
+                            {cashSession?.closeFailedError ? <p className="rounded bg-amber-600 px-2 py-1 text-center text-xs font-black text-white">CHIUSURA DA RIPETERE</p> : null}
+                        </div>
+                    </details>
+                </div>
+                <div className="border-t border-[#d9e6f8] bg-[#f7fbff] px-3 py-2" data-testid="pos-desktop-discounts">
+                    {discountsSurfaceContent}
+                </div>
+            </header>
+
+            <div className="flex min-h-0 flex-1">
             {/* Sinistra: Selezione Prodotti (70%) */}
             <div className="flex h-full flex-1 flex-col border-r border-[#d9e6f8] bg-white">
-                <div className="shrink-0 border-b border-[#d9e6f8] bg-[#f7fbff] px-3 py-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-bold text-slate-600">
-                            {categories.length} reparti • {products.length} prodotti
-                        </p>
-                        <div className="flex items-center gap-1.5">
-                        <button type="button" onClick={() => setIsCashStatusSheetOpen(true)} className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-bold text-slate-700">
-                            Cassa {cashSession?.isTest ? <span className="ml-1 rounded bg-rose-700 px-1.5 py-0.5 text-xs text-white">TEST</span> : null}
-                            {cashSession?.closeFailedError ? <span className="ml-1 rounded bg-amber-600 px-1.5 py-0.5 text-xs text-white">CHIUSURA DA RIPETERE</span> : null}
-                        </button>
-                        <button type="button" onClick={openPendingOrdersSurface} disabled={isStockMode} className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-sm font-bold text-indigo-700 disabled:cursor-not-allowed disabled:opacity-45">Pendenti</button>
-                        <button type="button" onClick={() => handleCodeDialogOpenChange(true)} disabled={isStockMode} className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-45">Codice</button>
-                        <button
-                            type="button"
-                            onClick={toggleStockMode}
-                            aria-pressed={isStockMode}
-                            className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm font-bold ${isStockMode ? "border-amber-700 bg-amber-700 text-white" : "border-amber-200 bg-amber-50 text-amber-800"}`}
-                        >
-                            <PackageOpen size={15} />
-                            {isStockMode ? "Termina scorte" : "Scorte"}
-                        </button>
-                        </div>
-                    </div>
-                </div>
-
                 {isStockMode ? (
                     <div className="shrink-0 border-b-2 border-amber-400 bg-amber-50 px-3 py-2 text-sm font-black text-amber-900" role="status" data-testid="pos-stock-mode-banner">
                         Modalità scorte attiva · il catalogo non aggiunge al carrello
@@ -2554,79 +2639,8 @@ export default function PosPage() {
                 style={{ width: "clamp(280px, 23vw, 380px)" }}
             >
                 <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-testid="pos-desktop-scroll-region">
-                {/* Info Intestazione */}
                 <div className="border-b border-[#d9e6f8] bg-white p-3">
-                    <h2 className="truncate text-base font-black uppercase tracking-tight text-[var(--brand-ink)]">
-                        {activeEvent?.name || "Cassa FantaFestando"}
-                    </h2>
-                    <button
-                        onClick={() => setIsPosSelectorOpen(true)}
-                        className="mt-1 flex w-full items-center gap-1 text-xs font-bold text-[var(--brand-blue-700)] hover:underline"
-                    >
-                        <Monitor size={12} className="shrink-0" />
-                        <span className="truncate">{selectedPosDevice ? `Postazione: ${selectedPosDevice.name}` : "Seleziona Cassa"}</span>
-                    </button>
-                    <button
-                        onClick={() => handleCodeDialogOpenChange(true)}
-                        disabled={isStockMode}
-                        className="mt-2 inline-flex items-center gap-2 rounded-md border border-[#d9e6f8] bg-[#eef5ff] px-2.5 py-1.5 text-xs font-bold text-[var(--brand-blue-700)] transition-colors hover:bg-[#e4efff] disabled:cursor-not-allowed disabled:opacity-45"
-                    >
-                        <Search size={14} />
-                        Carica ordine da codice
-                    </button>
-                    <div className={`mt-3 rounded-md border p-2.5 ${cashSession ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
-                        <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                                <p className={`text-[10px] font-black uppercase tracking-widest ${cashSession ? "text-emerald-700" : "text-rose-700"}`}>
-                                    Stato Cassa
-                                </p>
-                                {isCashSessionLoading ? (
-                                    <p className="text-xs font-semibold text-slate-500">Caricamento sessione...</p>
-                                ) : cashSession ? (
-                                    <p className="text-xs font-semibold text-emerald-700">
-                                        Aperta alle {formatSessionDateTime(cashSession.openedAt)} · Fondo {formatEuro(cashSession.openingFloatAmount)}
-                                    </p>
-                                ) : (
-                                    <p className="text-xs font-semibold text-rose-700">Chiusa. Apri la cassa per iniziare gli incassi.</p>
-                                )}
-                            </div>
-                            {cashSession ? (
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    className="border-emerald-300 bg-white font-black text-emerald-700"
-                                    onClick={() => void handleOpenCloseCashDialog()}
-                                    disabled={isStockMode || isCashSessionLoading || isCashSessionActionLoading || isCloseCashSessionPreviewLoading || isProcessing}
-                                >
-                                    <Wallet size={14} />
-                                    Chiudi Cassa
-                                </Button>
-                            ) : (
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    className="bg-rose-600 font-black text-white hover:bg-rose-700"
-                                    onClick={() => setIsOpenCashDialogOpen(true)}
-                                    disabled={isStockMode || isCashSessionLoading || isCashSessionActionLoading}
-                                >
-                                    <Wallet size={14} />
-                                    Apri Cassa
-                                </Button>
-                            )}
-                        </div>
-                    </div>
-                    {lastClosedSummary ? (
-                        <div className="mt-3 rounded-md border border-slate-200 bg-white p-2.5 text-xs font-semibold text-slate-600">
-                            <p className="font-black uppercase tracking-widest text-slate-500">Ultima chiusura</p>
-                            <p className="mt-1">Chiusa alle {formatSessionDateTime(lastClosedSummary.closedAt)}</p>
-                            <p>Atteso: {formatEuro(lastClosedSummary.expectedCashAmount)} · Contato: {formatEuro(lastClosedSummary.closingCountedCashAmount)}</p>
-                            <p className={lastClosedSummary.varianceAmount === 0 ? "text-emerald-700" : "text-amber-700"}>
-                                Differenza: {formatEuro(lastClosedSummary.varianceAmount)}
-                            </p>
-                        </div>
-                    ) : null}
-                    <div className="mt-2 grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                         <div className="flex items-center gap-2 rounded-md border bg-white p-2">
                             <User size={18} className="text-slate-400" />
                             <input
@@ -2645,10 +2659,6 @@ export default function PosPage() {
                             </span>
                         </div>
                     </div>
-                </div>
-
-                <div className="max-h-[clamp(8rem,24vh,14rem)] shrink-0 overflow-y-auto border-b border-[#d9e6f8] bg-white p-3" data-testid="pos-desktop-discounts">
-                    {discountsSurfaceContent}
                 </div>
 
                 {/* Elementi Carrello */}
@@ -2733,6 +2743,7 @@ export default function PosPage() {
                     </p>
                     ) : null}
                 </div>
+            </div>
             </div>
             </div>
             )}

@@ -397,6 +397,7 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
 
 - Catalogo filtrabile con ricerca smart, palette ad alto contrasto e barcode dei piatti numerati esplicitamente opt-in.
 - POS più leggibile con titoli su due righe, tastiera fisica per il calcolo resto ed editor rapido delle scorte.
+- Header desktop POS ampliata con menu contestuale della cassa, sconti integrati e indicatori quantità senza prefisso `x`.
 - Errori di stampa raggruppati per stampante e retry atomico dei soli job falliti.
 - Retry POS e ristampa dal riepilogo ordini corretti con recupero immediato dei job interrotti ed esito reale mostrato all'operatore.
 - Checkout POS recuperato dopo una risposta interrotta, senza consentire una seconda contabilizzazione accidentale dell'ordine incerto.
@@ -405,4 +406,4 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
 - Selezione di più sessioni cassa chiuse per generare un unico workbook `.xlsx` aggregato e tracciabile per postazione.
 
 **Test principali**: unit test catalogo, scorte, stampa, transizioni sessione e workbook; flussi Playwright POS/Admin.
-**Issue collegate**: `#106`, `#107`, `#116`.
+**Issue collegate**: `#106`, `#107`, `#116`, `#137`.

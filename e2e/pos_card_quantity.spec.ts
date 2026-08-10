@@ -52,7 +52,7 @@ test.describe("POS card quantity controls", () => {
             const initialCardHeight = (await productCard.boundingBox())?.height;
 
             await productCard.click();
-            await expect(productQuantity).toContainText("1");
+            await expect(productQuantity.locator("span").last()).toHaveText("1");
             await expect(page.getByText("1 x 5.00 €")).toBeVisible();
             const unitPrice = page.locator('[data-testid^="cart-item-unit-price-"]').first();
             const lineTotal = page.locator('[data-testid^="cart-item-total-"]').first();
@@ -62,7 +62,7 @@ test.describe("POS card quantity controls", () => {
             expect(await cartQuantity.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(18);
 
             for (let quantity = 2; quantity <= 10; quantity += 1) await productCard.click();
-            await expect(productQuantity).toContainText("x10");
+            await expect(productQuantity.locator("span").last()).toHaveText("10");
             await expect(page.getByText("10 x 5.00 €")).toBeVisible();
             const badgeBox = await productQuantity.boundingBox();
             expect(badgeBox).not.toBeNull();
@@ -71,7 +71,7 @@ test.describe("POS card quantity controls", () => {
             expect((await productCard.boundingBox())?.height).toBe(initialCardHeight);
 
             for (let quantity = 11; quantity <= 100; quantity += 1) await productCard.click();
-            await expect(productQuantity).toContainText("x100");
+            await expect(productQuantity.locator("span").last()).toHaveText("100");
             expect(await productQuantity.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
             expect((await productCard.boundingBox())?.height).toBe(initialCardHeight);
             const cartItemBox = await page.locator('[data-testid^="cart-item-row-"]').first().boundingBox();
@@ -84,7 +84,7 @@ test.describe("POS card quantity controls", () => {
             expect(increaseButtonBox!.x + increaseButtonBox!.width).toBeLessThanOrEqual(cartItemBox!.x + cartItemBox!.width);
 
             await productCard.click({ button: "right" });
-            await expect(productQuantity).toContainText("x99");
+            await expect(productQuantity.locator("span").last()).toHaveText("99");
             await expect(page.getByText("99 x 5.00 €")).toBeVisible();
 
             await productCard.focus();
@@ -93,7 +93,7 @@ test.describe("POS card quantity controls", () => {
             await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible();
 
             await page.keyboard.press("Enter");
-            await expect(productQuantity).toContainText("x1");
+            await expect(productQuantity.locator("span").last()).toHaveText("1");
             await page.keyboard.press("-");
             await expect(productQuantity).toHaveCount(0);
             await expect(page.getByText(/Il carrello è vuoto/i)).toBeVisible();
