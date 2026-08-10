@@ -73,6 +73,6 @@ E2E:
 
 ## Scorte rapide POS e sessioni TEST (Epica 35)
 
-Il dialog `Scorte` del POS consente di aggiornare prodotti e varianti con quantità intere, stato esaurito o scorta illimitata. L'accesso usa le stesse regole del POS, quindi non richiede il ruolo Admin.
+La modalità `Scorte` del POS trasforma le card del catalogo in editor inline per prodotti e varianti. Il cassiere inserisce una quantità intera, `0` per esaurito oppure usa `Illimitata`; durante la modifica il carrello resta visibile ma non modificabile e il pagamento è sospeso. L'accesso usa le stesse regole del POS, quindi non richiede il ruolo Admin.
 
 Ogni nuovo ordine salva gli aggiustamenti di prodotto e ingrediente realmente applicati e il relativo stato `APPLIED`/`REVERTED`. Quando una sessione TEST viene chiusa gli aggiustamenti vengono ripristinati con chiavi operative idempotenti; una successiva riclassificazione a normale li riapplica solo se le scorte sono sufficienti. Un claim atomico per ordine impedisce che storno e transizione della sessione modifichino contemporaneamente le stesse scorte; un claim breve sulla sessione impedisce inoltre che una chiusura intersechi la persistenza di un pagamento. Gli ordini storici senza snapshot vengono ricostruiti da carrello, componenti menu e piano ingredienti e sono segnalati come approssimativi.
