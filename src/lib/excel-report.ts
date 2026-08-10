@@ -1,7 +1,10 @@
 import ExcelJS from "exceljs"
 import { formatDashboardDateTime, type DashboardStatsResult } from "@/lib/dashboard-stats"
 import type { CashSessionReportInput } from "@/lib/cash-session"
-import type { ProductSalesBreakdownResult } from "@/lib/product-consumption"
+import {
+    buildProductSalesCategorySummaries,
+    type ProductSalesBreakdownResult
+} from "@/lib/product-consumption"
 
 type Cell = string | number | boolean | Date | null
 
@@ -22,17 +25,14 @@ function addSheet(workbook: ExcelJS.Workbook, name: string, headers: string[], r
 }
 
 function categoryRows(sales: ProductSalesBreakdownResult) {
-    const totals = new Map<string, { quantity: number; gross: number; discount: number; net: number }>()
-    for (const row of sales.rows) {
-        const current = totals.get(row.categoryName) || { quantity: 0, gross: 0, discount: 0, net: 0 }
-        current.quantity += row.quantitySold
-        current.gross += row.grossAmount
-        current.discount += row.discountAmount
-        current.net += row.netAmount
-        totals.set(row.categoryName, current)
-    }
     return [
-        ...[...totals].map(([category, value]) => [category, value.quantity, value.gross, value.discount, value.net] as Cell[]),
+        ...buildProductSalesCategorySummaries(sales).map((summary) => [
+            summary.name,
+            summary.quantitySold,
+            summary.grossAmount,
+            summary.discountAmount,
+            summary.netAmount
+        ] as Cell[]),
         ["TOTALE GENERALE", sales.totals.quantitySold, sales.totals.grossAmount, sales.totals.discountAmount, sales.totals.netAmount]
     ]
 }
@@ -57,17 +57,16 @@ function cashSessionCategoryRows(reports: CashSessionReportInput[]): Cell[][] {
     const rows: Cell[][] = []
     for (const report of reports) {
         const sales = report.salesBreakdown || { rows: [], discountSummaries: [], totals: { quantitySold: 0, grossAmount: 0, discountAmount: 0, netAmount: 0 } }
-        const categories = new Map<string, { quantity: number; gross: number; discount: number; net: number }>()
-        for (const sale of sales.rows) {
-            const current = categories.get(sale.categoryName) || { quantity: 0, gross: 0, discount: 0, net: 0 }
-            current.quantity += sale.quantitySold
-            current.gross += toCents(sale.grossAmount)
-            current.discount += toCents(sale.discountAmount)
-            current.net += toCents(sale.netAmount)
-            categories.set(sale.categoryName, current)
-        }
-        for (const [category, value] of categories) {
-            rows.push([report.sessionId, report.posDeviceName, category, value.quantity, fromCents(value.gross), fromCents(value.discount), fromCents(value.net)])
+        for (const summary of buildProductSalesCategorySummaries(sales)) {
+            rows.push([
+                report.sessionId,
+                report.posDeviceName,
+                summary.name,
+                summary.quantitySold,
+                summary.grossAmount,
+                summary.discountAmount,
+                summary.netAmount
+            ])
         }
         rows.push([
             report.sessionId, report.posDeviceName, "TOTALE SESSIONE", sales.totals.quantitySold,

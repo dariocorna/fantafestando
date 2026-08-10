@@ -44,6 +44,36 @@ describe("xlsx reports", () => {
         expect(workbook.getWorksheet("Categorie")?.getCell("C2").value).toBe(10)
     })
 
+    test("keeps same-name category totals separate by stable key", async () => {
+        const duplicateNameSales = {
+            rows: [
+                { ...sales.rows[0], categoryKey: "cat-a", productKey: "p1", quantitySold: 1, grossAmount: 1, netAmount: 1 },
+                { ...sales.rows[0], categoryKey: "cat-b", productKey: "p2", productName: "Acqua", displayName: "Acqua", quantitySold: 1, grossAmount: 2, netAmount: 2 }
+            ],
+            discountSummaries: [],
+            totals: { quantitySold: 2, grossAmount: 3, discountAmount: 0, netAmount: 3 }
+        }
+        const buffer = await buildEventWorkbook({
+            eventName: "Festa",
+            sales: duplicateNameSales,
+            stats: {
+                generatedAt: "2026-08-10T10:00:00.000Z",
+                summary: { totalRevenue: 3, cashRevenue: 3, cardRevenue: 0, otherRevenue: 0, paidOrdersCount: 1, averageTicket: 3 },
+                soldProducts: [],
+                bestSellers: [],
+                underperforming: [],
+                paidOrders: []
+            }
+        })
+        const workbook = new ExcelJS.Workbook()
+        await workbook.xlsx.load(buffer)
+        const categories = workbook.getWorksheet("Categorie")!
+
+        expect(rowValues(categories, 2, 1, 5)).toEqual(["Bar", 1, 1, 0, 1])
+        expect(rowValues(categories, 3, 1, 5)).toEqual(["Bar", 1, 2, 0, 2])
+        expect(rowValues(categories, 4, 1, 5)).toEqual(["TOTALE GENERALE", 2, 3, 0, 3])
+    })
+
     test("keeps the single-session workbook layout and TEST marker unchanged", async () => {
         const buffer = await buildCashSessionWorkbook({
             eventName: "Festa", posDeviceName: "Cassa 1", sessionId: "s1", status: "CLOSED", isTest: true,

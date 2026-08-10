@@ -16,8 +16,10 @@ import {
 import { filterDashboardOrdersByTimeRange, resolveDashboardTimeRange } from "@/lib/dashboard-time-range";
 import { aggregateOrderProductSales } from "@/lib/product-consumption";
 import { buildEventWorkbook } from "@/lib/excel-report";
+import { buildDashboardPdfBuffer } from "@/lib/dashboard-pdf";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 interface OrderProjection {
     _id: unknown
@@ -103,9 +105,9 @@ export async function GET(request: NextRequest) {
         }
 
         const format = request.nextUrl.searchParams.get("format")?.trim().toLowerCase() || "csv";
-        if (!["csv", "xls", "xlsx"].includes(format)) {
+        if (!["csv", "xls", "xlsx", "pdf"].includes(format)) {
             return NextResponse.json(
-                { error: "Formato export non supportato. Usa format=csv oppure format=xlsx." },
+                { error: "Formato export non supportato. Usa format=csv, format=xlsx oppure format=pdf." },
                 { status: 400 }
             );
         }
@@ -193,6 +195,7 @@ export async function GET(request: NextRequest) {
                 name: product.name,
                 shortName: product.shortName,
                 basePrice: product.basePrice,
+                categoryKey: product.categoryId ? String(product.categoryId) : undefined,
                 categoryName: category?.name,
                 categoryOrder: category?.printOrder
             }];
@@ -203,14 +206,18 @@ export async function GET(request: NextRequest) {
         });
 
         const isExcel = format === "xls" || format === "xlsx";
-        const content = isExcel
-            ? await buildEventWorkbook({ eventName: contextEvent.name, stats, sales: salesBreakdown, intervalLabel: activeRange.label, timezone })
-            : buildDashboardCsvContent(stats, { eventName: contextEvent.name, timezone, intervalLabel: activeRange.label, salesBreakdown });
+        const content = format === "pdf"
+            ? await buildDashboardPdfBuffer({ eventName: contextEvent.name, stats, sales: salesBreakdown, intervalLabel: activeRange.label, timezone })
+            : isExcel
+                ? await buildEventWorkbook({ eventName: contextEvent.name, stats, sales: salesBreakdown, intervalLabel: activeRange.label, timezone })
+                : buildDashboardCsvContent(stats, { eventName: contextEvent.name, timezone, intervalLabel: activeRange.label, salesBreakdown });
 
-        const extension = isExcel ? "xlsx" : "csv";
-        const contentType = isExcel
-            ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            : "text/csv; charset=utf-8";
+        const extension = format === "pdf" ? "pdf" : isExcel ? "xlsx" : "csv";
+        const contentType = format === "pdf"
+            ? "application/pdf"
+            : isExcel
+                ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                : "text/csv; charset=utf-8";
 
         const filenamePrefix = sanitizeFileNameSegment(contextEvent.name);
         const fileTimestamp = getTimestampTag(new Date(stats.generatedAt));

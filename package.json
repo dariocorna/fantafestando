@@ -38,6 +38,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^5.2.2",
+    "@react-pdf/renderer": "^4.6.0",
     "@sumup/sdk": "^0.1.0",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",

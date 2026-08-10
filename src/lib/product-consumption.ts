@@ -2,6 +2,7 @@ export interface ProductConsumptionCatalogEntry {
     name?: string | null
     shortName?: string | null
     basePrice?: number | null
+    categoryKey?: string | null
     categoryName?: string | null
     categoryOrder?: number | null
 }
@@ -47,6 +48,7 @@ export interface ProductConsumptionMetric {
 }
 
 export interface ProductSalesBreakdownRow {
+    categoryKey?: string
     categoryName: string
     categoryOrder: number
     productId?: string
@@ -83,6 +85,15 @@ export interface ProductSalesBreakdownResult {
     }
 }
 
+export interface ProductSalesCategorySummary {
+    key: string
+    name: string
+    quantitySold: number
+    grossAmount: number
+    discountAmount: number
+    netAmount: number
+}
+
 export type ProductSalesExportRow = Array<string | number>
 
 export interface ProductSalesPrintRow {
@@ -102,6 +113,45 @@ function toCents(value: number | null | undefined): number {
 
 function fromCents(value: number): number {
     return Number((Math.max(0, value) / 100).toFixed(2))
+}
+
+function productSalesCategoryKey(row: ProductSalesBreakdownRow): string {
+    return row.categoryKey?.trim() ? `key:${row.categoryKey.trim()}` : `name:${row.categoryName}`
+}
+
+export function buildProductSalesCategorySummaries(result: ProductSalesBreakdownResult): ProductSalesCategorySummary[] {
+    const summaries = new Map<string, ProductSalesCategorySummary & {
+        grossCents: number
+        discountCents: number
+        netCents: number
+    }>()
+
+    for (const row of result.rows) {
+        const key = productSalesCategoryKey(row)
+        const current = summaries.get(key) || {
+            key,
+            name: row.categoryName,
+            quantitySold: 0,
+            grossAmount: 0,
+            discountAmount: 0,
+            netAmount: 0,
+            grossCents: 0,
+            discountCents: 0,
+            netCents: 0
+        }
+        current.quantitySold += row.quantitySold
+        current.grossCents += toCents(row.grossAmount)
+        current.discountCents += toCents(row.discountAmount)
+        current.netCents += toCents(row.netAmount)
+        summaries.set(key, current)
+    }
+
+    return [...summaries.values()].map(({ grossCents, discountCents, netCents, ...summary }) => ({
+        ...summary,
+        grossAmount: fromCents(grossCents),
+        discountAmount: fromCents(discountCents),
+        netAmount: fromCents(netCents)
+    }))
 }
 
 function getProductId(value: ProductConsumptionCartItem["productId"]): string | undefined {
@@ -293,6 +343,7 @@ export function aggregateOrderProductSales(options: {
             productKey: string
             productName: string
             displayName: string
+            categoryKey?: string
             categoryName: string
             categoryOrder: number
             quantitySold: number
@@ -318,6 +369,7 @@ export function aggregateOrderProductSales(options: {
                 productKey,
                 productName,
                 displayName: (catalogEntry?.shortName?.trim() || productName).slice(0, 24),
+                categoryKey: catalogEntry?.categoryKey?.trim() || undefined,
                 categoryName: catalogEntry?.categoryName?.trim() || "Non categorizzato",
                 categoryOrder: Number.isFinite(catalogEntry?.categoryOrder)
                     ? Number(catalogEntry?.categoryOrder)
@@ -407,7 +459,7 @@ export function aggregateOrderProductSales(options: {
 
             const pricingGroup = buildPricingGroup(lineComponents)
             const resultKey = [
-                line.categoryName,
+                line.categoryKey ? `key:${line.categoryKey}` : `name:${line.categoryName}`,
                 line.productKey,
                 pricingGroup.pricingRegime,
                 pricingGroup.discountLabel,
@@ -424,6 +476,7 @@ export function aggregateOrderProductSales(options: {
             }
 
             resultByKey.set(resultKey, {
+                categoryKey: line.categoryKey,
                 categoryName: line.categoryName,
                 categoryOrder: line.categoryOrder,
                 productId: line.productId,
@@ -490,6 +543,7 @@ export function aggregateOrderProductSales(options: {
 
     const rows = Array.from(resultByKey.values())
         .map((row) => ({
+            categoryKey: row.categoryKey,
             categoryName: row.categoryName,
             categoryOrder: row.categoryOrder,
             productId: row.productId,
@@ -510,6 +564,8 @@ export function aggregateOrderProductSales(options: {
             if (left.categoryOrder !== right.categoryOrder) return left.categoryOrder - right.categoryOrder
             const categoryComparison = left.categoryName.localeCompare(right.categoryName, "it")
             if (categoryComparison !== 0) return categoryComparison
+            const categoryKeyComparison = productSalesCategoryKey(left).localeCompare(productSalesCategoryKey(right), "it")
+            if (categoryKeyComparison !== 0) return categoryKeyComparison
             const productComparison = left.productName.localeCompare(right.productName, "it")
             if (productComparison !== 0) return productComparison
             if (left.pricingRegime !== right.pricingRegime) {
@@ -588,11 +644,12 @@ export function buildProductSalesExportRows(result: ProductSalesBreakdownResult)
         "Sconto",
         "Netto"
     ]]
-    let currentCategory: string | null = null
+    let currentCategoryKey: string | null = null
+    let currentCategoryName: string | null = null
     let categoryRows: ProductSalesBreakdownRow[] = []
 
     const appendCategoryTotal = () => {
-        if (!currentCategory) return
+        if (!currentCategoryName) return
         const totals = categoryRows.reduce((sum, row) => ({
             quantity: sum.quantity + row.quantitySold,
             grossCents: sum.grossCents + toCents(row.grossAmount),
@@ -600,7 +657,7 @@ export function buildProductSalesExportRows(result: ProductSalesBreakdownResult)
             netCents: sum.netCents + toCents(row.netAmount)
         }), { quantity: 0, grossCents: 0, discountCents: 0, netCents: 0 })
         rows.push([
-            "TOTALE CATEGORIA", currentCategory, "", "", "", "", "", "",
+            "TOTALE CATEGORIA", currentCategoryName, "", "", "", "", "", "",
             totals.quantity,
             fromCents(totals.grossCents).toFixed(2),
             fromCents(totals.discountCents).toFixed(2),
@@ -609,9 +666,11 @@ export function buildProductSalesExportRows(result: ProductSalesBreakdownResult)
     }
 
     result.rows.forEach((row) => {
-        if (currentCategory !== row.categoryName) {
+        const categoryKey = productSalesCategoryKey(row)
+        if (currentCategoryKey !== categoryKey) {
             appendCategoryTotal()
-            currentCategory = row.categoryName
+            currentCategoryKey = categoryKey
+            currentCategoryName = row.categoryName
             categoryRows = []
         }
         categoryRows.push(row)
