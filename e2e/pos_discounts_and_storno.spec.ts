@@ -3,6 +3,7 @@ import mongoose from "mongoose"
 import { ensureAdminAuthenticated } from "./utils/auth"
 import {
     configureCashPos,
+    closeCashSession,
     openPosAndSelectDevice,
     openCashSession,
     dismissFeedbackModal,
@@ -35,7 +36,12 @@ async function createEventWithDiscountPresets(
                 "settings.quickDiscountPresets": [
                     { label: "Staff", type: "PERCENT", value: 50 },
                     { label: "Promo Cassa", type: "FIXED", value: 2 },
-                    { label: "Tesserati", type: "PERCENT", value: 20 }
+                    { label: "Tesserati", type: "PERCENT", value: 20 },
+                    { label: "Convenzione A", type: "PERCENT", value: 5 },
+                    { label: "Convenzione B", type: "PERCENT", value: 10 },
+                    { label: "Convenzione C", type: "PERCENT", value: 15 },
+                    { label: "Buono 1", type: "FIXED", value: 1 },
+                    { label: "Buono 3", type: "FIXED", value: 3 }
                 ]
             }
         }
@@ -75,6 +81,7 @@ test.describe("POS sconti e storno ordine", () => {
         const productB = `Discount Product B ${suffix}`
 
         try {
+            await page.setViewportSize({ width: 1366, height: 768 })
             await createEventWithDiscountPresets(eventName, categoryName, [
                 { name: productA, price: "8.00" },
                 { name: productB, price: "4.00" },
@@ -88,10 +95,14 @@ test.describe("POS sconti e storno ordine", () => {
             // Order 1: Staff 50% discount
             await addProductsToCart(page, [productA, productB])
             const panel = page.locator("#pos-discount-presets")
-            if (!(await panel.isVisible().catch(() => false))) {
-                await page.locator("#discounts-tab-trigger").click()
-            }
             await expect(panel).toBeVisible()
+            await expect(panel.getByText("Prezzi e sconti", { exact: true })).toBeVisible()
+            const discountsBox = await page.getByTestId("pos-desktop-discounts").boundingBox()
+            const cartBox = await page.getByTestId("pos-desktop-cart-items").boundingBox()
+            expect(discountsBox).not.toBeNull()
+            expect(cartBox).not.toBeNull()
+            expect(discountsBox!.height).toBeLessThanOrEqual(190)
+            expect(cartBox!.height).toBeGreaterThanOrEqual(120)
             await expect(page.locator("#discount-preset-card-0")).toBeVisible()
             await page.locator("#discount-preset-card-0").click()
             await expect(page.getByText(/Totale da Pagare/i).locator("..")).toContainText(/6\.00\s*€/i)
@@ -100,14 +111,18 @@ test.describe("POS sconti e storno ordine", () => {
 
             // Order 2: Fixed -2€ discount
             await addProductsToCart(page, [productA, productB])
-            if (!(await panel.isVisible().catch(() => false))) {
-                await page.locator("#discounts-tab-trigger").click()
-            }
+            await expect(panel).toBeVisible()
             await expect(page.locator("#discount-preset-card-1")).toBeVisible()
             await page.locator("#discount-preset-card-1").click()
             await expect(page.getByText(/Totale da Pagare/i).locator("..")).toContainText(/10\.00\s*€/i)
             await page.getByRole("button", { name: "PAGA ORA", exact: true }).click()
             await completeCheckout(page)
+
+            await closeCashSession(page, "66")
+            await expect(page.getByText("Ultima chiusura", { exact: true })).toBeVisible()
+            const payCtaBox = await page.getByTestId("pos-pay-cta").boundingBox()
+            expect(payCtaBox).not.toBeNull()
+            expect(payCtaBox!.y + payCtaBox!.height).toBeLessThanOrEqual(768)
 
             // Verify orders in admin
             await page.goto("/admin/orders")
@@ -161,9 +176,7 @@ test.describe("POS sconti e storno ordine", () => {
             // Applica 50% con il solo prodotto A (10€) -> totale 5€.
             await addProductsToCart(page, [productA])
             const panel = page.locator("#pos-discount-presets")
-            if (!(await panel.isVisible().catch(() => false))) {
-                await page.locator("#discounts-tab-trigger").click()
-            }
+            await expect(panel).toBeVisible()
             await expect(page.locator("#discount-preset-card-0")).toBeVisible()
             await page.locator("#discount-preset-card-0").click()
             await expect(page.getByText(/Totale da Pagare/i).locator("..")).toContainText(/5\.00\s*€/i)

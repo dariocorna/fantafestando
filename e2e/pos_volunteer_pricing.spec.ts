@@ -113,6 +113,10 @@ test.describe("POS volunteer pricing", () => {
             await page.getByRole("button", { name: new RegExp(standardProductName) }).click();
             await expect(page.getByText(/25\.00 €/).first()).toBeVisible();
 
+            const pricingPanel = page.getByTestId("pos-discount-presets");
+            await expect(pricingPanel.getByText("Prezzi e sconti", { exact: true })).toBeVisible();
+            await expect(pricingPanel.getByLabel("Modalità volontari")).toBeVisible();
+            await expect(page.getByTestId("pos-pay-cta").locator("..").getByLabel("Modalità volontari")).toHaveCount(0);
             await page.getByLabel("Modalità volontari").check();
             await expect(page.getByText(/19\.00 €/).first()).toBeVisible();
             await expect(page.getByText(/Prezzi volontari:\s*-6\.00 €/)).toBeVisible();

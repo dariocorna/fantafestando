@@ -146,9 +146,17 @@ test.describe("POS mobile touch-first", () => {
 
             await page.getByRole("button", { name: new RegExp(friesName) }).click();
 
-            await page.getByRole("button", { name: /Sconti/i }).click();
+            await page.getByRole("button", { name: /Prezzi e sconti/i }).click();
             await expect(page.getByTestId("pos-mobile-discount-presets")).toBeVisible();
-            const discountPreset = page.getByRole("dialog", { name: /Sconti/i }).getByRole("button", { name: /Promo 20%/i });
+            const discountDialog = page.getByRole("dialog", { name: /Prezzi e sconti/i });
+            const volunteerPricing = discountDialog.getByLabel("Modalità volontari");
+            await expect(volunteerPricing).toBeVisible();
+            await volunteerPricing.check();
+            await page.keyboard.press("Escape");
+            await expect(page.getByRole("button", { name: /Prezzi volontari attivi/i })).toBeVisible();
+            await page.getByRole("button", { name: /Prezzi volontari attivi/i }).click();
+            await discountDialog.getByLabel("Modalità volontari").uncheck();
+            const discountPreset = discountDialog.getByRole("button", { name: /Promo 20%/i });
             await discountPreset.focus();
             await page.keyboard.press("Enter");
 
@@ -160,6 +168,7 @@ test.describe("POS mobile touch-first", () => {
             await expect(cartSheet.getByText(burgerName)).toBeVisible();
             await expect(cartSheet.getByText(friesName)).toBeVisible();
             await expect(cartSheet.getByText(/Sconto Promo 20%/i)).toBeVisible();
+            await expect(cartSheetDialog.getByLabel("Modalità volontari")).toHaveCount(0);
 
             await cartSheetDialog.getByRole("button", { name: "PAGA ORA", exact: true }).click();
             const checkoutDialog = page.getByRole("dialog").filter({ hasText: /Importo Dovuto/i });

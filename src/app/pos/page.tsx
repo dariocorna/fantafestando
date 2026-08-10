@@ -305,6 +305,8 @@ function PosProductCard({
 }: PosProductCardProps) {
     const hasQuantity = quantity > 0
     const shouldShowTouchDecrement = showTouchDecrement && hasQuantity
+    const usesDesktopQuantityControl = variant !== "mobile" && shouldShowTouchDecrement
+    const quantityControlInset = Math.max(56, 40 + String(quantity).length * 10)
     const effectivePrice = useVolunteerPrice && typeof product.volunteerPrice === "number"
         ? product.volunteerPrice
         : product.basePrice
@@ -313,18 +315,21 @@ function PosProductCard({
         : `${effectivePrice.toFixed(2)} €`
     const instructionsId = "pos-product-card-instructions"
     const addLabel = `${displayName}, ${priceLabel}, quantita nel carrello ${quantity}. Aggiungi una unita`
-    const decrementLabel = `Rimuovi una unita di ${displayName}`
+    const decrementLabel = `Rimuovi una unità di ${displayName}. Quantità nel carrello ${quantity}`
     const stockPillClass = `inline-flex w-fit rounded-sm px-1.5 py-0.5 text-[10px] font-bold ${stockStatus === "OUT"
         ? "bg-red-100 text-red-700"
         : "bg-amber-100 text-amber-700"
         }`
-    const badge = hasQuantity ? (
+    const badge = hasQuantity && !usesDesktopQuantityControl ? (
         <span
-            className={`absolute right-2 top-2 z-10 inline-flex min-h-8 min-w-8 items-center justify-center rounded-full border-2 border-white bg-[var(--brand-blue-700)] px-2 text-sm font-black leading-none text-white shadow-md ${variant === "compact" ? "text-xs" : ""}`}
+            className={`absolute right-2 top-2 z-10 inline-flex items-center justify-center rounded-xl border-2 border-white bg-[var(--brand-blue-700)] font-black leading-none text-white shadow-md tabular-nums ${variant === "compact"
+                ? "h-11 min-w-12 px-2 text-lg"
+                : "min-h-10 min-w-10 px-3 text-lg"
+                }`}
             data-testid={`pos-product-quantity-${product._id}`}
             aria-hidden="true"
         >
-            {variant === "compact" ? quantity : `x${quantity}`}
+            x{quantity}
         </span>
     ) : null
 
@@ -353,13 +358,22 @@ function PosProductCard({
                 event.stopPropagation()
                 onDecrement(product)
             }}
-            className={`absolute z-20 inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-xl border-2 border-white bg-white px-2.5 text-sm font-black text-red-700 shadow-lg ring-1 ring-red-200 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 ${variant === "mobile"
-                ? "bottom-3 right-3"
-                : "left-2 top-2"
-                }`}
+            className={variant === "mobile"
+                ? "absolute bottom-3 right-3 z-20 inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-xl border-2 border-white bg-white px-2.5 text-sm font-black text-red-700 shadow-lg ring-1 ring-red-200 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600"
+                : "absolute right-2 top-2 z-20 inline-flex h-11 min-w-12 flex-col items-center justify-center rounded-xl border-2 border-white bg-red-700 px-2 font-black leading-none text-white shadow-lg ring-1 ring-red-300 transition-colors hover:bg-red-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600"
+            }
         >
-            <Minus size={18} strokeWidth={3} />
-            <span className="text-xs">-1</span>
+            {variant === "mobile" ? (
+                <>
+                    <Minus size={18} strokeWidth={3} />
+                    <span className="text-xs">-1</span>
+                </>
+            ) : (
+                <>
+                    <span className="text-xs leading-none">-1</span>
+                    <span className="text-lg leading-none tabular-nums">x{quantity}</span>
+                </>
+            )}
         </button>
     ) : null
 
@@ -418,7 +432,7 @@ function PosProductCard({
                         )}
                         {hasQuantity ? (
                             <span
-                                className="ml-auto inline-flex min-h-8 items-center rounded-full bg-[var(--brand-blue-700)] px-3 text-sm font-black text-white"
+                                className="ml-auto inline-flex min-h-10 items-center rounded-xl bg-[var(--brand-blue-700)] px-4 text-lg font-black text-white"
                                 data-testid={`pos-product-quantity-${product._id}`}
                             >
                                 Nel carrello: {quantity}
@@ -454,7 +468,10 @@ function PosProductCard({
                         className="flex flex-1 flex-col gap-2 px-2.5 py-2.5"
                         style={{ backgroundColor }}
                     >
-                        <p className={`line-clamp-2 min-h-10 text-lg font-black leading-tight text-slate-900 ${hasQuantity ? "pr-10" : ""} ${shouldShowTouchDecrement ? "pl-16" : ""}`}>
+                        <p
+                            className="line-clamp-2 min-h-10 text-lg font-black leading-tight text-slate-900"
+                            style={hasQuantity ? { paddingRight: quantityControlInset } : undefined}
+                        >
                             {displayName}
                         </p>
                         {product.requiresConfiguration ? (
@@ -508,7 +525,10 @@ function PosProductCard({
                     boxShadow,
                 }}
             >
-                <p className={`mx-auto line-clamp-2 min-h-10 w-full max-w-[96%] text-center text-[clamp(16px,1vw,20px)] font-black leading-tight text-slate-800 ${hasQuantity ? "pr-7" : ""} ${shouldShowTouchDecrement ? "pl-16" : ""}`}>
+                <p
+                    className="mx-auto line-clamp-2 min-h-10 w-full max-w-[96%] text-center text-[clamp(16px,1vw,20px)] font-black leading-tight text-slate-800"
+                    style={hasQuantity ? { paddingRight: quantityControlInset } : undefined}
+                >
                     {displayName}
                 </p>
                 {product.requiresConfiguration ? (
@@ -535,7 +555,6 @@ export default function PosPage() {
     const [ingredients, setIngredients] = useState<IIngredient[]>([])
     const [activeEvent, setActiveEvent] = useState<IEvent | null>(null)
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
-    const [isDiscountsExpanded, setIsDiscountsExpanded] = useState(false)
     const [isDiscountSheetOpen, setIsDiscountSheetOpen] = useState(false)
     const [isQuickStockOpen, setIsQuickStockOpen] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
@@ -817,7 +836,7 @@ export default function PosPage() {
     const getAdaptiveProductRowMinHeight = (productsCount: number): string => {
         const safeCount = Math.max(productsCount, 1)
         const gapPx = 6 // space-y-1.5
-        const reservedVerticalPx = isDiscountsExpanded ? 170 : 120
+        const reservedVerticalPx = 120
 
         // Viewport-based adaptive sizing per column:
         // - grows on tall screens
@@ -1670,34 +1689,34 @@ export default function PosPage() {
             ? Number((computeLiveDiscountAmount(item) * -1).toFixed(2))
             : Number((item.quantity * unitPrice).toFixed(2))
         return (
-            <div key={item.lineId} className="grid gap-2 rounded-md border bg-white p-2.5">
+            <div key={item.lineId} className="grid gap-3 rounded-md border bg-white p-3" data-testid={`cart-item-row-${item.lineId}`}>
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex flex-col">
-                        <span className={`line-clamp-2 text-sm font-bold ${item.isDiscount ? "text-emerald-700" : "text-slate-800 dark:text-slate-100"}`}>{item.name}</span>
+                        <span className={`line-clamp-2 text-base font-black ${item.isDiscount ? "text-emerald-700" : "text-slate-800 dark:text-slate-100"}`}>{item.name}</span>
                         {item.isDiscount ? (
-                            <span className="text-[11px] font-semibold text-emerald-600">
+                            <span className="text-sm font-semibold text-emerald-600">
                                 {item.discountPreset?.type === "PERCENT"
                                     ? `${item.discountPreset.value}% su ${(liveDiscountsByLineId.get(item.lineId)?.baseAmount ?? subtotal).toFixed(2)} €`
                                     : `Sconto fisso ${item.discountPreset?.value.toFixed(2)} €`}
                             </span>
                         ) : (
                             <div className="space-y-1">
-                                <span className="text-xs text-slate-500">
+                                <span className="text-base font-bold text-slate-600" data-testid={`cart-item-unit-price-${item.lineId}`}>
                                     {item.quantity} x {unitPrice.toFixed(2)} €
                                     {isVolunteerMode && typeof item.volunteerPrice === "number" ? " · Volontari" : ""}
                                 </span>
                                 {Array.isArray(item.selectedOptions) && item.selectedOptions.length > 0 ? (
-                                    <p className="line-clamp-2 text-[11px] font-semibold text-slate-500">
+                                    <p className="line-clamp-2 text-sm font-semibold text-slate-500">
                                         {item.selectedOptions.join(" • ")}
                                     </p>
                                 ) : null}
                                 {item.customKitchenNotes ? (
-                                    <p className="line-clamp-2 text-[11px] font-black text-indigo-700" data-testid={`cart-item-notes-${item.lineId}`}>
+                                    <p className="line-clamp-2 text-sm font-black text-indigo-700" data-testid={`cart-item-notes-${item.lineId}`}>
                                         {item.customKitchenNotes}
                                     </p>
                                 ) : null}
                                 {item.splitPrintPerUnit ? (
-                                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">
+                                    <p className="text-xs font-black uppercase tracking-widest text-amber-700">
                                         Comanda singola
                                     </p>
                                 ) : null}
@@ -1713,35 +1732,35 @@ export default function PosPage() {
                         <Trash2 size={18} />
                     </button>
                 </div>
-                <div className="flex items-center justify-between gap-2">
-                    <span className={`text-sm font-black ${item.isDiscount ? "text-emerald-700" : ""}`}>{lineTotal.toFixed(2)} €</span>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className={`text-lg font-black ${item.isDiscount ? "text-emerald-700" : "text-[var(--brand-blue-700)]"}`} data-testid={`cart-item-total-${item.lineId}`}>{lineTotal.toFixed(2)} €</span>
                     {!item.isDiscount ? (
-                        <div className="flex shrink-0 items-center gap-2">
+                        <div className="ml-auto flex shrink-0 items-center gap-2">
                             <button
                                 type="button"
                                 aria-label={`Modifica dettagli ${item.name}`}
                                 onClick={() => openCartItemContext(item)}
-                                className={`flex items-center justify-center rounded-md text-indigo-600 hover:bg-indigo-50 ${isMobilePos ? "h-11 w-11" : "h-10 w-10"}`}
+                                className="flex h-11 w-11 items-center justify-center rounded-md text-indigo-600 hover:bg-indigo-50"
                             >
                                 <Settings2 size={18} />
                             </button>
-                            <div className={`inline-flex items-center rounded-md border border-slate-200 bg-slate-50 ${isMobilePos ? "h-11" : "h-10"}`}>
+                            <div className="inline-flex h-11 items-center rounded-md border border-slate-200 bg-slate-50">
                                 <button
                                     type="button"
                                     aria-label={`Diminuisci quantità ${item.name}`}
                                     disabled={item.quantity <= 1}
-                                    className={`flex items-center justify-center text-lg font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-35 ${isMobilePos ? "h-11 w-11" : "h-10 w-10"}`}
+                                    className="flex h-11 w-11 items-center justify-center text-2xl font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-35"
                                     onClick={() => decreaseCartItemQuantity(item.lineId)}
                                 >
                                     -
                                 </button>
-                                <span className="min-w-8 text-center text-sm font-black text-slate-800" aria-live="polite">
+                                <span className="min-w-10 text-center text-lg font-black text-slate-900" aria-live="polite" data-testid={`cart-item-quantity-${item.lineId}`}>
                                     {item.quantity}
                                 </span>
                                 <button
                                     type="button"
                                     aria-label={`Aumenta quantità ${item.name}`}
-                                    className={`flex items-center justify-center text-lg font-black text-slate-700 ${isMobilePos ? "h-11 w-11" : "h-10 w-10"}`}
+                                    className="flex h-11 w-11 items-center justify-center text-2xl font-black text-slate-700"
                                     onClick={() => increaseCartItemQuantity(item.lineId)}
                                 >
                                     +
@@ -1783,19 +1802,40 @@ export default function PosPage() {
     ) : null
 
     const discountsSurfaceContent = (
-        <div
-            className="border border-[#d9e6f8] bg-white p-2"
+        <section
+            id={isMobilePos ? "pos-mobile-discount-presets" : "pos-discount-presets"}
+            className="space-y-2 rounded-lg border-2 border-emerald-200 bg-emerald-50/60 p-2.5"
             data-testid={isMobilePos ? "pos-mobile-discount-presets" : "pos-discount-presets"}
         >
+            <div className="flex items-center justify-between gap-3">
+                <div>
+                    <p className="text-sm font-black uppercase tracking-[0.08em] text-emerald-900">Prezzi e sconti</p>
+                    <p className="text-xs font-semibold text-emerald-700">Modificatori del carrello</p>
+                </div>
+                <label className="inline-flex min-h-11 items-center gap-2 rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-black text-emerald-800">
+                    <span>Volontari</span>
+                    <input
+                        type="checkbox"
+                        aria-label="Modalità volontari"
+                        checked={isVolunteerMode}
+                        onChange={(event) => {
+                            setIsVolunteerMode(event.target.checked)
+                            if (event.target.checked) {
+                                setCart((prev) => prev.filter((item) => !item.isDiscount))
+                            }
+                        }}
+                    />
+                </label>
+            </div>
             {quickDiscountPresets.length === 0 ? (
-                <div className="border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center">
+                <div className="border border-dashed border-emerald-300 bg-white px-3 py-3 text-center">
                     <p className="text-sm font-black text-slate-700">Nessun preset sconto configurato</p>
                     <p className="mt-1 text-xs font-semibold text-slate-500">
                         Configura i preset da Admin &gt; Impostazioni.
                     </p>
                 </div>
             ) : (
-                <div className="flex flex-wrap gap-1.5">
+                <div className="grid gap-2">
                     {quickDiscountPresets.map((preset, index) => {
                         const previewAmount = computePresetDiscountAmount(preset, discountBaseAmount)
                         const isPresetApplied = discountCartItems.some((item) => isSameDiscountPreset(item, preset))
@@ -1812,15 +1852,15 @@ export default function PosPage() {
                                     }
                                 }}
                                 disabled={isVolunteerMode || productCartItems.length === 0 || isPresetApplied}
-                                className="inline-flex min-h-11 min-w-[200px] items-center gap-1.5 border border-emerald-200 bg-emerald-50 px-2 py-1 text-left transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                className="inline-flex min-h-12 w-full items-center gap-2 rounded-md border border-emerald-300 bg-white px-3 py-2 text-left shadow-sm transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                                <span className="max-w-[120px] truncate text-xs font-black leading-tight text-emerald-800">
+                                <span className="min-w-0 flex-1 text-sm font-black leading-tight text-emerald-900">
                                     {preset.label}
                                 </span>
-                                <span className="inline-flex w-fit border border-emerald-200 bg-white px-1 py-0.5 text-[10px] font-bold text-emerald-700">
+                                <span className="inline-flex w-fit rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">
                                     {preset.type === "PERCENT" ? `${preset.value}%` : `${preset.value.toFixed(2)} €`}
                                 </span>
-                                <span className="ml-auto whitespace-nowrap text-xs font-black text-emerald-700">
+                                <span className="whitespace-nowrap text-sm font-black text-emerald-700">
                                     {isPresetApplied ? "Applicato" : `-${previewAmount.toFixed(2)} €`}
                                 </span>
                             </button>
@@ -1828,7 +1868,7 @@ export default function PosPage() {
                     })}
                 </div>
             )}
-        </div>
+        </section>
     )
 
     const recentPendingOrdersContent = (
@@ -2101,7 +2141,7 @@ export default function PosPage() {
                             className="inline-flex min-h-11 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700"
                         >
                             <Banknote size={14} />
-                            Sconti
+                            Prezzi e sconti
                         </button>
                         <button
                             type="button"
@@ -2112,6 +2152,16 @@ export default function PosPage() {
                             Scorte
                         </button>
                     </div>
+                    {isVolunteerMode ? (
+                        <button
+                            type="button"
+                            onClick={() => setIsDiscountSheetOpen(true)}
+                            className="mt-2 flex min-h-11 w-full items-center justify-between rounded-xl border border-emerald-300 bg-emerald-100 px-3 py-2 text-sm font-black text-emerald-900"
+                        >
+                            <span>Prezzi volontari attivi</span>
+                            <span className="text-xs uppercase tracking-wider">Modifica</span>
+                        </button>
+                    ) : null}
                     {loadedPendingOrder ? (
                         <div className="mt-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700">
                             Ordine caricato: codice {loadedPendingOrder.code}
@@ -2161,16 +2211,6 @@ export default function PosPage() {
                         </button>
                         <button type="button" onClick={openPendingOrdersSurface} className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-sm font-bold text-indigo-700">Pendenti</button>
                         <button type="button" onClick={() => handleCodeDialogOpenChange(true)} className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-bold text-slate-700">Codice</button>
-                        <button
-                            id="discounts-tab-trigger"
-                            onClick={() => setIsDiscountsExpanded((prev) => !prev)}
-                            className={`rounded-md border px-2.5 py-1.5 text-sm font-bold transition-colors ${isDiscountsExpanded
-                                ? "border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800"
-                                : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                                }`}
-                        >
-                            Sconti
-                        </button>
                         <button type="button" onClick={() => setIsQuickStockOpen(true)} className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-sm font-bold text-amber-800"><PackageOpen size={15} />Scorte</button>
                         </div>
                     </div>
@@ -2178,51 +2218,6 @@ export default function PosPage() {
 
                 <div className="flex-1 overflow-y-auto p-3 text-slate-800">
                     <div className="space-y-2">
-                        {isDiscountsExpanded ? (
-                            <section
-                                id="pos-discount-presets"
-                                className="border border-[#d9e6f8] bg-white p-2"
-                                data-testid="pos-discount-presets"
-                            >
-                                {quickDiscountPresets.length === 0 ? (
-                                    <div className="border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center">
-                                        <p className="text-sm font-black text-slate-700">Nessun preset sconto configurato</p>
-                                        <p className="mt-1 text-xs font-semibold text-slate-500">
-                                            Configura i preset da Admin &gt; Impostazioni.
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <div className="flex flex-wrap gap-1.5">
-                                        {quickDiscountPresets.map((preset, index) => {
-                                            const previewAmount = computePresetDiscountAmount(preset, discountBaseAmount)
-                                            const isPresetApplied = discountCartItems.some((item) => isSameDiscountPreset(item, preset))
-                                            return (
-                                                <button
-                                                    type="button"
-                                                    key={`discount-preset-card-${preset.label}-${preset.type}-${preset.value}-${index}`}
-                                                    id={`discount-preset-card-${index}`}
-                                                    aria-pressed={isPresetApplied}
-                                                    onClick={() => addDiscountPresetToCart(preset)}
-                                                    disabled={isVolunteerMode || productCartItems.length === 0 || isPresetApplied}
-                                                    className="inline-flex h-10 min-w-[200px] items-center gap-1.5 border border-emerald-200 bg-emerald-50 px-2 py-1 text-left transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                >
-                                                    <span className="max-w-[120px] truncate text-xs font-black leading-tight text-emerald-800">
-                                                        {preset.label}
-                                                    </span>
-                                                    <span className="inline-flex w-fit border border-emerald-200 bg-white px-1 py-0.5 text-[10px] font-bold text-emerald-700">
-                                                        {preset.type === "PERCENT" ? `${preset.value}%` : `${preset.value.toFixed(2)} €`}
-                                                    </span>
-                                                    <span className="ml-auto whitespace-nowrap text-xs font-black text-emerald-700">
-                                                        {isPresetApplied ? "Applicato" : `-${previewAmount.toFixed(2)} €`}
-                                                    </span>
-                                                </button>
-                                            )
-                                        })}
-                                    </div>
-                                )}
-                            </section>
-                        ) : null}
-
                         <section data-testid="pos-all-categories-catalog">
                             {isModernCatalogLayout ? (
                                 <div className="space-y-2">
@@ -2441,6 +2436,7 @@ export default function PosPage() {
                 className="h-full shrink-0 border-l border-[#d9e6f8] bg-[#f7fbff] flex flex-col"
                 style={{ width: "clamp(280px, 23vw, 380px)" }}
             >
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-testid="pos-desktop-scroll-region">
                 {/* Info Intestazione */}
                 <div className="border-b border-[#d9e6f8] bg-white p-3">
                     <h2 className="truncate text-base font-black uppercase tracking-tight text-[var(--brand-ink)]">
@@ -2532,8 +2528,12 @@ export default function PosPage() {
                     </div>
                 </div>
 
+                <div className="max-h-[clamp(8rem,24vh,14rem)] shrink-0 overflow-y-auto border-b border-[#d9e6f8] bg-white p-3" data-testid="pos-desktop-discounts">
+                    {discountsSurfaceContent}
+                </div>
+
                 {/* Elementi Carrello */}
-                <div className="flex-1 space-y-2 overflow-y-auto p-3">
+                <div className="min-h-32 flex-1 space-y-2 overflow-y-auto p-3" data-testid="pos-desktop-cart-items">
                     {loadedPendingOrder ? (
                         <div className="space-y-2 rounded-md border border-indigo-200 bg-indigo-50 p-3">
                             <div className="flex items-start justify-between gap-2">
@@ -2571,9 +2571,10 @@ export default function PosPage() {
                         cart.map(renderCartItem)
                     )}
                 </div>
+                </div>
 
                 {/* Footer / Pulsante Pagamento */}
-                <div className="space-y-2 border-t border-[#d9e6f8] bg-white p-3">
+                <div className="shrink-0 space-y-2 border-t border-[#d9e6f8] bg-white p-3">
                     <div className="flex items-center justify-between gap-2 px-1">
                         <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Totale da Pagare</span>
                         <span className="whitespace-nowrap text-2xl font-black leading-none text-[var(--brand-blue-700)]">{effectiveTotal.toFixed(2)} €</span>
@@ -2585,20 +2586,6 @@ export default function PosPage() {
                         ) : null}
                         <p>Sconti applicati: -{totalDiscountApplied.toFixed(2)} €</p>
                     </div>
-                    <label className="flex items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-800">
-                        <span>Modalità volontari</span>
-                        <input
-                            type="checkbox"
-                            checked={isVolunteerMode}
-                            onChange={(event) => {
-                                setIsVolunteerMode(event.target.checked)
-                                if (event.target.checked) {
-                                    setCart((prev) => prev.filter((item) => !item.isDiscount))
-                                }
-                            }}
-                        />
-                    </label>
-
                     <button
                         onClick={() => setIsCheckoutOpen(true)}
                         disabled={productCartItems.length === 0 || !selectedPosDeviceId || !cashSession || isProcessing || isCashSessionLoading}
@@ -2663,19 +2650,6 @@ export default function PosPage() {
                             ) : null}
                             <p>Sconti applicati: -{totalDiscountApplied.toFixed(2)} €</p>
                         </div>
-                        <label className="flex items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-800">
-                            <span>Modalità volontari</span>
-                            <input
-                                type="checkbox"
-                                checked={isVolunteerMode}
-                                onChange={(event) => {
-                                    setIsVolunteerMode(event.target.checked)
-                                    if (event.target.checked) {
-                                        setCart((prev) => prev.filter((item) => !item.isDiscount))
-                                    }
-                                }}
-                            />
-                        </label>
                         <Button
                             type="button"
                             className="brand-cta-primary h-14 w-full text-lg font-black"
@@ -2701,8 +2675,8 @@ export default function PosPage() {
             <Sheet open={isDiscountSheetOpen} onOpenChange={setIsDiscountSheetOpen}>
                 <SheetContent side="bottom" className="max-h-[82dvh] rounded-t-3xl px-0 pb-0 lg:hidden">
                     <SheetHeader className="border-b border-[#d9e6f8] px-4 pb-3">
-                        <SheetTitle className="text-xl font-black text-[var(--brand-ink)]">Sconti</SheetTitle>
-                        <SheetDescription>Preset rapidi applicabili al carrello corrente.</SheetDescription>
+                        <SheetTitle className="text-xl font-black text-[var(--brand-ink)]">Prezzi e sconti</SheetTitle>
+                        <SheetDescription>Modalità volontari e preset applicabili al carrello corrente.</SheetDescription>
                     </SheetHeader>
                     <div className="overflow-y-auto px-4 py-4">
                         {discountsSurfaceContent}
