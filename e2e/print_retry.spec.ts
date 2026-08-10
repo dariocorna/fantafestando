@@ -5,7 +5,9 @@ import Printer from "../src/models/Printer"
 import PrintJob from "../src/models/PrintJob"
 import Order from "../src/models/Order"
 import {
+    createCategory,
     createAndActivateEvent,
+    createProduct,
     configureCashPos,
     deleteEvent,
     openPosAndSelectDevice,
@@ -59,31 +61,8 @@ async function createCatalogProduct(
     kitchenPrinterName?: string,
     shortName = "RTR-SHORT"
 ) {
-    await page.goto("/admin/catalog")
-    await page.click("#new-category-btn")
-    const categoryDialog = page.getByRole("dialog").filter({ hasText: /Aggiungi Categoria/i }).first()
-    await categoryDialog.locator("#cat-name").fill(categoryName)
-    if (kitchenPrinterName) {
-        const printerSelect = categoryDialog.getByLabel("Stampante Reparto")
-        const printerValue = await printerSelect.evaluate((element, needle) => {
-            const select = element as HTMLSelectElement
-            const option = Array.from(select.options).find((item) => item.text.includes(needle))
-            return option?.value ?? null
-        }, kitchenPrinterName)
-        expect(printerValue).toBeTruthy()
-        await printerSelect.selectOption(printerValue!)
-    }
-    await categoryDialog.getByRole("button", { name: "Salva Categoria", exact: true }).click()
-    await expect(page.getByRole("row").filter({ hasText: categoryName }).first()).toBeVisible()
-
-    await page.click("#new-product-btn")
-    const productDialog = page.getByRole("dialog").filter({ hasText: /Aggiungi Prodotto/i }).first()
-    await productDialog.locator("#prod-name").fill(productName)
-    await productDialog.getByLabel("Etichetta breve POS/Scontrino (opzionale)").fill(shortName)
-    await productDialog.locator('input[name="basePrice"]').fill("5.00")
-    await productDialog.locator('select[name="categoryId"]').selectOption({ label: categoryName })
-    await productDialog.getByRole("button", { name: "Salva Prodotto", exact: true }).click()
-    await expect(page.getByText(productName)).toBeVisible()
+    await createCategory(page, categoryName, { kitchenPrinterName })
+    await createProduct(page, categoryName, { name: productName, shortName, price: "5.00" })
 }
 
 test.describe("Print Retry Flows", () => {
@@ -222,8 +201,13 @@ test.describe("Print Retry Flows", () => {
 
             const failedJobButton = page.locator("button").filter({ hasText: /FAILED/ }).first()
             await failedJobButton.click()
+            const failedRetryResponse = page.waitForResponse((response) =>
+                response.url().includes("/api/admin/print-jobs/")
+                && response.request().method() === "POST"
+            )
             await page.getByRole("button", { name: "Reinvia job fallito" }).click()
-            await expect(page.getByText("Invio stampa fallito")).toBeVisible({ timeout: 15000 })
+            expect((await failedRetryResponse).status()).toBe(400)
+            await expect(page.getByText("Invio stampa fallito")).toBeVisible()
 
             // Ripristina la stampante cassa verso emulatore raggiungibile e ritenta il retry
             await page.getByRole("tab", { name: "Stampanti" }).click()

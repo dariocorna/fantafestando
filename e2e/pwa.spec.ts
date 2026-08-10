@@ -50,15 +50,9 @@ test.describe("PWA surfaces", () => {
         await expect
             .poll(async () => {
                 const registrations = await getServiceWorkerRegistrations(page);
-                return registrations.find((registration) => registration.scope.includes("/menu/")) || null;
+                return registrations.find((registration) => registration.scope.includes("/menu/"))?.scriptURL || "";
             }, { timeout: 10000 })
-            .not.toBeNull();
-
-        const registrations = await getServiceWorkerRegistrations(page);
-        const menuRegistration = registrations.find((registration) => registration.scope.includes("/menu/"));
-
-        expect(menuRegistration).toBeDefined();
-        expect(menuRegistration?.scriptURL).toContain("/sw-menu.js?v=");
+            .toContain("/sw-menu.js?v=");
     });
 
     test("nessuna route offline dedicata per menu", async ({ page }) => {
