@@ -150,7 +150,7 @@ Rifattorizzazione dell'architettura hardware per supportare periferiche modulari
 - Dashboard con metriche: incasso contanti vs. carte (SumUp).
 - Tracciamento vendite prodotti (Best Seller, Sotto Performanti).
 - Riepilogo espandibile di tutti i prodotti venduti nella serata corrente.
-- Export CSV/Excel per rendicontazione di fine festa.
+- Export CSV/Excel e report PDF A4 multipagina per rendicontazione di fine festa.
 - Sezione **Sessioni Cassa** in admin con storico aperture/chiusure per postazione.
 - Download report sessione cassa (CSV/XLS) dal pannello admin.
 - Chiusura cassa POS con indicazione del **contante atteso** (solo cash, esclusi elettronici).
