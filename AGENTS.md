@@ -43,7 +43,7 @@ Il branch si crea partendo dal branch di sviluppo principale corrente.
 2. Ogni commit deve contenere una sola modifica logica. Nessun commit deve corrispondere a un rework di un commit precedente sulla stessa sessione (usare `git rebase -i` / squash se necessario).
 3. Aprire la **Pull Request** su GitHub verso il branch di sviluppo principale.
 4. Attendere la review e il merge da parte dell'utente.
-5. Dopo il merge, creare sempre un tag di rilascio **annotato** sul commit risultante (`git tag -a vX.Y.Z -m "Release X.Y.Z"`), verificarne il target e pubblicare il solo tag su `origin` (`git push origin vX.Y.Z`). Un rilascio non è completato finché il tag non è presente sul remote.
+5. Dopo il merge, sincronizzare prima il branch principale e creare il tag di rilascio **annotato** indicando esplicitamente il commit risultante dal merge; non taggare il `HEAD` del branch della PR. Esempio: `git switch master && git pull --ff-only origin master`, poi `RELEASE_SHA="$(git rev-parse HEAD)"` e `git tag -a vX.Y.Z "$RELEASE_SHA" -m "Release X.Y.Z"`. Verificare il target e pubblicare il solo tag su `origin` (`git push origin vX.Y.Z`). Un rilascio non è completato finché il tag non è presente sul remote.
 
 ---
 
