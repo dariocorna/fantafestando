@@ -57,6 +57,29 @@ Il branch si crea partendo dal branch di sviluppo principale corrente.
 - Nei bugfix, considerare bloccante ogni refactor non indispensabile: correggere la causa nel punto condiviso più piccolo possibile e preservare i comportamenti, i contratti e i flussi adiacenti.
 
 
+## Code Graph obbligatorio
+
+- Lo strumento canonico è `~/devel/dario/code-graph-rag`. Prima di qualsiasi modifica funzionale o code review, dalla root del repository sincronizzare il grafo con:
+  ```bash
+  ~/devel/dario/code-graph-rag/.venv/bin/cgr start \
+    --repo-path "$PWD" \
+    --update-graph \
+    --no-embeddings
+  ```
+- Non usare mai `--clean`: il database è condiviso con altri progetti. Lasciare che `cgr` derivi automaticamente il nome del progetto, senza `--project-name`, così CLI e MCP usano lo stesso scope.
+- Prima di modificare, interrogare almeno le definizioni coinvolte, i chiamanti, le chiamate in uscita, gli import e i test correlati. In review partire dai simboli toccati dal diff e verificare anche consumatori e contratti a valle.
+- Se è configurato un provider LLM, usare una query in sola lettura, ad esempio:
+  ```bash
+  ~/devel/dario/code-graph-rag/.venv/bin/cgr start \
+    --repo-path "$PWD" \
+    --no-sync \
+    --no-embeddings \
+    --ask-agent "Use only query_graph; do not modify files. <domanda>"
+  ```
+  Senza provider LLM, interrogare Memgraph con Cypher in sola lettura tramite `connect_memgraph`; l'assenza del provider non elimina l'obbligo di consultare il grafo.
+- Il grafo è un indice di navigazione: confermare sempre i risultati nel sorgente, nel diff e nei test. Non usare gli strumenti di modifica di Code-Graph-RAG.
+
+
 ## Regole Generali
 
 - **SumUp temporaneamente deprecato**: non configurare o abilitare il pagamento automatico SumUp nei rilasci finché il relativo flusso di recupero non è stato validato; il deploy senza supporto SumUp è quello atteso.
