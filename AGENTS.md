@@ -59,9 +59,10 @@ Il branch si crea partendo dal branch di sviluppo principale corrente.
 
 ## Code Graph obbligatorio
 
-- Lo strumento canonico è `~/devel/dario/code-graph-rag`. Prima di qualsiasi modifica funzionale o code review, dalla root del repository sincronizzare il grafo con:
+- Lo strumento canonico è Code-Graph-RAG. Il binario è configurabile tramite `CODE_GRAPH_RAG_BIN`; il default punta al checkout locale dell'utente corrente. Prima di qualsiasi modifica funzionale o code review, dalla root del repository sincronizzare il grafo con:
   ```bash
-  ~/devel/dario/code-graph-rag/.venv/bin/cgr start \
+  CGR_BIN="${CODE_GRAPH_RAG_BIN:-$HOME/devel/dario/code-graph-rag/.venv/bin/cgr}"
+  "$CGR_BIN" start \
     --repo-path "$PWD" \
     --update-graph \
     --no-embeddings
@@ -70,7 +71,8 @@ Il branch si crea partendo dal branch di sviluppo principale corrente.
 - Prima di modificare, interrogare almeno le definizioni coinvolte, i chiamanti, le chiamate in uscita, gli import e i test correlati. In review partire dai simboli toccati dal diff e verificare anche consumatori e contratti a valle.
 - Se è configurato un provider LLM, usare una query in sola lettura, ad esempio:
   ```bash
-  ~/devel/dario/code-graph-rag/.venv/bin/cgr start \
+  CGR_BIN="${CODE_GRAPH_RAG_BIN:-$HOME/devel/dario/code-graph-rag/.venv/bin/cgr}"
+  "$CGR_BIN" start \
     --repo-path "$PWD" \
     --no-sync \
     --no-embeddings \
