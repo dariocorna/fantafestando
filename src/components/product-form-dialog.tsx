@@ -116,6 +116,7 @@ export function ProductFormDialog(props: ProductFormDialogProps) {
     const { mode, eventId, categories, products, ingredients, action } = props;
     const product = mode === "edit" ? props.product : undefined;
     const isEdit = mode === "edit";
+    const formKey = isEdit ? JSON.stringify(product) : "create";
     const initialState = getInitialState(product);
     const [open, setOpen] = useState(false);
     const [availableDays, setAvailableDays] = useState<DayCode[]>(initialState.availableDays);
@@ -240,7 +241,7 @@ export function ProductFormDialog(props: ProductFormDialogProps) {
                 )}
             </DialogTrigger>
             <DialogContent className="max-h-[90vh] overflow-y-auto">
-                <form action={handleSubmit}>
+                <form key={formKey} action={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle>{isEdit ? "Modifica Prodotto" : "Aggiungi Prodotto"}</DialogTitle>
                         <DialogDescription>
