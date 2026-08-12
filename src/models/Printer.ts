@@ -8,6 +8,8 @@ export interface IPrinter extends Document {
     isVirtual: boolean;
     emulatorSlot?: number;
     type: "CASHIER" | "KITCHEN";
+    printQueueLeaseToken?: string;
+    printQueueLeaseExpiresAt?: Date;
 }
 
 const PrinterSchema = new Schema<IPrinter>({
@@ -17,7 +19,9 @@ const PrinterSchema = new Schema<IPrinter>({
     port: { type: Number, required: true, default: 9100, min: 1, max: 65535 },
     isVirtual: { type: Boolean, required: true, default: false },
     emulatorSlot: { type: Number, min: 1, max: 10 },
-    type: { type: String, enum: ["CASHIER", "KITCHEN"], required: true, default: "KITCHEN" }
+    type: { type: String, enum: ["CASHIER", "KITCHEN"], required: true, default: "KITCHEN" },
+    printQueueLeaseToken: { type: String, trim: true },
+    printQueueLeaseExpiresAt: { type: Date }
 }, {
     timestamps: true
 });

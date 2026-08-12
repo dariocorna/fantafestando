@@ -434,3 +434,22 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
 
 **Test E2E**: `e2e/pos_stock_realtime.spec.ts` con due contesti browser, fallback e riconnessione.
 **Issue collegata**: `#141`.
+
+---
+
+## Issue GitHub #121: Coda persistente stampe reparto
+
+- Il POS consente di proseguire dopo un errore di stampa reparto lasciando i
+  job falliti in una coda persistente, senza perdere l'ordine contabilizzato.
+- Un poller backoffice riprende automaticamente i job in ordine di creazione
+  quando la stampante torna disponibile, con lease per evitare invii concorrenti.
+- Il monitor stampa mostra per reparto il numero di job in attesa e il job
+  accodato da più tempo.
+- Il retry manuale resta disponibile; le stampe cassa e gli errori permanenti
+  non vengono accodati automaticamente.
+- Il ritorno online è verificato tentando il primo job reale: la sola
+  connessione TCP non certifica lo stato del sensore carta.
+
+**Test E2E**: `e2e/print_queue_recovery.spec.ts` con accodamento POS di più
+ordini, ripresa automatica e verifica anti-duplicazione.
+**Issue collegata**: `#121`.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition, type FormEvent } from "react";
+import { useRef, useState, useSyncExternalStore, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -44,8 +44,17 @@ type FeedbackState =
     }
   | null;
 
+const subscribeToHydration = () => () => undefined;
+const getClientHydrationSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
+
 export function ImportEventDialog({ importUrl }: ImportEventDialogProps) {
   const router = useRouter();
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot
+  );
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [newEventName, setNewEventName] = useState("");
@@ -129,7 +138,7 @@ export function ImportEventDialog({ importUrl }: ImportEventDialogProps) {
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="outline">
+        <Button variant="outline" disabled={!hydrated}>
           <Upload className="h-4 w-4" />
           Importa Festa
         </Button>

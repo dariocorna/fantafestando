@@ -8,7 +8,8 @@ const {
     eventFindByIdMock,
     posDeviceFindByIdMock,
     productFindMock,
-    categoryFindMock
+    categoryFindMock,
+    printJobExistsMock
 } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     orderFindByIdMock: vi.fn(),
@@ -16,7 +17,8 @@ const {
     eventFindByIdMock: vi.fn(),
     posDeviceFindByIdMock: vi.fn(),
     productFindMock: vi.fn(),
-    categoryFindMock: vi.fn()
+    categoryFindMock: vi.fn(),
+    printJobExistsMock: vi.fn()
 }));
 
 vi.mock("@/lib/mongoose", () => ({
@@ -55,7 +57,7 @@ vi.mock("@/models/Category", () => ({
 }));
 
 vi.mock("@/models/PrintJob", () => ({
-    default: {}
+    default: { exists: printJobExistsMock }
 }));
 
 import { PrinterService } from "@/lib/printer";
@@ -125,6 +127,7 @@ describe("PrinterService.routeOrderToPrinters", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         orderUpdateOneMock.mockResolvedValue({ acknowledged: true });
+        printJobExistsMock.mockResolvedValue(null);
     });
 
     test("keeps only cashier summary and customer copy when no department printer is configured", async () => {
@@ -701,7 +704,8 @@ describe("PrinterService.routeOrderToPrinters", () => {
                     name: "Forno",
                     ip: "192.168.178.210",
                     port: 9100,
-                    isVirtual: false
+                    isVirtual: false,
+                    type: "KITCHEN"
                 }
             }
         ]);
@@ -721,6 +725,7 @@ describe("PrinterService.routeOrderToPrinters", () => {
         expect(cashierJob?.pizzaBarcodeValue).toBeUndefined();
         expect(kitchenJob).toEqual(expect.objectContaining({
             printType: "KITCHEN_ORDER",
+            queueRecoverable: true,
             pizzaNumber: 81,
             pizzaBarcodeValue: "00000819"
         }));
@@ -829,6 +834,7 @@ describe("PrinterService.routeOrderToPrinters", () => {
         expect(kitchenJob).toEqual(expect.objectContaining({
             ip: "192.168.178.203",
             printType: "KITCHEN_ORDER",
+            queueRecoverable: false,
             pizzaNumber: 81
         }));
         expect(kitchenJob?.pizzaBarcodeValue).toBeUndefined();

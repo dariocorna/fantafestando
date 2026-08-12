@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
 
 export type PrintJobSource = "ORDER" | "CASH_SESSION" | "MANUAL_TEST";
-export type PrintJobStatus = "QUEUED" | "SENT" | "FAILED";
+export type PrintJobStatus = "QUEUED" | "HELD" | "SENT" | "FAILED";
 export type PrintJobType =
     | "CUSTOMER_ORDER"
     | "KITCHEN_ORDER"
@@ -16,6 +16,7 @@ export interface IPrintJob extends Document {
     orderId?: Types.ObjectId;
     source: PrintJobSource;
     printType: PrintJobType;
+    queueRecoverable: boolean;
     status: PrintJobStatus;
     destinationHost: string;
     destinationPort: number;
@@ -26,6 +27,10 @@ export interface IPrintJob extends Document {
     rawCapturePath?: string;
     errorMessage?: string;
     retryClaimedAt?: Date;
+    liveClaimExpiresAt?: Date;
+    heldSince?: Date;
+    queueClaimToken?: string;
+    queueClaimExpiresAt?: Date;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -46,9 +51,10 @@ const PrintJobSchema = new Schema<IPrintJob>({
         required: true,
         default: "CUSTOMER_ORDER"
     },
+    queueRecoverable: { type: Boolean, required: true, default: false },
     status: {
         type: String,
-        enum: ["QUEUED", "SENT", "FAILED"],
+        enum: ["QUEUED", "HELD", "SENT", "FAILED"],
         required: true,
         default: "QUEUED"
     },
@@ -60,7 +66,11 @@ const PrintJobSchema = new Schema<IPrintJob>({
     document: { type: Schema.Types.Mixed, required: true },
     rawCapturePath: { type: String, trim: true },
     errorMessage: { type: String, trim: true },
-    retryClaimedAt: { type: Date }
+    retryClaimedAt: { type: Date },
+    liveClaimExpiresAt: { type: Date },
+    heldSince: { type: Date },
+    queueClaimToken: { type: String, trim: true },
+    queueClaimExpiresAt: { type: Date }
 }, {
     timestamps: true
 });
@@ -68,6 +78,7 @@ const PrintJobSchema = new Schema<IPrintJob>({
 PrintJobSchema.index({ eventId: 1, createdAt: -1 });
 PrintJobSchema.index({ eventId: 1, status: 1, createdAt: -1 });
 PrintJobSchema.index({ printerId: 1, createdAt: -1 });
+PrintJobSchema.index({ printerId: 1, status: 1, createdAt: 1, _id: 1 });
 
 if (process.env.NODE_ENV === "development") {
     delete mongoose.models.PrintJob;

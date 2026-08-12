@@ -11,11 +11,13 @@ import {
     MAX_VIRTUAL_PRINTER_SLOTS,
     normalizePrinterConfig
 } from "@/lib/printer-config";
+import { recoverStaleLiveKitchenPrintJobs } from "@/lib/print-queue";
 import { encryptSecret, isEncryptedSecret } from "@/lib/secrets";
 import Category from "@/models/Category";
 import Event from "@/models/Event";
 import Peripheral from "@/models/Peripheral";
 import PosDevice from "@/models/PosDevice";
+import PrintJob from "@/models/PrintJob";
 import Printer from "@/models/Printer";
 import { revalidatePath } from "next/cache";
 import {
@@ -33,6 +35,25 @@ function getConfigString(config: unknown, key: string): string | undefined {
     if (!config || typeof config !== "object") return undefined;
     const value = (config as Record<string, unknown>)[key];
     return typeof value === "string" ? value : undefined;
+}
+
+function hasPendingPrintQueue(eventId: string, printerId: string) {
+    return PrintJob.exists({
+        eventId,
+        printerId,
+        queueRecoverable: true,
+        status: { $in: ["HELD", "QUEUED"] }
+    });
+}
+
+function availablePrintQueueLease(now: Date = new Date()) {
+    return {
+        $or: [
+            { printQueueLeaseToken: { $exists: false } },
+            { printQueueLeaseExpiresAt: { $exists: false } },
+            { printQueueLeaseExpiresAt: { $lte: now } }
+        ]
+    };
 }
 
 export async function createPrinterAction(formData: FormData) {
@@ -90,8 +111,19 @@ export async function deletePrinterAction(formData: FormData) {
     const scopedEventId = scopedEvent.eventId;
 
     await dbConnect();
-    const deletedPrinter = await Printer.findOneAndDelete({ _id: id, eventId: scopedEventId }).select("_id").lean();
+    await recoverStaleLiveKitchenPrintJobs({ eventId: scopedEventId, printerId: id });
+    if (await hasPendingPrintQueue(scopedEventId, id)) {
+        return { error: "La stampante ha stampe reparto in attesa o in invio. Attendi lo svuotamento della coda prima di eliminarla." };
+    }
+    const deletedPrinter = await Printer.findOneAndDelete({
+        _id: id,
+        eventId: scopedEventId,
+        ...availablePrintQueueLease()
+    }).select("_id").lean();
     if (!deletedPrinter) {
+        if (await Printer.exists({ _id: id, eventId: scopedEventId })) {
+            return { error: "La stampante ha stampe reparto in attesa o in invio. Attendi lo svuotamento della coda prima di eliminarla." };
+        }
         return { error: "Stampante non trovata nella festa selezionata" };
     }
 
@@ -130,8 +162,18 @@ export async function updatePrinterAction(formData: FormData) {
     if ("error" in scopedEvent) return { error: scopedEvent.error };
 
     await dbConnect();
+    if (type === "CASHIER") {
+        await recoverStaleLiveKitchenPrintJobs({ eventId: scopedEvent.eventId, printerId: id });
+    }
+    if (type === "CASHIER" && await hasPendingPrintQueue(scopedEvent.eventId, id)) {
+        return { error: "La stampante ha stampe reparto in attesa o in invio. Attendi lo svuotamento della coda prima di cambiarne il tipo." };
+    }
     const updatedPrinter = await Printer.findOneAndUpdate(
-        { _id: id, eventId: scopedEvent.eventId },
+        {
+            _id: id,
+            eventId: scopedEvent.eventId,
+            ...(type === "CASHIER" ? availablePrintQueueLease() : {})
+        },
         {
             name: name.trim(),
             ip: normalizedConfig.data.ip,
@@ -144,6 +186,9 @@ export async function updatePrinterAction(formData: FormData) {
     ).select("_id").lean();
 
     if (!updatedPrinter) {
+        if (type === "CASHIER" && await Printer.exists({ _id: id, eventId: scopedEvent.eventId })) {
+            return { error: "La stampante ha stampe reparto in attesa o in invio. Attendi lo svuotamento della coda prima di cambiarne il tipo." };
+        }
         return { error: "Stampante non trovata nella festa selezionata" };
     }
 

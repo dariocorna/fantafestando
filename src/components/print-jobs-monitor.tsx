@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { RefreshCw } from "lucide-react";
 import { PrintDocumentViewer } from "./print-document-viewer";
 
-type PrintJobStatus = "QUEUED" | "SENT" | "FAILED";
+type PrintJobStatus = "QUEUED" | "HELD" | "SENT" | "FAILED";
 type PrintJobType = "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "EASTER_EGG_IMAGE" | "MANUAL_TEST";
 
 interface MonitorPrinterOption {
@@ -42,6 +42,16 @@ interface PrintJobItem {
     } | null;
 }
 
+interface HeldPrintQueue {
+    key: string;
+    printerId: string | null;
+    name: string;
+    destinationHost: string;
+    destinationPort: number;
+    count: number;
+    oldestHeldAt: string;
+}
+
 function formatDateTime(value: string): string {
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return value;
@@ -51,7 +61,12 @@ function formatDateTime(value: string): string {
 function statusBadgeClass(status: PrintJobStatus) {
     if (status === "SENT") return "bg-emerald-100 text-emerald-700";
     if (status === "FAILED") return "bg-rose-100 text-rose-700";
+    if (status === "HELD") return "bg-orange-100 text-orange-800";
     return "bg-amber-100 text-amber-700";
+}
+
+function statusLabel(status: PrintJobStatus) {
+    return status === "HELD" ? "IN ATTESA" : status;
 }
 
 function printTypeBadgeClass(type: PrintJobType) {
@@ -79,6 +94,7 @@ export function PrintJobsMonitor({
     printers: MonitorPrinterOption[];
 }) {
     const [jobs, setJobs] = useState<PrintJobItem[]>([]);
+    const [heldQueues, setHeldQueues] = useState<HeldPrintQueue[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [statusFilter, setStatusFilter] = useState<"ALL" | PrintJobStatus>("ALL");
     const [printerFilter, setPrinterFilter] = useState<string>("ALL");
@@ -100,13 +116,15 @@ export function PrintJobsMonitor({
         const response = await fetch(`/api/admin/print-jobs?${params.toString()}`, { cache: "no-store" });
         if (!response.ok) {
             setJobs([]);
+            setHeldQueues([]);
             setIsLoading(false);
             return;
         }
 
-        const payload = await response.json() as { jobs?: PrintJobItem[] };
+        const payload = await response.json() as { jobs?: PrintJobItem[]; heldQueues?: HeldPrintQueue[] };
         const nextJobs = payload.jobs || [];
         setJobs(nextJobs);
+        setHeldQueues(payload.heldQueues || []);
         setIsLoading(false);
         if (nextJobs.length > 0 && !selectedJobId) {
             setSelectedJobId(nextJobs[0].id);
@@ -185,6 +203,25 @@ export function PrintJobsMonitor({
 
     return (
         <div className="space-y-4">
+            {heldQueues.length > 0 ? (
+                <Card data-testid="held-print-queues" className="border-orange-300 bg-orange-50">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-lg text-orange-900">Code reparto in attesa</CardTitle>
+                    </CardHeader>
+                    <CardContent className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                        {heldQueues.map((queue) => (
+                            <div key={queue.key} className="rounded-xl border border-orange-200 bg-white p-3">
+                                <p className="font-black text-orange-900">
+                                    {queue.name} · {queue.count} {queue.count === 1 ? "stampa" : "stampe"}
+                                </p>
+                                <p className="text-xs font-semibold text-orange-700">
+                                    In attesa dal {formatDateTime(queue.oldestHeldAt)}
+                                </p>
+                            </div>
+                        ))}
+                    </CardContent>
+                </Card>
+            ) : null}
             <Card>
                 <CardHeader className="pb-2">
                     <CardTitle className="text-xl">Monitor Stampa Runtime</CardTitle>
@@ -199,6 +236,7 @@ export function PrintJobsMonitor({
                                 <SelectContent>
                                     <SelectItem value="ALL">Tutti gli stati</SelectItem>
                                     <SelectItem value="QUEUED">In coda</SelectItem>
+                                    <SelectItem value="HELD">In attesa stampante</SelectItem>
                                     <SelectItem value="SENT">Inviati</SelectItem>
                                     <SelectItem value="FAILED">Falliti</SelectItem>
                                 </SelectContent>
@@ -253,7 +291,7 @@ export function PrintJobsMonitor({
                                     >
                                         <div className="flex flex-wrap items-center gap-2">
                                             <span className={`rounded-md px-2 py-1 text-xs font-black ${statusBadgeClass(job.status)}`}>
-                                                {job.status}
+                                                {statusLabel(job.status)}
                                             </span>
                                             <span className={`rounded-md px-2 py-1 text-xs font-semibold ${printTypeBadgeClass(job.printType)}`}>
                                                 {printTypeLabel(job.printType)}

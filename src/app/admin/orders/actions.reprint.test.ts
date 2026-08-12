@@ -6,6 +6,7 @@ const {
     getAdminContextEventIdMock,
     orderFindOneMock,
     printJobFindMock,
+    recoverStaleManualPrintRetryClaimsMock,
     routeOrderToPrintersMock,
     retryPrintJobByIdMock,
     revalidatePathMock
@@ -15,6 +16,7 @@ const {
     getAdminContextEventIdMock: vi.fn(),
     orderFindOneMock: vi.fn(),
     printJobFindMock: vi.fn(),
+    recoverStaleManualPrintRetryClaimsMock: vi.fn(),
     routeOrderToPrintersMock: vi.fn(),
     retryPrintJobByIdMock: vi.fn(),
     revalidatePathMock: vi.fn()
@@ -35,6 +37,9 @@ vi.mock("@/lib/printer", () => ({
         retryPrintJobById: retryPrintJobByIdMock
     }
 }))
+vi.mock("@/lib/print-queue", () => ({
+    recoverStaleManualPrintRetryClaims: recoverStaleManualPrintRetryClaimsMock
+}))
 vi.mock("@/lib/secrets", () => ({ decryptSecret: vi.fn() }))
 vi.mock("@/lib/sumup", () => ({
     refundSumUpTransaction: vi.fn(),
@@ -52,7 +57,7 @@ function mockOrder(order: { posDeviceId?: string | { toString(): string } } | nu
     return { selectMock, leanMock }
 }
 
-function failedJobsQuery(rows: Array<{ _id: string | { toString(): string } }>) {
+function failedJobsQuery(rows: Array<{ _id: string | { toString(): string }; status?: "FAILED" | "HELD" | "QUEUED" }>) {
     return {
         sort: vi.fn().mockReturnValue({
             select: vi.fn().mockReturnValue({
@@ -71,6 +76,7 @@ describe("reprintOrderById", () => {
         printJobFindMock.mockReturnValue(failedJobsQuery([]))
         routeOrderToPrintersMock.mockResolvedValue([true])
         retryPrintJobByIdMock.mockResolvedValue({ success: true })
+        recoverStaleManualPrintRetryClaimsMock.mockResolvedValue({ recovered: 0 })
     })
 
     test("rejects unauthenticated requests before reading the event", async () => {
@@ -179,7 +185,7 @@ describe("reprintOrderById", () => {
             eventId: "event-1",
             orderId: "order-1",
             source: "ORDER",
-            status: "FAILED"
+            status: { $in: ["FAILED", "HELD", "QUEUED"] }
         })
         expect(retryPrintJobByIdMock).toHaveBeenNthCalledWith(1, "event-1", "job-1")
         expect(retryPrintJobByIdMock).toHaveBeenNthCalledWith(2, "event-1", "job-2")
@@ -216,6 +222,30 @@ describe("reprintOrderById", () => {
         })
         expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
         expect(revalidatePathMock).toHaveBeenCalledWith("/admin/orders")
+    })
+
+    test.each(["HELD", "QUEUED"] as const)("does not create a duplicate batch while a job is %s", async (status) => {
+        mockOrder({ posDeviceId: "pos-1" })
+        printJobFindMock.mockReturnValue(failedJobsQuery([{ _id: "job-1", status }]))
+
+        await expect(reprintOrderById("order-1")).resolves.toEqual({
+            success: false,
+            error: "Ci sono già stampe in coda o in attesa per questo ordine. Attendi il completamento prima di ristampare."
+        })
+        expect(retryPrintJobByIdMock).not.toHaveBeenCalled()
+        expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
+    })
+
+    test("recovers expired manual retry claims before applying the duplicate guard", async () => {
+        mockOrder({ posDeviceId: "pos-1" })
+        printJobFindMock.mockReturnValue(failedJobsQuery([{ _id: "job-1", status: "FAILED" }]))
+        recoverStaleManualPrintRetryClaimsMock.mockResolvedValue({ recovered: 1 })
+
+        await expect(reprintOrderById("order-1")).resolves.toEqual({ success: true })
+
+        expect(recoverStaleManualPrintRetryClaimsMock).toHaveBeenCalledWith("event-1", "order-1")
+        expect(retryPrintJobByIdMock).toHaveBeenCalledWith("event-1", "job-1")
+        expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
     })
 
     test("returns a clear error when routing throws", async () => {

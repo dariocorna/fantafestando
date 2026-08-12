@@ -28,10 +28,17 @@ export function DeleteForm({
     idName?: string,
     hiddenFields?: Array<{ name: string; value: string }>,
     message: string,
-    action: (formData: FormData) => void,
+    action: (formData: FormData) => Promise<unknown> | unknown,
     buttonSize?: "default" | "sm" | "lg" | "icon" | "xs",
     iconSize?: number
 }) {
+    async function handleAction(formData: FormData) {
+        const result = await action(formData)
+        if (result && typeof result === "object" && "error" in result && typeof result.error === "string") {
+            alert(result.error)
+        }
+    }
+
     return (
         <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -54,7 +61,7 @@ export function DeleteForm({
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                     <AlertDialogCancel>Annulla</AlertDialogCancel>
-                    <form action={action}>
+                    <form action={handleAction}>
                         <input type="hidden" name={idName} value={id} />
                         {hiddenFields.map(field => (
                             <input key={field.name} type="hidden" name={field.name} value={field.value} />

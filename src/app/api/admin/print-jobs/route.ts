@@ -5,7 +5,7 @@ import { adminUnauthorizedJson, ensureAdminSession } from "@/lib/authz";
 import PrintJob from "@/models/PrintJob";
 import "@/models/Printer"; // Import to register schema for .populate()
 
-const allowedStatuses = new Set(["QUEUED", "SENT", "FAILED"]);
+const allowedStatuses = new Set(["QUEUED", "HELD", "SENT", "FAILED"]);
 const allowedPrintTypes = new Set(["CUSTOMER_ORDER", "KITCHEN_ORDER", "CASHIER_SUMMARY", "CASH_SESSION_SUMMARY", "EASTER_EGG_IMAGE", "MANUAL_TEST"]);
 
 function parseLimit(value: string | null): number {
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
                 _id: { toString(): string } | string;
                 source: "ORDER" | "CASH_SESSION" | "MANUAL_TEST";
                 printType?: "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "EASTER_EGG_IMAGE" | "MANUAL_TEST";
-                status: "QUEUED" | "SENT" | "FAILED";
+                status: "QUEUED" | "HELD" | "SENT" | "FAILED";
                 destinationHost: string;
                 destinationPort: number;
                 isVirtual: boolean;
@@ -78,6 +78,52 @@ export async function GET(request: NextRequest) {
                 createdAt?: Date;
                 printerId?: unknown;
             }>;
+
+        const heldQueueQuery: Record<string, unknown> = { eventId: contextEventId, status: "HELD" };
+        if (printerId) heldQueueQuery.printerId = printerId;
+        const heldJobs = await PrintJob.find(heldQueueQuery)
+            .populate("printerId", "name ip port type")
+            .select("printerId destinationHost destinationPort heldSince createdAt")
+            .lean() as Array<{
+                printerId?: unknown;
+                destinationHost: string;
+                destinationPort: number;
+                heldSince?: Date;
+                createdAt?: Date;
+            }>;
+
+        const heldQueueMap = new Map<string, {
+            key: string;
+            printerId: string | null;
+            name: string;
+            destinationHost: string;
+            destinationPort: number;
+            count: number;
+            oldestHeldAt: string;
+        }>();
+        for (const job of heldJobs) {
+            const populatedPrinter = job.printerId && typeof job.printerId === "object"
+                ? job.printerId as { _id?: unknown; name?: string; ip?: string; port?: number }
+                : null;
+            const printerId = populatedPrinter?._id ? String(populatedPrinter._id) : null;
+            const destinationHost = job.destinationHost || populatedPrinter?.ip || "stampante";
+            const destinationPort = job.destinationPort || populatedPrinter?.port || 9100;
+            const key = printerId || `${destinationHost}:${destinationPort}`;
+            const heldAt = job.heldSince || job.createdAt || new Date(0);
+            const heldAtIso = new Date(heldAt).toISOString();
+            const current = heldQueueMap.get(key) || {
+                key,
+                printerId,
+                name: populatedPrinter?.name || `${destinationHost}:${destinationPort}`,
+                destinationHost,
+                destinationPort,
+                count: 0,
+                oldestHeldAt: heldAtIso
+            };
+            current.count += 1;
+            if (heldAtIso < current.oldestHeldAt) current.oldestHeldAt = heldAtIso;
+            heldQueueMap.set(key, current);
+        }
 
         const serializedJobs = jobs.map((job) => ({
             id: job._id.toString(),
@@ -106,7 +152,11 @@ export async function GET(request: NextRequest) {
                 : null
         }));
 
-        return NextResponse.json({ jobs: serializedJobs });
+        const heldQueues = [...heldQueueMap.values()].sort((left, right) =>
+            left.oldestHeldAt.localeCompare(right.oldestHeldAt) || left.key.localeCompare(right.key)
+        );
+
+        return NextResponse.json({ jobs: serializedJobs, heldQueues });
     } catch (error) {
         console.error("Print Jobs API error:", error);
         return NextResponse.json({ error: "Errore interno" }, { status: 500 });

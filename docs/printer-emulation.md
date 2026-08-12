@@ -45,10 +45,23 @@ I listener ricevono stream ESC/POS raw e salvano i job su volume persistente.
 ## Preview runtime in Admin
 
 La vista Admin “Monitor Stampa” mostrerà:
-- elenco job con stato (`SENT`, `FAILED`)
+- elenco job con stato (`QUEUED`, `HELD`, `SENT`, `FAILED`)
 - destinazione (`host:port`)
 - preview ricevuta renderizzata (layout operativo)
 - link al dump raw ESC/POS per diagnostica
+
+## Coda persistente delle stampe reparto
+
+Quando una stampa su una stampante di tipo `KITCHEN` fallisce, il POS mantiene
+il retry immediato e consente anche di proseguire lasciando il job nello stato
+`HELD`. Il monitor Admin mostra il numero di stampe in attesa per reparto e il
+momento di accodamento più vecchio.
+
+Il poller del processo backoffice acquisisce una sola coda per stampante e
+reinvia i job in ordine di creazione. Il lease persistito impedisce a poller
+concorrenti di inviare contemporaneamente la stessa coda; un errore interrompe
+la ripresa di quella stampante, senza bloccare le altre. La frequenza è
+configurabile con `PRINTER_QUEUE_POLL_SECONDS` (30 secondi di default).
 
 Nota tecnica:
 - La preview è basata sul payload applicativo (`PrintJob.document`) normalizzato nello schema `PrintDocumentV2`.
@@ -97,3 +110,10 @@ Alternative valutate:
 
 - Non è previsto in questa epica un parser ESC/POS completo per ricostruire fedelmente ogni comando raw.
 - Priorità: stabilità di sviluppo/demo, osservabilità job e assenza regressioni su stampa reale.
+- Una connessione TCP accettata sulla porta della stampante non prova che la
+  carta sia disponibile. Senza un protocollo di stato verificato sul modello
+  fisico, il primo job reale della coda funge da sonda; non viene promessa la
+  lettura del sensore carta.
+- Il lease evita duplicazioni tra poller concorrenti, ma non può garantire una
+  consegna exactly-once tra l'invio al socket e il salvataggio Mongo: un crash
+  dopo l'invio e prima dello stato `SENT` può richiedere verifica operativa.
