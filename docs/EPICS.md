@@ -88,7 +88,7 @@ Supporto pagamenti con carta tramite terminale SumUp.
 
 - SDK: `@sumup/sdk`.
 - Bottone "Paga con POS" nel frontale cassa.
-- Webhook SumUp per conferma automatica ordine e triggering stampe.
+- Cloud API del lettore SumUp con callback verificata server-to-server prima della conferma ordine e delle stampe.
 - Localizzazione completa della UI in lingua italiana.
 
 ---
@@ -126,7 +126,7 @@ Architettura: Dialog Client-Side controllate (si chiudono automaticamente a succ
 Rifattorizzazione dell'architettura hardware per supportare periferiche modulari.
 
 ### Architettura
-- **Modello `Peripheral`**: Rappresenta una periferica di pagamento (SumUp o Cassetta Contanti) associabile ai Punti Cassa. Campi: `eventId`, `name`, `type` (`SUMUP | CASH_BOX | OTHER`), `config` (es. `merchantId`, `affiliateKey` per SumUp).
+- **Modello `Peripheral`**: Rappresenta una periferica di pagamento (SumUp, POS manuale o Cassetta Contanti) associabile ai Punti Cassa. Campi: `eventId`, `name`, `type` (`SUMUP | ELECTRONIC_MANUAL | CASH_BOX | OTHER`), `config` (Merchant Code, Reader ID e credenziali cifrate per SumUp).
 - **`PosDevice` aggiornato**: Aggiunto `paymentTerminalId` (ref a `Peripheral`) e `cashBoxId` (ref a `Peripheral`) — entrambi opzionali.
 
 ### UI
@@ -215,7 +215,7 @@ Riferimento funzionale dettagliato: `docs/inventory-stock.md`.
 
 La UI del POS riflette le periferiche effettivamente associate al Punto Cassa selezionato.
 
-- Se il POS ha un `paymentTerminalId`, viene mostrato il bottone "Paga con POS (SumUp)".
+- Se il POS ha un `paymentTerminalId`, viene mostrato il bottone "Carta / POS"; per una periferica SumUp la transazione viene inviata al lettore associato.
 - Se il POS ha un `cashBoxId`, viene mostrato il bottone "Paga in Contanti".
 - Supporto pagamento elettronico manuale (senza terminale fisico) per separazione contabile contanti/elettronico.
 - Memoria locale per postazione dell'ultimo metodo di pagamento completato, riutilizzato come default al checkout successivo.
@@ -223,6 +223,19 @@ La UI del POS riflette le periferiche effettivamente associate al Punto Cassa se
 
 **Test E2E**: `e2e/pos_electronic_payment.spec.ts`, `e2e/pos_payment_preference.spec.ts`.
 **Issue collegate**: `#14`, `#124`.
+
+---
+
+## ✅ Epica GitHub #149: SumUp e sessioni TEST
+
+- Pagamento in presenza tramite SumUp Reader Cloud API, con configurazione per periferica di Merchant Code, Reader ID, API Key, Affiliate App ID e Affiliate Key.
+- Callback pubblica limitata alla sola route SumUp e verifica della transazione tramite API prima di contabilizzare e stampare; le scorte sono prenotate all'avvio e ripristinate in modo idempotente sugli esiti negativi.
+- Pagamenti automatici SumUp esclusi dalle sessioni `TEST`; checkout pendenti e pagamenti certificati impediscono la riclassificazione di sessioni aperte o chiuse.
+- Pagamenti elettronici manuali ammessi nelle sessioni `TEST`, senza rimborso SumUp né blocco della riclassificazione.
+- Ordini con un checkout SumUp attivo non completabili manualmente, per evitare doppio incasso.
+
+**Test E2E**: `e2e/sumup_test_sessions.spec.ts`.
+**Issue collegata**: `#149`.
 
 ---
 

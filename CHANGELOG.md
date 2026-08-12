@@ -8,18 +8,21 @@ Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
 - Sincronizzate in tempo reale le scorte tra postazioni POS della stessa serata tramite SSE, con snapshot dal database, stato del canale e fallback a polling senza azzerare carrello o selezioni.
 - Aggiunta la coda persistente delle stampe reparto: il cassiere può proseguire dopo un errore, vedere i job in attesa e lasciarli reinviare automaticamente in ordine quando la stampante torna disponibile.
+- Riabilitati i pagamenti in presenza SumUp tramite Reader Cloud API, configurazione completa del lettore e callback verificata prima della contabilizzazione.
 
 ### Changed
 
 - Unificati i dialog di creazione e modifica prodotto in un solo form condiviso, preservando payload e comportamento dei due flussi.
 - Separati i comandi delle impostazioni per area funzionale e centralizzata la risoluzione sicura degli upload runtime.
 - Riscritta la documentazione architetturale come descrizione del sistema effettivamente distribuito.
+- Esplicitata la separazione tra SumUp certificato e POS elettronico manuale: SumUp è escluso dalle sessioni TEST, mentre il pagamento manuale resta disponibile sotto responsabilità del cassiere.
 
 ### Fixed
 
 - Riallineato automaticamente il flag esaurito quando storni e transizioni delle sessioni cassa ripristinano una quantità positiva.
 - Stabilizzato l'autosave delle immagini Easter egg anche quando il componente padre ricrea il callback di salvataggio.
 - Eliminato il tracciamento indiscriminato del repository durante la build standalone degli asset gestiti.
+- Impedita la riclassificazione a TEST di sessioni aperte o chiuse con pagamenti SumUp pendenti/certificati e corretti storno e completamento manuale per non trattare i pagamenti POS manuali come SumUp.
 
 ### Removed
 

@@ -45,8 +45,7 @@ APP_VERSION=0.9.1
 APP_BUILD=
 
 # Opzionali / in base alla funzionalita'
-SUMUP_API_KEY=
-SUMUP_WEBHOOK_SECRET=
+SUMUP_WEBHOOK_URL=https://menu.example.com/api/sumup/webhook
 EVENT_SETTINGS_ENCRYPTION_KEY=
 PRINTER_EMULATOR_HOST=127.0.0.1
 PRINTER_EMULATOR_START_PORT=19100
@@ -166,7 +165,8 @@ corrispondente della versione in esecuzione.
 
 ## Note
 
-- Le integrazioni SumUp e webhook richiedono la configurazione delle relative variabili ambiente.
+- La Cloud API SumUp richiede una periferica configurata in Admin con Merchant Code, Reader ID, API Key, Affiliate App ID e Affiliate Key. I segreti sono cifrati; `SUMUP_WEBHOOK_URL` è opzionale e, se assente, viene derivato da `NEXTAUTH_URL_MENU`.
+- SumUp è disabilitato nelle sessioni `TEST`; il pagamento elettronico manuale resta disponibile e non viene considerato una transazione SumUp certificata.
 - In Admin la versione mostrata usa `APP_VERSION` (fallback: `package.json`), con suffisso opzionale `APP_BUILD`.
 - La PWA `menu` è configurata in modalità online-first: installabile, ma senza flussi offline operativi.
 - Il README descrive lo stato corrente del repository `master`.

@@ -29,10 +29,10 @@ Disponibilità temporale:
 
 ## Regole di consumo scorte
 
-Le scorte si decrementano solo quando un ordine passa a `PAID`:
+Le scorte si decrementano quando un ordine viene pagato oppure, per SumUp, quando il checkout viene preparato:
 - creazione ordine POS in contanti,
 - chiusura ordine pendente da POS,
-- conferma pagamento carta via webhook SumUp.
+- prenotazione del pagamento SumUp prima dell'invio al lettore; un esito negativo verificato ripristina la stessa prenotazione in modo idempotente, mentre la callback verificata finalizza l'ordine senza un secondo decremento.
 
 Vincoli:
 - nessuna scorta negativa;
