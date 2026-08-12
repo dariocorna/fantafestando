@@ -66,6 +66,7 @@ export async function cleanupEventArtifactsByName(eventName: string) {
         db.collection("peripherals").deleteMany({ eventId }),
         db.collection("printers").deleteMany({ eventId }),
         db.collection("products").deleteMany({ eventId }),
+        db.collection("ingredients").deleteMany({ eventId }),
         db.collection("categories").deleteMany({ eventId }),
         db.collection("events").deleteOne({ _id: eventId })
     ]);
