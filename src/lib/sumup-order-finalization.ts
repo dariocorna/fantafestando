@@ -67,14 +67,16 @@ export function sumUpTransactionsMatch(left: VerifiedSumUpTransaction, right: Ve
 export async function dispatchSumUpOrderPrints(order: ClaimedSumUpOrder) {
     const orderId = order._id.toString()
     try {
-        await PrinterService.routeOrderToPrinters(
+        const results = await PrinterService.routeOrderToPrinters(
             orderId,
             order.posDeviceId?.toString(),
             { idempotencyScope: "SUMUP_CALLBACK" },
         )
+        return results?.includes("RECOVERY_PENDING") ? "RECOVERY_PENDING" as const : "COMPLETED" as const
     } catch (error) {
         // Il pagamento e' gia' autorevole: il monitor stampa mantiene visibile il guasto.
         console.error("[SumUp] Errore durante il trigger delle stampe:", error)
+        return "COMPLETED" as const
     }
 }
 

@@ -226,7 +226,9 @@ export async function POST(req: NextRequest) {
         let order = await loadWebhookOrder(clientTransactionId)
 
         if (order?.status === "PAID") {
-            await dispatchSumUpOrderPrints(order)
+            if (await dispatchSumUpOrderPrints(order) === "RECOVERY_PENDING") {
+                return NextResponse.json({ error: "Print recovery pending" }, { status: 503 })
+            }
             return NextResponse.json({ success: true, message: "Already paid" })
         }
         if (order?.status === "CANCELLED" && !order.sumupRecoveryCancelledAt) {
@@ -290,7 +292,9 @@ export async function POST(req: NextRequest) {
         if (!claimedOrder) {
             const currentOrder = await loadWebhookOrder(clientTransactionId)
             if (currentOrder?.status === "PAID") {
-                await dispatchSumUpOrderPrints(currentOrder)
+                if (await dispatchSumUpOrderPrints(currentOrder) === "RECOVERY_PENDING") {
+                    return NextResponse.json({ error: "Print recovery pending" }, { status: 503 })
+                }
                 return NextResponse.json({ success: true, message: "Already paid" })
             }
             if (currentOrder?.status === "CANCELLED") {

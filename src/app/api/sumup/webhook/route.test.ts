@@ -147,6 +147,18 @@ describe("POST /api/sumup/webhook", () => {
         )
     })
 
+    test("keeps the first successful finalizer authoritative while print recovery is pending", async () => {
+        routeOrderToPrintersMock.mockResolvedValue(["RECOVERY_PENDING"])
+
+        const response = await POST(webhookRequest())
+
+        expect(response.status).toBe(200)
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            { _id: "order-1", status: "PENDING", sumupWebhookClaimToken: expect.any(String) },
+            expect.objectContaining({ $set: expect.objectContaining({ status: "PAID" }) }),
+        )
+    })
+
     test("uses simple_status as authoritative and rolls back a refunded payment", async () => {
         getByClientMock.mockResolvedValue({
             success: true,
@@ -323,12 +335,40 @@ describe("POST /api/sumup/webhook", () => {
 
     test("recovers prints for an already-paid callback without querying SumUp again", async () => {
         orderFindOneMock.mockReturnValue(selectLean({ ...pendingOrder, status: "PAID" }))
+        routeOrderToPrintersMock.mockResolvedValue([true])
 
         const response = await POST(webhookRequest())
 
         await expect(response.json()).resolves.toEqual({ success: true, message: "Already paid" })
         expect(getByClientMock).not.toHaveBeenCalled()
         expect(routeOrderToPrintersMock).toHaveBeenCalledOnce()
+    })
+
+    test("returns 503 for an already-paid callback while a print recovery claim is active, then completes after reclaim", async () => {
+        orderFindOneMock.mockReturnValue(selectLean({ ...pendingOrder, status: "PAID" }))
+        routeOrderToPrintersMock
+            .mockResolvedValueOnce(["RECOVERY_PENDING"])
+            .mockResolvedValueOnce([true])
+
+        const activeClaimResponse = await POST(webhookRequest())
+        const reclaimedResponse = await POST(webhookRequest())
+
+        expect(activeClaimResponse.status).toBe(503)
+        await expect(activeClaimResponse.json()).resolves.toEqual({ error: "Print recovery pending" })
+        expect(reclaimedResponse.status).toBe(200)
+        await expect(reclaimedResponse.json()).resolves.toEqual({ success: true, message: "Already paid" })
+        expect(routeOrderToPrintersMock).toHaveBeenCalledTimes(2)
+        expect(getByClientMock).not.toHaveBeenCalled()
+    })
+
+    test.each([true, false])("acknowledges an already-paid callback when its duplicate print intent is terminal (%s)", async (result) => {
+        orderFindOneMock.mockReturnValue(selectLean({ ...pendingOrder, status: "PAID" }))
+        routeOrderToPrintersMock.mockResolvedValue([result])
+
+        const response = await POST(webhookRequest())
+
+        expect(response.status).toBe(200)
+        await expect(response.json()).resolves.toEqual({ success: true, message: "Already paid" })
     })
 
     test("rebuilds missing print intents idempotently for an already-paid order", async () => {
