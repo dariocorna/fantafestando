@@ -18,6 +18,7 @@ function revalidateHardwareViews() {
 }
 
 const PENDING_SUMUP_HARDWARE_ERROR = "Operazione bloccata: un ordine SumUp in attesa usa questo punto cassa. Completa o recupera il pagamento prima di modificarlo.";
+const LEGACY_SUMUP_REFUND_HARDWARE_ERROR = "Operazione bloccata: un pagamento SumUp non ancora rimborsato usa questo punto cassa. Completa il rimborso prima di modificarlo.";
 
 async function hasPendingSumUpCheckout(
     eventId: string,
@@ -38,6 +39,41 @@ async function hasPendingSumUpCheckout(
         status: "PENDING",
         posDeviceId,
         sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+    }));
+}
+
+async function hasLegacySumUpRefundDependency(
+    eventId: string,
+    posDeviceId: string,
+    paymentTerminalId: string
+) {
+    if (!posDeviceId.trim() || !paymentTerminalId.trim()) return false;
+
+    const isSumUpTerminal = await Peripheral.exists({
+        _id: paymentTerminalId,
+        eventId,
+        type: "SUMUP"
+    });
+    if (!isSumUpTerminal) return false;
+
+    return Boolean(await Order.exists({
+        eventId,
+        posDeviceId,
+        "sumupRefundCredentials.apiKey": { $in: [null, ""] },
+        "stornoMeta.refundStatus": { $ne: "DONE" },
+        $or: [
+            {
+                status: "PAID",
+                $or: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            },
+            {
+                status: "CANCELLED",
+                sumupLateSuccessDetectedAt: { $exists: true, $ne: null }
+            }
+        ]
     }));
 }
 
@@ -127,6 +163,9 @@ export async function deletePosDeviceAction(formData: FormData) {
     if (await hasPendingSumUpCheckout(scopedEvent.eventId, id, currentPaymentTerminalId)) {
         return { error: PENDING_SUMUP_HARDWARE_ERROR };
     }
+    if (await hasLegacySumUpRefundDependency(scopedEvent.eventId, id, currentPaymentTerminalId)) {
+        return { error: LEGACY_SUMUP_REFUND_HARDWARE_ERROR };
+    }
     const deletedDevice = await PosDevice.findOneAndDelete({ _id: id, eventId: scopedEvent.eventId }).select("_id").lean();
 
     if (!deletedDevice) {
@@ -197,11 +236,18 @@ export async function updatePosDeviceAction(formData: FormData) {
     }
     const currentPrinterId = String(currentDevice.printerId ?? "").trim();
     const currentPaymentTerminalId = String(currentDevice.paymentTerminalId ?? "").trim();
+    const changesPaymentTerminal = currentPaymentTerminalId !== normalizedPaymentTerminalId;
     if (
-        (currentPrinterId !== printerId || currentPaymentTerminalId !== normalizedPaymentTerminalId)
+        (currentPrinterId !== printerId || changesPaymentTerminal)
         && await hasPendingSumUpCheckout(scopedEventId, id, currentPaymentTerminalId)
     ) {
         return { error: PENDING_SUMUP_HARDWARE_ERROR };
+    }
+    if (
+        changesPaymentTerminal
+        && await hasLegacySumUpRefundDependency(scopedEventId, id, currentPaymentTerminalId)
+    ) {
+        return { error: LEGACY_SUMUP_REFUND_HARDWARE_ERROR };
     }
 
     const updatedDevice = await PosDevice.findOneAndUpdate(

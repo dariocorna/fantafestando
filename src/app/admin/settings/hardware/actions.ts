@@ -58,6 +58,7 @@ function availablePrintQueueLease(now: Date = new Date()) {
 }
 
 const PENDING_SUMUP_HARDWARE_ERROR = "Operazione bloccata: un ordine SumUp in attesa usa questa configurazione hardware. Completa o recupera il pagamento prima di modificarla.";
+const LEGACY_SUMUP_REFUND_HARDWARE_ERROR = "Operazione bloccata: un pagamento SumUp non ancora rimborsato usa questa configurazione hardware. Completa il rimborso prima di modificarla.";
 
 async function hasPendingSumUpCheckout(
     eventId: string,
@@ -74,6 +75,37 @@ async function hasPendingSumUpCheckout(
         status: "PENDING",
         posDeviceId: { $in: posDeviceIds },
         sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+    }));
+}
+
+async function hasLegacySumUpRefundDependency(
+    eventId: string,
+    posDeviceFilter: Record<string, unknown>
+) {
+    const posDeviceIds = (await PosDevice.distinct("_id", { eventId, ...posDeviceFilter }))
+        .map((value: unknown) => String(value ?? "").trim())
+        .filter(Boolean);
+
+    if (posDeviceIds.length === 0) return false;
+
+    return Boolean(await Order.exists({
+        eventId,
+        posDeviceId: { $in: posDeviceIds },
+        "sumupRefundCredentials.apiKey": { $in: [null, ""] },
+        "stornoMeta.refundStatus": { $ne: "DONE" },
+        $or: [
+            {
+                status: "PAID",
+                $or: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            },
+            {
+                status: "CANCELLED",
+                sumupLateSuccessDetectedAt: { $exists: true, $ne: null }
+            }
+        ]
     }));
 }
 
@@ -142,6 +174,12 @@ export async function deletePrinterAction(formData: FormData) {
         paymentTerminalId: { $in: sumUpTerminalIds }
     })) {
         return { error: PENDING_SUMUP_HARDWARE_ERROR };
+    }
+    if (sumUpTerminalIds.length > 0 && await hasLegacySumUpRefundDependency(scopedEventId, {
+        printerId: id,
+        paymentTerminalId: { $in: sumUpTerminalIds }
+    })) {
+        return { error: LEGACY_SUMUP_REFUND_HARDWARE_ERROR };
     }
     const deletedPrinter = await Printer.findOneAndDelete({
         _id: id,
@@ -463,8 +501,13 @@ export async function deletePeripheralAction(formData: FormData) {
     if (!currentPeripheral) {
         return { error: "Periferica non trovata nella festa selezionata" };
     }
-    if (currentPeripheral.type === "SUMUP" && await hasPendingSumUpCheckout(scopedEventId, { paymentTerminalId: id })) {
-        return { error: PENDING_SUMUP_HARDWARE_ERROR };
+    if (currentPeripheral.type === "SUMUP") {
+        if (await hasPendingSumUpCheckout(scopedEventId, { paymentTerminalId: id })) {
+            return { error: PENDING_SUMUP_HARDWARE_ERROR };
+        }
+        if (await hasLegacySumUpRefundDependency(scopedEventId, { paymentTerminalId: id })) {
+            return { error: LEGACY_SUMUP_REFUND_HARDWARE_ERROR };
+        }
     }
     const deletedPeripheral = await Peripheral.findOneAndDelete({ _id: id, eventId: scopedEventId }).select("_id").lean();
 
@@ -515,8 +558,13 @@ export async function updatePeripheralAction(formData: FormData) {
         || Boolean(readerId && readerId !== getConfigString(currentPeripheral.config, "readerId"))
         || Boolean(affiliateAppId && affiliateAppId !== getConfigString(currentPeripheral.config, "affiliateAppId"))
     );
-    if (changesSumUpConfiguration && await hasPendingSumUpCheckout(scopedEventId, { paymentTerminalId: id })) {
-        return { error: PENDING_SUMUP_HARDWARE_ERROR };
+    if (changesSumUpConfiguration) {
+        if (await hasPendingSumUpCheckout(scopedEventId, { paymentTerminalId: id })) {
+            return { error: PENDING_SUMUP_HARDWARE_ERROR };
+        }
+        if (await hasLegacySumUpRefundDependency(scopedEventId, { paymentTerminalId: id })) {
+            return { error: LEGACY_SUMUP_REFUND_HARDWARE_ERROR };
+        }
     }
 
     if (type === "SUMUP") {

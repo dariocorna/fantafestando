@@ -63,6 +63,28 @@ function posDeviceForm(overrides: Record<string, string> = {}) {
     return formData;
 }
 
+function legacySumUpRefundQuery() {
+    return {
+        eventId: "event-1",
+        posDeviceId: "pos-1",
+        "sumupRefundCredentials.apiKey": { $in: [null, ""] },
+        "stornoMeta.refundStatus": { $ne: "DONE" },
+        $or: [
+            {
+                status: "PAID",
+                $or: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            },
+            {
+                status: "CANCELLED",
+                sumupLateSuccessDetectedAt: { $exists: true, $ne: null }
+            }
+        ]
+    };
+}
+
 describe("pending SumUp checkout hardware guards", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -104,6 +126,17 @@ describe("pending SumUp checkout hardware guards", () => {
         expect(mocks.posDeviceFindOneAndDelete).not.toHaveBeenCalled();
     });
 
+    test("blocks deleting a POS needed for a legacy SumUp refund", async () => {
+        mocks.orderExists.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+        await expect(deletePosDeviceAction(posDeviceForm())).resolves.toEqual({
+            error: expect.stringMatching(/pagamento SumUp non ancora rimborsato/i)
+        });
+
+        expect(mocks.orderExists).toHaveBeenNthCalledWith(2, legacySumUpRefundQuery());
+        expect(mocks.posDeviceFindOneAndDelete).not.toHaveBeenCalled();
+    });
+
     test.each(["terminal-2", "none"])(
         "blocks changing or removing the terminal while a SumUp checkout is pending (%s)",
         async (paymentTerminalId) => {
@@ -123,8 +156,27 @@ describe("pending SumUp checkout hardware guards", () => {
         }
     );
 
-    test("allows changing the cash box while keeping the original SumUp terminal", async () => {
-        await expect(updatePosDeviceAction(posDeviceForm({ cashBoxId: "cashbox-2" }))).resolves.toEqual({
+    test.each(["terminal-2", "none"])(
+        "blocks changing or removing a terminal needed for a legacy SumUp refund (%s)",
+        async (paymentTerminalId) => {
+            mocks.orderExists.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+            await expect(updatePosDeviceAction(posDeviceForm({ paymentTerminalId }))).resolves.toEqual({
+                error: expect.stringMatching(/pagamento SumUp non ancora rimborsato/i)
+            });
+
+            expect(mocks.orderExists).toHaveBeenNthCalledWith(2, legacySumUpRefundQuery());
+            expect(mocks.posDeviceFindOneAndUpdate).not.toHaveBeenCalled();
+        }
+    );
+
+    test("allows changing the name and cash box while keeping the original SumUp terminal", async () => {
+        mocks.orderExists.mockResolvedValue(true);
+
+        await expect(updatePosDeviceAction(posDeviceForm({
+            name: "Cassa rinominata",
+            cashBoxId: "cashbox-2"
+        }))).resolves.toEqual({
             success: true
         });
 
@@ -133,6 +185,7 @@ describe("pending SumUp checkout hardware guards", () => {
         expect(mocks.posDeviceFindOneAndUpdate).toHaveBeenCalledWith(
             { _id: "pos-1", eventId: "event-1" },
             expect.objectContaining({
+                name: "Cassa rinominata",
                 paymentTerminalId: "terminal-1",
                 cashBoxId: "cashbox-2"
             }),
@@ -154,6 +207,25 @@ describe("pending SumUp checkout hardware guards", () => {
             sumupCheckoutId: { $exists: true, $nin: [null, ""] }
         });
         expect(mocks.posDeviceFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    test("allows changing only the printer when no SumUp checkout is pending", async () => {
+        mocks.orderExists.mockImplementation(async (query: Record<string, unknown>) => (
+            "sumupRefundCredentials.apiKey" in query
+        ));
+
+        await expect(updatePosDeviceAction(posDeviceForm({ printerId: "printer-2" }))).resolves.toEqual({
+            success: true
+        });
+
+        expect(mocks.orderExists).toHaveBeenCalledTimes(1);
+        expect(mocks.orderExists).toHaveBeenCalledWith({
+            eventId: "event-1",
+            status: "PENDING",
+            posDeviceId: "pos-1",
+            sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+        });
+        expect(mocks.posDeviceFindOneAndUpdate).toHaveBeenCalled();
     });
 
     test("allows replacing a SumUp terminal when no checkout is pending", async () => {

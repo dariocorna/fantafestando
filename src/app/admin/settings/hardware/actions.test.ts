@@ -123,6 +123,28 @@ function sumUpForm(overrides: Record<string, string | undefined> = {}) {
     return formData;
 }
 
+function legacySumUpRefundQuery(posDeviceId: string | { $in: string[] }) {
+    return {
+        eventId: "event-1",
+        posDeviceId,
+        "sumupRefundCredentials.apiKey": { $in: [null, ""] },
+        "stornoMeta.refundStatus": { $ne: "DONE" },
+        $or: [
+            {
+                status: "PAID",
+                $or: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            },
+            {
+                status: "CANCELLED",
+                sumupLateSuccessDetectedAt: { $exists: true, $ne: null }
+            }
+        ]
+    };
+}
+
 describe("printer queue lifecycle guards", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -232,6 +254,26 @@ describe("printer queue lifecycle guards", () => {
         expect(mocks.posDeviceDeleteMany).not.toHaveBeenCalled();
     });
 
+    test("blocks deleting a printer that would remove a POS needed for a legacy SumUp refund", async () => {
+        mocks.peripheralDistinct.mockResolvedValue(["terminal-1"]);
+        mocks.posDeviceDistinct.mockResolvedValue(["pos-1"]);
+        mocks.orderExists.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+        const formData = new FormData();
+        formData.set("id", "printer-1");
+        formData.set("eventId", "event-1");
+
+        await expect(deletePrinterAction(formData)).resolves.toEqual({
+            error: expect.stringMatching(/pagamento SumUp non ancora rimborsato/i)
+        });
+
+        expect(mocks.orderExists).toHaveBeenNthCalledWith(
+            2,
+            legacySumUpRefundQuery({ $in: ["pos-1"] })
+        );
+        expect(mocks.printerFindOneAndDelete).not.toHaveBeenCalled();
+        expect(mocks.posDeviceDeleteMany).not.toHaveBeenCalled();
+    });
+
     test("blocks changing a queued department printer to CASHIER", async () => {
         mocks.printJobExists.mockResolvedValue(true);
 
@@ -285,6 +327,29 @@ describe("printer queue lifecycle guards", () => {
             sumupCheckoutId: { $exists: true, $nin: [null, ""] }
         });
         expect(mocks.printerFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    test("does not apply the legacy refund guard when updating a printer", async () => {
+        mocks.normalizePrinterConfig.mockReturnValue({
+            success: true,
+            data: { ip: "10.0.0.20", port: 9100, isVirtual: false, emulatorSlot: undefined }
+        });
+        mocks.peripheralDistinct.mockResolvedValue(["terminal-1"]);
+        mocks.posDeviceDistinct.mockResolvedValue(["pos-1"]);
+        mocks.orderExists.mockImplementation(async (query: Record<string, unknown>) => (
+            "sumupRefundCredentials.apiKey" in query
+        ));
+
+        await expect(updatePrinterAction(printerForm("KITCHEN"))).resolves.toEqual({ success: true });
+
+        expect(mocks.orderExists).toHaveBeenCalledTimes(1);
+        expect(mocks.orderExists).toHaveBeenCalledWith({
+            eventId: "event-1",
+            status: "PENDING",
+            posDeviceId: { $in: ["pos-1"] },
+            sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+        });
+        expect(mocks.printerFindOneAndUpdate).toHaveBeenCalled();
     });
 
     test("allows renaming a printer used by a pending SumUp checkout", async () => {
@@ -553,6 +618,65 @@ describe("SumUp peripheral configuration", () => {
         expect(mocks.peripheralFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
+    test.each([
+        { type: "SUMUP", apiKey: "sup_sk_replacement", affiliateKey: "affiliate-replacement" },
+        { type: "ELECTRONIC_MANUAL", apiKey: "", affiliateKey: "" }
+    ])("blocks changing SumUp credentials or type needed for a legacy refund", async (changes) => {
+        mocks.peripheralFindOne.mockReturnValue({
+            lean: vi.fn().mockResolvedValue({
+                _id: "peripheral-1",
+                type: "SUMUP",
+                config: {
+                    merchantCode: "MK10CL2A",
+                    readerId: "rdr_3MSAFM23CK82VSTT4BN6RWSQ65",
+                    apiKey: "encrypted:old-api",
+                    affiliateAppId: "it.fantafestando.pos",
+                    affiliateKey: "encrypted:old-affiliate"
+                }
+            })
+        });
+        mocks.posDeviceDistinct.mockResolvedValue(["pos-1"]);
+        mocks.orderExists.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+        await expect(updatePeripheralAction(sumUpForm(changes))).resolves.toEqual({
+            error: expect.stringMatching(/pagamento SumUp non ancora rimborsato/i)
+        });
+
+        expect(mocks.orderExists).toHaveBeenNthCalledWith(
+            2,
+            legacySumUpRefundQuery({ $in: ["pos-1"] })
+        );
+        expect(mocks.encryptSecret).not.toHaveBeenCalled();
+        expect(mocks.peripheralFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    test("allows renaming a SumUp peripheral used as a legacy refund fallback", async () => {
+        mocks.peripheralFindOne.mockReturnValue({
+            lean: vi.fn().mockResolvedValue({
+                _id: "peripheral-1",
+                type: "SUMUP",
+                config: {
+                    merchantCode: "MK10CL2A",
+                    readerId: "rdr_3MSAFM23CK82VSTT4BN6RWSQ65",
+                    apiKey: "encrypted:old-api",
+                    affiliateAppId: "it.fantafestando.pos",
+                    affiliateKey: "encrypted:old-affiliate"
+                }
+            })
+        });
+        mocks.orderExists.mockResolvedValue(true);
+
+        await expect(updatePeripheralAction(sumUpForm({
+            name: "SumUp rinominato",
+            apiKey: "",
+            affiliateKey: ""
+        }))).resolves.toEqual({ success: true });
+
+        expect(mocks.posDeviceDistinct).not.toHaveBeenCalled();
+        expect(mocks.orderExists).not.toHaveBeenCalled();
+        expect(mocks.peripheralFindOneAndUpdate).toHaveBeenCalled();
+    });
+
     test("blocks deleting a SumUp peripheral while a checkout is pending", async () => {
         mocks.peripheralFindOne.mockReturnValue(queryResult({ _id: "peripheral-1", type: "SUMUP" }));
         mocks.posDeviceDistinct.mockResolvedValue(["pos-1"]);
@@ -562,6 +686,23 @@ describe("SumUp peripheral configuration", () => {
             error: expect.stringMatching(/ordine SumUp in attesa/i)
         });
 
+        expect(mocks.peripheralFindOneAndDelete).not.toHaveBeenCalled();
+        expect(mocks.posDeviceUpdateMany).not.toHaveBeenCalled();
+    });
+
+    test("blocks deleting a SumUp peripheral needed for a legacy refund", async () => {
+        mocks.peripheralFindOne.mockReturnValue(queryResult({ _id: "peripheral-1", type: "SUMUP" }));
+        mocks.posDeviceDistinct.mockResolvedValue(["pos-1"]);
+        mocks.orderExists.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+        await expect(deletePeripheralAction(sumUpForm())).resolves.toEqual({
+            error: expect.stringMatching(/pagamento SumUp non ancora rimborsato/i)
+        });
+
+        expect(mocks.orderExists).toHaveBeenNthCalledWith(
+            2,
+            legacySumUpRefundQuery({ $in: ["pos-1"] })
+        );
         expect(mocks.peripheralFindOneAndDelete).not.toHaveBeenCalled();
         expect(mocks.posDeviceUpdateMany).not.toHaveBeenCalled();
     });
