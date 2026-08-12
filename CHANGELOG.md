@@ -7,6 +7,7 @@ Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 ### Added
 
 - Sincronizzate in tempo reale le scorte tra postazioni POS della stessa serata tramite SSE, con snapshot dal database, stato del canale e fallback a polling senza azzerare carrello o selezioni.
+- Aggiunta la coda persistente delle stampe reparto: il cassiere può proseguire dopo un errore, vedere i job in attesa e lasciarli reinviare automaticamente in ordine quando la stampante torna disponibile.
 
 ### Changed
 
