@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { dbConnectMock, printJobFindMock, printJobUpdateManyMock, orderFindOneMock, productFindOneAndUpdateMock, eventExistsMock, retryPrintJobByIdMock, ensureAuthenticatedSessionMock } = vi.hoisted(() => ({
+const { dbConnectMock, printJobFindMock, printJobUpdateManyMock, orderFindOneMock, productFindOneAndUpdateMock, eventExistsMock, retryPrintJobByIdMock, holdFailedKitchenPrintJobsMock, recoverStaleManualPrintRetryClaimsMock, ensureAuthenticatedSessionMock } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     printJobFindMock: vi.fn(),
     printJobUpdateManyMock: vi.fn(),
@@ -8,6 +8,8 @@ const { dbConnectMock, printJobFindMock, printJobUpdateManyMock, orderFindOneMoc
     productFindOneAndUpdateMock: vi.fn(),
     eventExistsMock: vi.fn(),
     retryPrintJobByIdMock: vi.fn(),
+    holdFailedKitchenPrintJobsMock: vi.fn(),
+    recoverStaleManualPrintRetryClaimsMock: vi.fn(),
     ensureAuthenticatedSessionMock: vi.fn()
 }));
 
@@ -36,13 +38,18 @@ vi.mock("@/lib/printer", () => ({
     }
 }));
 
+vi.mock("@/lib/print-queue", () => ({
+    holdFailedKitchenPrintJobs: holdFailedKitchenPrintJobsMock,
+    recoverStaleManualPrintRetryClaims: recoverStaleManualPrintRetryClaimsMock
+}));
+
 vi.mock("@/models/Order", () => ({ default: { findOne: orderFindOneMock } }));
 vi.mock("@/models/PosDevice", () => ({ default: {} }));
 vi.mock("@/models/Product", () => ({ default: { findOneAndUpdate: productFindOneAndUpdateMock } }));
 vi.mock("@/models/Event", () => ({ default: { exists: eventExistsMock } }));
 vi.mock("@/models/CashSession", () => ({ default: {} }));
 
-import { retryFailedOrderPrintJobs, updatePosStock } from "@/app/pos/actions";
+import { holdFailedOrderPrintJobs, retryFailedOrderPrintJobs, updatePosStock } from "@/app/pos/actions";
 
 function mockFindFailedJobs(rows: Array<{ _id: string }>) {
     printJobFindMock
@@ -59,6 +66,7 @@ describe("retryFailedOrderPrintJobs", () => {
         });
         orderFindOneMock.mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue({ eventId: { toString: () => "evt-1" } }) }) });
         printJobUpdateManyMock.mockResolvedValue({ modifiedCount: 0 });
+        recoverStaleManualPrintRetryClaimsMock.mockResolvedValue({ recovered: 0 });
     });
 
     test("returns error when event/order ids are missing", async () => {
@@ -88,18 +96,7 @@ describe("retryFailedOrderPrintJobs", () => {
             failed: 0,
             failedPrinters: []
         });
-        expect(printJobUpdateManyMock).toHaveBeenCalledWith(
-            expect.objectContaining({
-                eventId: "evt-1",
-                orderId: "ord-1",
-                status: "QUEUED",
-                retryClaimedAt: { $lte: expect.any(Date) }
-            }),
-            {
-                $set: { status: "FAILED", errorMessage: "Reinvio interrotto: riprova" },
-                $unset: { retryClaimedAt: 1 }
-            }
-        );
+        expect(recoverStaleManualPrintRetryClaimsMock).toHaveBeenCalledWith("evt-1", "ord-1");
     });
 
     test("counts partial retry results", async () => {
@@ -122,6 +119,57 @@ describe("retryFailedOrderPrintJobs", () => {
         });
     });
 
+    test("offers hold only for queue-recoverable groups backed by a KITCHEN printer", async () => {
+        const kitchenPopulateMock = vi.fn().mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue([
+                    {
+                        _id: "job-kitchen",
+                        printerId: { _id: "printer-kitchen", name: "Cucina", type: "KITCHEN" },
+                        destinationHost: "10.0.0.10",
+                        destinationPort: 9100,
+                        queueRecoverable: true
+                    },
+                    {
+                        _id: "job-kitchen-legacy",
+                        printerId: { _id: "printer-kitchen-legacy", name: "Cucina legacy", type: "KITCHEN" },
+                        destinationHost: "10.0.0.12",
+                        destinationPort: 9100,
+                        queueRecoverable: false
+                    },
+                    {
+                        _id: "job-cashier",
+                        printerId: { _id: "printer-cashier", name: "Cassa", type: "CASHIER" },
+                        destinationHost: "10.0.0.11",
+                        destinationPort: 9100,
+                        queueRecoverable: false
+                    }
+                ])
+            })
+        });
+        printJobFindMock
+            .mockReturnValueOnce({
+                sort: vi.fn().mockReturnValue({
+                    select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue([]) })
+                })
+            })
+            .mockReturnValueOnce({
+                sort: vi.fn().mockReturnValue({ populate: kitchenPopulateMock })
+            });
+
+        const result = await retryFailedOrderPrintJobs({ orderId: "ord-1", jobIds: ["missing"] });
+
+        expect(result).toMatchObject({
+            success: true,
+            failedPrinters: [
+                expect.objectContaining({ key: "printer-kitchen", printerType: "KITCHEN", canHold: true }),
+                expect.objectContaining({ key: "printer-kitchen-legacy", printerType: "KITCHEN", canHold: false }),
+                expect.objectContaining({ key: "printer-cashier", printerType: "CASHIER", canHold: false })
+            ]
+        });
+        expect(kitchenPopulateMock).toHaveBeenCalledWith("printerId", "name ip port type");
+    });
+
     test("returns error when lookup throws", async () => {
         printJobFindMock.mockImplementation(() => {
             throw new Error("db unavailable");
@@ -132,6 +180,86 @@ describe("retryFailedOrderPrintJobs", () => {
         if (!result.success) {
             expect(result.error).toMatch(/Errore durante il reinvio/i);
         }
+    });
+});
+
+describe("holdFailedOrderPrintJobs", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        ensureAuthenticatedSessionMock.mockResolvedValue({
+            ok: true,
+            user: { id: "user-1", username: "cashier", role: "CASHIER" }
+        });
+        orderFindOneMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue({ eventId: { toString: () => "evt-1" } })
+            })
+        });
+        holdFailedKitchenPrintJobsMock.mockResolvedValue({ held: 2, busyPrinterIds: [] });
+        recoverStaleManualPrintRetryClaimsMock.mockResolvedValue({ recovered: 0 });
+        eventExistsMock.mockResolvedValue({ _id: "evt-1" });
+        printJobUpdateManyMock.mockResolvedValue({ modifiedCount: 0 });
+        printJobFindMock.mockReturnValue({
+            sort: vi.fn().mockReturnValue({
+                populate: vi.fn().mockReturnValue({
+                    select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue([]) })
+                })
+            })
+        });
+    });
+
+    test("requires an authenticated POS session before holding jobs", async () => {
+        ensureAuthenticatedSessionMock.mockResolvedValue({ ok: false, status: 401, error: "Autenticazione richiesta" });
+
+        await expect(holdFailedOrderPrintJobs({ orderId: "ord-1", jobIds: ["job-1"] })).resolves.toEqual({
+            success: false,
+            error: "Autenticazione richiesta"
+        });
+        expect(orderFindOneMock).not.toHaveBeenCalled();
+        expect(holdFailedKitchenPrintJobsMock).not.toHaveBeenCalled();
+    });
+
+    test("scopes the request to its paid order and delegates the KITCHEN check to the core", async () => {
+        await expect(holdFailedOrderPrintJobs({ orderId: "ord-1", jobIds: ["job-1", "job-2"] })).resolves.toEqual({
+            success: true,
+            held: 2,
+            failedPrinters: []
+        });
+        expect(orderFindOneMock).toHaveBeenCalledWith({ _id: "ord-1", status: "PAID" });
+        expect(holdFailedKitchenPrintJobsMock).toHaveBeenCalledWith({
+            eventId: "evt-1",
+            orderId: "ord-1",
+            jobIds: ["job-1", "job-2"]
+        });
+        expect(eventExistsMock).toHaveBeenCalledWith({ _id: "evt-1", active: true, archived: { $ne: true } });
+    });
+
+    test("does not claim cashier jobs when the core rejects the requested ids", async () => {
+        holdFailedKitchenPrintJobsMock.mockResolvedValue({ held: 0, busyPrinterIds: [] });
+
+        await expect(holdFailedOrderPrintJobs({ orderId: "ord-1", jobIds: ["cashier-job"] })).resolves.toMatchObject({
+            success: true,
+            held: 0
+        });
+    });
+
+    test("returns an explicit error when the target kitchen printer is busy", async () => {
+        holdFailedKitchenPrintJobsMock.mockResolvedValue({ held: 0, busyPrinterIds: ["printer-kitchen"] });
+
+        await expect(holdFailedOrderPrintJobs({ orderId: "ord-1", jobIds: ["job-1"] })).resolves.toEqual({
+            success: false,
+            error: "La stampante sta già inviando una comanda. Riprova tra poco."
+        });
+    });
+
+    test("rejects paid orders outside the active event", async () => {
+        eventExistsMock.mockResolvedValue(null);
+
+        await expect(holdFailedOrderPrintJobs({ orderId: "ord-old", jobIds: ["job-1"] })).resolves.toEqual({
+            success: false,
+            error: "Ordine non appartenente alla festa attiva"
+        });
+        expect(holdFailedKitchenPrintJobsMock).not.toHaveBeenCalled();
     });
 });
 

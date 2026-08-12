@@ -66,6 +66,7 @@ import {
     releaseCashSessionPaymentClaim,
 } from "@/lib/cash-session-payment-claim"
 import { publishStockInvalidation } from "@/lib/pos-stock-realtime"
+import { holdFailedKitchenPrintJobs, recoverStaleManualPrintRetryClaims } from "@/lib/print-queue"
 
 interface PrintDispatchSummary {
     attempted: number
@@ -78,6 +79,8 @@ interface PrintDispatchSummary {
 interface FailedPrinterGroup {
     key: string
     name: string
+    printerType: "CASHIER" | "KITCHEN" | null
+    canHold: boolean
     error?: string
     count: number
     jobIds: string[]
@@ -850,24 +853,6 @@ function summarizePrintDispatch(results: boolean[] | undefined): PrintDispatchSu
     }
 }
 
-const PRINT_RETRY_LEASE_MS = 5 * 60 * 1000
-
-async function recoverStalePrintRetryClaims(eventId: string, orderId: string) {
-    await PrintJob.updateMany(
-        {
-            eventId,
-            orderId,
-            source: "ORDER",
-            status: "QUEUED",
-            retryClaimedAt: { $lte: new Date(Date.now() - PRINT_RETRY_LEASE_MS) }
-        },
-        {
-            $set: { status: "FAILED", errorMessage: "Reinvio interrotto: riprova" },
-            $unset: { retryClaimedAt: 1 }
-        }
-    )
-}
-
 /** Never throws: a lookup failure must not turn an already paid order into a failed payment. */
 async function safeFailedPrinterGroups(eventId: string, orderId: string): Promise<FailedPrinterGroup[]> {
     try {
@@ -879,23 +864,36 @@ async function safeFailedPrinterGroups(eventId: string, orderId: string): Promis
 }
 
 async function listFailedPrinterGroups(eventId: string, orderId: string): Promise<FailedPrinterGroup[]> {
-    await recoverStalePrintRetryClaims(eventId, orderId)
+    await recoverStaleManualPrintRetryClaims(eventId, orderId)
     const jobs = await PrintJob.find({ eventId, orderId, source: "ORDER", status: "FAILED" })
         .sort({ createdAt: 1 })
-        .populate("printerId", "name ip port")
-        .select("_id printerId destinationHost destinationPort errorMessage")
+        .populate("printerId", "name ip port type")
+        .select("_id printerId destinationHost destinationPort errorMessage queueRecoverable")
         .lean() as Array<{
             _id: { toString(): string }
-            printerId?: { _id?: { toString(): string }; name?: string; ip?: string; port?: number } | null
+            printerId?: { _id?: { toString(): string }; name?: string; ip?: string; port?: number; type?: "CASHIER" | "KITCHEN" } | null
             destinationHost?: string
             destinationPort?: number
             errorMessage?: string
+            queueRecoverable?: boolean
         }>
     const groups = new Map<string, FailedPrinterGroup>()
     for (const job of jobs) {
         const fallback = `${job.destinationHost || job.printerId?.ip || "stampante"}:${job.destinationPort || job.printerId?.port || 9100}`
         const key = job.printerId?._id?.toString() || fallback
-        const current = groups.get(key) || { key, name: job.printerId?.name || fallback, count: 0, jobIds: [] }
+        const printerType = job.printerId?.type === "CASHIER" || job.printerId?.type === "KITCHEN"
+            ? job.printerId.type
+            : null
+        const canHold = printerType === "KITCHEN" && job.queueRecoverable === true
+        const current = groups.get(key) || {
+            key,
+            name: job.printerId?.name || fallback,
+            printerType,
+            canHold,
+            count: 0,
+            jobIds: []
+        }
+        current.canHold ||= canHold
         current.count += 1
         current.jobIds.push(job._id.toString())
         current.error ||= job.errorMessage
@@ -2399,7 +2397,7 @@ export async function retryFailedOrderPrintJobs(data: {
         const order = await Order.findOne({ _id: data.orderId, status: "PAID" }).select("eventId").lean() as ({ eventId: { toString(): string } } | null)
         if (!order) return { success: false, error: "Ordine pagato non trovato" }
         const eventId = order.eventId.toString()
-        await recoverStalePrintRetryClaims(eventId, data.orderId)
+        await recoverStaleManualPrintRetryClaims(eventId, data.orderId)
         const failedJobs = await PrintJob.find({
             eventId,
             orderId: data.orderId,
@@ -2435,5 +2433,53 @@ export async function retryFailedOrderPrintJobs(data: {
     } catch (error) {
         console.error("Retry Failed Order Print Jobs Error:", error)
         return { success: false, error: "Errore durante il reinvio delle stampe fallite" }
+    }
+}
+
+export async function holdFailedOrderPrintJobs(data: {
+    orderId: string
+    jobIds: string[]
+}): Promise<
+    { success: true, held: number, failedPrinters: FailedPrinterGroup[] }
+    | { success: false, error: string }
+> {
+    try {
+        const sessionCheck = await ensurePosActionSession()
+        if (!sessionCheck.success) return sessionCheck
+
+        if (!data.orderId || !Array.isArray(data.jobIds) || data.jobIds.length === 0) {
+            return { success: false, error: "Dati mancanti per la coda di stampa" }
+        }
+
+        await dbConnect()
+        const order = await Order.findOne({ _id: data.orderId, status: "PAID" })
+            .select("eventId")
+            .lean() as ({ eventId: { toString(): string } } | null)
+        if (!order) return { success: false, error: "Ordine pagato non trovato" }
+
+        const eventId = order.eventId.toString()
+        const activeEvent = await Event.exists({ _id: eventId, active: true, archived: { $ne: true } })
+        if (!activeEvent) return { success: false, error: "Ordine non appartenente alla festa attiva" }
+        const result = await holdFailedKitchenPrintJobs({
+            eventId,
+            orderId: data.orderId,
+            jobIds: data.jobIds
+        })
+
+        if (result.held === 0 && result.busyPrinterIds.length > 0) {
+            return {
+                success: false,
+                error: "La stampante sta già inviando una comanda. Riprova tra poco."
+            }
+        }
+
+        return {
+            success: true,
+            held: result.held,
+            failedPrinters: await safeFailedPrinterGroups(eventId, data.orderId)
+        }
+    } catch (error) {
+        console.error("Hold Failed Order Print Jobs Error:", error)
+        return { success: false, error: "Errore durante l'accodamento delle stampe di reparto" }
     }
 }

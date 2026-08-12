@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import {
     Dialog,
     DialogContent,
+    DialogDescription,
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog"
@@ -28,9 +29,11 @@ import {
     openCashSession,
     closeCashSession,
     getCashSessionClosurePreview,
+    holdFailedOrderPrintJobs,
     retryFailedOrderPrintJobs,
     printProductIngredients
 } from "./actions"
+import { resolveFailedPrintersAfterHold, type FailedPrinterGroupState } from "./print-recovery"
 import { categoryColorWithAlpha, getCategoryTheme } from "@/lib/category-colors"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
 import { getStockLabel, getStockStatus, type StockShortage } from "@/lib/inventory"
@@ -236,14 +239,6 @@ interface FeedbackModalState {
         orderId: string
         failedPrinters: FailedPrinterGroupState[]
     }
-}
-
-interface FailedPrinterGroupState {
-    key: string
-    name: string
-    error?: string
-    count: number
-    jobIds: string[]
 }
 
 interface PrintDispatchSummaryState {
@@ -603,7 +598,9 @@ export default function PosPage() {
         message: ""
     })
     const [retryingPrinterKey, setRetryingPrinterKey] = useState<string | null>(null)
+    const [holdingPrinterKey, setHoldingPrinterKey] = useState<string | null>(null)
     const [retryPrintsFeedback, setRetryPrintsFeedback] = useState<string | null>(null)
+    const isPrintRecoveryBusy = retryingPrinterKey !== null || holdingPrinterKey !== null
     const [configuringProduct, setConfiguringProduct] = useState<IProduct | null>(null)
     const [contextLineId, setContextLineId] = useState<string | null>(null)
     const [contextDraft, setContextDraft] = useState<CartContextDraft>({
@@ -1256,6 +1253,7 @@ export default function PosPage() {
         })
         setRetryPrintsFeedback(null)
         setRetryingPrinterKey(null)
+        setHoldingPrinterKey(null)
     }
 
     const buildPrintFailureMessage = (summary?: PrintDispatchSummaryState) => {
@@ -1266,62 +1264,120 @@ export default function PosPage() {
 
     const handleRetryFailedPrintsFromModal = async (printer: FailedPrinterGroupState) => {
         const action = feedbackModal.action
-        if (!action || action.type !== "RETRY_FAILED_PRINTS") return
+        if (!action || action.type !== "RETRY_FAILED_PRINTS" || retryingPrinterKey || holdingPrinterKey) return
 
         setRetryingPrinterKey(printer.key)
         setRetryPrintsFeedback(null)
-        const result = await retryFailedOrderPrintJobs({
-            orderId: action.orderId,
-            jobIds: printer.jobIds
-        })
-        setRetryingPrinterKey(null)
+        try {
+            const result = await retryFailedOrderPrintJobs({
+                orderId: action.orderId,
+                jobIds: printer.jobIds
+            })
 
-        if (!result.success) {
-            setRetryPrintsFeedback(result.error || "Reinvio non riuscito")
-            return
-        }
+            if (!result.success) {
+                setRetryPrintsFeedback(result.error || "Reinvio non riuscito")
+                return
+            }
 
-        if (result.attempted === 0) {
-            setRetryPrintsFeedback("Nessun job fallito da reinviare per questo ordine.")
-        } else if (result.retried === 0) {
-            setRetryPrintsFeedback(`Reinvio non riuscito: 0/${result.attempted} job inviati.`)
-        } else if (result.failed > 0) {
-            setRetryPrintsFeedback(`Reinvio completato parzialmente: ${result.retried}/${result.attempted} inviati.`)
-        } else {
-            setRetryPrintsFeedback(`Reinvio completato: ${result.retried}/${result.attempted} job inviati.`)
-        }
-        setFeedbackModal((current) => {
-            if (current.action?.type !== "RETRY_FAILED_PRINTS") return current
-            const preservedFailedPrinters = result.failed === 0
-                ? current.action.failedPrinters.filter((failedPrinter) => failedPrinter.key !== printer.key)
-                : current.action.failedPrinters
-            if (result.failed === 0 && result.failedPrinters.length === 0 && preservedFailedPrinters.length === 0) {
+            if (result.attempted === 0) {
+                setRetryPrintsFeedback("Nessun job fallito da reinviare per questo ordine.")
+            } else if (result.retried === 0) {
+                setRetryPrintsFeedback(`Reinvio non riuscito: 0/${result.attempted} job inviati.`)
+            } else if (result.failed > 0) {
+                setRetryPrintsFeedback(`Reinvio completato parzialmente: ${result.retried}/${result.attempted} inviati.`)
+            } else {
+                setRetryPrintsFeedback(`Reinvio completato: ${result.retried}/${result.attempted} job inviati.`)
+            }
+            setFeedbackModal((current) => {
+                if (current.action?.type !== "RETRY_FAILED_PRINTS") return current
+                const preservedFailedPrinters = result.failed === 0
+                    ? current.action.failedPrinters.filter((failedPrinter) => failedPrinter.key !== printer.key)
+                    : current.action.failedPrinters
+                if (result.failed === 0 && result.failedPrinters.length === 0 && preservedFailedPrinters.length === 0) {
+                    return {
+                        ...current,
+                        tone: "success",
+                        title: "Stampe inviate",
+                        message: "Tutte le stampe fallite sono state reinviate correttamente.",
+                        action: undefined
+                    }
+                }
+                const failedPrinters = result.failedPrinters.length > 0
+                    ? result.failedPrinters
+                    : preservedFailedPrinters
+                if (failedPrinters.length === 0) {
+                    return {
+                        ...current,
+                        message: `${result.failed} ${result.failed === 1 ? "stampa non è stata inviata" : "stampe non sono state inviate"}. Riprova.`
+                    }
+                }
+
+                const remainingCount = failedPrinters.reduce((total, printer) => total + printer.count, 0)
+                const remainingPrinters = failedPrinters.map((printer) => printer.name).join(", ")
                 return {
                     ...current,
-                    tone: "success",
-                    title: "Stampe inviate",
-                    message: "Tutte le stampe fallite sono state reinviate correttamente.",
-                    action: undefined
+                    message: `Restano ${remainingCount} ${remainingCount === 1 ? "stampa" : "stampe"} da reinviare${remainingPrinters ? ` su: ${remainingPrinters}` : ""}.`,
+                    action: { ...current.action, failedPrinters }
                 }
+            })
+        } catch {
+            setRetryPrintsFeedback("Reinvio non riuscito. Riprova.")
+        } finally {
+            setRetryingPrinterKey(null)
+        }
+    }
+
+    const handleHoldFailedPrintsFromModal = async (printer: FailedPrinterGroupState) => {
+        const action = feedbackModal.action
+        if (!action || action.type !== "RETRY_FAILED_PRINTS" || printer.printerType !== "KITCHEN" || !printer.canHold || retryingPrinterKey || holdingPrinterKey) return
+
+        setHoldingPrinterKey(printer.key)
+        setRetryPrintsFeedback(null)
+        try {
+            const result = await holdFailedOrderPrintJobs({
+                orderId: action.orderId,
+                jobIds: printer.jobIds
+            })
+
+            if (!result.success) {
+                setRetryPrintsFeedback(result.error || "Accodamento non riuscito")
+                return
             }
-            const failedPrinters = result.failedPrinters.length > 0
-                ? result.failedPrinters
-                : preservedFailedPrinters
-            if (failedPrinters.length === 0) {
-                return {
-                    ...current,
-                    message: `${result.failed} ${result.failed === 1 ? "stampa non è stata inviata" : "stampe non sono state inviate"}. Riprova.`
-                }
+            if (result.held === 0) {
+                setRetryPrintsFeedback("Nessuna stampa di reparto disponibile da lasciare in coda.")
+                return
             }
 
-            const remainingCount = failedPrinters.reduce((total, printer) => total + printer.count, 0)
-            const remainingPrinters = failedPrinters.map((printer) => printer.name).join(", ")
-            return {
-                ...current,
-                message: `Restano ${remainingCount} ${remainingCount === 1 ? "stampa" : "stampe"} da reinviare${remainingPrinters ? ` su: ${remainingPrinters}` : ""}.`,
-                action: { ...current.action, failedPrinters }
-            }
-        })
+            setFeedbackModal((current) => {
+                if (current.action?.type !== "RETRY_FAILED_PRINTS") return current
+                const heldLabel = `${result.held} ${result.held === 1 ? "stampa lasciata" : "stampe lasciate"} in coda su ${printer.name}.`
+                const failedPrinters = resolveFailedPrintersAfterHold(
+                    current.action.failedPrinters,
+                    printer.key,
+                    result.failedPrinters
+                )
+                if (failedPrinters.length === 0) {
+                    return {
+                        ...current,
+                        tone: "info",
+                        title: "Stampe lasciate in coda",
+                        message: `${heldLabel} Saranno reinviate automaticamente quando la stampante tornerà disponibile. Puoi proseguire con il prossimo ordine.`,
+                        action: undefined
+                    }
+                }
+
+                const remainingCount = failedPrinters.reduce((total, failedPrinter) => total + failedPrinter.count, 0)
+                return {
+                    ...current,
+                    message: `${heldLabel} Restano ${remainingCount} ${remainingCount === 1 ? "stampa fallita" : "stampe fallite"} da gestire.`,
+                    action: { ...current.action, failedPrinters }
+                }
+            })
+        } catch {
+            setRetryPrintsFeedback("Accodamento non riuscito. Riprova.")
+        } finally {
+            setHoldingPrinterKey(null)
+        }
     }
 
     const handleCodeDialogOpenChange = (open: boolean) => {
@@ -3565,14 +3621,19 @@ export default function PosPage() {
             <Dialog
                 open={feedbackModal.open}
                 onOpenChange={(open) => {
+                    if (!open && isPrintRecoveryBusy) return
                     setFeedbackModal((prev) => ({ ...prev, open }))
                     if (!open) {
                         setRetryPrintsFeedback(null)
                         setRetryingPrinterKey(null)
+                        setHoldingPrinterKey(null)
                     }
                 }}
             >
-                <DialogContent className="max-w-[460px] rounded-3xl p-0 overflow-hidden">
+                <DialogContent
+                    className="max-w-[460px] rounded-3xl p-0 overflow-hidden"
+                    showCloseButton={!isPrintRecoveryBusy}
+                >
                     <DialogHeader
                         className={`border-b px-8 py-6 ${feedbackModal.tone === "success"
                             ? "bg-emerald-50"
@@ -3591,6 +3652,9 @@ export default function PosPage() {
                         >
                             {feedbackModal.title}
                         </DialogTitle>
+                        <DialogDescription className="sr-only">
+                            {feedbackModal.message}
+                        </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 p-8">
                         <p className="text-base font-semibold text-slate-700">{feedbackModal.message}</p>
@@ -3600,9 +3664,19 @@ export default function PosPage() {
                                     <div key={printer.key} className="rounded-xl border border-rose-200 bg-rose-50 p-3">
                                         <p className="font-black text-rose-900">{printer.name} · {printer.count} {printer.count === 1 ? "stampa" : "stampe"}</p>
                                         {printer.error ? <p className="text-sm text-rose-700">{printer.error}</p> : null}
-                                        <Button type="button" variant="outline" className="mt-2 w-full rounded-lg font-bold" onClick={() => void handleRetryFailedPrintsFromModal(printer)} disabled={retryingPrinterKey !== null}>
+                                        <Button type="button" variant="outline" className="mt-2 w-full rounded-lg font-bold" onClick={() => void handleRetryFailedPrintsFromModal(printer)} disabled={isPrintRecoveryBusy}>
                                             {retryingPrinterKey === printer.key ? "Reinvio..." : `Riprova — ${printer.name}`}
                                         </Button>
+                                        {printer.printerType === "KITCHEN" && printer.canHold ? (
+                                            <Button
+                                                type="button"
+                                                className="mt-2 w-full rounded-lg bg-amber-600 font-bold hover:bg-amber-700"
+                                                onClick={() => void handleHoldFailedPrintsFromModal(printer)}
+                                                disabled={isPrintRecoveryBusy}
+                                            >
+                                                {holdingPrinterKey === printer.key ? "Accodamento..." : `Prosegui e lascia in coda — ${printer.name}`}
+                                            </Button>
+                                        ) : null}
                                     </div>
                                 ))}
                             </div>
@@ -3617,12 +3691,15 @@ export default function PosPage() {
                                         : "bg-slate-700 hover:bg-slate-800"
                                     }`}
                                 onClick={() => setFeedbackModal((prev) => ({ ...prev, open: false }))}
+                                disabled={isPrintRecoveryBusy}
                             >
                                 OK
                             </Button>
                         </div>
                         {retryPrintsFeedback ? (
-                            <p className="text-sm font-semibold text-slate-600">{retryPrintsFeedback}</p>
+                            <p role="status" aria-live="polite" className="text-sm font-semibold text-slate-600">
+                                {retryPrintsFeedback}
+                            </p>
                         ) : null}
                     </div>
                 </DialogContent>
@@ -3641,9 +3718,9 @@ export default function PosPage() {
                         <DialogTitle className="text-xl font-black text-amber-800">
                             Sostituire il carrello corrente?
                         </DialogTitle>
-                        <p className="text-sm font-semibold text-amber-700">
+                        <DialogDescription className="text-sm font-semibold text-amber-700">
                             L&apos;ordine pendente sostituirà prodotti, cliente e tavolo già inseriti nel POS.
-                        </p>
+                        </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 p-6">
                         <p className="text-sm font-semibold text-slate-700">
@@ -3727,9 +3804,9 @@ export default function PosPage() {
                                 <Search className="h-5 w-5 text-indigo-600" />
                                 Carica ordine da codice
                             </DialogTitle>
-                            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                            <DialogDescription className="text-xs font-medium text-slate-500 dark:text-slate-400">
                                 Inserisci il numero ordine oppure seleziona uno degli ordini pendenti.
-                            </p>
+                            </DialogDescription>
                         </DialogHeader>
                         <div className="space-y-4 p-5">
                             <div className="flex items-center gap-2">
@@ -3777,6 +3854,9 @@ export default function PosPage() {
                 <DialogContent className="max-w-[400px] rounded-3xl p-8">
                     <DialogHeader>
                         <DialogTitle className="text-2xl font-black text-center">In quale cassa sei?</DialogTitle>
+                        <DialogDescription className="sr-only">
+                            Seleziona il punto cassa da usare per il POS.
+                        </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                         {posDevices.length === 0 ? (
