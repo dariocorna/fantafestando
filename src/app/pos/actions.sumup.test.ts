@@ -495,9 +495,28 @@ describe("completePendingOrderPayment SumUp lifecycle", () => {
         })
 
         expect(result).toMatchObject({ success: true, paymentCompleted: false, paymentPending: true })
-        expect(order.save).toHaveBeenCalledOnce()
-        expect(order.set).toHaveBeenCalledWith("sumupCheckoutId", "initiating:order-1")
-        expect(order.set).toHaveBeenCalledWith("sumupInitiatedAt", expect.any(Date))
+        expect(order.save).not.toHaveBeenCalled()
+        expect(orderUpdateOneMock).toHaveBeenNthCalledWith(
+            1,
+            {
+                _id: "order-1",
+                eventId: "event-1",
+                status: "PENDING",
+                $nor: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            },
+            expect.objectContaining({
+                $set: expect.objectContaining({
+                    cart: expect.any(Array),
+                    cashSessionId: "session-1",
+                    sumupCheckoutId: "initiating:order-1",
+                    sumupInitiatedAt: expect.any(Date),
+                    stockEffectStatus: "REVERTED"
+                })
+            })
+        )
         expect(transitionSumUpOrderStockMock).toHaveBeenCalledWith({
             eventId: "event-1",
             orderId: "order-1",
@@ -509,6 +528,37 @@ describe("completePendingOrderPayment SumUp lifecycle", () => {
             expect.objectContaining({ sumupCheckoutId: "initiating:order-1" }),
             { $set: { sumupCheckoutId: "client-tx-1" } }
         )
+    })
+
+    test("does not reserve stock or call SumUp when the atomic order claim is lost", async () => {
+        orderUpdateOneMock.mockResolvedValueOnce({ acknowledged: true, matchedCount: 0 })
+        createSumUpCheckoutMock.mockResolvedValue({ success: true, id: "client-tx-1" })
+
+        const result = await completePendingOrderPayment({
+            eventId: "event-1",
+            orderId: "order-1",
+            paymentMethod: "CARD",
+            posDeviceId: "pos-1"
+        })
+
+        expect(result).toMatchObject({ success: false, error: expect.stringContaining("non più in attesa") })
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            {
+                _id: "order-1",
+                eventId: "event-1",
+                status: "PENDING",
+                $nor: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            },
+            expect.objectContaining({
+                $set: expect.objectContaining({ sumupCheckoutId: "initiating:order-1" })
+            })
+        )
+        expect(transitionSumUpOrderStockMock).not.toHaveBeenCalled()
+        expect(createSumUpCheckoutMock).not.toHaveBeenCalled()
+        expect(releaseCashSessionPaymentClaimMock).toHaveBeenCalledWith("session-1", "claim-1")
     })
 
     test("blocks the reader before planning stock in a TEST session", async () => {
@@ -589,7 +639,9 @@ describe("completePendingOrderPayment SumUp lifecycle", () => {
 
     test("treats a late checkout-link write failure as uncertain", async () => {
         createSumUpCheckoutMock.mockResolvedValue({ success: true, id: "client-tx-1" })
-        orderUpdateOneMock.mockRejectedValueOnce(new Error("write failed"))
+        orderUpdateOneMock
+            .mockResolvedValueOnce({ acknowledged: true, matchedCount: 1 })
+            .mockRejectedValueOnce(new Error("write failed"))
 
         const result = await completePendingOrderPayment({
             eventId: "event-1",

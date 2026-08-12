@@ -2278,13 +2278,6 @@ export async function completePendingOrderPayment(data: {
             return { success: false, error: "L'ordine deve contenere almeno un prodotto" }
         }
 
-        if (data.customer) {
-            order.set("customer", {
-                name: data.customer.name || undefined,
-                table: data.customer.table || undefined
-            })
-        }
-
         if (typeof data.totalAmount === "number" && (!Number.isFinite(data.totalAmount) || data.totalAmount < 0)) {
             return { success: false, error: "Totale ordine non valido" }
         }
@@ -2452,19 +2445,31 @@ export async function completePendingOrderPayment(data: {
             order.dishTickets
         )
 
-        const applyOrderDetails = () => {
-            order.set("cart", pricingResult.pricing.cartWithDiscounts)
-            order.set("ingredientPlan", ingredientPlan)
-            order.set("dishTickets", dishTickets)
-            order.totalAmount = payableAmount
-            order.discountApplied = pricingResult.pricing.discountApplied
-            order.set("discountMeta", pricingResult.pricing.orderDiscountMeta || undefined)
-            order.set("discountComponents", pricingResult.pricing.discountComponents)
-            order.set("pricingMode", pendingPricingMode === "VOLUNTEER" ? "VOLUNTEER" : "STANDARD")
-            order.paymentMethod = data.paymentMethod
-            order.set("posDeviceId", data.posDeviceId || undefined)
-            order.set("cashSessionId", sessionResult.session.id)
-            order.set("stockOverrideApproved", Boolean(data.allowStockOverride))
+        const orderPaymentDetails = {
+            ...(data.customer ? {
+                customer: {
+                    name: data.customer.name || undefined,
+                    table: data.customer.table || undefined
+                }
+            } : {}),
+            cart: pricingResult.pricing.cartWithDiscounts,
+            ingredientPlan,
+            dishTickets,
+            totalAmount: payableAmount,
+            discountApplied: pricingResult.pricing.discountApplied,
+            ...(pricingResult.pricing.orderDiscountMeta
+                ? { discountMeta: pricingResult.pricing.orderDiscountMeta }
+                : {}),
+            discountComponents: pricingResult.pricing.discountComponents,
+            pricingMode: pendingPricingMode === "VOLUNTEER" ? "VOLUNTEER" : "STANDARD",
+            paymentMethod: data.paymentMethod,
+            ...(data.posDeviceId ? { posDeviceId: data.posDeviceId } : {}),
+            cashSessionId: sessionResult.session.id,
+            stockOverrideApproved: Boolean(data.allowStockOverride)
+        }
+        const orderPaymentFieldsToUnset = {
+            ...(!pricingResult.pricing.orderDiscountMeta ? { discountMeta: 1 as const } : {}),
+            ...(!data.posDeviceId ? { posDeviceId: 1 as const } : {})
         }
 
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
@@ -2479,7 +2484,7 @@ export async function completePendingOrderPayment(data: {
             paymentClaimToken = undefined
             return { success: false, error: "I pagamenti sul terminale SumUp sono bloccati nelle sessioni TEST" }
         }
-        const orderStillManuallyPayable = await Order.exists({
+        const pendingOrderPaymentGuard = {
             _id: data.orderId,
             eventId: data.eventId,
             status: "PENDING",
@@ -2487,7 +2492,8 @@ export async function completePendingOrderPayment(data: {
                 { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
                 { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
             ]
-        })
+        }
+        const orderStillManuallyPayable = await Order.exists(pendingOrderPaymentGuard)
         if (!orderStillManuallyPayable) {
             await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
             paymentClaimToken = undefined
@@ -2507,13 +2513,26 @@ export async function completePendingOrderPayment(data: {
             }
 
             const initiationMarker = `initiating:${order._id.toString()}`
-            applyOrderDetails()
-            order.status = "PENDING"
-            order.set("sumupCheckoutId", initiationMarker)
-            order.set("sumupInitiatedAt", new Date())
-            order.set("stockAdjustments", stockPlan.adjustments)
-            order.set("stockEffectStatus", "REVERTED")
-            await order.save()
+            const claimedOrder = await Order.updateOne(
+                pendingOrderPaymentGuard,
+                {
+                    $set: {
+                        ...orderPaymentDetails,
+                        sumupCheckoutId: initiationMarker,
+                        sumupInitiatedAt: new Date(),
+                        stockAdjustments: stockPlan.adjustments,
+                        stockEffectStatus: "REVERTED"
+                    },
+                    ...(Object.keys(orderPaymentFieldsToUnset).length > 0
+                        ? { $unset: orderPaymentFieldsToUnset }
+                        : {})
+                }
+            )
+            if (!claimedOrder.acknowledged || claimedOrder.matchedCount !== 1) {
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+                paymentClaimToken = undefined
+                return { success: false, error: "Ordine già associato a SumUp o non più in attesa" }
+            }
             sumUpOrderInProgressId = order._id.toString()
 
             const reservation = await transitionSumUpOrderStock({
@@ -2639,12 +2658,29 @@ export async function completePendingOrderPayment(data: {
             return { success: false, error: "La sessione cassa è stata chiusa durante il pagamento", cashSessionRequired: true }
         }
 
-        applyOrderDetails()
-        order.status = "PAID"
-        order.set("paidAt", new Date())
-        order.set("stockAdjustments", stockAdjustmentsToRollback)
-        order.set("stockEffectStatus", "APPLIED")
-        await order.save()
+        const paidOrder = await Order.updateOne(
+            pendingOrderPaymentGuard,
+            {
+                $set: {
+                    ...orderPaymentDetails,
+                    status: "PAID",
+                    paidAt: new Date(),
+                    stockAdjustments: stockAdjustmentsToRollback,
+                    stockEffectStatus: "APPLIED"
+                },
+                ...(Object.keys(orderPaymentFieldsToUnset).length > 0
+                    ? { $unset: orderPaymentFieldsToUnset }
+                    : {})
+            }
+        )
+        if (!paidOrder.acknowledged || paidOrder.matchedCount !== 1) {
+            const appliedAdjustments = stockAdjustmentsToRollback
+            stockAdjustmentsToRollback = []
+            await rollbackStockAdjustments(data.eventId, appliedAdjustments)
+            await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+            paymentClaimToken = undefined
+            return { success: false, error: "Ordine già associato a SumUp o non più in attesa" }
+        }
         stockAdjustmentsToRollback = []
         await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
         paymentClaimToken = undefined
