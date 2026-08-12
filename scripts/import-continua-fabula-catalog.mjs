@@ -24,21 +24,6 @@ function unwrapEjson(value) {
     return value;
 }
 
-function normalizeVariants(variants) {
-    if (!Array.isArray(variants)) return [];
-
-    return variants
-        .map((variant) => ({
-            optionName: String(variant.optionName || "").trim(),
-            priceVariation: Number(variant.priceVariation || 0),
-            stockQuantity:
-                variant.stockQuantity === null || variant.stockQuantity === undefined
-                    ? null
-                    : Number(variant.stockQuantity),
-        }))
-        .filter((variant) => variant.optionName.length > 0);
-}
-
 function normalizeEventName(value) {
     return String(value || "")
         .toLowerCase()
