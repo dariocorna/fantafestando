@@ -233,6 +233,7 @@ La UI del POS riflette le periferiche effettivamente associate al Punto Cassa se
 - Pagamenti automatici SumUp esclusi dalle sessioni `TEST`; checkout pendenti e pagamenti certificati impediscono la riclassificazione di sessioni aperte o chiuse.
 - Pagamenti elettronici manuali ammessi nelle sessioni `TEST`, senza rimborso SumUp né blocco della riclassificazione.
 - Ordini con un checkout SumUp attivo non completabili manualmente, per evitare doppio incasso.
+- Gli avvii con esito di rete incerto restano prenotati e visibili in Admin: la recovery riconcilia gli identificativi SumUp oppure, dopo almeno 15 minuti, libera scorte e ordine solo con doppio lookup negativo e reader online/idle. Se il pagamento compare dopo l'annullamento locale, il webhook lo segnala come tardivo e Admin ne consente il rimborso senza toccare nuovamente le scorte.
 
 **Test E2E**: `e2e/sumup_test_sessions.spec.ts`.
 **Issue collegata**: `#149`.

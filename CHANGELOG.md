@@ -23,6 +23,7 @@ Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 - Stabilizzato l'autosave delle immagini Easter egg anche quando il componente padre ricrea il callback di salvataggio.
 - Eliminato il tracciamento indiscriminato del repository durante la build standalone degli asset gestiti.
 - Impedita la riclassificazione a TEST di sessioni aperte o chiuse con pagamenti SumUp pendenti/certificati e corretti storno e completamento manuale per non trattare i pagamenti POS manuali come SumUp.
+- Resi recuperabili gli avvii SumUp con esito di rete incerto: Admin verifica la transazione con SumUp e annulla solo dopo una finestra di sicurezza, doppia assenza confermata e reader online/libero; un eventuale successo tardivo resta visibile e rimborsabile senza una seconda variazione delle scorte.
 
 ### Removed
 
