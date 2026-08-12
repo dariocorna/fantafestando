@@ -137,7 +137,13 @@ async function seedEventTransferFixture(sourceEventName: string, token: string):
     eventId: sourceEventId,
     name: `SumUp ${token}`,
     type: "SUMUP",
-    config: { merchantId: `merchant-${token}` },
+    config: {
+      merchantCode: `merchant-${token}`,
+      readerId: `reader-${token}`,
+      apiKey: `encrypted-api-${token}`,
+      affiliateAppId: `app-${token}`,
+      affiliateKey: `encrypted-affiliate-${token}`,
+    },
   });
   const cashBoxPeripheral = await Peripheral.create({
     eventId: sourceEventId,
@@ -481,5 +487,12 @@ test.describe("Admin event export/import", () => {
     expect(String(importedPosDevice!.printerId)).toBe(String(importedCashierPrinter!._id));
     expect(String(importedPosDevice!.paymentTerminalId)).toBe(String(importedPaymentPeripheral!._id));
     expect(String(importedPosDevice!.cashBoxId)).toBe(String(importedCashBoxPeripheral!._id));
+    expect(importedPaymentPeripheral!.config).toMatchObject({
+      merchantCode: `merchant-${suffix}`,
+      readerId: `reader-${suffix}`,
+      apiKey: `encrypted-api-${suffix}`,
+      affiliateAppId: `app-${suffix}`,
+      affiliateKey: `encrypted-affiliate-${suffix}`,
+    });
   });
 });
