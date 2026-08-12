@@ -421,3 +421,16 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
 
 **Test principali**: unit/component test per form, autosave, upload, event transfer e settings; suite Playwright Chromium completata con 87 test passati e 7 test hardware saltati.
 **Issue collegata**: `#140`.
+
+---
+
+## Issue GitHub #141: Scorte POS realtime
+
+- Sincronizzazione entro pochi secondi di quantità, varianti e stato esaurito tra postazioni della stessa serata.
+- SSE come segnale di invalidazione e snapshot autenticato dal database come fonte di verità.
+- Carrello, categoria e cassa locale preservati durante il riallineamento.
+- Fallback a polling con stato visibile e ritorno automatico al canale realtime.
+- Validazione server della sovravendita invariata e ripristino coerente del flag sold-out dopo storno.
+
+**Test E2E**: `e2e/pos_stock_realtime.spec.ts` con due contesti browser, fallback e riconnessione.
+**Issue collegata**: `#141`.

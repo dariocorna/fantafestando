@@ -76,3 +76,9 @@ E2E:
 La modalità `Scorte` del POS trasforma le card del catalogo in editor inline per prodotti e varianti. Il cassiere inserisce una quantità intera, `0` per esaurito oppure usa `Illimitata`; durante la modifica il carrello resta visibile ma non modificabile e il pagamento è sospeso. L'accesso usa le stesse regole del POS, quindi non richiede il ruolo Admin.
 
 Ogni nuovo ordine salva gli aggiustamenti di prodotto e ingrediente realmente applicati e il relativo stato `APPLIED`/`REVERTED`. Quando una sessione TEST viene chiusa gli aggiustamenti vengono ripristinati con chiavi operative idempotenti; una successiva riclassificazione a normale li riapplica solo se le scorte sono sufficienti. Un claim atomico per ordine impedisce che storno e transizione della sessione modifichino contemporaneamente le stesse scorte; un claim breve sulla sessione impedisce inoltre che una chiusura intersechi la persistenza di un pagamento. Gli ordini storici senza snapshot vengono ricostruiti da carrello, componenti menu e piano ingredienti e sono segnalati come approssimativi.
+
+## Sincronizzazione tra postazioni POS (Issue #141)
+
+Le mutazioni concluse pubblicano un segnale SSE limitato all'evento attivo. Il segnale non trasporta dati di catalogo: ogni client rilegge uno snapshot autenticato dal database e fonde soltanto quantità, varianti, flag sold-out e stato calcolato. Carrello, cassa selezionata e navigazione locale restano invariati; il checkout continua a validare le scorte lato server.
+
+Se lo stream non è disponibile, il POS passa a un riallineamento periodico e torna automaticamente al canale realtime alla riconnessione. Il bus di invalidazione è process-local ed è coerente con l'unico processo backoffice attuale; un futuro scaling su più processi richiederà un broker condiviso o MongoDB change streams.

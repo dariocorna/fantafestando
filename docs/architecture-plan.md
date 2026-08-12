@@ -70,6 +70,14 @@ i dati, aggiornano scorte e sessione cassa e registrano l'esito del pagamento.
 Gli ordini pendenti del menu pubblico vengono chiusi dallo stesso dominio
 operativo del POS.
 
+Le postazioni della stessa serata ricevono invalidazioni scorte tramite una
+route SSE del backoffice. A ogni invalidazione rileggono dal database uno
+snapshot ristretto ai campi di disponibilità, senza sostituire il carrello o
+la validazione server del checkout. Se lo stream cade, il client usa un polling
+periodico e si riallinea alla riconnessione. Il bus è volutamente interno al
+singolo processo Node del backoffice; uno scaling orizzontale richiederà un
+meccanismo di pubblicazione condiviso.
+
 ### Stampa
 
 `PrinterService` mantiene la facade usata dalle action e dalle route. Il
