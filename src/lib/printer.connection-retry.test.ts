@@ -232,6 +232,33 @@ describe("PrinterService.printComanda connection retry", () => {
         );
     });
 
+    test("skips dispatch when the same persisted print intent already exists", async () => {
+        printJobCreateMock.mockRejectedValueOnce(Object.assign(new Error("duplicate"), { code: 11000 }));
+
+        await expect(PrinterService.printComanda({
+            ...baseJob(),
+            idempotencyKey: "SUMUP_CALLBACK:order-1:cashier-summary"
+        }, 1)).resolves.toBe(true);
+
+        expect(isPrinterConnectedMock).not.toHaveBeenCalled();
+        expect(executeMock).not.toHaveBeenCalled();
+        expect(printJobUpdateOneMock).not.toHaveBeenCalled();
+    });
+
+    test("does not dispatch an idempotent intent when its log cannot be persisted", async () => {
+        vi.spyOn(console, "error").mockImplementation(() => undefined);
+        printJobCreateMock.mockRejectedValueOnce(new Error("database unavailable"));
+
+        await expect(PrinterService.printComanda({
+            ...baseJob(),
+            idempotencyKey: "SUMUP_CALLBACK:order-1:cashier-summary"
+        }, 1)).resolves.toBe(false);
+
+        expect(isPrinterConnectedMock).not.toHaveBeenCalled();
+        expect(executeMock).not.toHaveBeenCalled();
+        expect(printJobUpdateOneMock).not.toHaveBeenCalled();
+    });
+
     test("automatically retries not reachable jobs before succeeding", async () => {
         vi.useFakeTimers();
         const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);

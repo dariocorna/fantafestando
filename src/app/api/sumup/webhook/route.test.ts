@@ -6,7 +6,6 @@ const {
     orderFindOneMock,
     orderUpdateOneMock,
     posDeviceFindOneMock,
-    printJobExistsMock,
     decryptSecretMock,
     getByClientMock,
     getByForeignMock,
@@ -20,7 +19,6 @@ const {
     orderFindOneMock: vi.fn(),
     orderUpdateOneMock: vi.fn(),
     posDeviceFindOneMock: vi.fn(),
-    printJobExistsMock: vi.fn(),
     decryptSecretMock: vi.fn(),
     getByClientMock: vi.fn(),
     getByForeignMock: vi.fn(),
@@ -40,7 +38,6 @@ vi.mock("@/models/Order", () => ({
     },
 }))
 vi.mock("@/models/PosDevice", () => ({ default: { findOne: posDeviceFindOneMock } }))
-vi.mock("@/models/PrintJob", () => ({ default: { exists: printJobExistsMock } }))
 vi.mock("@/lib/secrets", () => ({ decryptSecret: decryptSecretMock }))
 vi.mock("@/lib/sumup", () => ({
     getSumUpTransactionByClientTransactionId: getByClientMock,
@@ -119,7 +116,6 @@ describe("POST /api/sumup/webhook", () => {
         claimCashSessionPaymentMock.mockResolvedValue({ success: true, token: "session-claim", isTest: false })
         refreshCashSessionPaymentClaimMock.mockResolvedValue(true)
         releaseCashSessionPaymentClaimMock.mockResolvedValue(undefined)
-        printJobExistsMock.mockResolvedValue(null)
         routeOrderToPrintersMock.mockResolvedValue([])
     })
 
@@ -143,8 +139,11 @@ describe("POST /api/sumup/webhook", () => {
                 $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 },
             },
         )
-        expect(printJobExistsMock).toHaveBeenCalledWith({ orderId: "order-1", source: "ORDER" })
-        expect(routeOrderToPrintersMock).toHaveBeenCalledWith("order-1", "pos-1")
+        expect(routeOrderToPrintersMock).toHaveBeenCalledWith(
+            "order-1",
+            "pos-1",
+            { idempotencyScope: "SUMUP_CALLBACK" },
+        )
     })
 
     test("uses simple_status as authoritative and rolls back a refunded payment", async () => {
@@ -264,14 +263,17 @@ describe("POST /api/sumup/webhook", () => {
         expect(routeOrderToPrintersMock).toHaveBeenCalledOnce()
     })
 
-    test("does not duplicate prints when an already-paid order has a persisted print intent", async () => {
+    test("rebuilds missing print intents idempotently for an already-paid order", async () => {
         orderFindOneMock.mockReturnValue(selectLean({ ...pendingOrder, status: "PAID" }))
-        printJobExistsMock.mockResolvedValue({ _id: "print-job-1" })
 
         const response = await POST(webhookRequest())
 
         expect(response.status).toBe(200)
-        expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
+        expect(routeOrderToPrintersMock).toHaveBeenCalledWith(
+            "order-1",
+            "pos-1",
+            { idempotencyScope: "SUMUP_CALLBACK" },
+        )
     })
 
     test.each([

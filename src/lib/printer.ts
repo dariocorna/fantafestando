@@ -53,6 +53,7 @@ export interface PrinterCommandJob {
     queueRecoverable?: boolean;
     source?: PrintJobSource;
     printType?: PrintJobType;
+    idempotencyKey?: string;
     isVirtual?: boolean;
     title: string;
     eventName?: string;
@@ -125,6 +126,7 @@ export interface PrinterRasterImageJob {
     orderId?: string;
     source?: PrintJobSource;
     printType?: PrintJobType;
+    idempotencyKey?: string;
     isVirtual?: boolean;
     title: string;
     eventName?: string;
@@ -1066,8 +1068,9 @@ export class PrinterService {
         errorMessage?: string;
         heldSince?: Date;
         liveClaimExpiresAt?: Date;
-    }): Promise<string | undefined> {
-        if (!params.eventId) return undefined;
+        idempotencyKey?: string;
+    }): Promise<{ id?: string; created: boolean }> {
+        if (!params.eventId) return { created: true };
 
         try {
             await dbConnect();
@@ -1081,6 +1084,7 @@ export class PrinterService {
                 source: params.source,
                 printType: params.printType,
                 queueRecoverable: Boolean(params.queueRecoverable),
+                idempotencyKey: params.idempotencyKey,
                 status: params.status || "QUEUED",
                 destinationHost: params.destinationHost,
                 destinationPort: params.destinationPort,
@@ -1091,10 +1095,18 @@ export class PrinterService {
                 heldSince: params.heldSince,
                 liveClaimExpiresAt: params.liveClaimExpiresAt
             });
-            return created._id.toString();
+            return { id: created._id.toString(), created: true };
         } catch (error) {
+            if (
+                params.idempotencyKey
+                && typeof error === "object"
+                && error !== null
+                && (error as { code?: unknown }).code === 11000
+            ) {
+                return { created: false };
+            }
             console.error("Unable to persist print job log:", error);
-            return undefined;
+            return { created: true };
         }
     }
 
@@ -1431,13 +1443,14 @@ export class PrinterService {
         const canUseKitchenQueueLease = Boolean(job.queueRecoverable && job.eventId && job.printerId);
         const kitchenLease = canUseKitchenQueueLease ? buildPrintQueueLease() : null;
 
-        const logId = await this.createPrintJobLog({
+        const log = await this.createPrintJobLog({
             eventId: job.eventId,
             printerId: job.printerId,
             orderId: job.orderId,
             source: job.source || "ORDER",
             printType,
             queueRecoverable: Boolean(job.queueRecoverable),
+            idempotencyKey: job.idempotencyKey,
             destinationHost: destinationHost || "unknown",
             destinationPort,
             isVirtual: Boolean(job.isVirtual),
@@ -1445,6 +1458,9 @@ export class PrinterService {
             document: document as unknown as Record<string, unknown>,
             liveClaimExpiresAt: kitchenLease?.expiresAt
         });
+        if (!log.created) return true;
+        const logId = log.id;
+        if (job.idempotencyKey && !logId) return false;
 
         if (kitchenLease && !logId) return false;
         let kitchenLeaseClaimed = false;
@@ -1713,18 +1729,22 @@ export class PrinterService {
         const destinationPort = destination.port;
         const destinationLabel = destination.label;
 
-        const logId = await this.createPrintJobLog({
+        const log = await this.createPrintJobLog({
             eventId: job.eventId,
             printerId: job.printerId,
             orderId: job.orderId,
             source: job.source || "MANUAL_TEST",
             printType,
+            idempotencyKey: job.idempotencyKey,
             destinationHost: destinationHost || "unknown",
             destinationPort,
             isVirtual: Boolean(job.isVirtual),
             copies,
             document
         });
+        if (!log.created) return true;
+        const logId = log.id;
+        if (job.idempotencyKey && !logId) return false;
 
         if (options?.immediateFailureReason) {
             await this.updatePrintJobLog(logId, {
@@ -1769,7 +1789,11 @@ export class PrinterService {
         return true;
     }
 
-    static async routeOrderToPrinters(orderId: string, posDeviceId?: string) {
+    static async routeOrderToPrinters(
+        orderId: string,
+        posDeviceId?: string,
+        options?: { idempotencyScope?: string }
+    ) {
         await dbConnect();
         const order = await Order.findById(orderId).lean() as ({
             _id: { toString(): string };
@@ -1795,6 +1819,13 @@ export class PrinterService {
             };
         } | null);
         if (!order) return;
+
+        const idempotencyPrefix = options?.idempotencyScope?.trim()
+            ? `${options.idempotencyScope.trim()}:${order._id.toString()}`
+            : undefined;
+        const printIntentKey = (suffix: string) => idempotencyPrefix
+            ? `${idempotencyPrefix}:${suffix}`
+            : undefined;
 
         const eventId = order.eventId?.toString();
 
@@ -1984,6 +2015,7 @@ export class PrinterService {
                 const createdJob: PrinterCommandJob = {
                     ...cashierJob,
                     items: [],
+                    idempotencyKey: printIntentKey(`customer:${groupKey}`),
                     footerLines
                 };
                 customerJobsByGroup.set(groupKey, createdJob);
@@ -2063,6 +2095,7 @@ export class PrinterService {
                         printerId: destination.id,
                         eventId,
                         queueRecoverable: destination.queueRecoverable,
+                        idempotencyKey: printIntentKey(`kitchen:${kitchenGroupKey}`),
                         source: "ORDER",
                         printType: "KITCHEN_ORDER",
                         isVirtual: destination.isVirtual,
@@ -2126,6 +2159,7 @@ export class PrinterService {
         if (cashierJob.items.length > 0 && cashierJob.ip) {
             const summaryJob: PrinterCommandJob = {
                 ...cashierJob,
+                idempotencyKey: printIntentKey("cashier-summary"),
                 printType: "CASHIER_SUMMARY",
                 title: "SCONTRINO CASSA",
                 copyLabel: "COPIA CASSA",
@@ -2194,6 +2228,7 @@ export class PrinterService {
                 orderId: order._id.toString(),
                 source: "ORDER",
                 printType: "EASTER_EGG_IMAGE",
+                idempotencyKey: printIntentKey("easter-egg"),
                 isVirtual: Boolean(cashierPrinter?.isVirtual),
                 title: "Easter Egg Cliente",
                 eventName,
@@ -2286,7 +2321,7 @@ export class PrinterService {
                 || sanitizePrintableHeaderLogoUrl(event?.settings?.menuHeaderLogoUrl)
         });
 
-        const logId = await this.createPrintJobLog({
+        const log = await this.createPrintJobLog({
             eventId,
             printerId,
             source: "CASH_SESSION",
@@ -2298,6 +2333,7 @@ export class PrinterService {
             copies: 1,
             document: document as unknown as Record<string, unknown>
         });
+        const logId = log.id;
 
         if (!printerHost) {
             console.warn(`No cashier printer configured for POS ${posDeviceId}`);

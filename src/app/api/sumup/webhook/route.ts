@@ -12,7 +12,6 @@ import { transitionSumUpOrderStock } from "@/lib/sumup-order-stock"
 import { PrinterService } from "@/lib/printer"
 import Order from "@/models/Order"
 import PosDevice from "@/models/PosDevice"
-import PrintJob from "@/models/PrintJob"
 
 const WEBHOOK_CLAIM_TTL_MS = 5 * 60 * 1000
 
@@ -114,10 +113,11 @@ function transactionsMatch(left: VerifiedTransaction, right: VerifiedTransaction
 async function dispatchPrintsIfMissing(order: WebhookOrder) {
     const orderId = order._id.toString()
     try {
-        const existingPrintIntent = await PrintJob.exists({ orderId, source: "ORDER" })
-        if (!existingPrintIntent) {
-            await PrinterService.routeOrderToPrinters(orderId, order.posDeviceId?.toString())
-        }
+        await PrinterService.routeOrderToPrinters(
+            orderId,
+            order.posDeviceId?.toString(),
+            { idempotencyScope: "SUMUP_CALLBACK" },
+        )
     } catch (error) {
         // Payment is already authoritative. Print failures remain visible in the print monitor/admin reprint flow.
         console.error("[SumUp Webhook] Errore durante il trigger delle stampe:", error)
