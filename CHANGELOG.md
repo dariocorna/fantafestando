@@ -4,6 +4,10 @@ Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
 ## [Unreleased]
 
+### Added
+
+- Sincronizzate in tempo reale le scorte tra postazioni POS della stessa serata tramite SSE, con snapshot dal database, stato del canale e fallback a polling senza azzerare carrello o selezioni.
+
 ### Changed
 
 - Unificati i dialog di creazione e modifica prodotto in un solo form condiviso, preservando payload e comportamento dei due flussi.
@@ -12,6 +16,7 @@ Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
 ### Fixed
 
+- Riallineato automaticamente il flag esaurito quando storni e transizioni delle sessioni cassa ripristinano una quantità positiva.
 - Stabilizzato l'autosave delle immagini Easter egg anche quando il componente padre ricrea il callback di salvataggio.
 - Eliminato il tracciamento indiscriminato del repository durante la build standalone degli asset gestiti.
 

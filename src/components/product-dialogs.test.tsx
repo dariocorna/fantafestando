@@ -227,7 +227,7 @@ describe("product dialogs", () => {
             recipeItems: [{ ingredientId: "ingredient-bread", quantity: 1 }]
         };
         const secondProduct: ProductFormProduct = {
-            id: "product-b",
+            id: "product-a",
             name: "Prodotto B",
             categoryId: "category-drinks",
             basePrice: 9,

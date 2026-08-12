@@ -1,6 +1,6 @@
 "use client"
 
-import { useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { updatePosStock } from "@/app/pos/actions"
 import { Button } from "@/components/ui/button"
@@ -30,11 +30,26 @@ function StockRow({ eventId, product, variantName, value, onUpdated }: {
     onUpdated: (product: UpdatedProduct) => void
 }) {
     const label = variantName || product.shortName || product.name
+    const accessibleLabel = variantName
+        ? `${product.shortName || product.name} - ${variantName}`
+        : label
     const [draft, setDraft] = useState(value === null ? "" : String(value))
+    const [dirty, setDirty] = useState(false)
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState("")
     const [success, setSuccess] = useState("")
     const errorId = useId()
+    const syncedValue = useRef(value)
+
+    useEffect(() => {
+        if (dirty || saving) {
+            syncedValue.current = value
+            return
+        }
+        if (Object.is(syncedValue.current, value)) return
+        syncedValue.current = value
+        setDraft(value === null ? "" : String(value))
+    }, [dirty, saving, value])
 
     const save = (next = draft) => {
         setSuccess("")
@@ -62,9 +77,10 @@ function StockRow({ eventId, product, variantName, value, onUpdated }: {
                 const updatedQuantity = variantName
                     ? result.product.variants.find((variant) => variant.optionName === variantName)?.stockQuantity ?? null
                     : result.product.stockQuantity
-                setDraft(updatedQuantity === null ? "" : String(updatedQuantity))
-                setSuccess(`Scorta ${label} aggiornata a ${updatedQuantity === null ? "illimitata" : updatedQuantity}`)
                 onUpdated(result.product)
+                setDraft(updatedQuantity === null ? "" : String(updatedQuantity))
+                setDirty(false)
+                setSuccess(`Scorta ${accessibleLabel} aggiornata a ${updatedQuantity === null ? "illimitata" : updatedQuantity}`)
             } catch {
                 setError("Impossibile aggiornare le scorte. Riprova.")
             } finally {
@@ -88,7 +104,7 @@ function StockRow({ eventId, product, variantName, value, onUpdated }: {
                     {variantName ? label : "Prodotto"}
                 </p>
                 <Input
-                    aria-label={`Scorta ${label}`}
+                    aria-label={`Scorta ${accessibleLabel}`}
                     aria-describedby={error ? errorId : undefined}
                     aria-invalid={Boolean(error)}
                     className="h-11 w-24 text-center text-base font-bold"
@@ -101,6 +117,7 @@ function StockRow({ eventId, product, variantName, value, onUpdated }: {
                     placeholder="∞"
                     onChange={(event) => {
                         setDraft(event.target.value)
+                        setDirty(true)
                         setError("")
                         setSuccess("")
                     }}
@@ -109,7 +126,7 @@ function StockRow({ eventId, product, variantName, value, onUpdated }: {
                     type="button"
                     variant="outline"
                     className="h-11 px-3 font-bold"
-                    aria-label={`Imposta scorta illimitata per ${label}`}
+                    aria-label={`Imposta scorta illimitata per ${accessibleLabel}`}
                     disabled={saving}
                     onClick={() => save("")}
                 >
@@ -118,7 +135,7 @@ function StockRow({ eventId, product, variantName, value, onUpdated }: {
                 <Button
                     type="submit"
                     className="h-11 min-w-20 px-3 font-bold"
-                    aria-label={`Salva scorta ${label}`}
+                    aria-label={`Salva scorta ${accessibleLabel}`}
                     aria-busy={saving}
                     disabled={saving}
                 >

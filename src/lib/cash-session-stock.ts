@@ -1,7 +1,8 @@
 import Ingredient from "@/models/Ingredient"
 import Order from "@/models/Order"
 import Product from "@/models/Product"
-import { aggregateStockAdjustments, buildDemandMap, type StockAdjustment } from "@/lib/stock-operations"
+import { aggregateStockAdjustments, buildDemandMap, syncSoldOutFlags, type StockAdjustment } from "@/lib/stock-operations"
+import { publishStockInvalidation } from "@/lib/pos-stock-realtime"
 
 type SessionOrder = {
     _id: { toString(): string }
@@ -54,8 +55,6 @@ export async function transitionCashSessionStock(params: {
         .select("_id cart ingredientPlan stockAdjustments stockEffectStatus")
         .lean() as SessionOrder[]
     const plans = orders.map((order) => ({ order, ...adjustmentsForOrder(order) }))
-    const total = aggregateStockAdjustments(plans.flatMap((plan) => plan.adjustments))
-
     if (params.target === "APPLIED") {
         const shortages: Array<{ entityType: string; entityId: string; entityName: string; required: number; available: number }> = []
         for (const entityType of ["PRODUCT", "INGREDIENT"] as const) {
@@ -104,13 +103,6 @@ export async function transitionCashSessionStock(params: {
         if (!result.success) return result
     }
 
-    const productIds = total.filter((entry) => entry.entityType === "PRODUCT").map((entry) => entry.entityId)
-    if (productIds.length) {
-        const products = await Product.find({ eventId: params.eventId, _id: { $in: productIds } }).select("_id stockQuantity").lean() as Array<{ _id: { toString(): string }; stockQuantity?: number | null }>
-        for (const product of products) {
-            await Product.updateOne({ _id: product._id }, { $set: { isSoldOut: typeof product.stockQuantity === "number" && product.stockQuantity <= 0 } })
-        }
-    }
     return { success: true as const, approximateOrders: plans.filter((plan) => plan.approximate).length, source }
 }
 
@@ -144,6 +136,12 @@ export async function transitionClaimedOrderStock(params: {
             if (!alreadyApplied && tracked) return { success: false, error: "Scorte cambiate durante l'operazione: correggile e riprova" }
         }
     }
+
+    await syncSoldOutFlags(
+        params.eventId,
+        aggregated.filter((entry) => entry.entityType === "PRODUCT").map((entry) => entry.entityId)
+    )
+    if (aggregated.length > 0) publishStockInvalidation(params.eventId)
 
     const finalized = await Order.updateOne(
         {

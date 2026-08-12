@@ -14,6 +14,7 @@ import {
     refreshCashSessionPaymentClaim,
     releaseCashSessionPaymentClaim,
 } from "@/lib/cash-session-payment-claim";
+import { publishStockInvalidation } from "@/lib/pos-stock-realtime";
 
 const WEBHOOK_CLAIM_TTL_MS = 5 * 60 * 1000;
 
@@ -240,6 +241,7 @@ export async function POST(req: NextRequest) {
                     throw new Error("Webhook claim lost before payment completion");
                 }
                 paymentCompleted = true
+                publishStockInvalidation(order.eventId.toString())
 
                 console.log(`[SumUp Webhook] Ordine ${order._id} marcato come PAGATO.`);
 

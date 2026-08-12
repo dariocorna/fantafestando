@@ -65,6 +65,7 @@ import {
     refreshCashSessionPaymentClaim,
     releaseCashSessionPaymentClaim,
 } from "@/lib/cash-session-payment-claim"
+import { publishStockInvalidation } from "@/lib/pos-stock-realtime"
 
 interface PrintDispatchSummary {
     attempted: number
@@ -174,6 +175,8 @@ export async function updatePosStock(data: {
             product.isSoldOut = typeof product.stockQuantity === "number" && product.stockQuantity <= 0
         }
     }
+
+    publishStockInvalidation(data.eventId)
 
     return {
         success: true as const,
@@ -1528,6 +1531,8 @@ export async function createOrder(data: {
         await releaseCashSessionPaymentClaim(paymentClaimSessionId || "", paymentClaimToken)
         paymentClaimToken = undefined
 
+        if (order.status === "PAID") publishStockInvalidation(data.eventId)
+
         let printSummary: PrintDispatchSummary | undefined
 
         // Trigger network printing ONLY if PAID immediately.
@@ -2334,6 +2339,8 @@ export async function completePendingOrderPayment(data: {
         stockAdjustmentsToRollback = []
         await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
         paymentClaimToken = undefined
+
+        publishStockInvalidation(data.eventId)
 
         let printSummary: PrintDispatchSummary | undefined
         try {

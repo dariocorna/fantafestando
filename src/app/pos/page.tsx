@@ -39,6 +39,7 @@ import { normalizePosCatalogLayout } from "@/lib/pos-catalog-layout"
 import { FixedMenuConfigDialog, type FixedMenuChoiceGroupDto, type FixedMenuComponentDto } from "@/components/fixed-menu-config-dialog"
 import { buildMenuConfigurationKey, type MenuSelectionInput } from "@/lib/fixed-menu"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { usePosStockRealtime } from "@/hooks/use-pos-stock-realtime"
 import { buildProductQuantityMap, decrementProductQuantityInCart, replaceSingleCartUnit } from "@/lib/pos-cart"
 import { buildCashReceivedSuggestions, formatCents, normalizeCashReceivedInput, toCents } from "@/lib/cash-change"
 import { PosInlineStockEditor } from "@/components/pos-inline-stock-editor"
@@ -703,6 +704,17 @@ export default function PosPage() {
     const selectedPaymentTerminal = getPeripheralRef(selectedPosDevice?.paymentTerminalId)
     const selectedCashBox = getPeripheralRef(selectedPosDevice?.cashBoxId)
     const activeEventId = activeEvent?._id
+    const stockSyncStatus = usePosStockRealtime(activeEventId, setProducts)
+    const stockSyncLabel = stockSyncStatus === "live"
+        ? "Scorte sincronizzate"
+        : stockSyncStatus === "polling"
+            ? "Riallineamento scorte periodico"
+            : "Connessione scorte…"
+    const stockSyncClass = stockSyncStatus === "live"
+        ? "text-emerald-700"
+        : stockSyncStatus === "polling"
+            ? "text-amber-700"
+            : "text-slate-500"
 
     const cashAvailable = Boolean(selectedCashBox)
     const cardAvailable = Boolean(selectedPaymentTerminal) && !(cashSession?.isTest && selectedPaymentTerminal?.type === "SUMUP")
@@ -2177,6 +2189,13 @@ export default function PosPage() {
                                 <Monitor size={12} />
                                 <span className="truncate">{selectedPosDevice ? `Cassa: ${selectedPosDevice.name}` : "Seleziona Cassa"}</span>
                             </button>
+                            <p
+                                className={`mt-1 text-[10px] font-bold ${stockSyncClass}`}
+                                data-testid="pos-stock-sync-status"
+                                role="status"
+                            >
+                                {stockSyncLabel}
+                            </p>
                         </div>
                         <div className="shrink-0 text-right">
                             <p className="text-[10px] font-black uppercase tracking-[0.1em] text-slate-500">Totale</p>
@@ -2286,6 +2305,13 @@ export default function PosPage() {
                     <h1 className="min-w-0 flex-1 truncate text-lg font-black uppercase tracking-tight text-[var(--brand-ink)]">
                         {activeEvent?.name || "Cassa FantaFestando"}
                     </h1>
+                    <p
+                        className={`shrink-0 text-xs font-bold ${stockSyncClass}`}
+                        data-testid="pos-stock-sync-status"
+                        role="status"
+                    >
+                        {stockSyncLabel}
+                    </p>
                     <button type="button" onClick={openPendingOrdersSurface} disabled={isStockMode} className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-700 disabled:cursor-not-allowed disabled:opacity-45">Pendenti</button>
                     <button type="button" onClick={() => handleCodeDialogOpenChange(true)} disabled={isStockMode} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-45">Codice</button>
                     <button
