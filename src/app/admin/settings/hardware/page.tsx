@@ -196,7 +196,14 @@ export default async function HardwarePage() {
                                 <CardContent>
                                     <div className="text-sm text-muted-foreground mb-4">
                                         <p>Tipo: <span className="font-medium text-foreground">{p.type === 'SUMUP' ? 'Terminale Carta / POS (SumUp)' : p.type === 'ELECTRONIC_MANUAL' ? 'Pagamento Carta / POS (Manuale)' : 'Cassetta Contanti'}</span></p>
-                                        {p.type === 'SUMUP' && <p>Merchant ID: <span className="font-mono text-foreground">{p.config?.merchantId || "Non configurato"}</span></p>}
+                                        {p.type === 'SUMUP' && (
+                                            <>
+                                                <p>Merchant Code: <span className="font-mono text-foreground">{p.config?.merchantCode || "Non configurato"}</span></p>
+                                                <p>Reader ID: <span className="font-mono text-foreground">{p.config?.readerId || "Non configurato"}</span></p>
+                                                <p>Affiliate App ID: <span className="font-mono text-foreground">{p.config?.affiliateAppId || "Non configurato"}</span></p>
+                                                <p>Credenziali: <span className="font-medium text-foreground">{p.config?.apiKey && p.config?.affiliateKey ? "Configurate" : "Incomplete"}</span></p>
+                                            </>
+                                        )}
                                     </div>
                                     <div className="flex justify-end gap-2 mt-4">
                                         <PeripheralDialog
@@ -204,7 +211,11 @@ export default async function HardwarePage() {
                                                 id: String(p._id),
                                                 name: p.name,
                                                 type: p.type,
-                                                config: { merchantId: p.config?.merchantId as string | undefined }
+                                                config: {
+                                                    merchantCode: p.config?.merchantCode as string | undefined,
+                                                    readerId: p.config?.readerId as string | undefined,
+                                                    affiliateAppId: p.config?.affiliateAppId as string | undefined
+                                                }
                                             }}
                                             eventId={eventId}
                                             updateAction={updatePeripheralAction}

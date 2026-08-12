@@ -12,7 +12,7 @@ import {
     normalizePrinterConfig
 } from "@/lib/printer-config";
 import { recoverStaleLiveKitchenPrintJobs } from "@/lib/print-queue";
-import { encryptSecret, isEncryptedSecret } from "@/lib/secrets";
+import { encryptSecret } from "@/lib/secrets";
 import Category from "@/models/Category";
 import Event from "@/models/Event";
 import Peripheral from "@/models/Peripheral";
@@ -352,14 +352,17 @@ export async function createPeripheralAction(formData: FormData) {
 
     const submittedEventId = formData.get("eventId") as string | null;
     const name = formData.get("name") as string;
-    const type = formData.get("type") as "SUMUP" | "CASH_BOX" | "OTHER";
+    const type = formData.get("type") as "SUMUP" | "CASH_BOX" | "ELECTRONIC_MANUAL" | "OTHER";
 
-    const merchantId = ((formData.get("merchantId") as string) || "").trim();
+    const merchantCode = ((formData.get("merchantCode") as string) || "").trim();
+    const readerId = ((formData.get("readerId") as string) || "").trim();
+    const apiKey = ((formData.get("apiKey") as string) || "").trim();
+    const affiliateAppId = ((formData.get("affiliateAppId") as string) || "").trim();
     const affiliateKey = ((formData.get("affiliateKey") as string) || "").trim();
 
     if (!name || !type) return { error: "Dati mancanti" };
-    if (type === "SUMUP" && (!merchantId || !affiliateKey)) {
-        return { error: "Merchant ID e API Key sono obbligatori per terminali SumUp" };
+    if (type === "SUMUP" && (!merchantCode || !readerId || !apiKey || !affiliateAppId || !affiliateKey)) {
+        return { error: "Merchant Code, Reader ID, API Key, Affiliate App ID e Affiliate Key sono obbligatori per terminali SumUp" };
     }
 
     const contextEventId = await requireContextEventId();
@@ -372,7 +375,13 @@ export async function createPeripheralAction(formData: FormData) {
         name,
         type,
         config: type === "SUMUP"
-            ? { merchantId, affiliateKey: encryptSecret(affiliateKey) }
+            ? {
+                merchantCode,
+                readerId,
+                apiKey: encryptSecret(apiKey),
+                affiliateAppId,
+                affiliateKey: encryptSecret(affiliateKey)
+            }
             : {}
     });
 
@@ -414,9 +423,12 @@ export async function updatePeripheralAction(formData: FormData) {
     const id = formData.get("id") as string;
     const submittedEventId = formData.get("eventId") as string | null;
     const name = formData.get("name") as string;
-    const type = formData.get("type") as "SUMUP" | "CASH_BOX" | "OTHER";
+    const type = formData.get("type") as "SUMUP" | "CASH_BOX" | "ELECTRONIC_MANUAL" | "OTHER";
 
-    const merchantId = ((formData.get("merchantId") as string) || "").trim();
+    const merchantCode = ((formData.get("merchantCode") as string) || "").trim();
+    const readerId = ((formData.get("readerId") as string) || "").trim();
+    const apiKey = ((formData.get("apiKey") as string) || "").trim();
+    const affiliateAppId = ((formData.get("affiliateAppId") as string) || "").trim();
     const affiliateKey = ((formData.get("affiliateKey") as string) || "").trim();
 
     if (!id || !name || !type) return { error: "Dati mancanti" };
@@ -432,22 +444,26 @@ export async function updatePeripheralAction(formData: FormData) {
         return { error: "Periferica non trovata nella festa selezionata" };
     }
 
-    const currentAffiliateKey = getConfigString(currentPeripheral.config, "affiliateKey");
-    const currentMerchantId = getConfigString(currentPeripheral.config, "merchantId");
-
     if (type === "SUMUP") {
-        const effectiveMerchantId = merchantId || currentMerchantId || "";
-        const effectiveAffiliateKey = affiliateKey || currentAffiliateKey || "";
+        const currentMerchantCode = getConfigString(currentPeripheral.config, "merchantCode");
+        const currentReaderId = getConfigString(currentPeripheral.config, "readerId");
+        const currentApiKey = getConfigString(currentPeripheral.config, "apiKey");
+        const currentAffiliateAppId = getConfigString(currentPeripheral.config, "affiliateAppId");
+        const currentAffiliateKey = getConfigString(currentPeripheral.config, "affiliateKey");
 
-        if (!effectiveMerchantId || !effectiveAffiliateKey) {
-            return { error: "Merchant ID e API Key sono obbligatori per terminali SumUp" };
+        if (!currentApiKey && currentAffiliateKey && (!apiKey || !affiliateKey)) {
+            return { error: "Per migrare il terminale SumUp inserisci sia API Key sia Affiliate Key" };
         }
 
-        const storedAffiliateKey = affiliateKey
-            ? encryptSecret(affiliateKey)
-            : (currentAffiliateKey && !isEncryptedSecret(currentAffiliateKey)
-                ? encryptSecret(currentAffiliateKey)
-                : currentAffiliateKey);
+        const effectiveMerchantCode = merchantCode || currentMerchantCode || "";
+        const effectiveReaderId = readerId || currentReaderId || "";
+        const effectiveApiKey = apiKey || currentApiKey || "";
+        const effectiveAffiliateAppId = affiliateAppId || currentAffiliateAppId || "";
+        const effectiveAffiliateKey = affiliateKey || (currentApiKey ? currentAffiliateKey : "") || "";
+
+        if (!effectiveMerchantCode || !effectiveReaderId || !effectiveApiKey || !effectiveAffiliateAppId || !effectiveAffiliateKey) {
+            return { error: "Merchant Code, Reader ID, API Key, Affiliate App ID e Affiliate Key sono obbligatori per terminali SumUp" };
+        }
 
         await Peripheral.findOneAndUpdate(
             { _id: id, eventId: scopedEventId },
@@ -455,8 +471,11 @@ export async function updatePeripheralAction(formData: FormData) {
                 name,
                 type,
                 config: {
-                    merchantId: effectiveMerchantId,
-                    affiliateKey: storedAffiliateKey
+                    merchantCode: effectiveMerchantCode,
+                    readerId: effectiveReaderId,
+                    apiKey: apiKey ? encryptSecret(apiKey) : currentApiKey,
+                    affiliateAppId: effectiveAffiliateAppId,
+                    affiliateKey: affiliateKey ? encryptSecret(affiliateKey) : currentAffiliateKey
                 }
             },
             { returnDocument: "after" }
