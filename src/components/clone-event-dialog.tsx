@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { cloneEventAction } from "@/app/admin/settings/actions";
+import { cloneEventAction } from "@/app/admin/settings/events/actions";
 import { Loader2 } from "lucide-react";
 
 interface CloneEventDialogProps {
