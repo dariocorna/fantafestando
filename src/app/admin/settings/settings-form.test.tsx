@@ -6,7 +6,7 @@ const { updateEventSettingsActionMock } = vi.hoisted(() => ({
     updateEventSettingsActionMock: vi.fn()
 }));
 
-vi.mock("./actions", () => ({
+vi.mock("./event-settings-actions", () => ({
     updateEventSettingsAction: updateEventSettingsActionMock
 }));
 

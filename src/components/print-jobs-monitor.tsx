@@ -1,12 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RefreshCw } from "lucide-react";
-import { buildPreviewLines, normalizeLegacyPrintDocument } from "@/lib/print-report";
 import { PrintDocumentViewer } from "./print-document-viewer";
 
 type PrintJobStatus = "QUEUED" | "SENT" | "FAILED";

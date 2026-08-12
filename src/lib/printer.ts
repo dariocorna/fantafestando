@@ -480,20 +480,23 @@ export class PrinterService {
     private static async resolveVirtualRawCapturePath(destinationPort: number, startedAt: Date): Promise<string | undefined> {
         const slot = destinationPort - getVirtualPrinterStartPort() + 1;
         if (!Number.isInteger(slot) || slot < 1 || slot > 99) return undefined;
-        const slotDir = path.join(PRINTER_EMULATOR_OUTPUT_DIR, `slot-${String(slot).padStart(2, "0")}`);
+        const slotDir = path.join(
+            /* turbopackIgnore: true */ PRINTER_EMULATOR_OUTPUT_DIR,
+            `slot-${String(slot).padStart(2, "0")}`
+        );
 
         const deadline = Date.now() + PRINTER_EMULATOR_CAPTURE_LOOKUP_TIMEOUT_MS;
         while (Date.now() <= deadline) {
             try {
-                const entries = await fs.readdir(slotDir, { withFileTypes: true });
+                const entries = await fs.readdir(/* turbopackIgnore: true */ slotDir, { withFileTypes: true });
                 const binEntries = entries
                     .filter((entry) => entry.isFile() && entry.name.endsWith(".bin"))
                     .map((entry) => entry.name);
                 if (binEntries.length > 0) {
                     const withStats = await Promise.all(
                         binEntries.map(async (name) => {
-                            const filePath = path.join(slotDir, name);
-                            const stat = await fs.stat(filePath);
+                            const filePath = path.join(/* turbopackIgnore: true */ slotDir, name);
+                            const stat = await fs.stat(/* turbopackIgnore: true */ filePath);
                             return { filePath, mtime: stat.mtime.getTime() };
                         })
                     );
@@ -527,7 +530,7 @@ export class PrinterService {
         try {
             await fs.mkdir(PRINTER_LOCAL_CAPTURE_DIR, { recursive: true });
             const fileName = `${prefix}-${startedAt.toISOString().replace(/[:.]/g, "-")}-${randomUUID()}.bin`;
-            const filePath = path.join(PRINTER_LOCAL_CAPTURE_DIR, fileName);
+            const filePath = path.join(/* turbopackIgnore: true */ PRINTER_LOCAL_CAPTURE_DIR, fileName);
             await fs.writeFile(filePath, raw);
             await this.pruneLocalRawCaptures();
             return filePath;
@@ -539,13 +542,19 @@ export class PrinterService {
 
     private static async pruneLocalRawCaptures(): Promise<void> {
         try {
-            const entries = await fs.readdir(PRINTER_LOCAL_CAPTURE_DIR, { withFileTypes: true });
+            const entries = await fs.readdir(
+                /* turbopackIgnore: true */ PRINTER_LOCAL_CAPTURE_DIR,
+                { withFileTypes: true }
+            );
             const files = await Promise.all(
                 entries
                     .filter((entry) => entry.isFile() && entry.name.endsWith(".bin"))
                     .map(async (entry) => {
-                        const filePath = path.join(PRINTER_LOCAL_CAPTURE_DIR, entry.name);
-                        const stat = await fs.stat(filePath);
+                        const filePath = path.join(
+                            /* turbopackIgnore: true */ PRINTER_LOCAL_CAPTURE_DIR,
+                            entry.name
+                        );
+                        const stat = await fs.stat(/* turbopackIgnore: true */ filePath);
                         return {
                             filePath,
                             mtimeMs: stat.mtimeMs

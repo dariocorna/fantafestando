@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createEventAction } from "@/app/admin/settings/actions";
+import { createEventAction } from "@/app/admin/settings/events/actions";
 import { Loader2 } from "lucide-react";
 
 const subscribeToHydration = () => () => undefined;

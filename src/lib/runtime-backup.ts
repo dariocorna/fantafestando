@@ -177,7 +177,7 @@ function toIsoString(value: Date | string | null | undefined): string | undefine
 export function getBackupTargetsRoot(): string | null {
   const raw = process.env.BACKUP_TARGETS_ROOT?.trim();
   if (!raw) return null;
-  return path.resolve(raw);
+  return path.resolve(/* turbopackIgnore: true */ raw);
 }
 
 function isPathWithinRoot(root: string, candidate: string) {
@@ -197,7 +197,7 @@ function formatBackupTimestamp(date: Date) {
 
 async function pathExists(targetPath: string) {
   try {
-    await stat(targetPath);
+    await stat(/* turbopackIgnore: true */ targetPath);
     return true;
   } catch {
     return false;
@@ -206,7 +206,7 @@ async function pathExists(targetPath: string) {
 
 async function isWritable(targetPath: string) {
   try {
-    await access(targetPath, constants.W_OK);
+    await access(/* turbopackIgnore: true */ targetPath, constants.W_OK);
     return true;
   } catch {
     return false;
@@ -218,15 +218,15 @@ async function countFilesRecursively(targetPath: string): Promise<number> {
     return 0;
   }
 
-  const stats = await stat(targetPath);
+  const stats = await stat(/* turbopackIgnore: true */ targetPath);
   if (!stats.isDirectory()) {
     return 1;
   }
 
-  const entries = await readdir(targetPath, { withFileTypes: true });
+  const entries = await readdir(/* turbopackIgnore: true */ targetPath, { withFileTypes: true });
   let total = 0;
   for (const entry of entries) {
-    const entryPath = path.join(targetPath, entry.name);
+    const entryPath = path.join(/* turbopackIgnore: true */ targetPath, entry.name);
     if (entry.isDirectory()) {
       total += await countFilesRecursively(entryPath);
     } else if (entry.isFile()) {
@@ -246,7 +246,7 @@ function requireMongoDb() {
 }
 
 async function runTarArchive(bundleRootDir: string, bundleDirName: string, outputFilePath: string) {
-  await mkdir(path.dirname(outputFilePath), { recursive: true });
+  await mkdir(/* turbopackIgnore: true */ path.dirname(outputFilePath), { recursive: true });
 
   const child = spawn("tar", ["-czf", outputFilePath, "-C", bundleRootDir, bundleDirName], {
     stdio: ["ignore", "pipe", "pipe"],
@@ -341,8 +341,8 @@ async function collectDirectoryCandidates(
 ): Promise<BackupTargetOption[]> {
   if (depth < 0) return [];
 
-  const baseDir = path.join(rootDir, relativeBase);
-  const entries = await readdir(baseDir, { withFileTypes: true }).catch(() => null);
+  const baseDir = path.join(/* turbopackIgnore: true */ rootDir, relativeBase);
+  const entries = await readdir(/* turbopackIgnore: true */ baseDir, { withFileTypes: true }).catch(() => null);
   if (!entries) {
     return [];
   }
@@ -354,7 +354,7 @@ async function collectDirectoryCandidates(
 
     const normalizedBase = relativeBase.replace(/\\/g, "/");
     const relativePath = normalizedBase ? path.posix.join(normalizedBase, entry.name) : entry.name;
-    const absolutePath = path.resolve(rootDir, relativePath);
+    const absolutePath = path.resolve(/* turbopackIgnore: true */ rootDir, relativePath);
 
     results.push({
       relativePath,
@@ -406,7 +406,7 @@ export function resolveBackupTargetPath(relativePath: string) {
     : relativePath.trim().replace(/\\/g, "/");
   const resolved = normalizedRelativePath === ROOT_TARGET_RELATIVE_PATH
     ? rootDir
-    : path.resolve(rootDir, normalizedRelativePath);
+    : path.resolve(/* turbopackIgnore: true */ rootDir, normalizedRelativePath);
 
   if (!isPathWithinRoot(rootDir, resolved)) {
     throw new Error("Destinazione backup non valida.");
@@ -428,7 +428,7 @@ export function isBackupDue(
 }
 
 async function writeCollectionBackupFile(collectionName: string, destinationFilePath: string) {
-  const stream = createWriteStream(destinationFilePath, { encoding: "utf8" });
+  const stream = createWriteStream(/* turbopackIgnore: true */ destinationFilePath, { encoding: "utf8" });
   const cursor = requireMongoDb().collection(collectionName).find({});
   let documentCount = 0;
 
@@ -458,19 +458,19 @@ async function buildRuntimeBackupBundle(outputFilePath?: string): Promise<Genera
   const now = new Date();
   const timestamp = formatBackupTimestamp(now);
   const bundleBaseName = `${ADMIN_BACKUP_PREFIX}-${timestamp}`;
-  const tempRoot = await mkdtemp(path.join(tmpdir(), "fantafestando-admin-backup-"));
-  const bundleDirPath = path.join(tempRoot, bundleBaseName);
-  const bundleMongoDir = path.join(bundleDirPath, "mongo");
-  const bundleUploadsDir = path.join(bundleDirPath, "uploads");
-  const manifestPath = path.join(bundleDirPath, "manifest.json");
-  const archiveFilePath = outputFilePath || path.join(tempRoot, `${bundleBaseName}.tar.gz`);
+  const tempRoot = await mkdtemp(path.join(/* turbopackIgnore: true */ tmpdir(), "fantafestando-admin-backup-"));
+  const bundleDirPath = path.join(/* turbopackIgnore: true */ tempRoot, bundleBaseName);
+  const bundleMongoDir = path.join(/* turbopackIgnore: true */ bundleDirPath, "mongo");
+  const bundleUploadsDir = path.join(/* turbopackIgnore: true */ bundleDirPath, "uploads");
+  const manifestPath = path.join(/* turbopackIgnore: true */ bundleDirPath, "manifest.json");
+  const archiveFilePath = outputFilePath || path.join(/* turbopackIgnore: true */ tempRoot, `${bundleBaseName}.tar.gz`);
 
   await mkdir(bundleMongoDir, { recursive: true });
   await mkdir(bundleUploadsDir, { recursive: true });
 
   const collectionManifest: CollectionBackupManifest[] = [];
   for (const definition of getCollectionDefinitions()) {
-    const destinationFilePath = path.join(bundleMongoDir, definition.fileName);
+    const destinationFilePath = path.join(/* turbopackIgnore: true */ bundleMongoDir, definition.fileName);
     const documentCount = await writeCollectionBackupFile(definition.collectionName, destinationFilePath);
     collectionManifest.push({
       collectionName: definition.collectionName,
@@ -483,7 +483,11 @@ async function buildRuntimeBackupBundle(outputFilePath?: string): Promise<Genera
   const uploadsIncluded = await pathExists(uploadsSourceDir);
   if (uploadsIncluded) {
     await rm(bundleUploadsDir, { recursive: true, force: true });
-    await cp(uploadsSourceDir, bundleUploadsDir, { recursive: true });
+    await cp(
+      /* turbopackIgnore: true */ uploadsSourceDir,
+      /* turbopackIgnore: true */ bundleUploadsDir,
+      { recursive: true }
+    );
   }
   const uploadsFileCount = await countFilesRecursively(bundleUploadsDir);
   const bundleFileName = path.basename(archiveFilePath);
@@ -503,7 +507,11 @@ async function buildRuntimeBackupBundle(outputFilePath?: string): Promise<Genera
     },
   };
 
-  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  await writeFile(
+    /* turbopackIgnore: true */ manifestPath,
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf8"
+  );
   await runTarArchive(tempRoot, bundleBaseName, archiveFilePath);
 
   return {
@@ -519,7 +527,7 @@ async function buildRuntimeBackupBundle(outputFilePath?: string): Promise<Genera
 async function pruneOldBundles(targetDir: string, keepCount: number) {
   if (keepCount < 1) return;
 
-  const entries = await readdir(targetDir, { withFileTypes: true });
+  const entries = await readdir(/* turbopackIgnore: true */ targetDir, { withFileTypes: true });
   const candidates = entries
     .filter(
       (entry) =>
@@ -529,7 +537,7 @@ async function pruneOldBundles(targetDir: string, keepCount: number) {
     )
     .map((entry) => ({
       name: entry.name,
-      absolutePath: path.join(targetDir, entry.name),
+      absolutePath: path.join(/* turbopackIgnore: true */ targetDir, entry.name),
     }))
     .sort((left, right) => left.name.localeCompare(right.name, "en"));
 
@@ -600,7 +608,7 @@ export async function runConfiguredBackupNow(
 
     try {
       const fileName = `${ADMIN_BACKUP_PREFIX}-${formatBackupTimestamp(startTime)}.tar.gz`;
-      const outputPath = path.join(targetDir, fileName);
+      const outputPath = path.join(/* turbopackIgnore: true */ targetDir, fileName);
       const generated = await buildRuntimeBackupBundle(outputPath);
       await pruneOldBundles(targetDir, settings.retentionCount);
       await generated.cleanup();
@@ -790,7 +798,7 @@ async function createRestoreTempCollection(
 }
 
 function resolveBundlePath(bundleDirPath: string, relativePath: string) {
-  const absolutePath = path.resolve(bundleDirPath, relativePath);
+  const absolutePath = path.resolve(/* turbopackIgnore: true */ bundleDirPath, relativePath);
   if (!isPathWithinRoot(bundleDirPath, absolutePath)) {
     throw new Error("Archivio backup non valido: contiene percorsi non consentiti.");
   }
@@ -798,7 +806,7 @@ function resolveBundlePath(bundleDirPath: string, relativePath: string) {
 }
 
 async function restoreCollectionFile(collectionName: string, filePath: string) {
-  const content = await readFile(filePath, "utf8");
+  const content = await readFile(/* turbopackIgnore: true */ filePath, "utf8");
   const lines = content
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -915,7 +923,11 @@ async function stageUploadsRestore(
   await rm(backupDirPath, { recursive: true, force: true });
 
   if (uploadsSourceDir && (await pathExists(uploadsSourceDir))) {
-    await cp(uploadsSourceDir, stagedDirPath, { recursive: true });
+    await cp(
+      /* turbopackIgnore: true */ uploadsSourceDir,
+      /* turbopackIgnore: true */ stagedDirPath,
+      { recursive: true }
+    );
   } else {
     await mkdir(stagedDirPath, { recursive: true });
   }
@@ -966,20 +978,22 @@ export async function restoreRuntimeBackupBundle(
   }
 
   runtimeState.restoreInProgress = true;
-  const extractRoot = await mkdtemp(path.join(tmpdir(), "fantafestando-admin-restore-"));
+  const extractRoot = await mkdtemp(path.join(/* turbopackIgnore: true */ tmpdir(), "fantafestando-admin-restore-"));
   const restoreToken = `${formatBackupTimestamp(new Date())}-${Math.random().toString(36).slice(2, 8)}`;
 
   try {
     await extractTarArchive(bundleFilePath, extractRoot);
-    const entries = await readdir(extractRoot, { withFileTypes: true });
+    const entries = await readdir(/* turbopackIgnore: true */ extractRoot, { withFileTypes: true });
     const bundleDirEntry = entries.find((entry) => entry.isDirectory());
     if (!bundleDirEntry) {
       throw new Error("Archivio backup non valido: cartella bundle mancante.");
     }
 
-    const bundleDirPath = path.join(extractRoot, bundleDirEntry.name);
-    const manifestPath = path.join(bundleDirPath, "manifest.json");
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as RuntimeBackupManifest;
+    const bundleDirPath = path.join(/* turbopackIgnore: true */ extractRoot, bundleDirEntry.name);
+    const manifestPath = path.join(/* turbopackIgnore: true */ bundleDirPath, "manifest.json");
+    const manifest = JSON.parse(
+      await readFile(/* turbopackIgnore: true */ manifestPath, "utf8")
+    ) as RuntimeBackupManifest;
     if (manifest.format !== ADMIN_BACKUP_FORMAT) {
       throw new Error(`Formato backup non supportato: ${manifest.format}`);
     }

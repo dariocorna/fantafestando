@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2, CheckCircle2, Plus, X, Upload, Trash2 } from "lucide-react";
-import { updateEventSettingsAction } from "./actions";
+import { updateEventSettingsAction } from "./event-settings-actions";
 import { MAX_PREDEFINED_TABLES, normalizeTableValue, parsePredefinedTablesInput } from "@/lib/table-presets";
 import {
     MAX_QUICK_DISCOUNT_PRESETS,

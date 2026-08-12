@@ -407,3 +407,17 @@ Refactoring dei report di stampa con focus su completezza informativa e leggibil
 
 **Test principali**: unit test catalogo, scorte, stampa, transizioni sessione e workbook; flussi Playwright POS/Admin.
 **Issue collegate**: `#106`, `#107`, `#116`, `#137`.
+
+---
+
+## Epica 36: Semplificazione del codice e dell'architettura
+
+- Rimossi file, helper e dipendenze senza consumer verificati tramite code graph e sorgente.
+- Unificati i form create/edit del catalogo mantenendo wrapper e contratti specifici dei due flussi.
+- Consolidati path e URL degli upload gestiti in un solo boundary validato; eliminate le route duplicate.
+- Suddivise le server action delle impostazioni per feature, senza introdurre repository layer o barrel di compatibilità.
+- Sostituita la roadmap architetturale obsoleta con la descrizione dell'architettura corrente.
+- Mantenuti fuori scope i refactor generalizzati di POS e stampa, da affrontare solo con slice a rischio e riduzione misurabili.
+
+**Test principali**: unit/component test per form, autosave, upload, event transfer e settings; suite Playwright Chromium completata con 87 test passati e 7 test hardware saltati.
+**Issue collegata**: `#140`.

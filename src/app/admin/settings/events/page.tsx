@@ -1,69 +1,17 @@
 import dbConnect from "@/lib/mongoose";
-import { ensureAdminSession } from "@/lib/authz";
 import Event, { IEvent } from "@/models/Event";
-import Category from "@/models/Category";
-import Product from "@/models/Product";
-import Printer from "@/models/Printer";
-import PosDevice from "@/models/PosDevice";
-import Peripheral from "@/models/Peripheral";
-import Order from "@/models/Order";
-import Ingredient from "@/models/Ingredient";
-import CashSession from "@/models/CashSession";
-import PrintJob from "@/models/PrintJob";
-import OrderCounter from "@/models/OrderCounter";
 import { DeleteForm } from "@/components/delete-form";
 import { ArchiveForm } from "@/components/archive-form";
-import { revalidatePath } from "next/cache";
 import { CreateEventDialog } from "@/components/create-event-dialog";
 import { CloneEventDialog } from "@/components/clone-event-dialog";
 import { ImportEventDialog } from "@/components/import-event-dialog";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
+import { archiveEventAction, deleteEventAction } from "./actions";
 
 export default async function EventsPage() {
     await dbConnect();
     const events = await Event.find({}).sort({ createdAt: -1 }).lean();
-
-    async function deleteEvent(formData: FormData) {
-        "use server"
-        const sessionCheck = await ensureAdminSession();
-        if (!sessionCheck.ok) return;
-
-        const eventId = formData.get("eventId") as string;
-        if (!eventId) return;
-
-        await dbConnect();
-        // Full cascade delete for all festa-bound data
-        await PrintJob.deleteMany({ eventId });
-        await CashSession.deleteMany({ eventId });
-        await Order.deleteMany({ eventId });
-        await OrderCounter.deleteMany({ eventId });
-        await PosDevice.deleteMany({ eventId });
-        await Peripheral.deleteMany({ eventId });
-        await Printer.deleteMany({ eventId });
-        await Product.deleteMany({ eventId });
-        await Ingredient.deleteMany({ eventId });
-        await Category.deleteMany({ eventId });
-        await Event.findByIdAndDelete(eventId);
-
-        revalidatePath("/admin/settings/events");
-    }
-
-    async function archiveEvent(formData: FormData) {
-        "use server"
-        const sessionCheck = await ensureAdminSession();
-        if (!sessionCheck.ok) return;
-
-        const eventId = formData.get("eventId") as string;
-        if (!eventId) return;
-
-        await dbConnect();
-        await Event.findByIdAndUpdate(eventId, {
-            archived: true,
-            active: false
-        });
-        revalidatePath("/admin/settings/events");
-    }
 
     return (
         <div className="space-y-6">
@@ -111,7 +59,7 @@ export default async function EventsPage() {
                                         id={String(evt._id)}
                                         idName="eventId"
                                         message="Questa festa non sarà più modificabile e scompariranno le impostazioni. Confermi l'archiviazione?"
-                                        action={archiveEvent}
+                                        action={archiveEventAction}
                                         buttonSize="icon"
                                         iconSize={18}
                                     />
@@ -121,7 +69,7 @@ export default async function EventsPage() {
                                     id={String(evt._id)}
                                     idName="eventId"
                                     message="Eliminare questa festa? Questo rimuoverà permanentemente TUTTI i prodotti e le categorie associate."
-                                    action={deleteEvent}
+                                    action={deleteEventAction}
                                     buttonSize="icon"
                                     iconSize={18}
                                 />

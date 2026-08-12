@@ -116,6 +116,7 @@ export function PortalEasterEggMobile({
             </div>
 
             <EasterEggComposer
+                key={eventId}
                 title="Stampa prova immediata"
                 description="Carica o scatta una foto, adatta il ritaglio con gesture touch e invia direttamente alla stampante della festa selezionata."
                 submitLabel="Stampa prova"

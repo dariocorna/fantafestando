@@ -84,7 +84,8 @@ async function run() {
     let copiedProducts = 0;
 
     for (const prod of sourceProducts) {
-        const { _id, ...prodData } = prod;
+        const prodData = { ...prod };
+        delete prodData._id;
         const newCategoryId = categoryIdMap.get(String(prod.categoryId));
 
         if (!newCategoryId) {

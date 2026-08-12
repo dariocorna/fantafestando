@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import path from "node:path";
 import sharp, { type Metadata } from "sharp";
 import {
     getThermalContentWidth,
@@ -14,10 +13,11 @@ import {
     unpackThermalRasterToPixels,
     type ThermalRasterPayload
 } from "./easter-egg-raster";
+import {
+    resolveManagedUploadUrl,
+    type ManagedUploadLocation
+} from "./managed-upload";
 
-const PUBLIC_ROOT = path.join(process.cwd(), "public");
-const EASTER_EGG_DIR = path.join(PUBLIC_ROOT, "uploads", "easter-eggs");
-const EASTER_EGG_URL_PREFIX = "/uploads/easter-eggs/";
 export interface ThermalRasterImage extends ThermalRasterPayload {
     data: Buffer;
 }
@@ -42,44 +42,26 @@ function getAutoOrientedDimensions(metadata: Metadata): { width: number; height:
     };
 }
 
-function normalizeUrl(value: unknown): string | undefined {
-    if (typeof value !== "string") return undefined;
-    const trimmed = value.trim();
-    if (!trimmed) return undefined;
-
-    let decoded = trimmed;
-    try {
-        decoded = decodeURIComponent(trimmed);
-    } catch {
-        decoded = trimmed;
-    }
-
-    if (!decoded.startsWith(EASTER_EGG_URL_PREFIX)) return undefined;
-    const lower = decoded.toLowerCase();
+function resolveEasterEggUpload(value: unknown): ManagedUploadLocation | undefined {
+    const upload = resolveManagedUploadUrl(value, ["easterEggs"]);
+    if (!upload) return undefined;
+    const lower = upload.fileName.toLowerCase();
     if (!lower.endsWith(".png") && !lower.endsWith(".jpg") && !lower.endsWith(".jpeg")) return undefined;
-    if (decoded.includes("\0")) return undefined;
-    return decoded;
+    return upload;
 }
 
 export function sanitizeEasterEggImageUrl(value: unknown): string | undefined {
-    return normalizeUrl(value);
+    return resolveEasterEggUpload(value)?.url;
 }
 
 export async function resolveEasterEggImagePathFromUrl(value: unknown): Promise<string | undefined> {
-    const normalized = normalizeUrl(value);
-    if (!normalized) return undefined;
-
-    const relativePath = normalized.slice(1);
-    const absolutePath = path.resolve(PUBLIC_ROOT, relativePath);
-    const dirWithSep = `${EASTER_EGG_DIR}${path.sep}`;
-    if (absolutePath !== EASTER_EGG_DIR && !absolutePath.startsWith(dirWithSep)) {
-        return undefined;
-    }
+    const upload = resolveEasterEggUpload(value);
+    if (!upload) return undefined;
 
     try {
-        const stats = await fs.stat(absolutePath);
+        const stats = await fs.stat(upload.filePath);
         if (!stats.isFile()) return undefined;
-        return absolutePath;
+        return upload.filePath;
     } catch {
         return undefined;
     }
