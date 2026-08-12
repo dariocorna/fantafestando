@@ -1,155 +1,311 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
-import { NextRequest } from "next/server";
+import { beforeEach, describe, expect, test, vi } from "vitest"
+import { NextRequest } from "next/server"
 
 const {
     orderFindOneAndUpdateMock,
     orderFindOneMock,
     orderUpdateOneMock,
-    applyStockForPaidOrderMock,
-    rollbackStockAdjustmentsMock,
+    posDeviceFindOneMock,
+    printJobExistsMock,
+    decryptSecretMock,
+    getByClientMock,
+    getByForeignMock,
+    transitionSumUpOrderStockMock,
     routeOrderToPrintersMock,
     claimCashSessionPaymentMock,
     refreshCashSessionPaymentClaimMock,
     releaseCashSessionPaymentClaimMock,
-    publishStockInvalidationMock
 } = vi.hoisted(() => ({
     orderFindOneAndUpdateMock: vi.fn(),
     orderFindOneMock: vi.fn(),
     orderUpdateOneMock: vi.fn(),
-    applyStockForPaidOrderMock: vi.fn(),
-    rollbackStockAdjustmentsMock: vi.fn(),
+    posDeviceFindOneMock: vi.fn(),
+    printJobExistsMock: vi.fn(),
+    decryptSecretMock: vi.fn(),
+    getByClientMock: vi.fn(),
+    getByForeignMock: vi.fn(),
+    transitionSumUpOrderStockMock: vi.fn(),
     routeOrderToPrintersMock: vi.fn(),
     claimCashSessionPaymentMock: vi.fn(),
     refreshCashSessionPaymentClaimMock: vi.fn(),
     releaseCashSessionPaymentClaimMock: vi.fn(),
-    publishStockInvalidationMock: vi.fn()
-}));
+}))
 
-vi.mock("@/lib/mongoose", () => ({ default: vi.fn() }));
+vi.mock("@/lib/mongoose", () => ({ default: vi.fn() }))
 vi.mock("@/models/Order", () => ({
     default: {
         findOneAndUpdate: orderFindOneAndUpdateMock,
         findOne: orderFindOneMock,
-        updateOne: orderUpdateOneMock
-    }
-}));
-vi.mock("@/lib/stock-operations", () => ({
-    applyStockForPaidOrder: applyStockForPaidOrderMock,
-    rollbackStockAdjustments: rollbackStockAdjustmentsMock
-}));
-vi.mock("@/lib/printer", () => ({
-    PrinterService: { routeOrderToPrinters: routeOrderToPrintersMock }
-}));
+        updateOne: orderUpdateOneMock,
+    },
+}))
+vi.mock("@/models/PosDevice", () => ({ default: { findOne: posDeviceFindOneMock } }))
+vi.mock("@/models/PrintJob", () => ({ default: { exists: printJobExistsMock } }))
+vi.mock("@/lib/secrets", () => ({ decryptSecret: decryptSecretMock }))
+vi.mock("@/lib/sumup", () => ({
+    getSumUpTransactionByClientTransactionId: getByClientMock,
+    getSumUpTransactionByForeignTransactionId: getByForeignMock,
+}))
+vi.mock("@/lib/sumup-order-stock", () => ({ transitionSumUpOrderStock: transitionSumUpOrderStockMock }))
+vi.mock("@/lib/printer", () => ({ PrinterService: { routeOrderToPrinters: routeOrderToPrintersMock } }))
 vi.mock("@/lib/cash-session-payment-claim", () => ({
     claimCashSessionPayment: claimCashSessionPaymentMock,
     refreshCashSessionPaymentClaim: refreshCashSessionPaymentClaimMock,
-    releaseCashSessionPaymentClaim: releaseCashSessionPaymentClaimMock
-}));
-vi.mock("@/lib/pos-stock-realtime", () => ({ publishStockInvalidation: publishStockInvalidationMock }));
+    releaseCashSessionPaymentClaim: releaseCashSessionPaymentClaimMock,
+}))
 
-import { POST } from "./route";
+import { POST } from "./route"
 
-function webhookRequest() {
-    return new NextRequest("http://localhost/api/sumup/webhook", {
+const pendingOrder = {
+    _id: "order-1",
+    status: "PENDING" as const,
+    totalAmount: 12.5,
+    eventId: "event-1",
+    cashSessionId: "session-1",
+    posDeviceId: "pos-1",
+    stockEffectStatus: "APPLIED" as const,
+    stockAdjustments: [{ entityType: "PRODUCT" as const, entityId: "product-1", quantity: 1 }],
+}
+
+const successfulTransaction = {
+    id: "sumup-tx-1",
+    merchant_code: "merchant-1",
+    amount: 12.5,
+    currency: "EUR" as const,
+    status: "SUCCESSFUL" as const,
+    simple_status: "SUCCESSFUL" as const,
+}
+
+function webhookRequest(payloadStatus: "successful" | "failed" = "successful", orderId?: string) {
+    const url = new URL("https://menu.example.test/api/sumup/webhook")
+    if (orderId) url.searchParams.set("orderId", orderId)
+    return new NextRequest(url, {
         method: "POST",
-        body: JSON.stringify({ event_type: "checkout.succeeded", id: "checkout-1" })
-    });
+        body: JSON.stringify({
+            event_type: "solo.transaction.updated",
+            payload: {
+                client_transaction_id: "client-tx-1",
+                merchant_code: "untrusted-merchant",
+                status: payloadStatus,
+            },
+        }),
+    })
+}
+
+function selectLean(value: unknown) {
+    return { select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue(value) }) }
+}
+
+function populatedPosDevice(value: unknown) {
+    return { populate: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue(value) }) }
 }
 
 describe("POST /api/sumup/webhook", () => {
     beforeEach(() => {
-        vi.clearAllMocks();
-        delete process.env.SUMUP_WEBHOOK_SECRET;
-        claimCashSessionPaymentMock.mockResolvedValue({ success: true, token: "session-claim", isTest: false });
-        refreshCashSessionPaymentClaimMock.mockResolvedValue(true);
-    });
+        vi.clearAllMocks()
+        orderFindOneMock.mockReturnValue(selectLean(pendingOrder))
+        orderFindOneAndUpdateMock.mockResolvedValue(pendingOrder)
+        orderUpdateOneMock.mockResolvedValue({ acknowledged: true, matchedCount: 1 })
+        posDeviceFindOneMock.mockReturnValue(populatedPosDevice({
+            paymentTerminalId: {
+                type: "SUMUP",
+                config: { merchantCode: "merchant-1", apiKey: "encrypted-api-key" },
+            },
+        }))
+        decryptSecretMock.mockReturnValue("api-key-1")
+        getByClientMock.mockResolvedValue({ success: true, transaction: successfulTransaction })
+        getByForeignMock.mockResolvedValue({ success: true, transaction: successfulTransaction })
+        transitionSumUpOrderStockMock.mockResolvedValue({ success: true })
+        claimCashSessionPaymentMock.mockResolvedValue({ success: true, token: "session-claim", isTest: false })
+        refreshCashSessionPaymentClaimMock.mockResolvedValue(true)
+        releaseCashSessionPaymentClaimMock.mockResolvedValue(undefined)
+        printJobExistsMock.mockResolvedValue(null)
+        routeOrderToPrintersMock.mockResolvedValue([])
+    })
 
-    test("does not process stock when another delivery owns the payment claim", async () => {
-        orderFindOneAndUpdateMock.mockResolvedValue(null);
-        orderFindOneMock.mockReturnValue({
-            select: vi.fn().mockReturnValue({
-                lean: vi.fn().mockResolvedValue({ status: "PENDING" })
-            })
-        });
+    test("completes only the transaction verified by SumUp and dispatches prints", async () => {
+        const response = await POST(webhookRequest("failed"))
 
-        const response = await POST(webhookRequest());
-
-        await expect(response.json()).resolves.toMatchObject({ message: "Payment processing" });
-        expect(applyStockForPaidOrderMock).not.toHaveBeenCalled();
-    });
-
-    test("completes a claimed payment with one atomic status update", async () => {
-        orderFindOneAndUpdateMock.mockResolvedValue({
-            _id: "order-1",
-            eventId: { toString: () => "event-1" },
-            cashSessionId: { toString: () => "session-1" },
-            status: "PENDING",
-            cart: [],
-            ingredientPlan: []
-        });
-        applyStockForPaidOrderMock.mockResolvedValue({ success: true, appliedAdjustments: [] });
-        orderUpdateOneMock.mockResolvedValue({ acknowledged: true, matchedCount: 1 });
-
-        const response = await POST(webhookRequest());
-
-        expect(response.status).toBe(200);
+        expect(response.status).toBe(200)
+        expect(getByClientMock).toHaveBeenCalledWith({
+            clientTransactionId: "client-tx-1",
+            merchantCode: "merchant-1",
+            apiKey: "api-key-1",
+        })
         expect(orderUpdateOneMock).toHaveBeenCalledWith(
-            expect.objectContaining({
-                _id: "order-1",
-                status: "PENDING",
-                sumupWebhookClaimToken: expect.any(String)
-            }),
-            expect.objectContaining({
-                $set: expect.objectContaining({
+            { _id: "order-1", status: "PENDING", sumupWebhookClaimToken: expect.any(String) },
+            {
+                $set: {
                     status: "PAID",
                     paidAt: expect.any(Date),
-                    stockAdjustments: [],
-                    stockEffectStatus: "APPLIED"
-                })
-            })
-        );
-        expect(routeOrderToPrintersMock).toHaveBeenCalledOnce();
-        expect(publishStockInvalidationMock).toHaveBeenCalledWith("event-1");
-    });
+                    sumupPaymentId: "sumup-tx-1",
+                },
+                $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 },
+            },
+        )
+        expect(printJobExistsMock).toHaveBeenCalledWith({ orderId: "order-1", source: "ORDER" })
+        expect(routeOrderToPrintersMock).toHaveBeenCalledWith("order-1", "pos-1")
+    })
 
-    test("does not complete a webhook payment after its cash session closes", async () => {
-        orderFindOneAndUpdateMock.mockResolvedValue({
-            _id: "order-1",
-            eventId: { toString: () => "event-1" },
-            cashSessionId: { toString: () => "session-1" },
-            status: "PENDING",
-            cart: [],
-            ingredientPlan: []
-        });
-        claimCashSessionPaymentMock.mockResolvedValue({ success: false });
+    test("uses simple_status as authoritative and rolls back a refunded payment", async () => {
+        getByClientMock.mockResolvedValue({
+            success: true,
+            transaction: { ...successfulTransaction, status: "SUCCESSFUL", simple_status: "REFUNDED" },
+        })
 
-        const response = await POST(webhookRequest());
+        const response = await POST(webhookRequest())
 
-        expect(response.status).toBe(409);
-        expect(applyStockForPaidOrderMock).not.toHaveBeenCalled();
-        expect(publishStockInvalidationMock).not.toHaveBeenCalled();
+        await expect(response.json()).resolves.toEqual({ success: true, status: "cancelled" })
+        expect(transitionSumUpOrderStockMock).toHaveBeenCalledWith({
+            eventId: "event-1",
+            orderId: "order-1",
+            token: "SUMUP_CANCEL:client-tx-1",
+            target: "REVERTED",
+            adjustments: [{ entityType: "PRODUCT", entityId: "product-1", quantity: 1 }],
+        })
+        expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
+    })
+
+    test("does not claim an order while the verified transaction is non-final", async () => {
+        getByClientMock.mockResolvedValue({
+            success: true,
+            transaction: { ...successfulTransaction, status: "PENDING", simple_status: undefined },
+        })
+
+        const response = await POST(webhookRequest())
+
+        expect(response.status).toBe(409)
+        expect(orderFindOneAndUpdateMock).not.toHaveBeenCalled()
+        expect(orderUpdateOneMock).not.toHaveBeenCalled()
+    })
+
+    test("rejects verified transaction data that does not match the order", async () => {
+        getByClientMock.mockResolvedValue({
+            success: true,
+            transaction: { ...successfulTransaction, amount: 18 },
+        })
+
+        const response = await POST(webhookRequest())
+
+        expect(response.status).toBe(409)
+        expect(orderFindOneAndUpdateMock).not.toHaveBeenCalled()
+    })
+
+    test("returns a retryable response while another callback owns the atomic claim", async () => {
+        orderFindOneMock
+            .mockReturnValueOnce(selectLean(pendingOrder))
+            .mockReturnValueOnce(selectLean(pendingOrder))
+        orderFindOneAndUpdateMock.mockResolvedValue(null)
+
+        const response = await POST(webhookRequest())
+
+        expect(response.status).toBe(503)
+        expect(orderFindOneAndUpdateMock).toHaveBeenCalledWith(
+            {
+                sumupCheckoutId: "client-tx-1",
+                status: "PENDING",
+                $or: [
+                    { sumupWebhookClaimedAt: { $exists: false } },
+                    { sumupWebhookClaimedAt: { $lt: expect.any(Date) } },
+                ],
+            },
+            { $set: { sumupWebhookClaimToken: expect.any(String), sumupWebhookClaimedAt: expect.any(Date) } },
+            { returnDocument: "after" },
+        )
+    })
+
+    test("reconciles an uncertain checkout with matching client and foreign lookups", async () => {
+        orderFindOneMock
+            .mockReturnValueOnce(selectLean(null))
+            .mockReturnValueOnce(selectLean(pendingOrder))
+
+        const response = await POST(webhookRequest("successful", "order-1"))
+
+        expect(response.status).toBe(200)
+        expect(getByClientMock).toHaveBeenCalledWith({
+            clientTransactionId: "client-tx-1",
+            merchantCode: "merchant-1",
+            apiKey: "api-key-1",
+        })
+        expect(getByForeignMock).toHaveBeenCalledWith({
+            foreignTransactionId: "order-1",
+            merchantCode: "merchant-1",
+            apiKey: "api-key-1",
+        })
         expect(orderUpdateOneMock).toHaveBeenCalledWith(
-            { _id: "order-1", sumupWebhookClaimToken: expect.any(String) },
-            { $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 } }
-        );
-    });
+            { _id: "order-1", status: "PENDING", sumupCheckoutId: "initiating:order-1" },
+            { $set: { sumupCheckoutId: "client-tx-1" } },
+        )
+    })
 
-    test("releases the session claim when a delayed callback reaches a TEST session", async () => {
-        orderFindOneAndUpdateMock.mockResolvedValue({
-            _id: "order-1",
-            eventId: { toString: () => "event-1" },
-            cashSessionId: { toString: () => "session-1" },
-            status: "PENDING",
-            cart: [],
-            ingredientPlan: []
-        });
-        claimCashSessionPaymentMock.mockResolvedValue({ success: true, token: "test-session-claim", isTest: true });
+    test("does not link an uncertain checkout when the two official lookups disagree", async () => {
+        orderFindOneMock
+            .mockReturnValueOnce(selectLean(null))
+            .mockReturnValueOnce(selectLean(pendingOrder))
+        getByForeignMock.mockResolvedValue({
+            success: true,
+            transaction: { ...successfulTransaction, id: "different-sumup-transaction" },
+        })
 
-        const response = await POST(webhookRequest());
+        const response = await POST(webhookRequest("successful", "order-1"))
 
-        expect(response.status).toBe(409);
-        expect(releaseCashSessionPaymentClaimMock).toHaveBeenCalledWith("session-1", "test-session-claim");
-        expect(applyStockForPaidOrderMock).not.toHaveBeenCalled();
-        expect(publishStockInvalidationMock).not.toHaveBeenCalled();
-    });
-});
+        expect(response.status).toBe(409)
+        expect(orderUpdateOneMock).not.toHaveBeenCalled()
+        expect(orderFindOneAndUpdateMock).not.toHaveBeenCalled()
+    })
+
+    test("recovers prints for an already-paid callback without querying SumUp again", async () => {
+        orderFindOneMock.mockReturnValue(selectLean({ ...pendingOrder, status: "PAID" }))
+
+        const response = await POST(webhookRequest())
+
+        await expect(response.json()).resolves.toEqual({ success: true, message: "Already paid" })
+        expect(getByClientMock).not.toHaveBeenCalled()
+        expect(routeOrderToPrintersMock).toHaveBeenCalledOnce()
+    })
+
+    test("does not duplicate prints when an already-paid order has a persisted print intent", async () => {
+        orderFindOneMock.mockReturnValue(selectLean({ ...pendingOrder, status: "PAID" }))
+        printJobExistsMock.mockResolvedValue({ _id: "print-job-1" })
+
+        const response = await POST(webhookRequest())
+
+        expect(response.status).toBe(200)
+        expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
+    })
+
+    test.each([
+        ["closed", { success: false }],
+        ["TEST", { success: true, token: "test-claim", isTest: true }],
+    ] as const)("does not complete stock or payment when the cash session is %s", async (_name, claimResult) => {
+        claimCashSessionPaymentMock.mockResolvedValue(claimResult)
+
+        const response = await POST(webhookRequest())
+
+        expect(response.status).toBe(409)
+        expect(transitionSumUpOrderStockMock).not.toHaveBeenCalled()
+        expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            { _id: "order-1", status: "PENDING", sumupWebhookClaimToken: expect.any(String) },
+            { $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 } },
+        )
+    })
+
+    test("releases the callback claim when cancellation loses its CAS", async () => {
+        getByClientMock.mockResolvedValue({
+            success: true,
+            transaction: { ...successfulTransaction, status: "FAILED", simple_status: "FAILED" },
+        })
+        orderUpdateOneMock
+            .mockResolvedValueOnce({ acknowledged: true, matchedCount: 0 })
+            .mockResolvedValueOnce({ acknowledged: true, matchedCount: 1 })
+
+        const response = await POST(webhookRequest())
+
+        expect(response.status).toBe(409)
+        expect(orderUpdateOneMock).toHaveBeenLastCalledWith(
+            { _id: "order-1", status: "PENDING", sumupWebhookClaimToken: expect.any(String) },
+            { $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 } },
+        )
+    })
+})
