@@ -190,14 +190,15 @@ export async function updatePosDeviceAction(formData: FormData) {
     }
 
     const currentDevice = await PosDevice.findOne({ _id: id, eventId: scopedEventId })
-        .select("_id paymentTerminalId")
-        .lean() as ({ paymentTerminalId?: unknown } | null);
+        .select("_id printerId paymentTerminalId")
+        .lean() as ({ printerId?: unknown; paymentTerminalId?: unknown } | null);
     if (!currentDevice) {
         return { error: "Punto cassa non trovato nella festa selezionata" };
     }
+    const currentPrinterId = String(currentDevice.printerId ?? "").trim();
     const currentPaymentTerminalId = String(currentDevice.paymentTerminalId ?? "").trim();
     if (
-        currentPaymentTerminalId !== normalizedPaymentTerminalId
+        (currentPrinterId !== printerId || currentPaymentTerminalId !== normalizedPaymentTerminalId)
         && await hasPendingSumUpCheckout(scopedEventId, id, currentPaymentTerminalId)
     ) {
         return { error: PENDING_SUMUP_HARDWARE_ERROR };

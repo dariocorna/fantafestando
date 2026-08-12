@@ -75,6 +75,7 @@ describe("pending SumUp checkout hardware guards", () => {
         mocks.peripheralFindOne.mockReturnValue(queryResult({ _id: "peripheral-1" }));
         mocks.posDeviceFindOne.mockReturnValue(queryResult({
             _id: "pos-1",
+            printerId: "printer-1",
             paymentTerminalId: "terminal-1"
         }));
         mocks.posDeviceFindOneAndDelete.mockReturnValue(queryResult({ _id: "pos-1" }));
@@ -137,6 +138,22 @@ describe("pending SumUp checkout hardware guards", () => {
             }),
             { returnDocument: "after" }
         );
+    });
+
+    test("blocks changing the cashier printer while a SumUp checkout is pending", async () => {
+        mocks.orderExists.mockResolvedValue(true);
+
+        await expect(updatePosDeviceAction(posDeviceForm({ printerId: "printer-2" }))).resolves.toEqual({
+            error: expect.stringMatching(/ordine SumUp in attesa/i)
+        });
+
+        expect(mocks.orderExists).toHaveBeenCalledWith({
+            eventId: "event-1",
+            status: "PENDING",
+            posDeviceId: "pos-1",
+            sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+        });
+        expect(mocks.posDeviceFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     test("allows replacing a SumUp terminal when no checkout is pending", async () => {
