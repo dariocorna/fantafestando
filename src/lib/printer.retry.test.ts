@@ -3,11 +3,26 @@ import { Binary } from "bson";
 import mongoose from "mongoose";
 import { getThermalContentWidth } from "@/lib/easter-egg-config";
 
-const { dbConnectMock, printJobFindOneAndUpdateMock, printJobUpdateOneMock, orderFindOneMock } = vi.hoisted(() => ({
+const {
+    dbConnectMock,
+    printJobFindOneAndUpdateMock,
+    printJobFindOneMock,
+    printJobUpdateOneMock,
+    printJobExistsMock,
+    orderFindOneMock,
+    buildPrintQueueLeaseMock,
+    claimKitchenPrinterQueueLeaseMock,
+    releaseKitchenPrinterQueueLeaseMock
+} = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     printJobFindOneAndUpdateMock: vi.fn(),
+    printJobFindOneMock: vi.fn(),
     printJobUpdateOneMock: vi.fn(),
-    orderFindOneMock: vi.fn()
+    printJobExistsMock: vi.fn(),
+    orderFindOneMock: vi.fn(),
+    buildPrintQueueLeaseMock: vi.fn(),
+    claimKitchenPrinterQueueLeaseMock: vi.fn(),
+    releaseKitchenPrinterQueueLeaseMock: vi.fn()
 }));
 
 vi.mock("@/lib/mongoose", () => ({
@@ -17,8 +32,17 @@ vi.mock("@/lib/mongoose", () => ({
 vi.mock("@/models/PrintJob", () => ({
     default: {
         findOneAndUpdate: printJobFindOneAndUpdateMock,
-        updateOne: printJobUpdateOneMock
+        findOne: printJobFindOneMock,
+        updateOne: printJobUpdateOneMock,
+        exists: printJobExistsMock
     }
+}));
+
+vi.mock("@/lib/print-queue", () => ({
+    buildPrintQueueLease: buildPrintQueueLeaseMock,
+    claimKitchenPrinterQueueLease: claimKitchenPrinterQueueLeaseMock,
+    refreshKitchenPrinterQueueLease: vi.fn(),
+    releaseKitchenPrinterQueueLease: releaseKitchenPrinterQueueLeaseMock
 }));
 
 vi.mock("@/models/Order", () => ({
@@ -40,9 +64,39 @@ function mockFindOneJob(job: unknown) {
     });
 }
 
+function recoverableKitchenJob() {
+    return {
+        _id: { toString: () => "job-kitchen" },
+        eventId: { toString: () => "evt-1" },
+        source: "ORDER",
+        printType: "KITCHEN_ORDER",
+        queueRecoverable: true,
+        copies: 1,
+        printerId: {
+            _id: "printer-kitchen",
+            ip: "printer-emulator",
+            port: 19101,
+            isVirtual: false
+        },
+        document: {
+            schemaVersion: 2,
+            printType: "KITCHEN_ORDER",
+            title: "Comanda reparto",
+            items: [{ name: "Panino", qty: 1 }]
+        }
+    };
+}
+
 describe("PrinterService.retryPrintJobById", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        buildPrintQueueLeaseMock.mockReturnValue({
+            token: "lease-token",
+            expiresAt: new Date("2026-08-12T10:00:00.000Z")
+        });
+        claimKitchenPrinterQueueLeaseMock.mockResolvedValue(true);
+        releaseKitchenPrinterQueueLeaseMock.mockResolvedValue(undefined);
+        printJobExistsMock.mockResolvedValue(false);
         orderFindOneMock.mockReturnValue({
             select: vi.fn().mockReturnValue({
                 lean: vi.fn().mockResolvedValue(null)
@@ -159,6 +213,89 @@ describe("PrinterService.retryPrintJobById", () => {
         );
     });
 
+    test("retries a recoverable kitchen print while holding the printer queue lease", async () => {
+        mockFindOneJob(recoverableKitchenJob());
+        const dispatchSpy = vi.spyOn(
+            PrinterService as unknown as { dispatchPrintDocumentWithAutomaticRetry: (params: unknown) => Promise<unknown> },
+            "dispatchPrintDocumentWithAutomaticRetry"
+        ).mockResolvedValue({ success: true, automaticRetryCount: 0 });
+
+        const result = await PrinterService.retryPrintJobById("evt-1", "job-kitchen");
+
+        expect(result).toEqual({ success: true });
+        expect(claimKitchenPrinterQueueLeaseMock).toHaveBeenCalledWith(
+            "printer-kitchen",
+            "lease-token",
+            new Date("2026-08-12T10:00:00.000Z")
+        );
+        expect(dispatchSpy).toHaveBeenCalledOnce();
+        expect(releaseKitchenPrinterQueueLeaseMock).toHaveBeenCalledWith("printer-kitchen", "lease-token");
+    });
+
+    test("returns a recoverable kitchen retry to failed when the printer lease is busy", async () => {
+        const job = recoverableKitchenJob();
+        mockFindOneJob(job);
+        claimKitchenPrinterQueueLeaseMock.mockResolvedValue(false);
+        const dispatchSpy = vi.spyOn(
+            PrinterService as unknown as { dispatchPrintDocumentWithAutomaticRetry: (params: unknown) => Promise<unknown> },
+            "dispatchPrintDocumentWithAutomaticRetry"
+        );
+
+        const result = await PrinterService.retryPrintJobById("evt-1", "job-kitchen");
+
+        const retryClaimedAt = printJobFindOneAndUpdateMock.mock.calls[0][1].$set.retryClaimedAt;
+        const error = "La stampante sta già inviando una comanda. Riprova tra poco.";
+        expect(result).toEqual({ success: false, error });
+        expect(printJobUpdateOneMock).toHaveBeenCalledWith(
+            { _id: job._id, eventId: "evt-1", status: "QUEUED", retryClaimedAt },
+            { $set: { status: "FAILED", errorMessage: error }, $unset: { retryClaimedAt: 1 } }
+        );
+        expect(dispatchSpy).not.toHaveBeenCalled();
+        expect(releaseKitchenPrinterQueueLeaseMock).not.toHaveBeenCalled();
+    });
+
+    test("does not let a recoverable kitchen retry bypass an existing held queue", async () => {
+        const job = recoverableKitchenJob();
+        mockFindOneJob(job);
+        printJobExistsMock.mockResolvedValue(true);
+        const dispatchSpy = vi.spyOn(
+            PrinterService as unknown as { dispatchPrintDocumentWithAutomaticRetry: (params: unknown) => Promise<unknown> },
+            "dispatchPrintDocumentWithAutomaticRetry"
+        );
+
+        const result = await PrinterService.retryPrintJobById("evt-1", "job-kitchen");
+
+        const retryClaimedAt = printJobFindOneAndUpdateMock.mock.calls[0][1].$set.retryClaimedAt;
+        const error = "Ci sono già stampe reparto in coda. Attendi il completamento prima di riprovare.";
+        expect(result).toEqual({ success: false, error });
+        expect(printJobExistsMock).toHaveBeenCalledWith(expect.objectContaining({
+            eventId: "evt-1",
+            printerId: "printer-kitchen",
+            queueRecoverable: true,
+            status: { $in: ["HELD", "QUEUED"] },
+            heldSince: { $exists: true }
+        }));
+        expect(printJobUpdateOneMock).toHaveBeenCalledWith(
+            { _id: job._id, eventId: "evt-1", status: "QUEUED", retryClaimedAt },
+            { $set: { status: "FAILED", errorMessage: error }, $unset: { retryClaimedAt: 1 } }
+        );
+        expect(dispatchSpy).not.toHaveBeenCalled();
+        expect(releaseKitchenPrinterQueueLeaseMock).toHaveBeenCalledWith("printer-kitchen", "lease-token");
+    });
+
+    test("releases the printer queue lease when a recoverable kitchen retry is interrupted", async () => {
+        mockFindOneJob(recoverableKitchenJob());
+        vi.spyOn(
+            PrinterService as unknown as { dispatchPrintDocumentWithAutomaticRetry: (params: unknown) => Promise<unknown> },
+            "dispatchPrintDocumentWithAutomaticRetry"
+        ).mockRejectedValue(new Error("render failed"));
+
+        const result = await PrinterService.retryPrintJobById("evt-1", "job-kitchen");
+
+        expect(result).toEqual({ success: false, error: "Reinvio stampa interrotto" });
+        expect(releaseKitchenPrinterQueueLeaseMock).toHaveBeenCalledWith("printer-kitchen", "lease-token");
+    });
+
     test("returns unexpectedly interrupted retries to FAILED", async () => {
         mockFindOneJob({
             _id: { toString: () => "job-1" },
@@ -258,6 +395,72 @@ describe("PrinterService.retryPrintJobById", () => {
         ).mockResolvedValue({ success: false, errorMessage: "Printer not reachable", automaticRetryCount: 0 });
         const result = await PrinterService.retryPrintJobById("evt-1", "job-1");
         expect(result).toEqual({ success: false, error: "Invio stampa fallito" });
+    });
+
+    test("dispatches a queue-owned kitchen job without mutating its status", async () => {
+        printJobFindOneMock.mockReturnValue({
+            populate: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue({
+                    printerId: {
+                        ip: "printer-emulator",
+                        port: 19101,
+                        type: "KITCHEN",
+                        isVirtual: false
+                    },
+                    copies: 1,
+                    document: {
+                        schemaVersion: 2,
+                        printType: "KITCHEN_ORDER",
+                        title: "Comanda reparto",
+                        copyLabel: "CUCINA",
+                        items: [{ name: "Panino", qty: 1 }],
+                        totals: []
+                    }
+                })
+            })
+        });
+        vi.spyOn(
+            PrinterService as unknown as { dispatchPrintDocumentWithAutomaticRetry: (params: unknown) => Promise<unknown> },
+            "dispatchPrintDocumentWithAutomaticRetry"
+        ).mockResolvedValue({ success: true, rawCapturePath: "/tmp/kitchen.raw", automaticRetryCount: 0 });
+
+        await expect(PrinterService.dispatchHeldKitchenPrintJob("evt-1", "job-1")).resolves.toEqual({
+            success: true,
+            rawCapturePath: "/tmp/kitchen.raw",
+            automaticRetryCount: 0
+        });
+        expect(printJobFindOneMock).toHaveBeenCalledWith(expect.objectContaining({
+            _id: "job-1",
+            eventId: "evt-1",
+            status: "QUEUED",
+            printType: "KITCHEN_ORDER",
+            queueRecoverable: true,
+            queueClaimToken: { $exists: true }
+        }));
+        expect(printJobUpdateOneMock).not.toHaveBeenCalled();
+    });
+
+    test("classifies physical dispatch failures as recoverable for the queue", async () => {
+        printJobFindOneMock.mockReturnValue({
+            populate: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue({
+                    printerId: { ip: "printer-emulator", port: 19101, type: "KITCHEN" },
+                    copies: 1,
+                    document: { title: "Comanda reparto", items: [] }
+                })
+            })
+        });
+        vi.spyOn(
+            PrinterService as unknown as { dispatchPrintDocumentWithAutomaticRetry: (params: unknown) => Promise<unknown> },
+            "dispatchPrintDocumentWithAutomaticRetry"
+        ).mockResolvedValue({ success: false, errorMessage: "Printer not reachable", automaticRetryCount: 5 });
+
+        await expect(PrinterService.dispatchHeldKitchenPrintJob("evt-1", "job-1")).resolves.toEqual({
+            success: false,
+            recoverable: true,
+            error: "Printer not reachable",
+            automaticRetryCount: 5
+        });
     });
 
     test("retries easter egg jobs using the raster stored on the order before falling back to legacy image URLs", async () => {

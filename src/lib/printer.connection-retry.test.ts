@@ -3,7 +3,14 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const {
     dbConnectMock,
     printJobCreateMock,
+    printJobDistinctMock,
+    printJobUpdateManyMock,
     printJobUpdateOneMock,
+    printJobExistsMock,
+    printerFindOneAndUpdateMock,
+    printerExistsMock,
+    printerDistinctMock,
+    printerUpdateOneMock,
     buildOrderPrintDocumentV2Mock,
     normalizeLegacyPrintDocumentMock,
     isPrinterConnectedMock,
@@ -12,7 +19,14 @@ const {
 } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     printJobCreateMock: vi.fn(),
+    printJobDistinctMock: vi.fn(),
+    printJobUpdateManyMock: vi.fn(),
     printJobUpdateOneMock: vi.fn(),
+    printJobExistsMock: vi.fn(),
+    printerFindOneAndUpdateMock: vi.fn(),
+    printerExistsMock: vi.fn(),
+    printerDistinctMock: vi.fn(),
+    printerUpdateOneMock: vi.fn(),
     buildOrderPrintDocumentV2Mock: vi.fn(),
     normalizeLegacyPrintDocumentMock: vi.fn(),
     isPrinterConnectedMock: vi.fn(),
@@ -27,7 +41,19 @@ vi.mock("@/lib/mongoose", () => ({
 vi.mock("@/models/PrintJob", () => ({
     default: {
         create: printJobCreateMock,
-        updateOne: printJobUpdateOneMock
+        distinct: printJobDistinctMock,
+        updateMany: printJobUpdateManyMock,
+        updateOne: printJobUpdateOneMock,
+        exists: printJobExistsMock
+    }
+}));
+
+vi.mock("@/models/Printer", () => ({
+    default: {
+        findOneAndUpdate: printerFindOneAndUpdateMock,
+        exists: printerExistsMock,
+        distinct: printerDistinctMock,
+        updateOne: printerUpdateOneMock
     }
 }));
 
@@ -88,6 +114,7 @@ vi.mock("node-thermal-printer", () => {
 });
 
 import { PrinterService } from "@/lib/printer";
+import { holdFailedKitchenPrintJobs } from "@/lib/print-queue";
 
 function buildDocument(input: {
     printType?: string;
@@ -157,7 +184,18 @@ describe("PrinterService.printComanda connection retry", () => {
         vi.useRealTimers();
 
         printJobCreateMock.mockResolvedValue({ _id: { toString: () => "job-1" } });
-        printJobUpdateOneMock.mockResolvedValue({ acknowledged: true });
+        printJobDistinctMock.mockResolvedValue([]);
+        printJobUpdateManyMock.mockResolvedValue({ modifiedCount: 0 });
+        printJobUpdateOneMock.mockResolvedValue({ acknowledged: true, matchedCount: 1, modifiedCount: 1 });
+        printJobExistsMock.mockResolvedValue(null);
+        printerDistinctMock.mockResolvedValue([]);
+        printerFindOneAndUpdateMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue({ _id: "printer-1" })
+            })
+        });
+        printerExistsMock.mockResolvedValue({ _id: "printer-1" });
+        printerUpdateOneMock.mockResolvedValue({ matchedCount: 1, modifiedCount: 1, acknowledged: true });
         buildOrderPrintDocumentV2Mock.mockImplementation((input) => buildDocument(input));
         normalizeLegacyPrintDocumentMock.mockImplementation((input) => input);
     });
@@ -296,5 +334,259 @@ describe("PrinterService.printComanda connection retry", () => {
                 $unset: { errorMessage: 1 }
             }
         );
+    });
+
+    test("puts new kitchen jobs behind an accepted backlog without sending them", async () => {
+        printJobExistsMock.mockResolvedValue({ _id: "held-1" });
+        const kitchenJob = {
+            ...baseJob(),
+            source: "ORDER" as const,
+            printType: "KITCHEN_ORDER" as const,
+            queueRecoverable: true,
+            printerId: "printer-1"
+        };
+
+        await expect(PrinterService.printComanda(kitchenJob, 1)).resolves.toBe(true);
+
+        expect(printJobExistsMock).toHaveBeenCalledWith(expect.objectContaining({
+            eventId: "evt-1",
+            printerId: "printer-1",
+            queueRecoverable: true,
+            status: { $in: ["HELD", "QUEUED"] },
+            heldSince: { $exists: true }
+        }));
+        expect(printJobCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+            queueRecoverable: true,
+            status: "QUEUED",
+            liveClaimExpiresAt: expect.any(Date)
+        }));
+        expect(printJobUpdateOneMock).toHaveBeenCalledWith(
+            { _id: "job-1", status: "QUEUED" },
+            {
+                $set: {
+                    status: "HELD",
+                    heldSince: expect.any(Date),
+                    errorMessage: "Accodata dietro stampe reparto già in attesa"
+                },
+                $unset: { liveClaimExpiresAt: 1 }
+            }
+        );
+        expect(printJobUpdateOneMock).not.toHaveBeenCalledWith(
+            { _id: "job-1" },
+            expect.objectContaining({ $set: expect.objectContaining({ status: "SENT" }) })
+        );
+        expect(isPrinterConnectedMock).not.toHaveBeenCalled();
+        expect(executeMock).not.toHaveBeenCalled();
+    });
+
+    test("does not claim the printer or report success when a recoverable job cannot be persisted", async () => {
+        printJobExistsMock.mockResolvedValue({ _id: "held-1" });
+        printJobCreateMock.mockRejectedValueOnce(new Error("write failed"));
+        const kitchenJob = {
+            ...baseJob(),
+            source: "ORDER" as const,
+            printType: "KITCHEN_ORDER" as const,
+            queueRecoverable: true,
+            printerId: "printer-1"
+        };
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+        await expect(PrinterService.printComanda(kitchenJob, 1)).resolves.toBe(false);
+
+        expect(isPrinterConnectedMock).not.toHaveBeenCalled();
+        expect(executeMock).not.toHaveBeenCalled();
+        expect(printerFindOneAndUpdateMock).not.toHaveBeenCalled();
+        expect(printerUpdateOneMock).not.toHaveBeenCalled();
+        consoleErrorSpy.mockRestore();
+    });
+
+    test("serializes concurrent kitchen prints so the second POS joins the held queue", async () => {
+        let releaseFirstExecute: (() => void) | undefined;
+        isPrinterConnectedMock.mockResolvedValue(true);
+        executeMock.mockImplementationOnce(() => new Promise<void>((resolve) => {
+            releaseFirstExecute = resolve;
+        }));
+        printerFindOneAndUpdateMock
+            .mockReturnValueOnce({
+                select: vi.fn().mockReturnValue({
+                    lean: vi.fn().mockResolvedValue({ _id: "printer-1" })
+                })
+            })
+            .mockReturnValueOnce({
+                select: vi.fn().mockReturnValue({
+                    lean: vi.fn().mockResolvedValue(null)
+                })
+            });
+        printJobCreateMock
+            .mockResolvedValueOnce({ _id: { toString: () => "job-live" } })
+            .mockResolvedValueOnce({ _id: { toString: () => "job-held" } });
+
+        const liveJob = {
+            ...baseJob(),
+            source: "ORDER" as const,
+            printType: "KITCHEN_ORDER" as const,
+            queueRecoverable: true,
+            printerId: "printer-1",
+            orderId: "507f1f77bcf86cd799439011"
+        };
+        const queuedJob = {
+            ...baseJob(),
+            source: "ORDER" as const,
+            printType: "KITCHEN_ORDER" as const,
+            queueRecoverable: true,
+            printerId: "printer-1",
+            orderId: "507f1f77bcf86cd799439012"
+        };
+
+        const livePromise = PrinterService.printComanda(liveJob, 1);
+        await vi.waitFor(() => expect(executeMock).toHaveBeenCalledTimes(1));
+
+        await expect(PrinterService.printComanda(queuedJob, 1)).resolves.toBe(true);
+
+        releaseFirstExecute?.();
+        await expect(livePromise).resolves.toBe(true);
+
+        expect(printJobExistsMock).toHaveBeenCalledTimes(1);
+        expect(printJobCreateMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
+            queueRecoverable: true,
+            orderId: "507f1f77bcf86cd799439011"
+        }));
+        expect(printJobCreateMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            queueRecoverable: true,
+            orderId: "507f1f77bcf86cd799439012"
+        }));
+        expect(printJobUpdateOneMock).toHaveBeenCalledWith(
+            { _id: "job-held", status: "QUEUED" },
+            {
+                $set: {
+                    status: "HELD",
+                    heldSince: expect.any(Date),
+                    errorMessage: "Accodata dietro stampe reparto già in attesa"
+                },
+                $unset: { liveClaimExpiresAt: 1 }
+            }
+        );
+        expect(executeMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("fails instead of orphaning a held job when printer deletion wins the lease race", async () => {
+        printerFindOneAndUpdateMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue(null)
+            })
+        });
+        printerExistsMock.mockResolvedValue(null);
+        const kitchenJob = {
+            ...baseJob(),
+            source: "ORDER" as const,
+            printType: "KITCHEN_ORDER" as const,
+            queueRecoverable: true,
+            printerId: "printer-deleted"
+        };
+
+        await expect(PrinterService.printComanda(kitchenJob, 1)).resolves.toBe(false);
+
+        expect(printerExistsMock).toHaveBeenCalledWith({
+            _id: "printer-deleted",
+            eventId: "evt-1",
+            type: "KITCHEN"
+        });
+        expect(printJobCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+            printerId: "printer-deleted",
+            queueRecoverable: true
+        }));
+        expect(printJobCreateMock.mock.invocationCallOrder[0]).toBeLessThan(
+            printerFindOneAndUpdateMock.mock.invocationCallOrder[0]
+        );
+        expect(printJobUpdateOneMock).toHaveBeenCalledWith(
+            { _id: "job-1" },
+            {
+                $set: {
+                    status: "FAILED",
+                    errorMessage: "Stampante reparto non disponibile",
+                    rawCapturePath: undefined,
+                    automaticRetryCount: 0
+                },
+                $unset: { liveClaimExpiresAt: 1 }
+            }
+        );
+        expect(printJobUpdateOneMock).not.toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ $set: expect.objectContaining({ status: "HELD" }) })
+        );
+        expect(isPrinterConnectedMock).not.toHaveBeenCalled();
+        expect(executeMock).not.toHaveBeenCalled();
+    });
+
+    test("keeps cashier-routed department copies out of queue recovery even with KITCHEN_ORDER printType", async () => {
+        isPrinterConnectedMock.mockResolvedValue(true);
+        executeMock.mockResolvedValue(undefined);
+        const cashierKitchenCopy = {
+            ...baseJob(),
+            source: "ORDER" as const,
+            printType: "KITCHEN_ORDER" as const,
+            queueRecoverable: false,
+            printerId: "cashier-printer-1"
+        };
+
+        await expect(PrinterService.printComanda(cashierKitchenCopy, 1)).resolves.toBe(true);
+
+        expect(printerFindOneAndUpdateMock).not.toHaveBeenCalled();
+        expect(printJobExistsMock).not.toHaveBeenCalled();
+        expect(printJobCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+            queueRecoverable: false,
+            printType: "KITCHEN_ORDER",
+            printerId: "cashier-printer-1"
+        }));
+        expect(executeMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("refuses a concurrent hold while the live sender has already checked backlog and owns the lease", async () => {
+        let releaseFirstExecute: (() => void) | undefined;
+        isPrinterConnectedMock.mockResolvedValue(true);
+        executeMock.mockImplementationOnce(() => new Promise<void>((resolve) => {
+            releaseFirstExecute = resolve;
+        }));
+        printJobExistsMock.mockResolvedValue(false);
+        printJobDistinctMock.mockResolvedValueOnce(["printer-1"]);
+        printerDistinctMock.mockResolvedValueOnce(["printer-1"]);
+        printerFindOneAndUpdateMock
+            .mockReturnValueOnce({
+                select: vi.fn().mockReturnValue({
+                    lean: vi.fn().mockResolvedValue({ _id: "printer-1" })
+                })
+            })
+            .mockReturnValueOnce({
+                select: vi.fn().mockReturnValue({
+                    lean: vi.fn().mockResolvedValue(null)
+                })
+            });
+
+        const liveJob = {
+            ...baseJob(),
+            source: "ORDER" as const,
+            printType: "KITCHEN_ORDER" as const,
+            queueRecoverable: true,
+            printerId: "printer-1",
+            orderId: "507f1f77bcf86cd799439021"
+        };
+
+        const livePromise = PrinterService.printComanda(liveJob, 1);
+        await vi.waitFor(() => expect(executeMock).toHaveBeenCalledTimes(1));
+        expect(printJobExistsMock).toHaveBeenCalledTimes(1);
+
+        await expect(holdFailedKitchenPrintJobs({
+            eventId: "evt-1",
+            orderId: "order-older-failed",
+            jobIds: ["job-failed"]
+        })).resolves.toEqual({
+            held: 0,
+            busyPrinterIds: ["printer-1"]
+        });
+
+        expect(printJobUpdateManyMock).not.toHaveBeenCalled();
+
+        releaseFirstExecute?.();
+        await expect(livePromise).resolves.toBe(true);
     });
 });
