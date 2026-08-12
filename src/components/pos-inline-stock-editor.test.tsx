@@ -111,4 +111,95 @@ describe("PosInlineStockEditor", () => {
         await waitFor(() => expect(row.getByRole("alert")).toHaveTextContent("Evento attivo non valido"))
         expect(saveButton).toBeEnabled()
     })
+
+    test("riallinea un valore remoto quando il campo non è stato modificato", () => {
+        const view = render(
+            <PosInlineStockEditor
+                eventId="event-1"
+                product={product}
+                displayName="Salamella"
+                priceLabel="6.00 €"
+                variant="modern"
+                borderColor="#1d4ed8"
+                backgroundColor="#dbeafe"
+                onUpdated={vi.fn()}
+            />
+        )
+
+        view.rerender(
+            <PosInlineStockEditor
+                eventId="event-1"
+                product={{ ...product, stockQuantity: 2 }}
+                displayName="Salamella"
+                priceLabel="6.00 €"
+                variant="modern"
+                borderColor="#1d4ed8"
+                backgroundColor="#dbeafe"
+                onUpdated={vi.fn()}
+            />
+        )
+
+        expect(within(screen.getByTestId(`stock-product-${product._id}`)).getByRole("spinbutton")).toHaveValue(2)
+    })
+
+    test("non sovrascrive un input locale non ancora salvato", () => {
+        const props = {
+            eventId: "event-1",
+            displayName: "Salamella",
+            priceLabel: "6.00 €",
+            variant: "modern" as const,
+            borderColor: "#1d4ed8",
+            backgroundColor: "#dbeafe",
+            onUpdated: vi.fn(),
+        }
+        const view = render(<PosInlineStockEditor {...props} product={product} />)
+        const input = within(screen.getByTestId(`stock-product-${product._id}`)).getByRole("spinbutton")
+        fireEvent.change(input, { target: { value: "9" } })
+
+        view.rerender(<PosInlineStockEditor {...props} product={{ ...product, stockQuantity: 2 }} />)
+
+        expect(input).toHaveValue(9)
+    })
+
+    test("mantiene il risultato del salvataggio se arriva un valore remoto mentre il campo è sporco", async () => {
+        let resolveAction!: (value: { success: true; product: typeof updatedProduct }) => void
+        updatePosStockMock.mockImplementation(() => new Promise((resolve) => {
+            resolveAction = resolve
+        }))
+        const props = {
+            eventId: "event-1",
+            displayName: "Salamella",
+            priceLabel: "6.00 €",
+            variant: "modern" as const,
+            borderColor: "#1d4ed8",
+            backgroundColor: "#dbeafe",
+            onUpdated: vi.fn(),
+        }
+        const view = render(<PosInlineStockEditor {...props} product={product} />)
+        const row = within(screen.getByTestId(`stock-product-${product._id}`))
+        const input = row.getByRole("spinbutton")
+
+        fireEvent.change(input, { target: { value: "6" } })
+        fireEvent.click(row.getByRole("button", { name: /Salva scorta/i }))
+        await waitFor(() => expect(input).toBeDisabled())
+
+        view.rerender(<PosInlineStockEditor {...props} product={{ ...product, stockQuantity: 2 }} />)
+        expect(input).toHaveValue(6)
+
+        await act(async () => {
+            resolveAction({ success: true, product: updatedProduct })
+            await Promise.resolve()
+        })
+
+        await waitFor(() => expect(input).toHaveValue(7))
+        expect(row.getByRole("status")).toHaveTextContent("Scorta Salamella aggiornata a 7")
+    })
+
+    test("include il prodotto nel nome accessibile dei controlli variante", () => {
+        renderEditor()
+        const row = within(screen.getByTestId(`stock-variant-${product._id}-Doppia`))
+
+        expect(row.getByRole("spinbutton", { name: "Scorta Salamella - Doppia" })).toBeVisible()
+        expect(row.getByRole("button", { name: "Salva scorta Salamella - Doppia" })).toBeVisible()
+    })
 })

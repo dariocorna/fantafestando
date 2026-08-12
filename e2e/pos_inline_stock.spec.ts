@@ -165,12 +165,12 @@ test.describe("POS modalità scorte inline", () => {
             expect(product?.stockQuantity).toBeNull()
 
             const variantSection = page.locator(`[data-testid="stock-variant-${setup.productId}-${variantLabel}"]`)
-            const variantInput = variantSection.getByRole("spinbutton", { name: `Scorta ${variantLabel}` })
+            const variantInput = variantSection.getByRole("spinbutton", { name: `Scorta ${setup.productName} - ${variantLabel}` })
             const variantSave = variantSection.getByRole("button", { name: /Salva/i })
 
             await variantInput.fill("7")
             await variantSave.click()
-            await expect(variantSection.getByRole("status")).toHaveText(`Scorta ${variantLabel} aggiornata a 7`)
+            await expect(variantSection.getByRole("status")).toHaveText(`Scorta ${setup.productName} - ${variantLabel} aggiornata a 7`)
 
             product = await loadProduct(setup.eventId, setup.productName)
             expect(product?.variants?.[0]?.stockQuantity).toBe(7)
