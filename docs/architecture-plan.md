@@ -1,82 +1,113 @@
-# Piano di Sviluppo FantaFestando
+# Architettura di FantaFestando
 
-Questo documento descrive l'architettura tecnica e le fasi di sviluppo proposte per il gestionale FantaFestando, formulate tramite supporto della documentazione Context7.
+Questo documento descrive l'architettura effettivamente presente nel
+repository. La roadmap funzionale e lo stato delle epiche sono mantenuti in
+[`EPICS.md`](EPICS.md).
 
-## 1. Stack Tecnologico Proposto
+## Stack applicativo
 
-- **Framework Full-Stack**: **Next.js** (App Router) con **React** e **TypeScript**.
-  - *Perché*: Permette di unire l'interfaccia ultra-veloce (POS) alle API di rete che parleranno con le stampanti (backend).
-- **Styling**: **Tailwind CSS**.
-  - *Perché*: Ideale per creare interfacce POS con pulsanti touch-friendly e leggibilità ottimale in ambienti serali.
-- **Autenticazione Backend**: **NextAuth.js (Auth.js)** (Libreria Context7: `/nextauthjs/next-auth`).
-  - *Perché*: Lo standard per gestire in modo sicuro e plug-and-play le sessioni di login degli amministratori su Next.js.
-- **Database Standalone**: **MongoDB** ospitato in container **Docker**, con **Mongoose**.
-  - *Perché*: Approccio eccellente per un'architettura dati pulita. Il sistema adotta un approccio strettamente gerarchico: la **Festa è la vera root (padre)**. Record come Categorie, Prodotti, Stampanti IP, Casse e Sconti vivono solo se associati a una specifica Festa.
-  - Le Feste concluse diventano entità storiche sigillate e possono essere riutilizzate esclusivamente come *template* per le edizioni successive (clonazione di struttura, menu, layout).
-- **Integrazione Stampanti Termiche**: **`node-thermal-printer`** (Libreria Context7: `/klemen1337/node-thermal-printer`).
-  - *Perché*: Ottimo modulo Node.js identificato tramite ricerca, in grado di comunicare in rete locale (TCP/IP via Ethernet o WiFi) con tutte le stampanti (cassa e reparti) usando il protocollo ESC/POS.
-- **Integrazione POS Bancario (SumUp)**: SDK Ufficiale Node.js (`@sumup/sdk`).
-  - *Perché*: La "Cloud API" (Terminal API) di SumUp consente a un backend web di avviare una transazione remota direttamente sul lettore carte compatibile (ad es. SumUp Solo connesso in WiFi) senza forzare il cassiere ad usare l'App smartphone proprietaria in parallelo.
-- **Testing**:
-  - Unit Tests: **Vitest**
-  - E2E Tests: **Playwright**
+- Next.js App Router, React e TypeScript per pagine, route HTTP e server
+  action.
+- MongoDB con Mongoose per la persistenza locale.
+- Tailwind CSS e componenti Radix per l'interfaccia.
+- `node-thermal-printer` per l'invio ESC/POS alle stampanti di rete.
+- Vitest per i test unitari e Playwright per i flussi end-to-end.
 
-## 2. Fasi di Sviluppo (Approccio Agile)
+L'evento è la radice dei dati operativi: catalogo, postazioni POS, stampanti,
+periferiche, ordini, sessioni cassa e job di stampa sono associati a un evento.
+Le operazioni devono sempre conservare questo confine.
 
-Sviluppo strutturato in epiche iterabili con piccoli commit ("atomici" come richiesto in `AGENTS.md`).
+## Confini del codice
 
-### Epica 1: Fondamenta, Autenticazione e Setup
-- Inizializzazione applicazione Next.js con Tailwind.
-- Startup file `docker-compose.yml` per MongoDB locale.
-- Configurazione NextAuth per il login amministrativo protetto.
-- Configurazione Mongoose e schema base Multi-tenant (Feste, Categorie, Prodotti, Varianti).
-- Schema "Impostazioni Festa" (es. abilitazione campi opzionali Nome e Tavolo).
-- Setup libreria QRCode (`qrcode.react`) e strumenti Testing.
+### `src/app`
 
-### Epica 2: Catalogo e Menù
-- API + UI per la gestione del Menu e Varianti (es. "Senza Cipolla", "Doppio").
-- UI base gestione prodotti e prezzi.
-- **Gestione Ciclo di Vita**: Implementazione della cancellazione (Delete) per Eventi, Categorie e Prodotti per pulizia dati.
+Contiene i boundary Next.js:
 
-### Epica 3: L'Interfaccia POS (Cassa)
-- UI principale "Point of Sale" ottimizzata per touchscreen (Dati e incassi salvati Localmente).
-- Integrazione Sincronizzazione "Ordini Pendenti" dal Cloud via API (fetch pre-ordini WebApp).
-- Interfaccia rapida di selezione ordine pendente o inserimento Codice Breve/QR identificativo.
-- Carrello, gestione sconti volontari o manuali.
-- Modifica o conferma dell'ordine (con campi "Autore" e "Tavolo" se configurati).
+- pagine e layout;
+- route HTTP;
+- server action vicine alla feature che le invoca;
+- componenti client specifici di una singola route.
 
-### Epica 4: WebApp Ordini Pubblica (in Cloud)
-- Portale esposto pubblicamente in Cloud (Vercel) su database MongoDB Cloud separato (Bucket).
-- Interfaccia per la selezione dei prodotti e personalizzazione (varianti).
-- Form di check-out cliente con richiesta Condizionale di "Nome" e "Tavolo" (secondo i settings della festa).
-- Generazione nel Cloud dell'ordine "Provvisorio" e visualizzazione al cliente di un Codice Breve Formattato (e relativo QR minimale identificativo) da comunicare in Cassa.
+Una page o una route può leggere direttamente un model per una query semplice
+e server-only. Le orchestrazioni condivise, le transazioni con più entità e le
+trasformazioni riutilizzate non devono essere duplicate nei boundary.
 
-### Epica 5: Smistamento Comande e Stampanti (solo Rete)
-- Sviluppo integrato del modulo di stampa Node.js tramite `node-thermal-printer`.
-- Generazione scontrino cliente cassa (invio a stampante IP di cassa).
-- Generazione smistamento ticket reparti (invio a stampanti IP per Bar, Griglia, ecc. via TCP/LAN).
+### `src/components`
 
-### Epica 5: Statistiche Base
-- Pagina per resoconti di fine giornata.
+Contiene componenti usati da più pagine o feature. Un componente usato da una
+sola route resta vicino alla route proprietaria; non viene spostato qui solo
+per separare fisicamente un file grande.
 
-### Epica 9: Magazzino e Scorte Base (in pianificazione)
-- Introduzione campo scorte su prodotto/variante (`stockQuantity`).
-- Decremento scorte solo su transizione ordine a `PAID`.
-- POS con override operativo a stock zero (warning + conferma cassiere).
-- Menu pubblico con esclusione prodotti esauriti.
-- Dettagli funzionali: `docs/inventory-stock.md`.
+### `src/lib`
 
-## User Review Required
+Contiene logica di dominio e infrastruttura condivisa da più consumer, tra cui
+stampa, report, backup, trasferimento eventi, autenticazione e integrazioni.
+Un modulo condiviso viene introdotto solo quando elimina duplicazioni reali o
+offre un unico boundary di sicurezza e consistenza.
 
-> [!CAUTION]
-## 4. Strategia di Deploy Multi-Festa
+### `src/models`
 
-## 4. Strategia di Deploy Definitiva: Standalone Locale Ibrido
+Contiene schemi e modelli Mongoose. I model descrivono la persistenza; le
+orchestrazioni applicative non devono accumularsi negli schema.
 
-Su indicazione del cliente, l'architettura scelta per il deploy alle feste è un ibrido che mira a **isolare i dati sensibili di incasso localmente, sfruttando il Cloud solo per raccogliere i clienti**:
+Non esiste un repository layer universale: aggiungere un wrapper a ogni
+chiamata Mongoose aumenterebbe il numero di livelli senza ridurre la
+complessità. I servizi sono mirati ai flussi che ne hanno bisogno.
 
-- **Il Backend Cassa Locale (RPi o PC cassa)** gestisce gli ordini "saldati", lo storico incassi e parla fisicamente TCP sulle reti WiFi/Ethernet con le stampanti di cucina e barra. Identifica l'evento corrente tramite un settaggio globale "Evento Attivo".
-- **Il Portale Web PWA Cloud (es. Vercel + DB Mongo Atlas Bucket)** fornisce il menu pubblico ai cellulari dei clienti caricando automaticamente l'unica festa attiva sincronizzata dalla Cassa.
-- **Sincronizzazione Unidirezionale in Cassa**: Il POS locale interroga periodicamente il DB in Cloud. Il cassiere aggancia l'ordine pendente associato all'evento attivo. Una volta saldato, questo viene salvato *esclusivamente* sul DB Locale, mentre viene purgato dal Cloud. Partono infine le stampe IP locali in cucina.
+## Flussi principali
 
-*Documento Approvato - Architettura Definitiva*.
+### Catalogo e menu
+
+L'amministrazione gestisce categorie, prodotti, varianti e disponibilità per
+evento. POS e menu pubblico ricevono viste coerenti dello stesso catalogo, con
+filtri diversi per il rispettivo canale.
+
+### Ordini e cassa
+
+Il server è la fonte di verità per prezzi, disponibilità e transizioni degli
+ordini. Il POS compone il carrello e invoca server action che validano di nuovo
+i dati, aggiornano scorte e sessione cassa e registrano l'esito del pagamento.
+Gli ordini pendenti del menu pubblico vengono chiusi dallo stesso dominio
+operativo del POS.
+
+### Stampa
+
+`PrinterService` mantiene la facade usata dalle action e dalle route. Il
+routing genera job persistiti e li invia alle stampanti cassa o reparto. Stato
+del job, retry e ristampa devono restare osservabili: una risposta HTTP non è
+di per sé prova che una stampa fisica sia riuscita.
+
+### Upload gestiti
+
+Le intestazioni menu/ricevuta e le immagini Easter egg sono file runtime
+persistenti. Path filesystem e URL pubbliche devono essere risolti da un solo
+boundary con bucket consentiti e validazione dei segmenti; route, stampa e
+trasferimento evento usano la stessa regola. Backup e ripristino preservano
+invece l'intera directory runtime `public/uploads`.
+
+## Runtime di produzione
+
+`docker-compose.prod.yml` esegue:
+
+- MongoDB con volume persistente;
+- due istanze della stessa immagine Next.js:
+  - `fantafestando-backoffice` per amministrazione e POS;
+  - `fantafestando-menu` per la superficie pubblica filtrata;
+- l'emulatore stampanti nel profilo `demo`;
+- il controller dei tunnel remoti nel profilo `oracle-tunnel`.
+
+Il mount `public` contiene anche gli upload runtime e non viene sostituito da
+un normale rebuild dell'immagine. Backup, restore e deploy devono preservare i
+volumi e verificare separatamente le superfici backoffice e menu.
+
+## Vincoli di evoluzione
+
+- Nessun cambio di schema o contratto pubblico implicito dentro un refactor.
+- Preferire cancellazione e consolidamento alla creazione di nuovi livelli.
+- Conservare i fallback legacy quando rappresentano dati persistiti già in
+  uso; rimuoverli solo con una migrazione esplicita.
+- Interrogare il code graph prima di modifiche e review, poi verificare le
+  conclusioni sul sorgente e sui test.
+- Una feature UI richiede test unitari per la logica introdotta e Playwright
+  per i flussi principali.
+- La suite Chromium completa resta il gate prima della pubblicazione.

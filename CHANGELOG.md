@@ -2,6 +2,23 @@
 
 Tutte le modifiche rilevanti al progetto vengono annotate in questo file.
 
+## [Unreleased]
+
+### Changed
+
+- Unificati i dialog di creazione e modifica prodotto in un solo form condiviso, preservando payload e comportamento dei due flussi.
+- Separati i comandi delle impostazioni per area funzionale e centralizzata la risoluzione sicura degli upload runtime.
+- Riscritta la documentazione architetturale come descrizione del sistema effettivamente distribuito.
+
+### Fixed
+
+- Stabilizzato l'autosave delle immagini Easter egg anche quando il componente padre ricrea il callback di salvataggio.
+- Eliminato il tracciamento indiscriminato del repository durante la build standalone degli asset gestiti.
+
+### Removed
+
+- Rimossi componenti, helper, route duplicate e dipendenze senza consumer.
+
 ## [0.25.0] - 2026-08-10
 
 ### Changed
