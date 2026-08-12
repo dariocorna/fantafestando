@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/mongoose";
 import { getAdminContextEventId } from "@/lib/events";
-import PrintJob from "@/models/PrintJob";
+import PrintJob, { type PrintJobStatus } from "@/models/PrintJob";
 import "@/models/Printer"; // Import to register schema for .populate()
 import { PrinterService } from "@/lib/printer";
 import { adminUnauthorizedJson, ensureAdminSession } from "@/lib/authz";
@@ -46,7 +46,7 @@ export async function GET(
                     _id: { toString(): string } | string;
                     source: "ORDER" | "CASH_SESSION" | "MANUAL_TEST";
                     printType?: "CUSTOMER_ORDER" | "KITCHEN_ORDER" | "CASHIER_SUMMARY" | "CASH_SESSION_SUMMARY" | "EASTER_EGG_IMAGE" | "MANUAL_TEST";
-                    status: "QUEUED" | "SENT" | "FAILED";
+                    status: PrintJobStatus;
                     destinationHost: string;
                     destinationPort: number;
                     isVirtual: boolean;

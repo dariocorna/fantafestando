@@ -11,6 +11,7 @@ import CashSession from "@/models/CashSession";
 import PosDevice from "@/models/PosDevice";
 import "@/models/Peripheral";
 import { PrinterService } from "@/lib/printer";
+import { recoverStaleManualPrintRetryClaims } from "@/lib/print-queue";
 import { decryptSecret } from "@/lib/secrets";
 import { refundSumUpTransaction, resolveSumUpTransactionIdByCheckout } from "@/lib/sumup";
 import { type StockAdjustment } from "@/lib/stock-operations";
@@ -123,15 +124,25 @@ export async function reprintOrderById(orderId: string) {
             return { success: false, error: "Ordine pagato non trovato nella festa selezionata" }
         }
 
-        const failedJobs = await PrintJob.find({
+        await recoverStaleManualPrintRetryClaims(eventId, normalizedOrderId)
+        const existingPrintJobs = await PrintJob.find({
             eventId,
             orderId: normalizedOrderId,
             source: "ORDER",
-            status: "FAILED"
+            status: { $in: ["FAILED", "HELD", "QUEUED"] }
         })
             .sort({ createdAt: 1 })
-            .select("_id")
-            .lean() as Array<{ _id: string | { toString(): string } }>
+            .select("_id status")
+            .lean() as Array<{ _id: string | { toString(): string }; status?: "FAILED" | "HELD" | "QUEUED" }>
+
+        if (existingPrintJobs.some((job) => job.status === "HELD" || job.status === "QUEUED")) {
+            return {
+                success: false,
+                error: "Ci sono già stampe in coda o in attesa per questo ordine. Attendi il completamento prima di ristampare."
+            }
+        }
+
+        const failedJobs = existingPrintJobs.filter((job) => !job.status || job.status === "FAILED")
 
         if (failedJobs.length > 0) {
             const retryResults = []
