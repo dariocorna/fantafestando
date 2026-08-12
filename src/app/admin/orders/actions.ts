@@ -14,6 +14,7 @@ import { PrinterService } from "@/lib/printer";
 import { recoverStaleManualPrintRetryClaims } from "@/lib/print-queue";
 import { decryptSecret } from "@/lib/secrets";
 import { refundSumUpTransaction, resolveSumUpTransactionIdByCheckout } from "@/lib/sumup";
+import { getSumUpRefundState } from "@/lib/sumup-refund";
 import { type StockAdjustment } from "@/lib/stock-operations";
 import { transitionClaimedOrderStock } from "@/lib/cash-session-stock";
 import { revalidatePath } from "next/cache";
@@ -38,10 +39,13 @@ interface OrderForStornoProjection {
     stockEffectStatus?: "APPLIED" | "REVERTED"
     stornoMeta?: {
         status?: "IN_PROGRESS" | "COMPLETED" | "FAILED"
+        requestedAt?: Date
         refundStatus?: "SKIPPED" | "DONE" | "FAILED"
         refundTransactionId?: string
     }
 }
+
+const STORNO_LEASE_MS = 5 * 60 * 1000
 
 function buildStockAdjustmentsFromOrder(order: OrderForStornoProjection): StockAdjustment[] {
     const productAdjustments = order.cart
@@ -63,8 +67,8 @@ function buildStockAdjustmentsFromOrder(order: OrderForStornoProjection): StockA
     return [...productAdjustments, ...ingredientAdjustments]
 }
 
-async function resolveSumUpApiKeyForOrder(eventId: string, posDeviceId?: string): Promise<
-    { success: true, apiKey: string }
+async function resolveSumUpCredentialsForOrder(eventId: string, posDeviceId?: string): Promise<
+    { success: true, apiKey: string, merchantCode: string }
     | { success: false, error: string }
 > {
     if (!posDeviceId) {
@@ -77,7 +81,7 @@ async function resolveSumUpApiKeyForOrder(eventId: string, posDeviceId?: string)
             {
                 paymentTerminalId?: {
                     type?: string
-                    config?: { affiliateKey?: string }
+                    config?: { apiKey?: string, merchantCode?: string }
                 } | null
             } | null
         )
@@ -87,12 +91,17 @@ async function resolveSumUpApiKeyForOrder(eventId: string, posDeviceId?: string)
         return { success: false, error: "Terminale SumUp non disponibile per l'ordine da stornare" }
     }
 
-    const apiKey = decryptSecret(terminal.config?.affiliateKey)
+    const apiKey = decryptSecret(terminal.config?.apiKey)
     if (!apiKey) {
         return { success: false, error: "Configurazione API key SumUp mancante" }
     }
 
-    return { success: true, apiKey }
+    const merchantCode = terminal.config?.merchantCode?.trim()
+    if (!merchantCode) {
+        return { success: false, error: "Configurazione merchant code SumUp mancante" }
+    }
+
+    return { success: true, apiKey, merchantCode }
 }
 
 export async function reprintOrderById(orderId: string) {
@@ -273,9 +282,13 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
         return { success: false, error: "Nessuna festa selezionata nel contesto admin" }
     }
 
+    let leaseRequestedAt: Date | undefined
+    let leaseClaimed = false
     try {
         await dbConnect()
         const now = new Date()
+        leaseRequestedAt = now
+        const staleBefore = new Date(now.getTime() - STORNO_LEASE_MS)
         const lockSetPayload: Record<string, unknown> = {
             "stornoMeta.status": "IN_PROGRESS",
             "stornoMeta.requestedAt": now,
@@ -292,7 +305,15 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                 status: "PAID",
                 $or: [
                     { "stornoMeta.status": { $exists: false } },
-                    { "stornoMeta.status": "FAILED" }
+                    { "stornoMeta.status": "FAILED" },
+                    {
+                        "stornoMeta.status": "IN_PROGRESS",
+                        "stornoMeta.requestedAt": { $lte: staleBefore }
+                    },
+                    {
+                        "stornoMeta.status": "IN_PROGRESS",
+                        "stornoMeta.requestedAt": { $exists: false }
+                    }
                 ]
             },
             {
@@ -326,13 +347,19 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
 
             return { success: false, error: "Solo gli ordini pagati possono essere stornati" }
         }
+        leaseClaimed = true
+
+        const leaseFilter = {
+            _id: normalizedOrderId,
+            eventId,
+            status: "PAID",
+            "stornoMeta.status": "IN_PROGRESS",
+            "stornoMeta.requestedAt": now
+        }
 
         const stockClaimedOrder = await Order.findOneAndUpdate(
             {
-                _id: normalizedOrderId,
-                eventId,
-                status: "PAID",
-                "stornoMeta.status": "IN_PROGRESS",
+                ...leaseFilter,
                 $or: [
                     { stockEffectClaim: null },
                     { "stockEffectClaim.token": "STORNO", "stockEffectClaim.target": "REVERTED" }
@@ -343,24 +370,28 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
         ).lean() as OrderForStornoProjection | null
         if (!stockClaimedOrder) {
             await Order.updateOne(
-                { _id: normalizedOrderId, eventId, "stornoMeta.status": "IN_PROGRESS" },
+                leaseFilter,
                 { $set: { "stornoMeta.status": "FAILED", "stornoMeta.refundError": "Modifica scorte già in corso" } }
             )
             return { success: false, error: "Modifica scorte già in corso per questo ordine: riprova tra poco" }
         }
         lockedOrder = stockClaimedOrder
 
-        let refundStatus: "SKIPPED" | "DONE" | "FAILED" = lockedOrder.paymentMethod === "CARD" ? "FAILED" : "SKIPPED"
+        const refundRequired = Boolean(
+            lockedOrder.sumupCheckoutId?.trim()
+            || lockedOrder.sumupPaymentId?.trim()
+        )
+        let refundStatus: "SKIPPED" | "DONE" | "FAILED" = refundRequired ? "FAILED" : "SKIPPED"
         let refundTransactionId = lockedOrder.stornoMeta?.refundTransactionId?.trim()
 
-        if (lockedOrder.paymentMethod === "CARD") {
+        if (refundRequired) {
             const refundAlreadyDone = lockedOrder.stornoMeta?.refundStatus === "DONE" && Boolean(refundTransactionId)
 
             if (!refundAlreadyDone) {
-                const apiKeyResult = await resolveSumUpApiKeyForOrder(eventId, lockedOrder.posDeviceId?.toString())
+                const apiKeyResult = await resolveSumUpCredentialsForOrder(eventId, lockedOrder.posDeviceId?.toString())
                 if (!apiKeyResult.success) {
                     await Order.updateOne(
-                        { _id: normalizedOrderId, eventId },
+                        leaseFilter,
                         {
                             $set: {
                                 "stornoMeta.status": "FAILED",
@@ -373,7 +404,8 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                     return { success: false, error: apiKeyResult.error }
                 }
 
-                let transactionId = lockedOrder.sumupPaymentId?.trim() || refundTransactionId
+                const priorRefundTransactionId = refundTransactionId
+                let transactionId = refundTransactionId || lockedOrder.sumupPaymentId?.trim()
                 if (!transactionId && lockedOrder.sumupCheckoutId?.trim()) {
                     const resolveResult = await resolveSumUpTransactionIdByCheckout(
                         lockedOrder.sumupCheckoutId,
@@ -381,7 +413,7 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                     )
                     if (!resolveResult.success || !resolveResult.transactionId) {
                         await Order.updateOne(
-                            { _id: normalizedOrderId, eventId },
+                            leaseFilter,
                             {
                                 $set: {
                                     "stornoMeta.status": "FAILED",
@@ -401,7 +433,7 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
 
                 if (!transactionId) {
                     await Order.updateOne(
-                        { _id: normalizedOrderId, eventId },
+                        leaseFilter,
                         {
                             $set: {
                                 "stornoMeta.status": "FAILED",
@@ -414,30 +446,103 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                     return { success: false, error: "Transaction id SumUp mancante" }
                 }
 
-                const refundResult = await refundSumUpTransaction({
-                    transactionId,
-                    apiKey: apiKeyResult.apiKey,
-                    amount: lockedOrder.totalAmount
-                })
+                if (priorRefundTransactionId) {
+                    const priorRefundState = await getSumUpRefundState({
+                        transactionId,
+                        merchantCode: apiKeyResult.merchantCode,
+                        apiKey: apiKeyResult.apiKey
+                    })
+                    if (!priorRefundState.success) {
+                        await Order.updateOne(
+                            leaseFilter,
+                            {
+                                $set: {
+                                    "stornoMeta.status": "FAILED",
+                                    "stornoMeta.refundRequired": true,
+                                    "stornoMeta.refundStatus": "FAILED",
+                                    "stornoMeta.refundTransactionId": transactionId,
+                                    "stornoMeta.refundError": priorRefundState.error
+                                }
+                            }
+                        )
+                        return { success: false, error: priorRefundState.error }
+                    }
+                    if (priorRefundState.fullyRefunded) {
+                        refundStatus = "DONE"
+                        refundTransactionId = transactionId
+                    }
+                }
 
-                if (!refundResult.success) {
-                    await Order.updateOne(
-                        { _id: normalizedOrderId, eventId },
+                if (refundStatus !== "DONE") {
+                    const attemptRecorded = await Order.updateOne(
+                        leaseFilter,
                         {
                             $set: {
-                                "stornoMeta.status": "FAILED",
                                 "stornoMeta.refundRequired": true,
                                 "stornoMeta.refundStatus": "FAILED",
                                 "stornoMeta.refundTransactionId": transactionId,
-                                "stornoMeta.refundError": refundResult.error || "Errore rimborso SumUp"
+                                "stornoMeta.refundError": "Rimborso SumUp in verifica"
                             }
                         }
                     )
-                    return { success: false, error: refundResult.error || "Errore rimborso SumUp" }
+                    if ((attemptRecorded.matchedCount ?? attemptRecorded.modifiedCount) !== 1) {
+                        return { success: false, error: "Storno rilevato da un'altra operazione: riprova" }
+                    }
+
+                    let refundResult: { success: boolean; error?: string }
+                    try {
+                        refundResult = await refundSumUpTransaction({
+                            transactionId,
+                            apiKey: apiKeyResult.apiKey
+                        })
+                    } catch {
+                        refundResult = { success: false, error: "Errore rimborso SumUp" }
+                    }
+
+                    if (!refundResult.success) {
+                        const refundState = await getSumUpRefundState({
+                            transactionId,
+                            merchantCode: apiKeyResult.merchantCode,
+                            apiKey: apiKeyResult.apiKey
+                        })
+                        if (!refundState.success || !refundState.fullyRefunded) {
+                            const refundError = refundState.success
+                                ? refundResult.error || "Errore rimborso SumUp"
+                                : refundState.error
+                            await Order.updateOne(
+                                leaseFilter,
+                                {
+                                    $set: {
+                                        "stornoMeta.status": "FAILED",
+                                        "stornoMeta.refundRequired": true,
+                                        "stornoMeta.refundStatus": "FAILED",
+                                        "stornoMeta.refundTransactionId": transactionId,
+                                        "stornoMeta.refundError": refundError
+                                    }
+                                }
+                            )
+                            return { success: false, error: refundError }
+                        }
+                    }
+
+                    refundStatus = "DONE"
+                    refundTransactionId = transactionId
                 }
 
-                refundStatus = "DONE"
-                refundTransactionId = transactionId
+                const refundRecorded = await Order.updateOne(
+                    leaseFilter,
+                    {
+                        $set: {
+                            "stornoMeta.refundRequired": true,
+                            "stornoMeta.refundStatus": "DONE",
+                            "stornoMeta.refundTransactionId": transactionId
+                        },
+                        $unset: { "stornoMeta.refundError": 1 }
+                    }
+                )
+                if ((refundRecorded.matchedCount ?? refundRecorded.modifiedCount) !== 1) {
+                    return { success: false, error: "Storno rilevato da un'altra operazione: riprova" }
+                }
             } else {
                 refundStatus = "DONE"
             }
@@ -458,11 +563,11 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
             if (!stockResult.success) throw new Error(stockResult.error)
         } catch (rollbackError) {
             await Order.updateOne(
-                { _id: normalizedOrderId, eventId },
+                leaseFilter,
                 {
                     $set: {
                         "stornoMeta.status": "FAILED",
-                        "stornoMeta.refundRequired": lockedOrder.paymentMethod === "CARD",
+                        "stornoMeta.refundRequired": refundRequired,
                         "stornoMeta.refundStatus": refundStatus,
                         "stornoMeta.refundTransactionId": refundTransactionId,
                         "stornoMeta.refundError": "Ripristino scorte non riuscito"
@@ -473,15 +578,15 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
             return { success: false, error: "Ripristino scorte non riuscito" }
         }
 
-        await Order.updateOne(
-            { _id: normalizedOrderId, eventId },
+        const completed = await Order.updateOne(
+            leaseFilter,
             {
                 $set: {
                     status: "CANCELLED",
                     "stornoMeta.status": "COMPLETED",
                     "stornoMeta.reason": normalizedReason || undefined,
                     "stornoMeta.completedAt": new Date(),
-                    "stornoMeta.refundRequired": lockedOrder.paymentMethod === "CARD",
+                    "stornoMeta.refundRequired": refundRequired,
                     "stornoMeta.refundStatus": refundStatus,
                     "stornoMeta.refundTransactionId": refundTransactionId,
                     stockEffectStatus: "REVERTED"
@@ -492,25 +597,32 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                 }
             }
         )
+        if ((completed.matchedCount ?? completed.modifiedCount) !== 1) {
+            return { success: false, error: "Storno rilevato da un'altra operazione: riprova" }
+        }
 
         revalidatePath("/admin/orders")
         revalidatePath("/admin")
         return { success: true }
     } catch (error) {
         try {
-            await Order.updateOne(
-                {
-                    _id: normalizedOrderId,
-                    eventId,
-                    "stornoMeta.status": "IN_PROGRESS"
-                },
-                {
-                    $set: {
-                        "stornoMeta.status": "FAILED",
-                        "stornoMeta.refundError": "Errore interno inatteso durante lo storno"
+            if (leaseClaimed && leaseRequestedAt) {
+                await Order.updateOne(
+                    {
+                        _id: normalizedOrderId,
+                        eventId,
+                        status: "PAID",
+                        "stornoMeta.status": "IN_PROGRESS",
+                        "stornoMeta.requestedAt": leaseRequestedAt
+                    },
+                    {
+                        $set: {
+                            "stornoMeta.status": "FAILED",
+                            "stornoMeta.refundError": "Errore interno inatteso durante lo storno"
+                        }
                     }
-                }
-            )
+                )
+            }
         } catch (stornoUpdateError) {
             console.error("Storno fallback status update error:", stornoUpdateError)
         }
