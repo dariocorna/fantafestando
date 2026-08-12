@@ -368,7 +368,7 @@ describe("createOrder SumUp lifecycle", () => {
         expect(orderUpdateOneMock).toHaveBeenNthCalledWith(
             1,
             { _id: order._id, eventId: "event-1", status: "PENDING" },
-            { $set: { sumupCheckoutId: "initiating:order-1" } }
+            { $set: { sumupCheckoutId: "initiating:order-1", sumupInitiatedAt: expect.any(Date) } }
         )
         expect(transitionSumUpOrderStockMock).toHaveBeenCalledWith({
             eventId: "event-1",
@@ -497,6 +497,7 @@ describe("completePendingOrderPayment SumUp lifecycle", () => {
         expect(result).toMatchObject({ success: true, paymentCompleted: false, paymentPending: true })
         expect(order.save).toHaveBeenCalledOnce()
         expect(order.set).toHaveBeenCalledWith("sumupCheckoutId", "initiating:order-1")
+        expect(order.set).toHaveBeenCalledWith("sumupInitiatedAt", expect.any(Date))
         expect(transitionSumUpOrderStockMock).toHaveBeenCalledWith({
             eventId: "event-1",
             orderId: "order-1",

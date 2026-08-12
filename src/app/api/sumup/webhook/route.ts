@@ -1,36 +1,32 @@
 import crypto from "node:crypto"
-import type { TransactionFull } from "@sumup/sdk"
 import { NextRequest, NextResponse } from "next/server"
 import dbConnect from "@/lib/mongoose"
-import { claimCashSessionPayment, refreshCashSessionPaymentClaim, releaseCashSessionPaymentClaim } from "@/lib/cash-session-payment-claim"
 import { decryptSecret } from "@/lib/secrets"
 import {
     getSumUpTransactionByClientTransactionId,
     getSumUpTransactionByForeignTransactionId,
 } from "@/lib/sumup"
-import { transitionSumUpOrderStock } from "@/lib/sumup-order-stock"
-import { PrinterService } from "@/lib/printer"
+import {
+    dispatchSumUpOrderPrints,
+    finalizeClaimedSumUpOrder,
+    getSumUpTransactionOutcome,
+    sumUpTransactionMatchesOrder,
+    sumUpTransactionsMatch,
+    type ClaimedSumUpOrder,
+    type VerifiedSumUpTransaction,
+} from "@/lib/sumup-order-finalization"
 import Order from "@/models/Order"
 import PosDevice from "@/models/PosDevice"
 
 const WEBHOOK_CLAIM_TTL_MS = 5 * 60 * 1000
 
-type WebhookOrder = {
-    _id: { toString(): string } | string
-    status?: "PENDING" | "PAID" | "CANCELLED"
-    totalAmount?: number
-    eventId?: { toString(): string } | string
-    cashSessionId?: { toString(): string } | string | null
-    posDeviceId?: { toString(): string } | string | null
-    stockEffectStatus?: "APPLIED" | "REVERTED"
-    stockAdjustments?: Array<{
-        entityType: "PRODUCT" | "INGREDIENT"
-        entityId: { toString(): string } | string
-        quantity: number
-    }>
+type WebhookOrder = ClaimedSumUpOrder & {
+    sumupCheckoutId?: string
+    sumupPaymentId?: string
+    sumupRecoveryCancelledAt?: Date
+    sumupLateSuccessDetectedAt?: Date
+    stornoMeta?: { refundStatus?: "SKIPPED" | "DONE" | "FAILED" }
 }
-
-type VerifiedTransaction = TransactionFull
 
 function extractPayloadClientTransactionId(payload: Record<string, unknown>) {
     const nestedPayload = payload.payload
@@ -39,27 +35,6 @@ function extractPayloadClientTransactionId(payload: Record<string, unknown>) {
     return typeof clientTransactionId === "string" && clientTransactionId.trim()
         ? clientTransactionId.trim()
         : undefined
-}
-
-function normalizeMoneyAmount(amount: number | undefined) {
-    if (typeof amount !== "number" || !Number.isFinite(amount)) return undefined
-    return Number(amount.toFixed(2))
-}
-
-function transactionOutcome(transaction: VerifiedTransaction): "SUCCESS" | "FAILED" | "PENDING" {
-    const simpleStatus = transaction.simple_status
-    if (simpleStatus) {
-        if (simpleStatus === "SUCCESSFUL" || simpleStatus === "PAID_OUT") return "SUCCESS"
-        if (["CANCELLED", "FAILED", "REFUNDED", "CHARGEBACK", "NON_COLLECTION"].includes(simpleStatus)) {
-            return "FAILED"
-        }
-        return "PENDING"
-    }
-
-    const status = transaction.status as string | undefined
-    if (status === "SUCCESSFUL" || status === "PAID_OUT") return "SUCCESS"
-    if (["CANCELLED", "FAILED", "REFUNDED", "CHARGE_BACK"].includes(status || "")) return "FAILED"
-    return "PENDING"
 }
 
 async function resolveSumUpTerminalCredentials(
@@ -91,43 +66,51 @@ async function resolveSumUpTerminalCredentials(
     return { success: true as const, merchantCode, apiKey }
 }
 
-function transactionMatchesOrder(
-    transaction: VerifiedTransaction,
-    credentials: { merchantCode: string },
-    order: WebhookOrder,
-) {
-    return transaction.merchant_code?.trim() === credentials.merchantCode
-        && transaction.currency?.trim() === "EUR"
-        && normalizeMoneyAmount(transaction.amount) === normalizeMoneyAmount(order.totalAmount)
-}
-
-function transactionsMatch(left: VerifiedTransaction, right: VerifiedTransaction) {
-    const leftId = left.id?.trim()
-    const rightId = right.id?.trim()
-    return Boolean(leftId && rightId && leftId === rightId)
-        && left.merchant_code?.trim() === right.merchant_code?.trim()
-        && left.currency?.trim() === right.currency?.trim()
-        && normalizeMoneyAmount(left.amount) === normalizeMoneyAmount(right.amount)
-}
-
-async function dispatchPrintsIfMissing(order: WebhookOrder) {
-    const orderId = order._id.toString()
-    try {
-        await PrinterService.routeOrderToPrinters(
-            orderId,
-            order.posDeviceId?.toString(),
-            { idempotencyScope: "SUMUP_CALLBACK" },
-        )
-    } catch (error) {
-        // Payment is already authoritative. Print failures remain visible in the print monitor/admin reprint flow.
-        console.error("[SumUp Webhook] Errore durante il trigger delle stampe:", error)
-    }
-}
-
 async function loadWebhookOrder(clientTransactionId: string) {
     return await Order.findOne({ sumupCheckoutId: clientTransactionId })
-        .select("_id status totalAmount eventId cashSessionId posDeviceId stockEffectStatus stockAdjustments")
+        .select("_id status totalAmount eventId cashSessionId posDeviceId stockEffectStatus stockAdjustments sumupCheckoutId sumupPaymentId sumupRecoveryCancelledAt sumupLateSuccessDetectedAt stornoMeta.refundStatus")
         .lean() as WebhookOrder | null
+}
+
+async function handleRecoveredCancellation(
+    order: WebhookOrder,
+    transaction: VerifiedSumUpTransaction,
+    clientTransactionId: string,
+) {
+    const outcome = getSumUpTransactionOutcome(transaction)
+    if (outcome === "SUCCESS" && order.stornoMeta?.refundStatus === "DONE") {
+        return NextResponse.json({ success: true, message: "Late payment already refunded" })
+    }
+    if (outcome === "FAILED") {
+        return NextResponse.json({ success: true, message: "Already cancelled" })
+    }
+    if (outcome === "PENDING") {
+        await Order.updateOne(
+            { _id: order._id, status: "CANCELLED", sumupRecoveryCancelledAt: { $exists: true } },
+            { $set: { sumupCheckoutId: clientTransactionId } },
+        )
+        return NextResponse.json({ error: "Late SumUp transaction is still pending" }, { status: 409 })
+    }
+
+    const paymentId = transaction.id?.trim()
+    const alreadyDetected = Boolean(order.sumupLateSuccessDetectedAt)
+    const detected = await Order.updateOne(
+        { _id: order._id, status: "CANCELLED", sumupRecoveryCancelledAt: { $exists: true } },
+        {
+            $set: {
+                sumupCheckoutId: clientTransactionId,
+                ...(paymentId ? { sumupPaymentId: paymentId } : {}),
+                ...(alreadyDetected ? {} : { sumupLateSuccessDetectedAt: new Date() }),
+            },
+        },
+    )
+    if (!detected.acknowledged || detected.matchedCount !== 1) {
+        return NextResponse.json({ error: "Late SumUp payment reconciliation conflict" }, { status: 409 })
+    }
+    return NextResponse.json(
+        { error: "Late SumUp payment detected after local cancellation; refund required" },
+        { status: 409 },
+    )
 }
 
 async function reconcileUncertainCheckout(req: NextRequest, clientTransactionId: string) {
@@ -136,10 +119,23 @@ async function reconcileUncertainCheckout(req: NextRequest, clientTransactionId:
 
     const order = await Order.findOne({
         _id: orderId,
-        status: "PENDING",
         sumupCheckoutId: `initiating:${orderId}`,
+        $and: [
+            {
+                $or: [
+                    { status: "PENDING" },
+                    { status: "CANCELLED", sumupRecoveryCancelledAt: { $exists: true } },
+                ],
+            },
+            {
+                $or: [
+                    { sumupWebhookClaimedAt: { $exists: false } },
+                    { sumupWebhookClaimedAt: { $lt: new Date(Date.now() - WEBHOOK_CLAIM_TTL_MS) } },
+                ],
+            },
+        ],
     })
-        .select("_id status totalAmount eventId cashSessionId posDeviceId stockEffectStatus stockAdjustments")
+        .select("_id status totalAmount eventId cashSessionId posDeviceId stockEffectStatus stockAdjustments sumupCheckoutId sumupPaymentId sumupRecoveryCancelledAt sumupLateSuccessDetectedAt stornoMeta.refundStatus")
         .lean() as WebhookOrder | null
     if (!order?.eventId) {
         return { success: false as const, response: NextResponse.json({ error: "Order not found" }, { status: 404 }) }
@@ -172,8 +168,8 @@ async function reconcileUncertainCheckout(req: NextRequest, clientTransactionId:
         }
     }
     if (
-        !transactionsMatch(clientLookup.transaction, foreignLookup.transaction)
-        || !transactionMatchesOrder(clientLookup.transaction, credentials, order)
+        !sumUpTransactionsMatch(clientLookup.transaction, foreignLookup.transaction)
+        || !sumUpTransactionMatchesOrder(clientLookup.transaction, credentials.merchantCode, order)
     ) {
         return {
             success: false as const,
@@ -181,8 +177,23 @@ async function reconcileUncertainCheckout(req: NextRequest, clientTransactionId:
         }
     }
 
+    if (order.status === "CANCELLED") {
+        return {
+            success: false as const,
+            response: await handleRecoveredCancellation(order, clientLookup.transaction, clientTransactionId),
+        }
+    }
+
     const linked = await Order.updateOne(
-        { _id: orderId, status: "PENDING", sumupCheckoutId: `initiating:${orderId}` },
+        {
+            _id: orderId,
+            status: "PENDING",
+            sumupCheckoutId: `initiating:${orderId}`,
+            $or: [
+                { sumupWebhookClaimedAt: { $exists: false } },
+                { sumupWebhookClaimedAt: { $lt: new Date(Date.now() - WEBHOOK_CLAIM_TTL_MS) } },
+            ],
+        },
         { $set: { sumupCheckoutId: clientTransactionId } },
     )
     if (!linked.acknowledged || linked.matchedCount !== 1) {
@@ -215,15 +226,15 @@ export async function POST(req: NextRequest) {
         let order = await loadWebhookOrder(clientTransactionId)
 
         if (order?.status === "PAID") {
-            await dispatchPrintsIfMissing(order)
+            await dispatchSumUpOrderPrints(order)
             return NextResponse.json({ success: true, message: "Already paid" })
         }
-        if (order?.status === "CANCELLED") {
+        if (order?.status === "CANCELLED" && !order.sumupRecoveryCancelledAt) {
             return NextResponse.json({ success: true, message: "Already cancelled" })
         }
 
         let credentials: Awaited<ReturnType<typeof resolveSumUpTerminalCredentials>>
-        let transaction: VerifiedTransaction
+        let transaction: VerifiedSumUpTransaction
         if (!order) {
             const reconciliation = await reconcileUncertainCheckout(req, clientTransactionId)
             if (!reconciliation.success) return reconciliation.response
@@ -249,11 +260,15 @@ export async function POST(req: NextRequest) {
             transaction = lookup.transaction
         }
 
-        if (!credentials.success || !transactionMatchesOrder(transaction, credentials, order)) {
+        if (!credentials.success || !sumUpTransactionMatchesOrder(transaction, credentials.merchantCode, order)) {
             return NextResponse.json({ error: "Transaction verification mismatch" }, { status: 409 })
         }
 
-        const outcome = transactionOutcome(transaction)
+        if (order.status === "CANCELLED") {
+            return await handleRecoveredCancellation(order, transaction, clientTransactionId)
+        }
+
+        const outcome = getSumUpTransactionOutcome(transaction)
         if (outcome === "PENDING") {
             return NextResponse.json({ error: "Transaction not confirmed as final" }, { status: 409 })
         }
@@ -275,7 +290,7 @@ export async function POST(req: NextRequest) {
         if (!claimedOrder) {
             const currentOrder = await loadWebhookOrder(clientTransactionId)
             if (currentOrder?.status === "PAID") {
-                await dispatchPrintsIfMissing(currentOrder)
+                await dispatchSumUpOrderPrints(currentOrder)
                 return NextResponse.json({ success: true, message: "Already paid" })
             }
             if (currentOrder?.status === "CANCELLED") {
@@ -287,82 +302,18 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Order not found" }, { status: 404 })
         }
 
-        let paymentClaimToken: string | undefined
-        const cashSessionId = claimedOrder.cashSessionId?.toString()
-        try {
-            if (!claimedOrder.eventId || !cashSessionId) {
-                return NextResponse.json({ error: "Cash session not found" }, { status: 409 })
-            }
-
-            const paymentClaim = await claimCashSessionPayment(cashSessionId)
-            if (!paymentClaim.success || paymentClaim.isTest) {
-                return NextResponse.json({ error: "Cash session is unavailable for SumUp payments" }, { status: 409 })
-            }
-            paymentClaimToken = paymentClaim.token
-
-            if (outcome === "FAILED") {
-                const stockResult = await transitionSumUpOrderStock({
-                    eventId: claimedOrder.eventId.toString(),
-                    orderId: claimedOrder._id.toString(),
-                    token: `SUMUP_CANCEL:${clientTransactionId}`,
-                    target: "REVERTED",
-                    adjustments: (claimedOrder.stockAdjustments || []).map((entry) => ({
-                        ...entry,
-                        entityId: entry.entityId.toString(),
-                    })),
-                })
-                if (!stockResult.success) {
-                    return NextResponse.json({ error: stockResult.error }, { status: 409 })
-                }
-                const cancelled = await Order.updateOne(
-                    { _id: claimedOrder._id, status: "PENDING", sumupWebhookClaimToken: claimToken },
-                    {
-                        $set: { status: "CANCELLED" },
-                        $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 },
-                    },
-                )
-                if (!cancelled.acknowledged || cancelled.matchedCount !== 1) {
-                    return NextResponse.json({ error: "Webhook claim lost before cancellation" }, { status: 409 })
-                }
-                return NextResponse.json({ success: true, status: "cancelled" })
-            }
-
-            if (claimedOrder.stockEffectStatus !== "APPLIED") {
-                return NextResponse.json({ error: "Reserved stock is not ready" }, { status: 503 })
-            }
-            if (!await refreshCashSessionPaymentClaim(cashSessionId, paymentClaimToken)) {
-                return NextResponse.json({ error: "Cash session changed during payment" }, { status: 409 })
-            }
-
-            const paid = await Order.updateOne(
-                { _id: claimedOrder._id, status: "PENDING", sumupWebhookClaimToken: claimToken },
-                {
-                    $set: {
-                        status: "PAID",
-                        paidAt: new Date(),
-                        ...(transaction.id?.trim() ? { sumupPaymentId: transaction.id.trim() } : {}),
-                    },
-                    $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 },
-                },
-            )
-            if (!paid.acknowledged || paid.matchedCount !== 1) {
-                return NextResponse.json({ error: "Webhook claim lost before payment completion" }, { status: 409 })
-            }
-
-            const paidOrder = { ...claimedOrder, status: "PAID" as const }
-            await dispatchPrintsIfMissing(paidOrder)
-            return NextResponse.json({ success: true })
-        } finally {
-            await releaseCashSessionPaymentClaim(cashSessionId || "", paymentClaimToken).catch((error) => {
-                console.error("[SumUp Webhook] Cash session payment claim release error:", error)
-            })
-            await Order.updateOne(
-                { _id: claimedOrder._id, status: "PENDING", sumupWebhookClaimToken: claimToken },
-                { $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 } },
-            ).catch((error) => {
-                console.error("[SumUp Webhook] Claim release error:", error)
-            })
+        const finalized = await finalizeClaimedSumUpOrder({
+            order: claimedOrder,
+            transaction,
+            checkoutId: clientTransactionId,
+            claimToken,
+        })
+        if (!finalized.success) {
+            return NextResponse.json({ error: finalized.error }, { status: finalized.httpStatus })
         }
+        return finalized.status === "CANCELLED"
+            ? NextResponse.json({ success: true, status: "cancelled" })
+            : NextResponse.json({ success: true })
     } catch (error) {
         console.error("[SumUp Webhook] Error:", error)
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })

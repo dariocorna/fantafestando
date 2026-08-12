@@ -173,6 +173,38 @@ describe("stornoPaidOrderById stock claim", () => {
         })
     })
 
+    test("refunds a late SumUp success without reverting stock a second time", async () => {
+        const lockedOrder = {
+            ...sumUpOrder(),
+            status: "CANCELLED",
+            stockEffectStatus: "REVERTED",
+            sumupLateSuccessDetectedAt: new Date(),
+        }
+        orderFindOneAndUpdateMock.mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
+        mockSumUpTerminal()
+        refundSumUpTransactionMock.mockResolvedValue({ success: true })
+
+        const result = await stornoPaidOrderById("order-1")
+
+        expect(result).toEqual({ success: true })
+        expect(refundSumUpTransactionMock).toHaveBeenCalledWith({
+            transactionId: "transaction-1",
+            apiKey: "plain-api-key"
+        })
+        expect(transitionClaimedOrderStockMock).not.toHaveBeenCalled()
+        expect(orderUpdateOneMock).toHaveBeenLastCalledWith(
+            expect.objectContaining({ _id: "order-1", status: "CANCELLED" }),
+            expect.objectContaining({
+                $set: expect.objectContaining({
+                    status: "CANCELLED",
+                    "stornoMeta.status": "COMPLETED",
+                    "stornoMeta.refundStatus": "DONE",
+                    stockEffectStatus: "REVERTED"
+                })
+            })
+        )
+    })
+
     test("completes a lost-response refund from SumUp without a second POST", async () => {
         const lockedOrder = sumUpOrder({
             status: "IN_PROGRESS",
@@ -258,10 +290,14 @@ describe("stornoPaidOrderById stock claim", () => {
 
         expect(result).toEqual({ success: true })
         expect(orderFindOneAndUpdateMock.mock.calls[0][0]).toEqual(expect.objectContaining({
-            $or: expect.arrayContaining([
+            $and: expect.arrayContaining([
                 expect.objectContaining({
-                    "stornoMeta.status": "IN_PROGRESS",
-                    "stornoMeta.requestedAt": { $lte: expect.any(Date) }
+                    $or: expect.arrayContaining([
+                        expect.objectContaining({
+                            "stornoMeta.status": "IN_PROGRESS",
+                            "stornoMeta.requestedAt": { $lte: expect.any(Date) }
+                        })
+                    ])
                 })
             ])
         }))

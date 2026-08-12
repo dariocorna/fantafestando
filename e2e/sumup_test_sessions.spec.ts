@@ -208,4 +208,114 @@ test.describe("SumUp e sessioni TEST", () => {
             await deleteEvent(page, eventName)
         }
     })
+
+    test("espone recovery incerta e pagamenti tardivi anche nelle sessioni TEST", async ({ page, isMobile }) => {
+        test.skip(isMobile, "Flusso validato su desktop.")
+
+        const suffix = uniqueSuffix()
+        const eventName = `SumUp Recovery Admin ${suffix}`
+
+        try {
+            const { eventId } = await createActiveEventWithCatalogDirect(eventName, `Catalogo recovery ${suffix}`, [
+                { name: `Prodotto recovery ${suffix}`, price: "5.00" },
+            ])
+            const product = await Product.findOne({ eventId }).select("_id name").lean<{ _id: string, name: string } | null>()
+            expect(product?._id).toBeTruthy()
+            const { printerId } = await createVirtualPrinterDirect({
+                eventName,
+                printerName: `Cassa recovery ${suffix}`,
+            })
+            const pending = await seedPaymentPos({
+                eventId,
+                printerId,
+                name: `SumUp incerto ${suffix}`,
+                terminalType: "SUMUP",
+                isTest: false,
+                status: "CLOSED",
+            })
+            const late = await seedPaymentPos({
+                eventId,
+                printerId,
+                name: `SumUp tardivo ${suffix}`,
+                terminalType: "SUMUP",
+                isTest: true,
+                status: "CLOSED",
+            })
+            const commonOrder = {
+                eventId,
+                totalAmount: 5,
+                discountApplied: 0,
+                paymentMethod: "CARD",
+                customer: {},
+                cart: [{
+                    productId: product!._id,
+                    snapshotName: product!.name,
+                    quantity: 1,
+                    unitBasePrice: 5,
+                    lineTotal: 5,
+                    selectedOptions: [],
+                }],
+                ingredientPlan: [],
+                dishTickets: [],
+                stockAdjustments: [],
+            } as const
+            const [uncertainOrder, lateSuccessOrder] = await Promise.all([
+                Order.create({
+                    ...commonOrder,
+                    status: "PENDING",
+                    cashSessionId: pending.cashSession._id,
+                    posDeviceId: pending.posDevice._id,
+                    stockEffectStatus: "APPLIED",
+                    sumupCheckoutId: `initiating:pending-${suffix}`,
+                    sumupInitiatedAt: new Date(),
+                }),
+                Order.create({
+                    ...commonOrder,
+                    status: "CANCELLED",
+                    cashSessionId: late.cashSession._id,
+                    posDeviceId: late.posDevice._id,
+                    stockEffectStatus: "REVERTED",
+                    sumupCheckoutId: `late-client-${suffix}`,
+                    sumupPaymentId: `late-transaction-${suffix}`,
+                    sumupRecoveryCancelledAt: new Date(),
+                    sumupLateSuccessDetectedAt: new Date(),
+                }),
+            ])
+            await Order.updateOne(
+                { _id: uncertainOrder._id },
+                { $set: { sumupCheckoutId: `initiating:${uncertainOrder._id}` } },
+            )
+
+            await setAdminEventContextCookie(page, eventId)
+
+            await page.goto("/admin/orders")
+            const recoveryRow = page.getByTestId(`order-row-${uncertainOrder._id}`)
+            await expect(recoveryRow).toContainText("SumUp da verificare")
+            const lateSuccessRow = page.getByTestId(`order-row-${lateSuccessOrder._id}`)
+            await expect(lateSuccessRow).toContainText("SumUp tardivo da rimborsare")
+            await expect(lateSuccessRow.getByTitle("Rimborsa pagamento SumUp tardivo")).toBeVisible()
+
+            const recoveryResult = new Promise<string>((resolve, reject) => {
+                const handler = async (dialog: import("@playwright/test").Dialog) => {
+                    try {
+                        if (dialog.type() === "confirm") {
+                            await dialog.accept()
+                            return
+                        }
+                        const message = dialog.message()
+                        await dialog.accept()
+                        page.off("dialog", handler)
+                        resolve(message)
+                    } catch (error) {
+                        reject(error)
+                    }
+                }
+                page.on("dialog", handler)
+            })
+            await recoveryRow.getByRole("button", { name: "Verifica e recupera pagamento SumUp" }).click()
+            await expect(recoveryResult).resolves.toContain("Attendi almeno 15 minuti")
+        } finally {
+            await deleteEvent(page, eventName)
+        }
+    })
 })

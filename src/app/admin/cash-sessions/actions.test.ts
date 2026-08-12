@@ -4,8 +4,10 @@ const {
     ensureAdminSessionMock,
     dbConnectMock,
     cashSessionFindByIdMock,
+    cashSessionFindOneMock,
     cashSessionFindOneAndUpdateMock,
     cashSessionUpdateOneMock,
+    getAdminContextEventIdMock,
     buildCashSessionPrintDocumentV2Mock,
     orderFindMock,
     orderExistsMock,
@@ -15,8 +17,10 @@ const {
     ensureAdminSessionMock: vi.fn(),
     dbConnectMock: vi.fn(),
     cashSessionFindByIdMock: vi.fn(),
+    cashSessionFindOneMock: vi.fn(),
     cashSessionFindOneAndUpdateMock: vi.fn(),
     cashSessionUpdateOneMock: vi.fn(),
+    getAdminContextEventIdMock: vi.fn(),
     buildCashSessionPrintDocumentV2Mock: vi.fn(),
     orderFindMock: vi.fn(),
     orderExistsMock: vi.fn(),
@@ -31,6 +35,7 @@ vi.mock("@/lib/authz", () => ({
 vi.mock("@/models/CashSession", () => ({
     default: {
         findById: cashSessionFindByIdMock,
+        findOne: cashSessionFindOneMock,
         findOneAndUpdate: cashSessionFindOneAndUpdateMock,
         updateOne: cashSessionUpdateOneMock
     }
@@ -44,6 +49,7 @@ vi.mock("@/models/Order", () => ({
 }));
 
 vi.mock("@/lib/mongoose", () => ({ default: dbConnectMock }));
+vi.mock("@/lib/events", () => ({ getAdminContextEventId: getAdminContextEventIdMock }));
 vi.mock("@/lib/cash-session-stock", () => ({ transitionCashSessionStock: transitionCashSessionStockMock }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -57,7 +63,7 @@ vi.mock("@/lib/print-report", () => ({
     buildCashSessionPrintDocumentV2: buildCashSessionPrintDocumentV2Mock
 }));
 
-import { getClosedCashSessionPrintDocumentAction, setCashSessionTestAction } from "./actions";
+import { deleteCashSessionAction, getClosedCashSessionPrintDocumentAction, setCashSessionTestAction } from "./actions";
 
 describe("getClosedCashSessionPrintDocumentAction", () => {
     beforeEach(() => {
@@ -273,7 +279,11 @@ describe("setCashSessionTestAction", () => {
         const session = { _id: "session-1", status: "OPEN", isTest: false };
         cashSessionFindByIdMock.mockResolvedValue(session);
         cashSessionFindOneAndUpdateMock.mockResolvedValue(session);
-        orderExistsMock.mockImplementation(async (query) => query.status === "PAID" ? { _id: "order-1" } : null);
+        orderExistsMock.mockImplementation(async (query) =>
+            query.$or?.some((branch: { status?: string }) => branch.status === "PAID")
+                ? { _id: "order-1" }
+                : null
+        );
 
         const result = await setCashSessionTestAction("session-1", true);
 
@@ -304,7 +314,10 @@ describe("setCashSessionTestAction", () => {
             };
             cashSessionFindByIdMock.mockResolvedValue(session);
             cashSessionFindOneAndUpdateMock.mockResolvedValue(session);
-            orderExistsMock.mockImplementation(async (query) => query.status === orderStatus ? { _id: "order-1" } : null);
+            orderExistsMock.mockImplementation(async (query) => {
+                const statuses = query.$or?.map((branch: { status?: string }) => branch.status) || [query.status];
+                return statuses.includes(orderStatus) ? { _id: "order-1" } : null;
+            });
 
             const result = await setCashSessionTestAction("session-1", true);
 
@@ -338,10 +351,19 @@ describe("setCashSessionTestAction", () => {
             expect(result).toMatchObject({ success: true });
             expect(orderExistsMock).toHaveBeenNthCalledWith(1, {
                 cashSessionId: "session-1",
-                status: "PAID",
                 $or: [
-                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
-                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                    {
+                        status: "PAID",
+                        $or: [
+                            { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                            { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                        ]
+                    },
+                    {
+                        status: "CANCELLED",
+                        sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                        "stornoMeta.refundStatus": { $ne: "DONE" }
+                    }
                 ]
             });
             expect(orderExistsMock).toHaveBeenNthCalledWith(2, {
@@ -365,4 +387,75 @@ describe("setCashSessionTestAction", () => {
             );
         }
     );
+
+    it("blocks TEST when a cancelled SumUp order has an unresolved late success without a transaction id", async () => {
+        const session = {
+            _id: "session-1",
+            eventId: { toString: () => "event-1" },
+            status: "CLOSED",
+            isTest: false
+        };
+        cashSessionFindByIdMock.mockResolvedValue(session);
+        cashSessionFindOneAndUpdateMock.mockResolvedValue(session);
+        orderExistsMock.mockResolvedValueOnce({ _id: "late-order-1" });
+
+        const result = await setCashSessionTestAction("session-1", true);
+
+        expect(result).toMatchObject({ success: false, error: expect.stringContaining("rimborsa") });
+        expect(orderExistsMock).toHaveBeenCalledWith({
+            cashSessionId: "session-1",
+            $or: expect.arrayContaining([
+                {
+                    status: "CANCELLED",
+                    sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                    "stornoMeta.refundStatus": { $ne: "DONE" }
+                }
+            ])
+        });
+        expect(transitionCashSessionStockMock).not.toHaveBeenCalled();
+    });
+});
+
+describe("deleteCashSessionAction", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        ensureAdminSessionMock.mockResolvedValue({ ok: true, user: { id: "admin-1", role: "ADMIN" } });
+        getAdminContextEventIdMock.mockResolvedValue("event-1");
+        cashSessionUpdateOneMock.mockResolvedValue({ acknowledged: true, matchedCount: 1 });
+    });
+
+    it("keeps a session with an unresolved late SumUp success without a transaction id", async () => {
+        const session = {
+            _id: "session-1",
+            eventId: { toString: () => "event-1" },
+            status: "CLOSED",
+            stockEffectStatus: "REVERTED"
+        };
+        cashSessionFindOneMock.mockResolvedValue(session);
+        cashSessionFindOneAndUpdateMock.mockResolvedValue(session);
+        orderExistsMock.mockResolvedValueOnce({ _id: "late-order-1" });
+
+        const result = await deleteCashSessionAction("session-1", "ELIMINA");
+
+        expect(result).toMatchObject({ success: false, error: expect.stringContaining("rimborsa") });
+        expect(orderExistsMock).toHaveBeenCalledWith({
+            cashSessionId: "session-1",
+            $or: expect.arrayContaining([
+                {
+                    status: "CANCELLED",
+                    sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                    "stornoMeta.refundStatus": { $ne: "DONE" }
+                }
+            ])
+        });
+        expect(cashSessionUpdateOneMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                _id: "session-1",
+                "transition.type": "DELETE"
+            }),
+            { $unset: { transition: 1, deletionStatus: 1 } }
+        );
+        expect(transitionCashSessionStockMock).not.toHaveBeenCalled();
+        expect(orderFindMock).not.toHaveBeenCalled();
+    });
 });

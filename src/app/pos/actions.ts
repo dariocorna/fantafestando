@@ -1172,10 +1172,19 @@ export async function closeCashSession(data: {
         if (claimed.isTest) {
             const sumUpOrder = await Order.exists({
                 cashSessionId: claimed._id,
-                status: "PAID",
                 $or: [
-                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
-                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                    {
+                        status: "PAID",
+                        $or: [
+                            { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                            { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                        ]
+                    },
+                    {
+                        status: "CANCELLED",
+                        sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                        "stornoMeta.refundStatus": { $ne: "DONE" }
+                    }
                 ]
             })
             if (sumUpOrder) {
@@ -1494,9 +1503,10 @@ export async function createOrder(data: {
 
         if (requiresPendingState) {
             const initiationMarker = `initiating:${order._id.toString()}`
+            const sumupInitiatedAt = new Date()
             const initiationResult = await Order.updateOne(
                 { _id: order._id, eventId: data.eventId, status: "PENDING" },
-                { $set: { sumupCheckoutId: initiationMarker } }
+                { $set: { sumupCheckoutId: initiationMarker, sumupInitiatedAt } }
             )
             if (!initiationResult.acknowledged || initiationResult.matchedCount !== 1) {
                 await Order.updateOne(
@@ -2500,6 +2510,7 @@ export async function completePendingOrderPayment(data: {
             applyOrderDetails()
             order.status = "PENDING"
             order.set("sumupCheckoutId", initiationMarker)
+            order.set("sumupInitiatedAt", new Date())
             order.set("stockAdjustments", stockPlan.adjustments)
             order.set("stockEffectStatus", "REVERTED")
             await order.save()

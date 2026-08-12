@@ -24,6 +24,12 @@ type SumUpForeignTransactionLookupInput = {
     apiKey?: string
 }
 
+type SumUpReaderInput = {
+    merchantCode: string
+    readerId: string
+    apiKey?: string
+}
+
 function resolveApiKey(overrideApiKey?: string): string | undefined {
     return overrideApiKey?.trim() || undefined;
 }
@@ -161,6 +167,13 @@ export async function getSumUpTransactionByClientTransactionId(data: SumUpTransa
         return { success: true as const, transaction }
     } catch (error) {
         console.error("SumUp Transaction Lookup Error:", error)
+        if (error instanceof APIError && error.status === 404) {
+            return {
+                success: false as const,
+                notFound: true as const,
+                error: "Transaction not found with SumUp"
+            }
+        }
         return { success: false as const, error: "Unable to verify transaction with SumUp" }
     }
 }
@@ -181,7 +194,39 @@ export async function getSumUpTransactionByForeignTransactionId(data: SumUpForei
         return { success: true as const, transaction }
     } catch (error) {
         console.error("SumUp Foreign Transaction Lookup Error:", error)
+        if (error instanceof APIError && error.status === 404) {
+            return {
+                success: false as const,
+                notFound: true as const,
+                error: "Transaction not found with SumUp"
+            }
+        }
         return { success: false as const, error: "Unable to reconcile transaction with SumUp" }
+    }
+}
+
+export async function getSumUpReaderStatus(data: SumUpReaderInput) {
+    try {
+        const merchantCode = data.merchantCode?.trim()
+        const readerId = data.readerId?.trim()
+        if (!merchantCode || !readerId) {
+            return { success: false as const, error: "Missing SumUp reader configuration" }
+        }
+
+        const apiKey = resolveApiKey(data.apiKey)
+        if (!apiKey) {
+            return { success: false as const, error: "Missing SumUp API key configuration" }
+        }
+
+        const readerStatus = await new SumUp({ apiKey }).readers.getStatus(merchantCode, readerId)
+        return {
+            success: true as const,
+            state: readerStatus.data.state,
+            status: readerStatus.data.status
+        }
+    } catch (error) {
+        console.error("SumUp Reader Status Error:", error)
+        return { success: false as const, error: "Unable to get SumUp reader status" }
     }
 }
 

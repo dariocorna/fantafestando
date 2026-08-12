@@ -126,10 +126,19 @@ export async function getClosedCashSessionPrintDocumentAction(sessionId: string,
 async function hasUnrefundedSumUpOrders(sessionId: string) {
     return Boolean(await Order.exists({
         cashSessionId: sessionId,
-        status: "PAID",
         $or: [
-            { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
-            { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+            {
+                status: "PAID",
+                $or: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            },
+            {
+                status: "CANCELLED",
+                sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                "stornoMeta.refundStatus": { $ne: "DONE" }
+            }
         ]
     }))
 }

@@ -77,6 +77,9 @@ export interface IOrder extends Document {
     paymentMethod: "CASH" | "CARD" | "OTHER";
     sumupCheckoutId?: string;
     sumupPaymentId?: string;
+    sumupInitiatedAt?: Date;
+    sumupRecoveryCancelledAt?: Date;
+    sumupLateSuccessDetectedAt?: Date;
     sumupWebhookClaimToken?: string;
     sumupWebhookClaimedAt?: Date;
     posDeviceId?: Types.ObjectId;
@@ -219,6 +222,9 @@ const OrderSchema = new Schema<IOrder>({
     paymentMethod: { type: String, enum: ["CASH", "CARD", "OTHER"], default: "CASH" },
     sumupCheckoutId: { type: String },
     sumupPaymentId: { type: String },
+    sumupInitiatedAt: { type: Date },
+    sumupRecoveryCancelledAt: { type: Date },
+    sumupLateSuccessDetectedAt: { type: Date },
     sumupWebhookClaimToken: { type: String },
     sumupWebhookClaimedAt: { type: Date },
     posDeviceId: { type: Schema.Types.ObjectId, ref: 'PosDevice' },

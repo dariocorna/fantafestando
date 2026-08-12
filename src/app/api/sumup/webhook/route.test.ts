@@ -134,6 +134,7 @@ describe("POST /api/sumup/webhook", () => {
                 $set: {
                     status: "PAID",
                     paidAt: expect.any(Date),
+                    sumupCheckoutId: "client-tx-1",
                     sumupPaymentId: "sumup-tx-1",
                 },
                 $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 },
@@ -232,7 +233,15 @@ describe("POST /api/sumup/webhook", () => {
             apiKey: "api-key-1",
         })
         expect(orderUpdateOneMock).toHaveBeenCalledWith(
-            { _id: "order-1", status: "PENDING", sumupCheckoutId: "initiating:order-1" },
+            {
+                _id: "order-1",
+                status: "PENDING",
+                sumupCheckoutId: "initiating:order-1",
+                $or: [
+                    { sumupWebhookClaimedAt: { $exists: false } },
+                    { sumupWebhookClaimedAt: { $lt: expect.any(Date) } },
+                ],
+            },
             { $set: { sumupCheckoutId: "client-tx-1" } },
         )
     })
@@ -251,6 +260,65 @@ describe("POST /api/sumup/webhook", () => {
         expect(response.status).toBe(409)
         expect(orderUpdateOneMock).not.toHaveBeenCalled()
         expect(orderFindOneAndUpdateMock).not.toHaveBeenCalled()
+    })
+
+    test("persists a late successful payment that arrives after recovery cancelled the order", async () => {
+        const recoveredCancellation = {
+            ...pendingOrder,
+            status: "CANCELLED" as const,
+            sumupCheckoutId: "initiating:order-1",
+            sumupRecoveryCancelledAt: new Date("2026-08-12T11:20:00Z"),
+        }
+        orderFindOneMock
+            .mockReturnValueOnce(selectLean(null))
+            .mockReturnValueOnce(selectLean(recoveredCancellation))
+
+        const response = await POST(webhookRequest("successful", "order-1"))
+
+        expect(response.status).toBe(409)
+        await expect(response.json()).resolves.toEqual({
+            error: "Late SumUp payment detected after local cancellation; refund required",
+        })
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            {
+                _id: "order-1",
+                status: "CANCELLED",
+                sumupRecoveryCancelledAt: { $exists: true },
+            },
+            {
+                $set: {
+                    sumupCheckoutId: "client-tx-1",
+                    sumupPaymentId: "sumup-tx-1",
+                    sumupLateSuccessDetectedAt: expect.any(Date),
+                },
+            },
+        )
+        expect(orderFindOneAndUpdateMock).not.toHaveBeenCalled()
+        expect(transitionSumUpOrderStockMock).not.toHaveBeenCalled()
+        expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
+    })
+
+    test("acknowledges a duplicate late callback after its payment was refunded", async () => {
+        orderFindOneMock.mockReturnValue(selectLean({
+            ...pendingOrder,
+            status: "CANCELLED",
+            sumupCheckoutId: "client-tx-1",
+            sumupRecoveryCancelledAt: new Date("2026-08-12T11:20:00Z"),
+            sumupLateSuccessDetectedAt: new Date("2026-08-12T11:25:00Z"),
+            stornoMeta: { refundStatus: "DONE" },
+        }))
+
+        const response = await POST(webhookRequest())
+
+        expect(response.status).toBe(200)
+        await expect(response.json()).resolves.toEqual({
+            success: true,
+            message: "Late payment already refunded",
+        })
+        expect(orderUpdateOneMock).not.toHaveBeenCalled()
+        expect(orderFindOneAndUpdateMock).not.toHaveBeenCalled()
+        expect(transitionSumUpOrderStockMock).not.toHaveBeenCalled()
+        expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
     })
 
     test("recovers prints for an already-paid callback without querying SumUp again", async () => {

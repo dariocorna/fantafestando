@@ -4,6 +4,7 @@ import { afterAll, beforeEach, describe, expect, test, vi } from "vitest"
 const {
     sumUpConstructorMock,
     readersCreateCheckoutMock,
+    readersGetStatusMock,
     checkoutsGetMock,
     merchantGetMerchantProfileMock,
     transactionsGetMock,
@@ -11,6 +12,7 @@ const {
 } = vi.hoisted(() => ({
     sumUpConstructorMock: vi.fn(),
     readersCreateCheckoutMock: vi.fn(),
+    readersGetStatusMock: vi.fn(),
     checkoutsGetMock: vi.fn(),
     merchantGetMerchantProfileMock: vi.fn(),
     transactionsGetMock: vi.fn(),
@@ -27,7 +29,10 @@ vi.mock("@sumup/sdk", () => ({
         }
     },
     SumUp: class {
-        readers = { createCheckout: readersCreateCheckoutMock }
+        readers = {
+            createCheckout: readersCreateCheckoutMock,
+            getStatus: readersGetStatusMock
+        }
         checkouts = { get: checkoutsGetMock }
         merchant = { getMerchantProfile: merchantGetMerchantProfileMock }
         transactions = { get: transactionsGetMock, refund: transactionsRefundMock }
@@ -40,6 +45,7 @@ vi.mock("@sumup/sdk", () => ({
 
 import {
     createSumUpCheckout,
+    getSumUpReaderStatus,
     getSumUpTransactionByClientTransactionId,
     getSumUpTransactionByForeignTransactionId,
     resolveSumUpTransactionIdByCheckout
@@ -159,6 +165,74 @@ describe("sumup helpers", () => {
         expect(transactionsGetMock).toHaveBeenCalledWith("merchant-1", {
             foreign_transaction_id: "order-1"
         })
+    })
+
+    test.each([
+        ["client transaction id", () => getSumUpTransactionByClientTransactionId({
+            clientTransactionId: "client-tx-1",
+            merchantCode: "merchant-1",
+            apiKey: "api-key-1"
+        })],
+        ["foreign transaction id", () => getSumUpTransactionByForeignTransactionId({
+            foreignTransactionId: "order-1",
+            merchantCode: "merchant-1",
+            apiKey: "api-key-1"
+        })]
+    ])("distinguishes a missing transaction by %s", async (_label, lookup) => {
+        transactionsGetMock.mockRejectedValue(new APIError(404, {}, new Response()))
+
+        const result = await lookup()
+
+        expect(result).toEqual({
+            success: false,
+            notFound: true,
+            error: "Transaction not found with SumUp"
+        })
+    })
+
+    test.each([
+        ["client transaction id", () => getSumUpTransactionByClientTransactionId({
+            clientTransactionId: "client-tx-1",
+            merchantCode: "merchant-1",
+            apiKey: "api-key-1"
+        })],
+        ["foreign transaction id", () => getSumUpTransactionByForeignTransactionId({
+            foreignTransactionId: "order-1",
+            merchantCode: "merchant-1",
+            apiKey: "api-key-1"
+        })]
+    ])("does not classify a SumUp 5xx by %s as not found", async (_label, lookup) => {
+        transactionsGetMock.mockRejectedValue(new APIError(503, {}, new Response()))
+
+        const result = await lookup()
+
+        expect(result).toMatchObject({ success: false })
+        expect(result).not.toHaveProperty("notFound")
+    })
+
+    test.each(["IDLE", "WAITING_FOR_CARD"] as const)("returns the %s reader state", async (state) => {
+        readersGetStatusMock.mockResolvedValue({ data: { state, status: "ONLINE" } })
+
+        const result = await getSumUpReaderStatus({
+            merchantCode: " merchant-1 ",
+            readerId: " reader-1 ",
+            apiKey: " api-key-1 "
+        })
+
+        expect(result).toEqual({ success: true, state, status: "ONLINE" })
+        expect(sumUpConstructorMock).toHaveBeenCalledWith({ apiKey: "api-key-1" })
+        expect(readersGetStatusMock).toHaveBeenCalledWith("merchant-1", "reader-1")
+    })
+
+    test("validates reader status configuration before calling SumUp", async () => {
+        const result = await getSumUpReaderStatus({
+            merchantCode: " ",
+            readerId: "reader-1",
+            apiKey: "api-key-1"
+        })
+
+        expect(result).toEqual({ success: false, error: "Missing SumUp reader configuration" })
+        expect(readersGetStatusMock).not.toHaveBeenCalled()
     })
 
     test("marks transport failures as an uncertain payment outcome", async () => {
