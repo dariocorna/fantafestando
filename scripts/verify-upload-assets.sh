@@ -56,8 +56,6 @@ const manifest = require("/app/.next/server/app-paths-manifest.json");
 const keys = new Set(Object.keys(manifest));
 const requiredRoutes = [
   "/uploads/[...path]/route",
-  "/uploads/menu-headers/[filename]/route",
-  "/uploads/receipt-headers/[filename]/route",
 ];
 const missing = requiredRoutes.filter((route) => !keys.has(route));
 if (missing.length > 0) {

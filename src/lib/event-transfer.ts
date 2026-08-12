@@ -10,6 +10,12 @@ import dbConnect from "@/lib/mongoose";
 import { normalizeAvailableDays } from "@/lib/product-availability";
 import { normalizeStockQuantity } from "@/lib/inventory";
 import { getAppVersion, getAppVersionLabel } from "@/lib/app-version";
+import {
+  getManagedUploadConfig,
+  resolveManagedUploadPath,
+  resolveManagedUploadUrl,
+  type ManagedUploadKind,
+} from "@/lib/managed-upload";
 import Category from "@/models/Category";
 import Event from "@/models/Event";
 import Ingredient from "@/models/Ingredient";
@@ -23,24 +29,25 @@ export const EVENT_TRANSFER_PREFIX = "fantafestando-event";
 
 const MANAGED_ASSET_DEFINITIONS = {
   menuHeaderLogoUrl: {
-    urlPrefix: "/uploads/menu-headers",
-    targetDir: path.join(process.cwd(), "public", "uploads", "menu-headers"),
+    uploadKind: "menuHeaders",
     bundlePrefix: "menu-header",
     importPrefix: "menu-header-import",
   },
   receiptHeaderLogoUrl: {
-    urlPrefix: "/uploads/receipt-headers",
-    targetDir: path.join(process.cwd(), "public", "uploads", "receipt-headers"),
+    uploadKind: "receiptHeaders",
     bundlePrefix: "receipt-header",
     importPrefix: "receipt-header-import",
   },
   portalEasterEggImageUrl: {
-    urlPrefix: "/uploads/easter-eggs",
-    targetDir: path.join(process.cwd(), "public", "uploads", "easter-eggs"),
+    uploadKind: "easterEggs",
     bundlePrefix: "portal-easter-egg",
     importPrefix: "portal-easter-egg-import",
   },
-} as const;
+} as const satisfies Record<string, {
+  uploadKind: ManagedUploadKind;
+  bundlePrefix: string;
+  importPrefix: string;
+}>;
 
 type ManagedAssetSettingKey = keyof typeof MANAGED_ASSET_DEFINITIONS;
 
@@ -253,7 +260,7 @@ export function getTransferTimestamp(value: Date) {
 
 async function pathExists(targetPath: string) {
   try {
-    await stat(targetPath);
+    await stat(/* turbopackIgnore: true */ targetPath);
     return true;
   } catch {
     return false;
@@ -309,20 +316,23 @@ async function copyManagedAssetIntoBundle(
   url: string
 ) {
   const definition = MANAGED_ASSET_DEFINITIONS[settingKey];
-  if (!url.startsWith(`${definition.urlPrefix}/`)) {
+  const source = resolveManagedUploadUrl(url, [definition.uploadKind]);
+  if (!source) {
     return { exportedUrl: url };
   }
 
-  const sourcePath = path.join(process.cwd(), "public", url.replace(/^\//, ""));
-  if (!(await pathExists(sourcePath))) {
+  if (!(await pathExists(source.filePath))) {
     throw new Error(`Asset mancante sul disco per ${settingKey}: ${url}`);
   }
 
-  const extension = path.extname(sourcePath) || ".bin";
+  const extension = path.extname(source.fileName) || ".bin";
   const targetFileName = `${definition.bundlePrefix}${extension.toLowerCase()}`;
   const bundleAssetPath = path.posix.join("assets", targetFileName);
-  const bundleAssetFilePath = path.join(bundleAssetsDir, targetFileName);
-  await copyFile(sourcePath, bundleAssetFilePath);
+  const bundleAssetFilePath = path.join(/* turbopackIgnore: true */ bundleAssetsDir, targetFileName);
+  await copyFile(
+    /* turbopackIgnore: true */ source.filePath,
+    /* turbopackIgnore: true */ bundleAssetFilePath
+  );
 
   return {
     exportedAssetPath: bundleAssetPath,
@@ -389,7 +399,7 @@ async function restoreManagedAssetFromBundle(
   }
 
   const definition = MANAGED_ASSET_DEFINITIONS[settingKey];
-  const sourcePath = path.resolve(bundleDirPath, bundleAssetPath);
+  const sourcePath = path.resolve(/* turbopackIgnore: true */ bundleDirPath, bundleAssetPath);
   if (!isPathWithinRoot(bundleDirPath, sourcePath)) {
     throw new Error(`Percorso asset non valido nel bundle per ${settingKey}.`);
   }
@@ -397,14 +407,21 @@ async function restoreManagedAssetFromBundle(
     throw new Error(`Asset mancante nel bundle per ${settingKey}.`);
   }
 
-  await mkdir(definition.targetDir, { recursive: true });
+  const uploadConfig = getManagedUploadConfig(definition.uploadKind);
+  await mkdir(uploadConfig.directoryPath, { recursive: true });
   const extension = path.extname(sourcePath) || ".bin";
   const fileName = `${definition.importPrefix}-${Date.now()}-${randomUUID()}${extension.toLowerCase()}`;
-  const targetPath = path.join(definition.targetDir, fileName);
-  await copyFile(sourcePath, targetPath);
+  const target = resolveManagedUploadPath(definition.uploadKind, fileName);
+  if (!target) {
+    throw new Error(`Nome asset non valido nel bundle per ${settingKey}.`);
+  }
+  await copyFile(
+    /* turbopackIgnore: true */ sourcePath,
+    /* turbopackIgnore: true */ target.filePath
+  );
   return {
-    url: `${definition.urlPrefix}/${fileName}`,
-    filePath: targetPath,
+    url: target.url,
+    filePath: target.filePath,
   };
 }
 
@@ -456,11 +473,11 @@ export async function buildEventTransferBundle(eventId: string): Promise<Generat
   const timestamp = getTransferTimestamp(now);
   const fileName = `${EVENT_TRANSFER_PREFIX}-${sanitizeTransferFileNameSegment(String(event.name || "evento"))}-${timestamp}.tar.gz`;
   const bundleDirName = fileName.replace(/\.tar\.gz$/, "");
-  const tempRoot = await mkdtemp(path.join(tmpdir(), "fantafestando-event-transfer-"));
-  const bundleDirPath = path.join(tempRoot, bundleDirName);
-  const bundleAssetsDir = path.join(bundleDirPath, "assets");
-  const bundlePayloadPath = path.join(bundleDirPath, "event-transfer.json");
-  const archiveFilePath = path.join(tempRoot, fileName);
+  const tempRoot = await mkdtemp(path.join(/* turbopackIgnore: true */ tmpdir(), "fantafestando-event-transfer-"));
+  const bundleDirPath = path.join(/* turbopackIgnore: true */ tempRoot, bundleDirName);
+  const bundleAssetsDir = path.join(/* turbopackIgnore: true */ bundleDirPath, "assets");
+  const bundlePayloadPath = path.join(/* turbopackIgnore: true */ bundleDirPath, "event-transfer.json");
+  const archiveFilePath = path.join(/* turbopackIgnore: true */ tempRoot, fileName);
 
   await mkdir(bundleAssetsDir, { recursive: true });
 
@@ -596,7 +613,11 @@ export async function buildEventTransferBundle(eventId: string): Promise<Generat
     })),
   };
 
-  await writeFile(bundlePayloadPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  await writeFile(
+    /* turbopackIgnore: true */ bundlePayloadPath,
+    `${JSON.stringify(payload, null, 2)}\n`,
+    "utf8"
+  );
   await runTarArchive(tempRoot, bundleDirName, archiveFilePath);
 
   return {
@@ -618,21 +639,23 @@ export async function importEventTransferBundle(
     throw new Error("Nome nuova festa obbligatorio.");
   }
 
-  const extractRoot = await mkdtemp(path.join(tmpdir(), "fantafestando-event-import-"));
+  const extractRoot = await mkdtemp(path.join(/* turbopackIgnore: true */ tmpdir(), "fantafestando-event-import-"));
   let createdEventId: string | null = null;
   const createdAssetPaths: string[] = [];
 
   try {
     await extractTarArchive(bundleFilePath, extractRoot);
-    const bundleDirEntries = await readdir(extractRoot, { withFileTypes: true });
+    const bundleDirEntries = await readdir(/* turbopackIgnore: true */ extractRoot, { withFileTypes: true });
     const bundleDir = bundleDirEntries.find((entry) => entry.isDirectory());
     if (!bundleDir) {
       throw new Error("Bundle festa non valido: cartella radice mancante.");
     }
 
-    const bundleDirPath = path.join(extractRoot, bundleDir.name);
-    const payloadPath = path.join(bundleDirPath, "event-transfer.json");
-    const payload = JSON.parse(await readFile(payloadPath, "utf8")) as EventTransferBundlePayload;
+    const bundleDirPath = path.join(/* turbopackIgnore: true */ extractRoot, bundleDir.name);
+    const payloadPath = path.join(/* turbopackIgnore: true */ bundleDirPath, "event-transfer.json");
+    const payload = JSON.parse(
+      await readFile(/* turbopackIgnore: true */ payloadPath, "utf8")
+    ) as EventTransferBundlePayload;
     if (payload.manifest?.format !== EVENT_TRANSFER_FORMAT) {
       throw new Error(`Formato bundle non supportato: ${payload.manifest?.format || "sconosciuto"}`);
     }

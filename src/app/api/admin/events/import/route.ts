@@ -60,13 +60,13 @@ export async function POST(request: Request) {
       );
     }
 
-    tempDir = await mkdtemp(path.join(tmpdir(), "fantafestando-event-transfer-upload-"));
+    tempDir = await mkdtemp(path.join(/* turbopackIgnore: true */ tmpdir(), "fantafestando-event-transfer-upload-"));
     const safeName = path.basename(bundleFile.name || "event-transfer.tar.gz").replace(/[^a-zA-Z0-9._-]+/g, "-");
-    const tempFilePath = path.join(tempDir, safeName || "event-transfer.tar.gz");
+    const tempFilePath = path.join(/* turbopackIgnore: true */ tempDir, safeName || "event-transfer.tar.gz");
 
     await pipeline(
       Readable.fromWeb(bundleFile.stream() as unknown as NodeReadableStream),
-      createWriteStream(tempFilePath)
+      createWriteStream(/* turbopackIgnore: true */ tempFilePath)
     );
 
     const result = await importEventTransferBundle(tempFilePath, newEventName);

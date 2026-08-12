@@ -72,13 +72,13 @@ export async function POST(request: Request) {
       );
     }
 
-    tempDir = await mkdtemp(path.join(tmpdir(), "fantafestando-admin-restore-upload-"));
+    tempDir = await mkdtemp(path.join(/* turbopackIgnore: true */ tmpdir(), "fantafestando-admin-restore-upload-"));
     const safeName = path.basename(bundleFile.name || "restore-bundle.tar.gz").replace(/[^a-zA-Z0-9._-]+/g, "-");
-    const tempFilePath = path.join(tempDir, safeName || "restore-bundle.tar.gz");
+    const tempFilePath = path.join(/* turbopackIgnore: true */ tempDir, safeName || "restore-bundle.tar.gz");
 
     await pipeline(
       Readable.fromWeb(bundleFile.stream() as unknown as NodeReadableStream),
-      createWriteStream(tempFilePath)
+      createWriteStream(/* turbopackIgnore: true */ tempFilePath)
     );
 
     const result = await restoreRuntimeBackupBundle(tempFilePath);
