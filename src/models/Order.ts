@@ -77,6 +77,11 @@ export interface IOrder extends Document {
     paymentMethod: "CASH" | "CARD" | "OTHER";
     sumupCheckoutId?: string;
     sumupPaymentId?: string;
+    sumupRefundCredentials?: {
+        merchantCode: string;
+        readerId?: string;
+        apiKey: string;
+    };
     sumupInitiatedAt?: Date;
     sumupRecoveryCancelledAt?: Date;
     sumupLateSuccessDetectedAt?: Date;
@@ -117,6 +122,12 @@ export interface IOrder extends Document {
     createdAt?: Date;
     updatedAt?: Date;
 }
+
+const SumUpRefundCredentialsSchema = new Schema({
+    merchantCode: { type: String, required: true, trim: true },
+    readerId: { type: String, trim: true },
+    apiKey: { type: String, required: true, trim: true }
+}, { _id: false });
 
 const OrderSchema = new Schema<IOrder>({
     eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
@@ -222,6 +233,10 @@ const OrderSchema = new Schema<IOrder>({
     paymentMethod: { type: String, enum: ["CASH", "CARD", "OTHER"], default: "CASH" },
     sumupCheckoutId: { type: String },
     sumupPaymentId: { type: String },
+    sumupRefundCredentials: {
+        type: SumUpRefundCredentialsSchema,
+        select: false
+    },
     sumupInitiatedAt: { type: Date },
     sumupRecoveryCancelledAt: { type: Date },
     sumupLateSuccessDetectedAt: { type: Date },

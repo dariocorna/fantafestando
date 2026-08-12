@@ -129,7 +129,11 @@ export async function finalizeClaimedSumUpOrder(params: {
                 { _id: order._id, status: "PENDING", sumupWebhookClaimToken: claimToken },
                 {
                     $set: { status: "CANCELLED", sumupCheckoutId: checkoutId },
-                    $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 },
+                    $unset: {
+                        sumupWebhookClaimToken: 1,
+                        sumupWebhookClaimedAt: 1,
+                        sumupRefundCredentials: 1,
+                    },
                 },
             )
             if (!cancelled.acknowledged || cancelled.matchedCount !== 1) {

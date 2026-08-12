@@ -12,6 +12,7 @@ import { revalidatePath } from "next/cache"
 import { PrinterService } from "@/lib/printer"
 import { createSumUpCheckout } from "@/lib/sumup"
 import { decryptSecret } from "@/lib/secrets"
+import { buildSumUpRefundCredentialsSnapshot } from "@/lib/sumup-order-credentials"
 import { getOrderCodeFromOrder, parseOrderNumberInput } from "@/lib/order-code"
 import { resolveDishTicketsForCart } from "@/lib/pizza-ticket"
 import { getStockStatus, type StockMode } from "@/lib/inventory"
@@ -1727,17 +1728,6 @@ export async function triggerSumUpPayment(amount: number, eventId: string, posDe
             return { success: false, error: "Ordine SumUp non valido" }
         }
 
-        const preparedOrder = await Order.exists({
-            _id: normalizedOrderId,
-            eventId,
-            posDeviceId,
-            status: "PENDING",
-            sumupCheckoutId: `initiating:${normalizedOrderId}`
-        })
-        if (!preparedOrder) {
-            return { success: false, error: "Ordine SumUp non preparato" }
-        }
-
         const terminal = posDevice?.paymentTerminalId
         const merchantCode = terminal?.config?.merchantCode?.trim()
         const readerId = terminal?.config?.readerId?.trim()
@@ -1751,6 +1741,29 @@ export async function triggerSumUpPayment(amount: number, eventId: string, posDe
 
         if (!merchantCode || !readerId || !affiliateAppId || !decryptedApiKey || !decryptedAffiliateKey) {
             return { success: false, error: "Configurazione SumUp mancante nella periferica associata alla cassa" }
+        }
+
+        const refundCredentials = buildSumUpRefundCredentialsSnapshot({
+            merchantCode,
+            readerId,
+            apiKey: terminal.config?.apiKey
+        })
+        if (!refundCredentials) {
+            return { success: false, error: "Configurazione SumUp mancante nella periferica associata alla cassa" }
+        }
+        const snapshotSaved = await Order.updateOne(
+            {
+                _id: normalizedOrderId,
+                eventId,
+                posDeviceId,
+                status: "PENDING",
+                sumupCheckoutId: `initiating:${normalizedOrderId}`,
+                sumupRefundCredentials: { $exists: false }
+            },
+            { $set: { sumupRefundCredentials: refundCredentials } }
+        )
+        if (!snapshotSaved.acknowledged || snapshotSaved.matchedCount !== 1) {
+            return { success: false, error: "Ordine SumUp non preparato" }
         }
 
         console.log(`[SumUp] Inizializzazione pagamento di ${amount}€ su ${terminal.name || posDevice?.name || "POS"}...`)
@@ -1767,6 +1780,17 @@ export async function triggerSumUpPayment(amount: number, eventId: string, posDe
         })
 
         if (!result.success) {
+            if (result.uncertain !== true) {
+                await Order.updateOne(
+                    {
+                        _id: normalizedOrderId,
+                        eventId,
+                        status: "PENDING",
+                        sumupCheckoutId: `initiating:${normalizedOrderId}`
+                    },
+                    { $unset: { sumupRefundCredentials: 1 } }
+                )
+            }
             return {
                 success: false,
                 error: result.error,

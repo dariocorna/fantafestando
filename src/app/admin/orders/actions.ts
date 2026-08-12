@@ -9,11 +9,12 @@ import Order from "@/models/Order";
 import OrderCounter from "@/models/OrderCounter";
 import PrintJob from "@/models/PrintJob";
 import CashSession from "@/models/CashSession";
-import PosDevice from "@/models/PosDevice";
-import "@/models/Peripheral";
 import { PrinterService } from "@/lib/printer";
 import { recoverStaleManualPrintRetryClaims } from "@/lib/print-queue";
-import { decryptSecret } from "@/lib/secrets";
+import {
+    resolveSumUpCredentialsForOrder,
+    type SumUpRefundCredentialsSnapshot
+} from "@/lib/sumup-order-credentials";
 import {
     getSumUpReaderStatus,
     getSumUpTransactionByClientTransactionId,
@@ -41,6 +42,7 @@ interface OrderForStornoProjection {
     totalAmount?: number
     sumupCheckoutId?: string
     sumupPaymentId?: string
+    sumupRefundCredentials?: SumUpRefundCredentialsSnapshot
     sumupLateSuccessDetectedAt?: Date
     posDeviceId?: string | { toString(): string }
     cart: Array<{
@@ -83,49 +85,13 @@ function buildStockAdjustmentsFromOrder(order: OrderForStornoProjection): StockA
     return [...productAdjustments, ...ingredientAdjustments]
 }
 
-async function resolveSumUpCredentialsForOrder(eventId: string, posDeviceId?: string): Promise<
-    { success: true, apiKey: string, merchantCode: string, readerId?: string }
-    | { success: false, error: string }
-> {
-    if (!posDeviceId) {
-        return { success: false, error: "Ordine carta senza punto cassa associato" }
-    }
-
-    const posDevice = await PosDevice.findOne({ _id: posDeviceId, eventId })
-        .populate({ path: "paymentTerminalId", select: "type config" })
-        .lean() as (
-            {
-                paymentTerminalId?: {
-                    type?: string
-                    config?: { apiKey?: string, merchantCode?: string, readerId?: string }
-                } | null
-            } | null
-        )
-
-    const terminal = posDevice?.paymentTerminalId
-    if (!terminal || terminal.type !== "SUMUP") {
-        return { success: false, error: "Terminale SumUp non disponibile per l'ordine da stornare" }
-    }
-
-    const apiKey = decryptSecret(terminal.config?.apiKey)
-    if (!apiKey) {
-        return { success: false, error: "Configurazione API key SumUp mancante" }
-    }
-
-    const merchantCode = terminal.config?.merchantCode?.trim()
-    if (!merchantCode) {
-        return { success: false, error: "Configurazione merchant code SumUp mancante" }
-    }
-
-    return { success: true, apiKey, merchantCode, readerId: terminal.config?.readerId?.trim() || undefined }
-}
-
 const SUMUP_UNCERTAIN_RECOVERY_GRACE_MS = 15 * 60 * 1000
 const SUMUP_RECOVERY_CLAIM_TTL_MS = 5 * 60 * 1000
 
 type RecoverableSumUpOrder = ClaimedSumUpOrder & {
     sumupCheckoutId?: string
     sumupPaymentId?: string
+    sumupRefundCredentials?: SumUpRefundCredentialsSnapshot
     sumupInitiatedAt?: Date
 }
 
@@ -219,7 +185,7 @@ export async function recoverUncertainSumUpOrderById(orderId: string) {
             { $set: { sumupWebhookClaimToken: claimToken, sumupWebhookClaimedAt: now } },
             { returnDocument: "after" }
         )
-            .select("_id status totalAmount eventId cashSessionId posDeviceId stockEffectStatus stockAdjustments sumupCheckoutId sumupPaymentId sumupInitiatedAt")
+            .select("_id status totalAmount eventId cashSessionId posDeviceId stockEffectStatus stockAdjustments sumupCheckoutId sumupPaymentId sumupInitiatedAt +sumupRefundCredentials")
             .lean() as RecoverableSumUpOrder | null
 
         if (!claimedOrder) {
@@ -243,10 +209,7 @@ export async function recoverUncertainSumUpOrderById(orderId: string) {
         if (checkoutId.startsWith("initiating:") && checkoutId !== `initiating:${normalizedOrderId}`) {
             return { success: false, error: "Marker di inizializzazione SumUp non coerente con l'ordine" }
         }
-        const credentials = await resolveSumUpCredentialsForOrder(
-            claimedOrder.eventId.toString(),
-            claimedOrder.posDeviceId?.toString()
-        )
+        const credentials = await resolveSumUpCredentialsForOrder(claimedOrder)
         if (!credentials.success) return credentials
         if (!credentials.readerId) {
             return { success: false, error: "Reader ID SumUp mancante nella periferica associata" }
@@ -620,7 +583,7 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                 $set: lockSetPayload
             },
             { returnDocument: "after" }
-        ).lean() as OrderForStornoProjection | null
+        ).select("+sumupRefundCredentials").lean() as OrderForStornoProjection | null
 
         if (!lockedOrder) {
             const existingOrder = await Order.findOne({
@@ -672,7 +635,7 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                 },
                 { $set: { stockEffectClaim: { token: "STORNO", target: "REVERTED" } } },
                 { returnDocument: "after" }
-            ).lean() as OrderForStornoProjection | null
+            ).select("+sumupRefundCredentials").lean() as OrderForStornoProjection | null
             if (!stockClaimedOrder) {
                 await Order.updateOne(
                     leaseFilter,
@@ -694,7 +657,10 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
             const refundAlreadyDone = lockedOrder.stornoMeta?.refundStatus === "DONE" && Boolean(refundTransactionId)
 
             if (!refundAlreadyDone) {
-                const apiKeyResult = await resolveSumUpCredentialsForOrder(eventId, lockedOrder.posDeviceId?.toString())
+                const apiKeyResult = await resolveSumUpCredentialsForOrder({
+                    ...lockedOrder,
+                    eventId
+                })
                 if (!apiKeyResult.success) {
                     await Order.updateOne(
                         leaseFilter,
@@ -901,7 +867,8 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                 },
                 $unset: {
                     "stornoMeta.refundError": 1,
-                    stockEffectClaim: 1
+                    stockEffectClaim: 1,
+                    ...(refundStatus === "DONE" ? { sumupRefundCredentials: 1 } : {})
                 }
             }
         )

@@ -1,7 +1,10 @@
 import crypto from "node:crypto"
 import { NextRequest, NextResponse } from "next/server"
 import dbConnect from "@/lib/mongoose"
-import { decryptSecret } from "@/lib/secrets"
+import {
+    resolveSumUpCredentialsForOrder,
+    type SumUpRefundCredentialsSnapshot,
+} from "@/lib/sumup-order-credentials"
 import {
     getSumUpTransactionByClientTransactionId,
     getSumUpTransactionByForeignTransactionId,
@@ -16,13 +19,13 @@ import {
     type VerifiedSumUpTransaction,
 } from "@/lib/sumup-order-finalization"
 import Order from "@/models/Order"
-import PosDevice from "@/models/PosDevice"
 
 const WEBHOOK_CLAIM_TTL_MS = 5 * 60 * 1000
 
 type WebhookOrder = ClaimedSumUpOrder & {
     sumupCheckoutId?: string
     sumupPaymentId?: string
+    sumupRefundCredentials?: SumUpRefundCredentialsSnapshot
     sumupRecoveryCancelledAt?: Date
     sumupLateSuccessDetectedAt?: Date
     stornoMeta?: { refundStatus?: "SKIPPED" | "DONE" | "FAILED" }
@@ -37,38 +40,9 @@ function extractPayloadClientTransactionId(payload: Record<string, unknown>) {
         : undefined
 }
 
-async function resolveSumUpTerminalCredentials(
-    eventId: string,
-    posDeviceId?: { toString(): string } | string | null,
-) {
-    if (!posDeviceId) {
-        return { success: false as const, error: "Ordine SumUp senza punto cassa associato" }
-    }
-
-    const posDevice = await PosDevice.findOne({ _id: posDeviceId.toString(), eventId })
-        .populate({ path: "paymentTerminalId", select: "type config" })
-        .lean() as (
-            {
-                paymentTerminalId?: {
-                    type?: string
-                    config?: { merchantCode?: string; apiKey?: string }
-                } | null
-            } | null
-        )
-    const terminal = posDevice?.paymentTerminalId
-    const merchantCode = terminal?.config?.merchantCode?.trim()
-    const apiKey = decryptSecret(terminal?.config?.apiKey)
-
-    if (!terminal || terminal.type !== "SUMUP" || !merchantCode || !apiKey) {
-        return { success: false as const, error: "Configurazione SumUp mancante nella periferica associata" }
-    }
-
-    return { success: true as const, merchantCode, apiKey }
-}
-
 async function loadWebhookOrder(clientTransactionId: string) {
     return await Order.findOne({ sumupCheckoutId: clientTransactionId })
-        .select("_id status totalAmount eventId cashSessionId posDeviceId stockEffectStatus stockAdjustments sumupCheckoutId sumupPaymentId sumupRecoveryCancelledAt sumupLateSuccessDetectedAt stornoMeta.refundStatus")
+        .select("_id status totalAmount eventId cashSessionId posDeviceId stockEffectStatus stockAdjustments sumupCheckoutId sumupPaymentId sumupRecoveryCancelledAt sumupLateSuccessDetectedAt stornoMeta.refundStatus +sumupRefundCredentials")
         .lean() as WebhookOrder | null
 }
 
@@ -135,13 +109,13 @@ async function reconcileUncertainCheckout(req: NextRequest, clientTransactionId:
             },
         ],
     })
-        .select("_id status totalAmount eventId cashSessionId posDeviceId stockEffectStatus stockAdjustments sumupCheckoutId sumupPaymentId sumupRecoveryCancelledAt sumupLateSuccessDetectedAt stornoMeta.refundStatus")
+        .select("_id status totalAmount eventId cashSessionId posDeviceId stockEffectStatus stockAdjustments sumupCheckoutId sumupPaymentId sumupRecoveryCancelledAt sumupLateSuccessDetectedAt stornoMeta.refundStatus +sumupRefundCredentials")
         .lean() as WebhookOrder | null
     if (!order?.eventId) {
         return { success: false as const, response: NextResponse.json({ error: "Order not found" }, { status: 404 }) }
     }
 
-    const credentials = await resolveSumUpTerminalCredentials(order.eventId.toString(), order.posDeviceId)
+    const credentials = await resolveSumUpCredentialsForOrder(order)
     if (!credentials.success) {
         return { success: false as const, response: NextResponse.json({ error: credentials.error }, { status: 409 }) }
     }
@@ -235,7 +209,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: true, message: "Already cancelled" })
         }
 
-        let credentials: Awaited<ReturnType<typeof resolveSumUpTerminalCredentials>>
+        let credentials: Awaited<ReturnType<typeof resolveSumUpCredentialsForOrder>>
         let transaction: VerifiedSumUpTransaction
         if (!order) {
             const reconciliation = await reconcileUncertainCheckout(req, clientTransactionId)
@@ -247,7 +221,7 @@ export async function POST(req: NextRequest) {
             if (!order.eventId) {
                 return NextResponse.json({ error: "Order event not found" }, { status: 409 })
             }
-            credentials = await resolveSumUpTerminalCredentials(order.eventId.toString(), order.posDeviceId)
+            credentials = await resolveSumUpCredentialsForOrder(order)
             if (!credentials.success) {
                 return NextResponse.json({ error: credentials.error }, { status: 409 })
             }

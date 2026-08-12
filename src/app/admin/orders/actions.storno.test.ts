@@ -8,6 +8,7 @@ const {
     orderUpdateOneMock,
     posDeviceFindOneMock,
     decryptSecretMock,
+    isEncryptedSecretMock,
     transitionClaimedOrderStockMock,
     refundSumUpTransactionMock,
     getSumUpRefundStateMock
@@ -19,6 +20,7 @@ const {
     orderUpdateOneMock: vi.fn(),
     posDeviceFindOneMock: vi.fn(),
     decryptSecretMock: vi.fn(),
+    isEncryptedSecretMock: vi.fn(),
     transitionClaimedOrderStockMock: vi.fn(),
     refundSumUpTransactionMock: vi.fn(),
     getSumUpRefundStateMock: vi.fn()
@@ -38,7 +40,11 @@ vi.mock("@/models/CashSession", () => ({ default: {} }))
 vi.mock("@/models/PosDevice", () => ({ default: { findOne: posDeviceFindOneMock } }))
 vi.mock("@/models/Peripheral", () => ({ default: {} }))
 vi.mock("@/lib/printer", () => ({ PrinterService: {} }))
-vi.mock("@/lib/secrets", () => ({ decryptSecret: decryptSecretMock }))
+vi.mock("@/lib/secrets", () => ({
+    decryptSecret: decryptSecretMock,
+    encryptSecret: vi.fn(),
+    isEncryptedSecret: isEncryptedSecretMock
+}))
 vi.mock("@/lib/sumup", () => ({
     refundSumUpTransaction: refundSumUpTransactionMock,
     resolveSumUpTransactionIdByCheckout: vi.fn()
@@ -77,6 +83,10 @@ function sumUpOrder(stornoMeta: Record<string, unknown> = { status: "IN_PROGRESS
     }
 }
 
+function selectedLean(value: unknown) {
+    return { select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue(value) }) }
+}
+
 describe("stornoPaidOrderById stock claim", () => {
     beforeEach(() => {
         vi.clearAllMocks()
@@ -97,8 +107,8 @@ describe("stornoPaidOrderById stock claim", () => {
             stornoMeta: { status: "IN_PROGRESS" }
         }
         orderFindOneAndUpdateMock
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(null) })
+            .mockReturnValueOnce(selectedLean(lockedOrder))
+            .mockReturnValueOnce(selectedLean(null))
 
         const result = await stornoPaidOrderById("order-1")
 
@@ -122,8 +132,8 @@ describe("stornoPaidOrderById stock claim", () => {
             stornoMeta: { status: "IN_PROGRESS" }
         }
         orderFindOneAndUpdateMock
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
+            .mockReturnValueOnce(selectedLean(lockedOrder))
+            .mockReturnValueOnce(selectedLean(lockedOrder))
         transitionClaimedOrderStockMock.mockResolvedValue({ success: true })
 
         const result = await stornoPaidOrderById("order-1")
@@ -146,8 +156,8 @@ describe("stornoPaidOrderById stock claim", () => {
     test("uses the dedicated encrypted API key for a certified SumUp refund", async () => {
         const lockedOrder = sumUpOrder()
         orderFindOneAndUpdateMock
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
+            .mockReturnValueOnce(selectedLean(lockedOrder))
+            .mockReturnValueOnce(selectedLean(lockedOrder))
         mockSumUpTerminal()
         refundSumUpTransactionMock.mockImplementation(async () => {
             expect(orderUpdateOneMock).toHaveBeenCalledWith(
@@ -173,6 +183,64 @@ describe("stornoPaidOrderById stock claim", () => {
         })
     })
 
+    test("refunds from the encrypted order snapshot after the POS and terminal are removed", async () => {
+        const lockedOrder = {
+            ...sumUpOrder(),
+            sumupRefundCredentials: {
+                merchantCode: "snapshot-merchant",
+                readerId: "snapshot-reader",
+                apiKey: "enc:v1:snapshot"
+            }
+        }
+        const leaseQuery = selectedLean(lockedOrder)
+        const stockQuery = selectedLean(lockedOrder)
+        orderFindOneAndUpdateMock
+            .mockReturnValueOnce(leaseQuery)
+            .mockReturnValueOnce(stockQuery)
+        isEncryptedSecretMock.mockReturnValue(true)
+        decryptSecretMock.mockReturnValue("snapshot-api-key")
+        refundSumUpTransactionMock.mockResolvedValue({ success: true })
+        transitionClaimedOrderStockMock.mockResolvedValue({ success: true })
+
+        const result = await stornoPaidOrderById("order-1")
+
+        expect(result).toEqual({ success: true })
+        expect(leaseQuery.select).toHaveBeenCalledWith("+sumupRefundCredentials")
+        expect(stockQuery.select).toHaveBeenCalledWith("+sumupRefundCredentials")
+        expect(posDeviceFindOneMock).not.toHaveBeenCalled()
+        expect(refundSumUpTransactionMock).toHaveBeenCalledWith({
+            transactionId: "transaction-1",
+            apiKey: "snapshot-api-key"
+        })
+        expect(orderUpdateOneMock).toHaveBeenLastCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                $unset: expect.objectContaining({ sumupRefundCredentials: 1 })
+            })
+        )
+    })
+
+    test("fails closed instead of falling back when the order snapshot is corrupt", async () => {
+        const lockedOrder = {
+            ...sumUpOrder(),
+            sumupRefundCredentials: {
+                merchantCode: "snapshot-merchant",
+                apiKey: "plaintext-is-not-a-valid-snapshot"
+            }
+        }
+        orderFindOneAndUpdateMock
+            .mockReturnValueOnce(selectedLean(lockedOrder))
+            .mockReturnValueOnce(selectedLean(lockedOrder))
+        isEncryptedSecretMock.mockReturnValue(false)
+        mockSumUpTerminal()
+
+        const result = await stornoPaidOrderById("order-1")
+
+        expect(result).toEqual({ success: false, error: "Snapshot credenziali SumUp non valido" })
+        expect(posDeviceFindOneMock).not.toHaveBeenCalled()
+        expect(refundSumUpTransactionMock).not.toHaveBeenCalled()
+    })
+
     test("refunds a late SumUp success without reverting stock a second time", async () => {
         const lockedOrder = {
             ...sumUpOrder(),
@@ -180,7 +248,7 @@ describe("stornoPaidOrderById stock claim", () => {
             stockEffectStatus: "REVERTED",
             sumupLateSuccessDetectedAt: new Date(),
         }
-        orderFindOneAndUpdateMock.mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
+        orderFindOneAndUpdateMock.mockReturnValueOnce(selectedLean(lockedOrder))
         mockSumUpTerminal()
         refundSumUpTransactionMock.mockResolvedValue({ success: true })
 
@@ -212,8 +280,8 @@ describe("stornoPaidOrderById stock claim", () => {
             refundTransactionId: "transaction-1"
         })
         orderFindOneAndUpdateMock
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
+            .mockReturnValueOnce(selectedLean(lockedOrder))
+            .mockReturnValueOnce(selectedLean(lockedOrder))
         mockSumUpTerminal()
         getSumUpRefundStateMock.mockResolvedValue({ success: true, fullyRefunded: true })
         transitionClaimedOrderStockMock.mockResolvedValue({ success: true })
@@ -238,8 +306,8 @@ describe("stornoPaidOrderById stock claim", () => {
     test("reconciles a lost POST response immediately and completes once", async () => {
         const lockedOrder = sumUpOrder()
         orderFindOneAndUpdateMock
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
+            .mockReturnValueOnce(selectedLean(lockedOrder))
+            .mockReturnValueOnce(selectedLean(lockedOrder))
         mockSumUpTerminal()
         refundSumUpTransactionMock.mockResolvedValue({ success: false, error: "Risposta SumUp persa" })
         getSumUpRefundStateMock.mockResolvedValue({ success: true, fullyRefunded: true })
@@ -254,7 +322,7 @@ describe("stornoPaidOrderById stock claim", () => {
     })
 
     test("does not take over an active storno lease", async () => {
-        orderFindOneAndUpdateMock.mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(null) })
+        orderFindOneAndUpdateMock.mockReturnValueOnce(selectedLean(null))
         orderFindOneMock.mockReturnValue({
             select: vi.fn().mockReturnValue({
                 lean: vi.fn().mockResolvedValue({
@@ -279,8 +347,8 @@ describe("stornoPaidOrderById stock claim", () => {
             refundTransactionId: "transaction-1"
         })
         orderFindOneAndUpdateMock
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
+            .mockReturnValueOnce(selectedLean(lockedOrder))
+            .mockReturnValueOnce(selectedLean(lockedOrder))
         mockSumUpTerminal()
         getSumUpRefundStateMock.mockResolvedValue({ success: true, fullyRefunded: false })
         refundSumUpTransactionMock.mockResolvedValue({ success: true })
@@ -313,8 +381,8 @@ describe("stornoPaidOrderById stock claim", () => {
     test("marks a lost-response attempt retryable without a second POST in the invocation", async () => {
         const lockedOrder = sumUpOrder()
         orderFindOneAndUpdateMock
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
-            .mockReturnValueOnce({ lean: vi.fn().mockResolvedValue(lockedOrder) })
+            .mockReturnValueOnce(selectedLean(lockedOrder))
+            .mockReturnValueOnce(selectedLean(lockedOrder))
         mockSumUpTerminal()
         refundSumUpTransactionMock.mockResolvedValue({ success: false, error: "Risposta SumUp persa" })
         getSumUpRefundStateMock.mockResolvedValue({ success: true, fullyRefunded: false })

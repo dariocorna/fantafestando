@@ -8,6 +8,7 @@ const {
     orderUpdateOneMock,
     posDeviceFindOneMock,
     decryptSecretMock,
+    isEncryptedSecretMock,
     getByClientMock,
     getByForeignMock,
     getReaderStatusMock,
@@ -24,6 +25,7 @@ const {
     orderUpdateOneMock: vi.fn(),
     posDeviceFindOneMock: vi.fn(),
     decryptSecretMock: vi.fn(),
+    isEncryptedSecretMock: vi.fn(),
     getByClientMock: vi.fn(),
     getByForeignMock: vi.fn(),
     getReaderStatusMock: vi.fn(),
@@ -49,7 +51,11 @@ vi.mock("@/models/PosDevice", () => ({ default: { findOne: posDeviceFindOneMock 
 vi.mock("@/models/Peripheral", () => ({ default: {} }))
 vi.mock("@/lib/printer", () => ({ PrinterService: {} }))
 vi.mock("@/lib/print-queue", () => ({ recoverStaleManualPrintRetryClaims: vi.fn() }))
-vi.mock("@/lib/secrets", () => ({ decryptSecret: decryptSecretMock }))
+vi.mock("@/lib/secrets", () => ({
+    decryptSecret: decryptSecretMock,
+    encryptSecret: vi.fn(),
+    isEncryptedSecret: isEncryptedSecretMock
+}))
 vi.mock("@/lib/sumup", () => ({
     getSumUpReaderStatus: getReaderStatusMock,
     getSumUpTransactionByClientTransactionId: getByClientMock,
@@ -169,6 +175,32 @@ describe("recoverUncertainSumUpOrderById", () => {
             claimToken: expect.any(String),
         }))
         expect(transitionSumUpOrderStockMock).not.toHaveBeenCalled()
+    })
+
+    test("recovers with the order snapshot after its POS has been removed", async () => {
+        const query = claimQuery(recoverableOrder({
+            sumupRefundCredentials: {
+                merchantCode: "merchant-1",
+                readerId: "reader-1",
+                apiKey: "enc:v1:snapshot"
+            }
+        }))
+        orderFindOneAndUpdateMock.mockReturnValue(query)
+        posDeviceFindOneMock.mockReset()
+        isEncryptedSecretMock.mockReturnValue(true)
+        decryptSecretMock.mockReturnValue("snapshot-api-key")
+        getByForeignMock.mockResolvedValue({ success: true, transaction })
+        getByClientMock.mockResolvedValue({ success: true, transaction })
+
+        const result = await recoverUncertainSumUpOrderById("order-1")
+
+        expect(result).toMatchObject({ success: true, status: "PAID" })
+        expect(query.select).toHaveBeenCalledWith(expect.stringContaining("+sumupRefundCredentials"))
+        expect(posDeviceFindOneMock).not.toHaveBeenCalled()
+        expect(getByForeignMock).toHaveBeenCalledWith(expect.objectContaining({
+            merchantCode: "merchant-1",
+            apiKey: "snapshot-api-key"
+        }))
     })
 
     test("releases stock only after two explicit misses and an online idle reader", async () => {

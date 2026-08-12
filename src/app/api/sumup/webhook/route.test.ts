@@ -7,6 +7,7 @@ const {
     orderUpdateOneMock,
     posDeviceFindOneMock,
     decryptSecretMock,
+    isEncryptedSecretMock,
     getByClientMock,
     getByForeignMock,
     transitionSumUpOrderStockMock,
@@ -20,6 +21,7 @@ const {
     orderUpdateOneMock: vi.fn(),
     posDeviceFindOneMock: vi.fn(),
     decryptSecretMock: vi.fn(),
+    isEncryptedSecretMock: vi.fn(),
     getByClientMock: vi.fn(),
     getByForeignMock: vi.fn(),
     transitionSumUpOrderStockMock: vi.fn(),
@@ -38,7 +40,11 @@ vi.mock("@/models/Order", () => ({
     },
 }))
 vi.mock("@/models/PosDevice", () => ({ default: { findOne: posDeviceFindOneMock } }))
-vi.mock("@/lib/secrets", () => ({ decryptSecret: decryptSecretMock }))
+vi.mock("@/lib/secrets", () => ({
+    decryptSecret: decryptSecretMock,
+    encryptSecret: vi.fn(),
+    isEncryptedSecret: isEncryptedSecretMock
+}))
 vi.mock("@/lib/sumup", () => ({
     getSumUpTransactionByClientTransactionId: getByClientMock,
     getSumUpTransactionByForeignTransactionId: getByForeignMock,
@@ -147,6 +153,32 @@ describe("POST /api/sumup/webhook", () => {
         )
     })
 
+    test("verifies the callback from the order snapshot after its POS has been removed", async () => {
+        const query = selectLean({
+            ...pendingOrder,
+            sumupRefundCredentials: {
+                merchantCode: "merchant-1",
+                readerId: "reader-1",
+                apiKey: "enc:v1:snapshot"
+            }
+        })
+        orderFindOneMock.mockReturnValue(query)
+        posDeviceFindOneMock.mockReset()
+        isEncryptedSecretMock.mockReturnValue(true)
+        decryptSecretMock.mockReturnValue("snapshot-api-key")
+
+        const response = await POST(webhookRequest())
+
+        expect(response.status).toBe(200)
+        expect(query.select).toHaveBeenCalledWith(expect.stringContaining("+sumupRefundCredentials"))
+        expect(posDeviceFindOneMock).not.toHaveBeenCalled()
+        expect(getByClientMock).toHaveBeenCalledWith({
+            clientTransactionId: "client-tx-1",
+            merchantCode: "merchant-1",
+            apiKey: "snapshot-api-key"
+        })
+    })
+
     test("keeps the first successful finalizer authoritative while print recovery is pending", async () => {
         routeOrderToPrintersMock.mockResolvedValue(["RECOVERY_PENDING"])
 
@@ -175,6 +207,12 @@ describe("POST /api/sumup/webhook", () => {
             target: "REVERTED",
             adjustments: [{ entityType: "PRODUCT", entityId: "product-1", quantity: 1 }],
         })
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            expect.objectContaining({ status: "PENDING" }),
+            expect.objectContaining({
+                $unset: expect.objectContaining({ sumupRefundCredentials: 1 })
+            })
+        )
         expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
     })
 

@@ -10,6 +10,7 @@ const {
     orderUpdateOneMock,
     createSumUpCheckoutMock,
     decryptSecretMock,
+    encryptSecretMock,
     productFindMock,
     planStockAdjustmentsForPaymentMock,
     transitionSumUpOrderStockMock,
@@ -26,6 +27,7 @@ const {
     orderUpdateOneMock: vi.fn(),
     createSumUpCheckoutMock: vi.fn(),
     decryptSecretMock: vi.fn(),
+    encryptSecretMock: vi.fn(),
     productFindMock: vi.fn(),
     planStockAdjustmentsForPaymentMock: vi.fn(),
     transitionSumUpOrderStockMock: vi.fn(),
@@ -52,7 +54,11 @@ vi.mock("@/models/Event", () => ({ default: {} }))
 vi.mock("@/lib/printer", () => ({ PrinterService: {} }))
 vi.mock("@/lib/pizza-ticket", () => ({ resolveDishTicketsForCart: vi.fn() }))
 vi.mock("@/lib/sumup", () => ({ createSumUpCheckout: createSumUpCheckoutMock }))
-vi.mock("@/lib/secrets", () => ({ decryptSecret: decryptSecretMock }))
+vi.mock("@/lib/secrets", () => ({
+    decryptSecret: decryptSecretMock,
+    encryptSecret: encryptSecretMock,
+    isEncryptedSecret: vi.fn()
+}))
 vi.mock("@/lib/stock-operations", () => ({
     applyStockForPaidOrder: vi.fn(),
     planStockAdjustmentsForPayment: planStockAdjustmentsForPaymentMock,
@@ -163,6 +169,7 @@ describe("triggerSumUpPayment", () => {
             adjustments: [{ entityType: "PRODUCT", entityId: "product-1", quantity: 1 }]
         })
         transitionSumUpOrderStockMock.mockResolvedValue({ success: true })
+        encryptSecretMock.mockReturnValue("enc:v1:ciphertext")
         decryptSecretMock.mockImplementation((value?: string) => {
             if (value === "enc-api-key") return "api-key-1"
             if (value === "enc-affiliate-key") return "affiliate-key-1"
@@ -205,13 +212,27 @@ describe("triggerSumUpPayment", () => {
         const result = await triggerSumUpPayment(12.5, "event-1", "pos-1", "order-1")
 
         expect(result).toEqual({ success: true, checkoutId: "client-tx-1" })
-        expect(orderExistsMock).toHaveBeenCalledWith({
-            _id: "order-1",
-            eventId: "event-1",
-            posDeviceId: "pos-1",
-            status: "PENDING",
-            sumupCheckoutId: "initiating:order-1"
-        })
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            {
+                _id: "order-1",
+                eventId: "event-1",
+                posDeviceId: "pos-1",
+                status: "PENDING",
+                sumupCheckoutId: "initiating:order-1",
+                sumupRefundCredentials: { $exists: false }
+            },
+            {
+                $set: {
+                    sumupRefundCredentials: {
+                        merchantCode: "merchant-1",
+                        readerId: "reader-1",
+                        apiKey: "enc:v1:ciphertext"
+                    }
+                }
+            }
+        )
+        expect(encryptSecretMock).toHaveBeenCalledWith("enc-api-key")
+        expect(JSON.stringify(orderUpdateOneMock.mock.calls[0])).not.toContain('"apiKey":"api-key-1"')
         expect(createSumUpCheckoutMock).toHaveBeenCalledWith({
             amount: 12.5,
             currency: "EUR",
@@ -278,7 +299,7 @@ describe("triggerSumUpPayment", () => {
     })
 
     test("does not call SumUp unless the order owns the initiation marker", async () => {
-        orderExistsMock.mockResolvedValue(null)
+        orderUpdateOneMock.mockResolvedValue({ acknowledged: true, matchedCount: 0 })
         posDeviceFindOneMock
             .mockReturnValueOnce({
                 populate: vi.fn().mockReturnValue({
@@ -290,9 +311,7 @@ describe("triggerSumUpPayment", () => {
                     })
                 })
             })
-            .mockReturnValueOnce({
-                populate: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue({}) })
-            })
+            .mockReturnValueOnce(populatedSumUpTerminal())
 
         const result = await triggerSumUpPayment(12.5, "event-1", "pos-1", "order-1")
 
@@ -349,6 +368,7 @@ describe("createOrder SumUp lifecycle", () => {
             adjustments: [{ entityType: "PRODUCT", entityId: "product-1", quantity: 1 }]
         })
         transitionSumUpOrderStockMock.mockResolvedValue({ success: true })
+        encryptSecretMock.mockReturnValue("enc:v1:ciphertext")
         decryptSecretMock.mockImplementation((value?: string) => value === "enc-api-key"
             ? "api-key-1"
             : value === "enc-affiliate-key" ? "affiliate-key-1" : undefined)
@@ -417,6 +437,7 @@ describe("createOrder SumUp lifecycle", () => {
         createSumUpCheckoutMock.mockResolvedValue({ success: true, id: "client-tx-1" })
         orderUpdateOneMock
             .mockResolvedValueOnce({ acknowledged: true, matchedCount: 1 })
+            .mockResolvedValueOnce({ acknowledged: true, matchedCount: 1 })
             .mockResolvedValueOnce({ acknowledged: true, matchedCount: 0 })
 
         const result = await createOrder(orderInput)
@@ -428,6 +449,7 @@ describe("createOrder SumUp lifecycle", () => {
     test("treats a late checkout-link write failure as uncertain", async () => {
         createSumUpCheckoutMock.mockResolvedValue({ success: true, id: "client-tx-1" })
         orderUpdateOneMock
+            .mockResolvedValueOnce({ acknowledged: true, matchedCount: 1 })
             .mockResolvedValueOnce({ acknowledged: true, matchedCount: 1 })
             .mockRejectedValueOnce(new Error("write failed"))
 
@@ -479,6 +501,7 @@ describe("completePendingOrderPayment SumUp lifecycle", () => {
             adjustments: [{ entityType: "PRODUCT", entityId: "product-1", quantity: 1 }]
         })
         transitionSumUpOrderStockMock.mockResolvedValue({ success: true })
+        encryptSecretMock.mockReturnValue("enc:v1:ciphertext")
         decryptSecretMock.mockImplementation((value?: string) => value === "enc-api-key"
             ? "api-key-1"
             : value === "enc-affiliate-key" ? "affiliate-key-1" : undefined)
@@ -640,6 +663,7 @@ describe("completePendingOrderPayment SumUp lifecycle", () => {
     test("treats a late checkout-link write failure as uncertain", async () => {
         createSumUpCheckoutMock.mockResolvedValue({ success: true, id: "client-tx-1" })
         orderUpdateOneMock
+            .mockResolvedValueOnce({ acknowledged: true, matchedCount: 1 })
             .mockResolvedValueOnce({ acknowledged: true, matchedCount: 1 })
             .mockRejectedValueOnce(new Error("write failed"))
 
