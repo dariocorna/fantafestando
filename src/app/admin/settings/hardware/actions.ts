@@ -15,6 +15,7 @@ import { recoverStaleLiveKitchenPrintJobs } from "@/lib/print-queue";
 import { encryptSecret } from "@/lib/secrets";
 import Category from "@/models/Category";
 import Event from "@/models/Event";
+import Order from "@/models/Order";
 import Peripheral from "@/models/Peripheral";
 import PosDevice from "@/models/PosDevice";
 import PrintJob from "@/models/PrintJob";
@@ -54,6 +55,26 @@ function availablePrintQueueLease(now: Date = new Date()) {
             { printQueueLeaseExpiresAt: { $lte: now } }
         ]
     };
+}
+
+const PENDING_SUMUP_HARDWARE_ERROR = "Operazione bloccata: un ordine SumUp in attesa usa questa configurazione hardware. Completa o recupera il pagamento prima di modificarla.";
+
+async function hasPendingSumUpCheckout(
+    eventId: string,
+    posDeviceFilter: Record<string, unknown>
+) {
+    const posDeviceIds = (await PosDevice.distinct("_id", { eventId, ...posDeviceFilter }))
+        .map((value: unknown) => String(value ?? "").trim())
+        .filter(Boolean);
+
+    if (posDeviceIds.length === 0) return false;
+
+    return Boolean(await Order.exists({
+        eventId,
+        status: "PENDING",
+        posDeviceId: { $in: posDeviceIds },
+        sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+    }));
 }
 
 export async function createPrinterAction(formData: FormData) {
@@ -115,6 +136,13 @@ export async function deletePrinterAction(formData: FormData) {
     if (await hasPendingPrintQueue(scopedEventId, id)) {
         return { error: "La stampante ha stampe reparto in attesa o in invio. Attendi lo svuotamento della coda prima di eliminarla." };
     }
+    const sumUpTerminalIds = await Peripheral.distinct("_id", { eventId: scopedEventId, type: "SUMUP" });
+    if (sumUpTerminalIds.length > 0 && await hasPendingSumUpCheckout(scopedEventId, {
+        printerId: id,
+        paymentTerminalId: { $in: sumUpTerminalIds }
+    })) {
+        return { error: PENDING_SUMUP_HARDWARE_ERROR };
+    }
     const deletedPrinter = await Printer.findOneAndDelete({
         _id: id,
         eventId: scopedEventId,
@@ -167,6 +195,32 @@ export async function updatePrinterAction(formData: FormData) {
     }
     if (type === "CASHIER" && await hasPendingPrintQueue(scopedEvent.eventId, id)) {
         return { error: "La stampante ha stampe reparto in attesa o in invio. Attendi lo svuotamento della coda prima di cambiarne il tipo." };
+    }
+    const currentPrinter = await Printer.findOne({ _id: id, eventId: scopedEvent.eventId })
+        .select("_id ip port isVirtual emulatorSlot type")
+        .lean() as ({
+            ip?: string;
+            port?: number;
+            isVirtual?: boolean;
+            emulatorSlot?: number | null;
+            type?: "CASHIER" | "KITCHEN";
+        } | null);
+    if (!currentPrinter) {
+        return { error: "Stampante non trovata nella festa selezionata" };
+    }
+    const changesPrintDestination = currentPrinter.ip !== normalizedConfig.data.ip
+        || currentPrinter.port !== normalizedConfig.data.port
+        || currentPrinter.isVirtual !== normalizedConfig.data.isVirtual
+        || (currentPrinter.emulatorSlot ?? undefined) !== normalizedConfig.data.emulatorSlot
+        || currentPrinter.type !== type;
+    if (changesPrintDestination) {
+        const sumUpTerminalIds = await Peripheral.distinct("_id", { eventId: scopedEvent.eventId, type: "SUMUP" });
+        if (sumUpTerminalIds.length > 0 && await hasPendingSumUpCheckout(scopedEvent.eventId, {
+            printerId: id,
+            paymentTerminalId: { $in: sumUpTerminalIds }
+        })) {
+            return { error: PENDING_SUMUP_HARDWARE_ERROR };
+        }
     }
     const updatedPrinter = await Printer.findOneAndUpdate(
         {
@@ -403,6 +457,15 @@ export async function deletePeripheralAction(formData: FormData) {
     const scopedEventId = scopedEvent.eventId;
 
     await dbConnect();
+    const currentPeripheral = await Peripheral.findOne({ _id: id, eventId: scopedEventId })
+        .select("_id type")
+        .lean();
+    if (!currentPeripheral) {
+        return { error: "Periferica non trovata nella festa selezionata" };
+    }
+    if (currentPeripheral.type === "SUMUP" && await hasPendingSumUpCheckout(scopedEventId, { paymentTerminalId: id })) {
+        return { error: PENDING_SUMUP_HARDWARE_ERROR };
+    }
     const deletedPeripheral = await Peripheral.findOneAndDelete({ _id: id, eventId: scopedEventId }).select("_id").lean();
 
     if (!deletedPeripheral) {
@@ -442,6 +505,18 @@ export async function updatePeripheralAction(formData: FormData) {
     const currentPeripheral = await Peripheral.findOne({ _id: id, eventId: scopedEventId }).lean();
     if (!currentPeripheral) {
         return { error: "Periferica non trovata nella festa selezionata" };
+    }
+
+    const changesSumUpConfiguration = currentPeripheral.type === "SUMUP" && (
+        type !== "SUMUP"
+        || Boolean(apiKey)
+        || Boolean(affiliateKey)
+        || Boolean(merchantCode && merchantCode !== getConfigString(currentPeripheral.config, "merchantCode"))
+        || Boolean(readerId && readerId !== getConfigString(currentPeripheral.config, "readerId"))
+        || Boolean(affiliateAppId && affiliateAppId !== getConfigString(currentPeripheral.config, "affiliateAppId"))
+    );
+    if (changesSumUpConfiguration && await hasPendingSumUpCheckout(scopedEventId, { paymentTerminalId: id })) {
+        return { error: PENDING_SUMUP_HARDWARE_ERROR };
     }
 
     if (type === "SUMUP") {
