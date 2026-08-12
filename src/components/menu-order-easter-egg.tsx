@@ -59,6 +59,7 @@ export function MenuOrderEasterEgg({ orderId }: { orderId: string | null }) {
     return (
         <div className="space-y-4">
             <EasterEggComposer
+                key={orderId}
                 title="Foto per la tua comanda"
                 submitLabel="Allega foto all'ordine"
                 submittingLabel="Invio allegato..."

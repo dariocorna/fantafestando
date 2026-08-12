@@ -32,10 +32,10 @@ vi.mock("@/lib/easter-egg-raster", () => ({
 
 import { EasterEggComposer } from "@/components/easter-egg-composer";
 
-function renderComposer(
+function buildComposer(
     props?: Partial<ComponentProps<typeof EasterEggComposer>>
 ) {
-    return render(
+    return (
         <EasterEggComposer
             title="Foto dell'ordine"
             description="Composer test"
@@ -49,6 +49,12 @@ function renderComposer(
             {...props}
         />
     );
+}
+
+function renderComposer(
+    props?: Partial<ComponentProps<typeof EasterEggComposer>>
+) {
+    return render(buildComposer(props));
 }
 
 async function uploadPhoto(
@@ -289,6 +295,37 @@ describe("EasterEggComposer", () => {
         });
 
         expect(onSubmitRasterMock).toHaveBeenCalledTimes(2);
+    });
+
+    test("does not restart the autosave countdown when the parent recreates its submit callback", async () => {
+        onSubmitRasterMock.mockResolvedValue({ success: "Prima versione salvata." });
+        const replacementSubmitRaster = vi.fn().mockResolvedValue({ success: "Versione aggiornata salvata." });
+        const { rerender } = renderComposer();
+
+        await uploadPhoto("first.jpg");
+        await act(async () => {
+            await vi.runOnlyPendingTimersAsync();
+        });
+
+        await uploadPhoto("second.jpg");
+        await act(async () => {
+            vi.advanceTimersByTime(3000);
+        });
+
+        rerender(buildComposer({ onSubmitRaster: replacementSubmitRaster }));
+
+        await act(async () => {
+            vi.advanceTimersByTime(1999);
+        });
+        expect(replacementSubmitRaster).not.toHaveBeenCalled();
+
+        await act(async () => {
+            vi.advanceTimersByTime(1);
+            await Promise.resolve();
+        });
+
+        expect(onSubmitRasterMock).toHaveBeenCalledTimes(1);
+        expect(replacementSubmitRaster).toHaveBeenCalledTimes(1);
     });
 
     test("opens the file picker from the empty preview area before any image is loaded", () => {

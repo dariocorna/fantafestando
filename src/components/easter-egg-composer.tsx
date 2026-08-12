@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, CheckCircle2, Loader2, Lock, PencilLine, Sparkles, Upload, ZoomIn } from "lucide-react";
 import {
     AlertDialog,
@@ -191,6 +191,7 @@ export function EasterEggComposer({
     const autoSaveTimeoutRef = useRef<number | null>(null);
     const latestSignatureRef = useRef<string | null>(null);
     const isSubmittingRef = useRef(false);
+    const onSubmitRasterRef = useRef(onSubmitRaster);
 
     const [fileName, setFileName] = useState("");
     const [fileIdentity, setFileIdentity] = useState<string | null>(null);
@@ -272,6 +273,10 @@ export function EasterEggComposer({
     }, [isSubmitting]);
 
     useEffect(() => {
+        onSubmitRasterRef.current = onSubmitRaster;
+    }, [onSubmitRaster]);
+
+    useEffect(() => {
         const canvas = previewCanvasRef.current;
         const image = imageRef.current;
         if (!canvas || !image || !isImageReady) return;
@@ -293,7 +298,7 @@ export function EasterEggComposer({
         }
     }, [confirmedRasterSignature, currentRasterSignature, status.success]);
 
-    const submitRaster = async (signature: string) => {
+    const submitRaster = useCallback(async (signature: string) => {
         const image = imageRef.current;
         if (!image || !isImageReady) {
             setFileError("Carica prima una foto.");
@@ -315,7 +320,7 @@ export function EasterEggComposer({
                 { centerX, centerY, zoom },
                 processing
             );
-            const result = await onSubmitRaster(raster);
+            const result = await onSubmitRasterRef.current(raster);
             if (result.success && latestSignatureRef.current === signature) {
                 setConfirmedRasterSignature(signature);
                 if (lockAfterFirstSave) {
@@ -329,7 +334,7 @@ export function EasterEggComposer({
         } finally {
             setIsSubmitting(false);
         }
-    };
+    }, [centerX, centerY, isImageReady, lockAfterFirstSave, processing, zoom]);
 
     useEffect(() => {
         if (autoSaveTimeoutRef.current) {
@@ -362,7 +367,7 @@ export function EasterEggComposer({
                 autoSaveTimeoutRef.current = null;
             }
         };
-    }, [autoSaveDelayMs, confirmedRasterSignature, currentRasterSignature, isImageReady, isSubmitting]);
+    }, [autoSaveDelayMs, confirmedRasterSignature, currentRasterSignature, isImageReady, isSubmitting, submitRaster]);
 
     const openFilePicker = () => {
         if (isEditLocked) {
