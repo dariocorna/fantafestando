@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 const productStore = new Map<string, { _id: string, eventId: string, name: string, stockQuantity: number | null, isSoldOut?: boolean }>()
 const ingredientStore = new Map<string, { _id: string, eventId: string, name: string, stockQuantity: number | null }>()
 let beforeProductAtomicUpdate: (() => void) | undefined
+let beforeProductUpdateOne: (() => void) | undefined
 
 function selectFields<T extends Record<string, unknown>>(doc: T, fields: string) {
     const keys = fields.split(/\s+/).filter(Boolean)
@@ -26,14 +27,32 @@ vi.mock("@/models/Product", () => ({
                 }
             }
         },
-        async updateOne(query: { _id: string, stockQuantity?: number }, update: { $inc?: { stockQuantity: number }, $set?: { stockQuantity?: number | null, isSoldOut?: boolean } }) {
+        async updateOne(
+            query: { _id: string, stockQuantity?: number },
+            update: { $inc?: { stockQuantity: number }, $set?: { stockQuantity?: number | null, isSoldOut?: boolean } }
+            | Array<{ $set?: { isSoldOut?: unknown } }>,
+            options?: { updatePipeline?: boolean }
+        ) {
+            if (Array.isArray(update) && options?.updatePipeline !== true) {
+                throw new Error("updatePipeline option is required")
+            }
+            beforeProductUpdateOne?.()
+            beforeProductUpdateOne = undefined
             const current = productStore.get(query._id)
             if (!current) return { acknowledged: true, matchedCount: 0 }
             if (typeof query.stockQuantity === "number" && current.stockQuantity !== query.stockQuantity) return { acknowledged: true, matchedCount: 0 }
-            if (update.$inc?.stockQuantity) current.stockQuantity = (current.stockQuantity ?? 0) + update.$inc.stockQuantity
-            if (update.$set) {
-                if (Object.prototype.hasOwnProperty.call(update.$set, "stockQuantity")) current.stockQuantity = update.$set.stockQuantity ?? null
-                if (Object.prototype.hasOwnProperty.call(update.$set, "isSoldOut")) current.isSoldOut = Boolean(update.$set.isSoldOut)
+            if (Array.isArray(update)) {
+                for (const stage of update) {
+                    if (stage.$set && Object.prototype.hasOwnProperty.call(stage.$set, "isSoldOut")) {
+                        current.isSoldOut = current.stockQuantity !== null && current.stockQuantity <= 0
+                    }
+                }
+            } else {
+                if (update.$inc?.stockQuantity) current.stockQuantity = (current.stockQuantity ?? 0) + update.$inc.stockQuantity
+                if (update.$set) {
+                    if (Object.prototype.hasOwnProperty.call(update.$set, "stockQuantity")) current.stockQuantity = update.$set.stockQuantity ?? null
+                    if (Object.prototype.hasOwnProperty.call(update.$set, "isSoldOut")) current.isSoldOut = Boolean(update.$set.isSoldOut)
+                }
             }
             productStore.set(query._id, current)
             return { acknowledged: true, matchedCount: 1 }
@@ -109,13 +128,14 @@ vi.mock("@/models/Ingredient", () => ({
     }
 }))
 
-import { aggregateStockAdjustments, applyStockForPaidOrder, rollbackStockAdjustments, validateStockForPendingOrder } from "@/lib/stock-operations"
+import { aggregateStockAdjustments, applyStockForPaidOrder, rollbackStockAdjustments, syncSoldOutFlags, validateStockForPendingOrder } from "@/lib/stock-operations"
 
 describe("stock operations", () => {
     beforeEach(() => {
         productStore.clear()
         ingredientStore.clear()
         beforeProductAtomicUpdate = undefined
+        beforeProductUpdateOne = undefined
     })
 
     test("decrements tracked ingredient stock when an order is paid", async () => {
@@ -213,6 +233,26 @@ describe("stock operations", () => {
         expect(productStore.get("prod-1")?.stockQuantity).toBe(0)
         await rollbackStockAdjustments("evt-1", result.appliedAdjustments || [])
         expect(productStore.get("prod-1")?.stockQuantity).toBe(2)
+    })
+
+    test("syncs sold-out flags without overwriting a concurrent stock transition", async () => {
+        productStore.set("prod-1", {
+            _id: "prod-1",
+            eventId: "evt-1",
+            name: "Panino",
+            stockQuantity: 5,
+            isSoldOut: false
+        })
+        beforeProductUpdateOne = () => {
+            productStore.get("prod-1")!.stockQuantity = 0
+        }
+
+        await syncSoldOutFlags("evt-1", ["prod-1"])
+
+        expect(productStore.get("prod-1")).toMatchObject({
+            stockQuantity: 0,
+            isSoldOut: true
+        })
     })
 
     test("rejects pending orders when tracked ingredient stock is insufficient", async () => {

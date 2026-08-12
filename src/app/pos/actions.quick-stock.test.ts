@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { productFindOneAndUpdateMock, productUpdateOneMock, eventExistsMock, ensurePosAccessMock } = vi.hoisted(() => ({
+const { productFindOneAndUpdateMock, productUpdateOneMock, eventExistsMock, ensurePosAccessMock, publishStockInvalidationMock } = vi.hoisted(() => ({
     productFindOneAndUpdateMock: vi.fn(),
     productUpdateOneMock: vi.fn(),
     eventExistsMock: vi.fn(),
-    ensurePosAccessMock: vi.fn()
+    ensurePosAccessMock: vi.fn(),
+    publishStockInvalidationMock: vi.fn()
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -21,6 +22,7 @@ vi.mock("@/models/PrintJob", () => ({ default: {} }));
 vi.mock("@/lib/printer", () => ({ PrinterService: {} }));
 vi.mock("@/lib/sumup", () => ({ createSumUpCheckout: vi.fn() }));
 vi.mock("@/lib/secrets", () => ({ decryptSecret: vi.fn() }));
+vi.mock("@/lib/pos-stock-realtime", () => ({ publishStockInvalidation: publishStockInvalidationMock }));
 
 import { updatePosStock } from "@/app/pos/actions";
 
@@ -55,6 +57,7 @@ describe("updatePosStock deltas", () => {
             variants: { $elemMatch: { optionName: "Media", stockQuantity: { $lt: 0 } } }
         });
         expect(clampUpdate).toEqual({ $set: { "variants.$.stockQuantity": 0 } });
+        expect(publishStockInvalidationMock).toHaveBeenCalledWith("event-1");
     });
 
     it("does not clamp a variant that stayed positive", async () => {
@@ -88,5 +91,6 @@ describe("updatePosStock deltas", () => {
 
         expect(result).toMatchObject({ success: false });
         expect(productUpdateOneMock).not.toHaveBeenCalled();
+        expect(publishStockInvalidationMock).not.toHaveBeenCalled();
     });
 });

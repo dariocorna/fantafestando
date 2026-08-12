@@ -1,15 +1,17 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
-const { orderFindMock, orderUpdateOneMock, orderExistsMock, productFindMock, productUpdateOneMock, productExistsMock, ingredientFindMock, ingredientUpdateOneMock, ingredientExistsMock } = vi.hoisted(() => ({
+const { orderFindMock, orderUpdateOneMock, orderExistsMock, productFindMock, productUpdateOneMock, productExistsMock, ingredientFindMock, ingredientUpdateOneMock, ingredientExistsMock, publishStockInvalidationMock } = vi.hoisted(() => ({
     orderFindMock: vi.fn(), orderUpdateOneMock: vi.fn(), productFindMock: vi.fn(), productUpdateOneMock: vi.fn(),
-    orderExistsMock: vi.fn(), productExistsMock: vi.fn(), ingredientFindMock: vi.fn(), ingredientUpdateOneMock: vi.fn(), ingredientExistsMock: vi.fn()
+    orderExistsMock: vi.fn(), productExistsMock: vi.fn(), ingredientFindMock: vi.fn(), ingredientUpdateOneMock: vi.fn(), ingredientExistsMock: vi.fn(),
+    publishStockInvalidationMock: vi.fn()
 }))
 
 vi.mock("@/models/Order", () => ({ default: { find: orderFindMock, updateOne: orderUpdateOneMock, exists: orderExistsMock } }))
 vi.mock("@/models/Product", () => ({ default: { find: productFindMock, updateOne: productUpdateOneMock, exists: productExistsMock } }))
 vi.mock("@/models/Ingredient", () => ({ default: { find: ingredientFindMock, updateOne: ingredientUpdateOneMock, exists: ingredientExistsMock } }))
+vi.mock("@/lib/pos-stock-realtime", () => ({ publishStockInvalidation: publishStockInvalidationMock }))
 
-import { transitionCashSessionStock } from "@/lib/cash-session-stock"
+import { transitionCashSessionStock, transitionClaimedOrderStock } from "@/lib/cash-session-stock"
 
 function queryResult(value: unknown) {
     return { select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue(value) }) }
@@ -65,6 +67,8 @@ describe("cash session stock transitions", () => {
             expect.objectContaining({ "stockEffectClaim.token": "t1" }),
             { $set: { stockEffectStatus: "APPLIED" }, $unset: { stockEffectClaim: 1 } }
         )
+        expect(publishStockInvalidationMock).toHaveBeenCalledOnce()
+        expect(publishStockInvalidationMock).toHaveBeenCalledWith("e1")
     })
 
     test("does not start TEST to normal when aggregate stock is insufficient", async () => {
@@ -78,6 +82,7 @@ describe("cash session stock transitions", () => {
         expect(result).toMatchObject({ success: false, error: "Scorte insufficienti", shortages: [{ entityId: "p1", required: 3, available: 2 }] })
         expect(productUpdateOneMock).not.toHaveBeenCalled()
         expect(orderUpdateOneMock).not.toHaveBeenCalled()
+        expect(publishStockInvalidationMock).not.toHaveBeenCalled()
     })
 
     test("marks legacy cart reconstruction as approximate and uses included menu components", async () => {
@@ -183,5 +188,46 @@ describe("cash session stock transitions", () => {
         const result = await transitionCashSessionStock({ eventId: "e1", sessionId: "s1", token: "retry", target: "APPLIED" })
 
         expect(result).toMatchObject({ success: true })
+    })
+
+    test("synchronizes sold-out flags for a direct claimed-order transition", async () => {
+        productUpdateOneMock.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 })
+
+        const result = await transitionClaimedOrderStock({
+            eventId: "e1",
+            orderId: "o1",
+            token: "STORNO",
+            target: "APPLIED",
+            adjustments: [{ entityType: "PRODUCT", entityId: "p1", quantity: 1 }],
+            releaseClaim: false
+        })
+
+        expect(result).toEqual({ success: true })
+        expect(productUpdateOneMock).toHaveBeenLastCalledWith(
+            { eventId: "e1", _id: "p1" },
+            [
+                { $set: { isSoldOut: { $and: [{ $ne: ["$stockQuantity", null] }, { $lte: ["$stockQuantity", 0] }] } } }
+            ],
+            { updatePipeline: true }
+        )
+        expect(publishStockInvalidationMock).toHaveBeenCalledWith("e1")
+    })
+
+    test("publishes a completed stock mutation even if order finalization loses its claim", async () => {
+        productUpdateOneMock.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 })
+        orderUpdateOneMock.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 })
+        orderExistsMock.mockResolvedValue(null)
+
+        const result = await transitionClaimedOrderStock({
+            eventId: "e1",
+            orderId: "o1",
+            token: "STORNO",
+            target: "REVERTED",
+            adjustments: [{ entityType: "PRODUCT", entityId: "p1", quantity: 1 }],
+            releaseClaim: false
+        })
+
+        expect(result).toEqual({ success: false, error: "Ordine cambiato durante l'operazione: riprova" })
+        expect(publishStockInvalidationMock).toHaveBeenCalledWith("e1")
     })
 })

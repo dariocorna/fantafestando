@@ -133,21 +133,13 @@ export async function syncSoldOutFlags(eventId: string, productIds: string[]) {
     const uniqueProductIds = [...new Set(productIds)]
     if (uniqueProductIds.length === 0) return
 
-    const docs = await Product.find({
-        eventId,
-        _id: { $in: uniqueProductIds }
-    }).select("_id stockQuantity").lean() as Array<{ _id: string | { toString(): string }, stockQuantity?: number | null }>
-
-    for (const doc of docs) {
-        const normalizedStock = normalizeStockQuantity(doc.stockQuantity ?? null)
+    for (const productId of uniqueProductIds) {
         await Product.updateOne(
-            { eventId, _id: doc._id.toString() },
-            {
-                $set: {
-                    stockQuantity: normalizedStock,
-                    isSoldOut: normalizedStock !== null ? normalizedStock <= 0 : false
-                }
-            }
+            { eventId, _id: productId },
+            [
+                { $set: { isSoldOut: { $and: [{ $ne: ["$stockQuantity", null] }, { $lte: ["$stockQuantity", 0] }] } } }
+            ],
+            { updatePipeline: true }
         )
     }
 }

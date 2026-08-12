@@ -10,7 +10,8 @@ const {
     routeOrderToPrintersMock,
     claimCashSessionPaymentMock,
     refreshCashSessionPaymentClaimMock,
-    releaseCashSessionPaymentClaimMock
+    releaseCashSessionPaymentClaimMock,
+    publishStockInvalidationMock
 } = vi.hoisted(() => ({
     orderFindOneAndUpdateMock: vi.fn(),
     orderFindOneMock: vi.fn(),
@@ -20,7 +21,8 @@ const {
     routeOrderToPrintersMock: vi.fn(),
     claimCashSessionPaymentMock: vi.fn(),
     refreshCashSessionPaymentClaimMock: vi.fn(),
-    releaseCashSessionPaymentClaimMock: vi.fn()
+    releaseCashSessionPaymentClaimMock: vi.fn(),
+    publishStockInvalidationMock: vi.fn()
 }));
 
 vi.mock("@/lib/mongoose", () => ({ default: vi.fn() }));
@@ -43,6 +45,7 @@ vi.mock("@/lib/cash-session-payment-claim", () => ({
     refreshCashSessionPaymentClaim: refreshCashSessionPaymentClaimMock,
     releaseCashSessionPaymentClaim: releaseCashSessionPaymentClaimMock
 }));
+vi.mock("@/lib/pos-stock-realtime", () => ({ publishStockInvalidation: publishStockInvalidationMock }));
 
 import { POST } from "./route";
 
@@ -106,6 +109,7 @@ describe("POST /api/sumup/webhook", () => {
             })
         );
         expect(routeOrderToPrintersMock).toHaveBeenCalledOnce();
+        expect(publishStockInvalidationMock).toHaveBeenCalledWith("event-1");
     });
 
     test("does not complete a webhook payment after its cash session closes", async () => {
@@ -123,6 +127,7 @@ describe("POST /api/sumup/webhook", () => {
 
         expect(response.status).toBe(409);
         expect(applyStockForPaidOrderMock).not.toHaveBeenCalled();
+        expect(publishStockInvalidationMock).not.toHaveBeenCalled();
         expect(orderUpdateOneMock).toHaveBeenCalledWith(
             { _id: "order-1", sumupWebhookClaimToken: expect.any(String) },
             { $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 } }
@@ -145,5 +150,6 @@ describe("POST /api/sumup/webhook", () => {
         expect(response.status).toBe(409);
         expect(releaseCashSessionPaymentClaimMock).toHaveBeenCalledWith("session-1", "test-session-claim");
         expect(applyStockForPaidOrderMock).not.toHaveBeenCalled();
+        expect(publishStockInvalidationMock).not.toHaveBeenCalled();
     });
 });
