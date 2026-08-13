@@ -13,6 +13,7 @@ import {
 } from "@/lib/printer-config";
 import { recoverStaleLiveKitchenPrintJobs } from "@/lib/print-queue";
 import { encryptSecret } from "@/lib/secrets";
+import { hasPendingSumUpPrintRouting } from "@/lib/sumup-print-routing";
 import Category from "@/models/Category";
 import Event from "@/models/Event";
 import Order from "@/models/Order";
@@ -20,6 +21,7 @@ import Peripheral from "@/models/Peripheral";
 import PosDevice from "@/models/PosDevice";
 import PrintJob from "@/models/PrintJob";
 import Printer from "@/models/Printer";
+import Product from "@/models/Product";
 import { revalidatePath } from "next/cache";
 import {
     requireAdminAuthorization,
@@ -76,6 +78,25 @@ async function hasPendingSumUpCheckout(
         posDeviceId: { $in: posDeviceIds },
         sumupCheckoutId: { $exists: true, $nin: [null, ""] }
     }));
+}
+
+async function hasPendingSumUpPrinterDependency(eventId: string, printerIds: string[]) {
+    if (printerIds.length === 0) return false;
+
+    const sumUpTerminalIds = await Peripheral.distinct("_id", { eventId, type: "SUMUP" });
+    if (sumUpTerminalIds.length > 0 && await hasPendingSumUpCheckout(eventId, {
+        printerId: { $in: printerIds },
+        paymentTerminalId: { $in: sumUpTerminalIds }
+    })) {
+        return true;
+    }
+
+    const categoryIds = await Category.distinct("_id", { eventId, printerId: { $in: printerIds } });
+    const productIds = categoryIds.length > 0
+        ? (await Product.distinct("_id", { eventId, categoryId: { $in: categoryIds } }))
+            .map((value: unknown) => String(value))
+        : [];
+    return hasPendingSumUpPrintRouting(eventId, productIds);
 }
 
 async function hasLegacySumUpRefundDependency(
@@ -252,11 +273,7 @@ export async function updatePrinterAction(formData: FormData) {
         || (currentPrinter.emulatorSlot ?? undefined) !== normalizedConfig.data.emulatorSlot
         || currentPrinter.type !== type;
     if (changesPrintDestination) {
-        const sumUpTerminalIds = await Peripheral.distinct("_id", { eventId: scopedEvent.eventId, type: "SUMUP" });
-        if (sumUpTerminalIds.length > 0 && await hasPendingSumUpCheckout(scopedEvent.eventId, {
-            printerId: id,
-            paymentTerminalId: { $in: sumUpTerminalIds }
-        })) {
+        if (await hasPendingSumUpPrinterDependency(scopedEvent.eventId, [id])) {
             return { error: PENDING_SUMUP_HARDWARE_ERROR };
         }
     }
@@ -316,6 +333,10 @@ export async function provisionVirtualPrintersAction(formData: FormData) {
             bySlot.set(printer.emulatorSlot, { _id: printer._id, type: printer.type });
         }
     });
+    const existingPrinterIds = existingPrinters.map((printer) => String(printer._id));
+    if (await hasPendingSumUpPrinterDependency(scopedEvent.eventId, existingPrinterIds)) {
+        return { error: PENDING_SUMUP_HARDWARE_ERROR };
+    }
 
     for (let slot = 1; slot <= MAX_VIRTUAL_PRINTER_SLOTS; slot += 1) {
         const port = 19099 + slot;

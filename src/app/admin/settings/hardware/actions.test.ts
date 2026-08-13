@@ -13,7 +13,13 @@ const mocks = vi.hoisted(() => ({
     printerFindOne: vi.fn(),
     printerFindOneAndDelete: vi.fn(),
     printerFindOneAndUpdate: vi.fn(),
+    printerFind: vi.fn(),
+    printerUpdateOne: vi.fn(),
+    printerCreate: vi.fn(),
     categoryUpdateMany: vi.fn(),
+    categoryDistinct: vi.fn(),
+    productDistinct: vi.fn(),
+    hasPendingSumUpPrintRouting: vi.fn(),
     posDeviceDeleteMany: vi.fn(),
     posDeviceDistinct: vi.fn(),
     posDeviceUpdateMany: vi.fn(),
@@ -47,7 +53,13 @@ vi.mock("@/lib/print-queue", () => ({
     recoverStaleLiveKitchenPrintJobs: mocks.recoverStaleLiveKitchenPrintJobs
 }));
 vi.mock("@/lib/secrets", () => ({ encryptSecret: mocks.encryptSecret }));
-vi.mock("@/models/Category", () => ({ default: { updateMany: mocks.categoryUpdateMany } }));
+vi.mock("@/lib/sumup-print-routing", () => ({
+    hasPendingSumUpPrintRouting: mocks.hasPendingSumUpPrintRouting
+}));
+vi.mock("@/models/Category", () => ({
+    default: { updateMany: mocks.categoryUpdateMany, distinct: mocks.categoryDistinct }
+}));
+vi.mock("@/models/Product", () => ({ default: { distinct: mocks.productDistinct } }));
 vi.mock("@/models/Event", () => ({ default: {} }));
 vi.mock("@/models/Order", () => ({ default: { exists: mocks.orderExists } }));
 vi.mock("@/models/Peripheral", () => ({
@@ -70,6 +82,9 @@ vi.mock("@/models/PrintJob", () => ({ default: { exists: mocks.printJobExists } 
 vi.mock("@/models/Printer", () => ({
     default: {
         findOne: mocks.printerFindOne,
+        find: mocks.printerFind,
+        create: mocks.printerCreate,
+        updateOne: mocks.printerUpdateOne,
         findOneAndDelete: mocks.printerFindOneAndDelete,
         findOneAndUpdate: mocks.printerFindOneAndUpdate,
         exists: mocks.printerExists
@@ -80,6 +95,7 @@ import {
     createPeripheralAction,
     deletePeripheralAction,
     deletePrinterAction,
+    provisionVirtualPrintersAction,
     updatePeripheralAction,
     updatePrinterAction
 } from "./actions";
@@ -171,6 +187,9 @@ describe("printer queue lifecycle guards", () => {
         mocks.peripheralDistinct.mockResolvedValue([]);
         mocks.posDeviceDistinct.mockResolvedValue([]);
         mocks.orderExists.mockResolvedValue(false);
+        mocks.categoryDistinct.mockResolvedValue([]);
+        mocks.productDistinct.mockResolvedValue([]);
+        mocks.hasPendingSumUpPrintRouting.mockResolvedValue(false);
     });
 
     test("blocks deletion while held or claimed jobs still reference the printer", async () => {
@@ -196,6 +215,47 @@ describe("printer queue lifecycle guards", () => {
         expect(mocks.printerFindOneAndDelete).not.toHaveBeenCalled();
         expect(mocks.categoryUpdateMany).not.toHaveBeenCalled();
         expect(mocks.posDeviceDeleteMany).not.toHaveBeenCalled();
+    });
+
+    test("blocks virtual provisioning when it would rewrite a pending SumUp destination", async () => {
+        mocks.printerFind.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue([{ _id: "printer-1", emulatorSlot: 1, type: "CASHIER" }])
+            })
+        });
+        mocks.peripheralDistinct.mockResolvedValue(["terminal-1"]);
+        mocks.posDeviceDistinct.mockResolvedValue(["pos-1"]);
+        mocks.orderExists.mockResolvedValue(true);
+        const formData = new FormData();
+        formData.set("eventId", "event-1");
+
+        await expect(provisionVirtualPrintersAction(formData)).resolves.toEqual({
+            error: expect.stringMatching(/ordine SumUp in attesa/i)
+        });
+
+        expect(mocks.printerUpdateOne).not.toHaveBeenCalled();
+        expect(mocks.printerCreate).not.toHaveBeenCalled();
+    });
+
+    test("blocks virtual provisioning when it would rewrite a pending SumUp kitchen route", async () => {
+        mocks.printerFind.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue([{ _id: "printer-2", emulatorSlot: 2, type: "KITCHEN" }])
+            })
+        });
+        mocks.categoryDistinct.mockResolvedValue(["category-1"]);
+        mocks.productDistinct.mockResolvedValue(["product-1"]);
+        mocks.hasPendingSumUpPrintRouting.mockResolvedValue(true);
+        const formData = new FormData();
+        formData.set("eventId", "event-1");
+
+        await expect(provisionVirtualPrintersAction(formData)).resolves.toEqual({
+            error: expect.stringMatching(/ordine SumUp in attesa/i)
+        });
+
+        expect(mocks.hasPendingSumUpPrintRouting).toHaveBeenCalledWith("event-1", ["product-1"]);
+        expect(mocks.printerUpdateOne).not.toHaveBeenCalled();
+        expect(mocks.printerCreate).not.toHaveBeenCalled();
     });
 
     test("blocks deletion atomically while a live department print owns the lease", async () => {
@@ -317,7 +377,7 @@ describe("printer queue lifecycle guards", () => {
         expect(mocks.printerFindOne).toHaveBeenCalledWith({ _id: "printer-1", eventId: "event-1" });
         expect(mocks.posDeviceDistinct).toHaveBeenCalledWith("_id", {
             eventId: "event-1",
-            printerId: "printer-1",
+            printerId: { $in: ["printer-1"] },
             paymentTerminalId: { $in: ["terminal-1"] }
         });
         expect(mocks.orderExists).toHaveBeenCalledWith({

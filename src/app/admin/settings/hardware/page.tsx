@@ -27,6 +27,7 @@ import { PeripheralDialog } from "@/components/peripheral-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PrintJobsMonitor } from "@/components/print-jobs-monitor";
 import { ManualPrintActionState, ManualPrintButton } from "@/components/manual-print-button";
+import { ProvisionVirtualPrintersForm } from "@/components/provision-virtual-printers-form";
 
 export default async function HardwarePage() {
     const eventId = await getAdminContextEventId();
@@ -34,7 +35,7 @@ export default async function HardwarePage() {
 
     async function handleProvisionVirtualPrinters(formData: FormData) {
         "use server";
-        await provisionVirtualPrintersAction(formData);
+        return provisionVirtualPrintersAction(formData);
     }
 
     async function handleCreateManualPrintJob(
@@ -82,10 +83,10 @@ export default async function HardwarePage() {
                     <div className="flex justify-between items-center">
                         <h2 className="text-xl font-semibold">Stampanti Termiche</h2>
                         <div className="flex items-center gap-2">
-                            <form action={handleProvisionVirtualPrinters}>
-                                <input type="hidden" name="eventId" value={eventId} />
-                                <Button type="submit" variant="outline">Provisiona 10 virtuali</Button>
-                            </form>
+                            <ProvisionVirtualPrintersForm
+                                eventId={eventId}
+                                action={handleProvisionVirtualPrinters}
+                            />
                             <HardwareDialog title="Aggiungi Nuova Stampante" buttonText="Nuova Stampante">
                                 <HardwareFormWrapper action={createPrinterAction}>
                                     <input type="hidden" name="eventId" value={eventId} />
