@@ -435,6 +435,20 @@ describe("createOrder SumUp lifecycle", () => {
             expect.objectContaining({ sumupCheckoutId: "initiating:order-1" }),
             { $set: { sumupCheckoutId: "client-tx-1" } }
         )
+        expect(claimSumUpEventOperationMock).toHaveBeenCalledBefore(orderCreateMock)
+        expect(releaseSumUpEventOperationMock).toHaveBeenCalledWith("event-1", "event-claim-1")
+    })
+
+    test("does not create an order or reserve stock while an event reset owns the lease", async () => {
+        claimSumUpEventOperationMock.mockResolvedValue(null)
+
+        const result = await createOrder(orderInput)
+
+        expect(result).toEqual({ success: false, error: "La festa è in fase di archiviazione o eliminazione" })
+        expect(orderCreateMock).not.toHaveBeenCalled()
+        expect(planStockAdjustmentsForPaymentMock).not.toHaveBeenCalled()
+        expect(transitionSumUpOrderStockMock).not.toHaveBeenCalled()
+        expect(createSumUpCheckoutMock).not.toHaveBeenCalled()
     })
 
     test("releases reserved stock and cancels a definite checkout rejection", async () => {
@@ -587,6 +601,25 @@ describe("completePendingOrderPayment SumUp lifecycle", () => {
             expect.objectContaining({ sumupCheckoutId: "initiating:order-1" }),
             { $set: { sumupCheckoutId: "client-tx-1" } }
         )
+        expect(claimSumUpEventOperationMock).toHaveBeenCalledBefore(planStockAdjustmentsForPaymentMock)
+        expect(releaseSumUpEventOperationMock).toHaveBeenCalledWith("event-1", "event-claim-1")
+    })
+
+    test("does not claim or reserve a pending order while event maintenance owns the lease", async () => {
+        claimSumUpEventOperationMock.mockResolvedValue(null)
+
+        const result = await completePendingOrderPayment({
+            eventId: "event-1",
+            orderId: "order-1",
+            paymentMethod: "CARD",
+            posDeviceId: "pos-1"
+        })
+
+        expect(result).toEqual({ success: false, error: "La festa è in fase di archiviazione o eliminazione" })
+        expect(planStockAdjustmentsForPaymentMock).not.toHaveBeenCalled()
+        expect(orderUpdateOneMock).not.toHaveBeenCalled()
+        expect(transitionSumUpOrderStockMock).not.toHaveBeenCalled()
+        expect(createSumUpCheckoutMock).not.toHaveBeenCalled()
     })
 
     test("does not reserve stock or call SumUp when the atomic order claim is lost", async () => {

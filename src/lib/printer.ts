@@ -1907,6 +1907,7 @@ export class PrinterService {
             status?: string;
             paymentMethod?: string;
             totalAmount?: number;
+            sumupPrintCompletedAt?: Date | string;
             customer?: { name?: string; table?: string };
             cart: CartItem[];
             easterEggAttachment?: {
@@ -1921,9 +1922,17 @@ export class PrinterService {
         const idempotencyPrefix = options?.idempotencyScope?.trim()
             ? `${options.idempotencyScope.trim()}:${order._id.toString()}`
             : undefined;
+        if (idempotencyPrefix && order.sumupPrintCompletedAt) return [];
         const printIntentKey = (suffix: string) => idempotencyPrefix
             ? `${idempotencyPrefix}:${suffix}`
             : undefined;
+        const completeSumUpPrintIntents = async (results: PrintDispatchResult[]) => {
+            if (!idempotencyPrefix || !results.every((result) => result === true)) return;
+            await Order.updateOne(
+                { _id: order._id, sumupPrintCompletedAt: { $exists: false } },
+                { $set: { sumupPrintCompletedAt: new Date() } }
+            );
+        };
 
         const eventId = order.eventId?.toString();
 
@@ -2296,6 +2305,7 @@ export class PrinterService {
             && !attachment?.printedAt;
 
         if (!shouldPrintEasterEgg) {
+            await completeSumUpPrintIntents(results);
             return results;
         }
 
@@ -2359,6 +2369,7 @@ export class PrinterService {
             );
         }
 
+        await completeSumUpPrintIntents(results);
         return results;
     }
 

@@ -17,13 +17,44 @@ test("finds pending SumUp orders using products directly or as menu components",
 
     expect(orderExists).toHaveBeenCalledWith({
         eventId: "event-1",
-        status: "PENDING",
-        sumupCheckoutId: { $exists: true, $nin: [null, ""] },
+        $and: [{
+            $or: [
+                {
+                    status: "PENDING",
+                    sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+                },
+                {
+                    status: "PAID",
+                    sumupPrintCompletedAt: { $exists: false },
+                    $or: [
+                        { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                        { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                    ]
+                }
+            ]
+        }],
         $or: [
             { "cart.productId": { $in: ["product-1", "product-2"] } },
             { "cart.includedComponents.productId": { $in: ["product-1", "product-2"] } }
         ]
     });
+});
+
+test("keeps routing immutable until a paid SumUp order has persisted every print intent", async () => {
+    orderExists.mockResolvedValue({ _id: "order-paid" });
+
+    await expect(hasPendingSumUpPrintRouting("event-1", ["product-1"])).resolves.toBe(true);
+
+    expect(orderExists).toHaveBeenCalledWith(expect.objectContaining({
+        $and: [{
+            $or: expect.arrayContaining([
+                expect.objectContaining({
+                    status: "PAID",
+                    sumupPrintCompletedAt: { $exists: false }
+                })
+            ])
+        }]
+    }));
 });
 
 test("skips the database when no product can affect routing", async () => {

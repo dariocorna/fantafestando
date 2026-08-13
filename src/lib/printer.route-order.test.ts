@@ -210,6 +210,28 @@ describe("PrinterService.routeOrderToPrinters", () => {
         expect(keys).toHaveLength(3);
         expect(new Set(keys).size).toBe(3);
         expect(keys.every((key) => key?.startsWith("SUMUP_CALLBACK:order-sumup-recovery:"))).toBe(true);
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            { _id: expect.any(Object), sumupPrintCompletedAt: { $exists: false } },
+            { $set: { sumupPrintCompletedAt: expect.any(Date) } }
+        );
+
+        mockOrder(buildOrder("order-sumup-recovery", { sumupPrintCompletedAt: new Date() }));
+        mockCategories([{
+            _id: { toString: () => "cat-1" },
+            name: "Nuovo reparto",
+            printerId: {
+                _id: "kitchen-printer-2",
+                ip: "192.168.178.220",
+                port: 9100
+            }
+        }]);
+
+        await expect(PrinterService.routeOrderToPrinters(
+            "order-sumup-recovery",
+            "pos-1",
+            { idempotencyScope: "SUMUP_CALLBACK" }
+        )).resolves.toEqual([]);
+        expect(printComandaSpy).toHaveBeenCalledTimes(3);
     });
 
     test("skips all comanda copies when the category is marked as non printable", async () => {

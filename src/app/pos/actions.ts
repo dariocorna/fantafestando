@@ -1361,6 +1361,7 @@ export async function createOrder(data: {
     let paymentClaimToken: string | undefined
     let paymentClaimSessionId: string | undefined
     let sumUpOrderInProgressId: string | undefined
+    let sumUpEventOperationToken: string | null = null
     try {
         const sessionCheck = await ensurePosActionSession()
         if (!sessionCheck.success) return sessionCheck
@@ -1446,6 +1447,15 @@ export async function createOrder(data: {
             await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
             paymentClaimToken = undefined
             return { success: false, error: "I pagamenti sul terminale SumUp sono bloccati nelle sessioni TEST" }
+        }
+
+        if (requiresPendingState) {
+            sumUpEventOperationToken = await claimSumUpEventOperation(data.eventId, true)
+            if (!sumUpEventOperationToken) {
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+                paymentClaimToken = undefined
+                return { success: false, error: "La festa è in fase di archiviazione o eliminazione" }
+            }
         }
 
         if (requiresPendingState) {
@@ -1547,11 +1557,12 @@ export async function createOrder(data: {
                 return { success: false, error: reservationResult.error }
             }
 
-            const sumupResult = await triggerSumUpPayment(
+            const sumupResult = await triggerSumUpPaymentWithLease(
                 payableAmount,
                 data.eventId,
                 data.posDeviceId,
-                order._id.toString()
+                order._id.toString(),
+                sumUpEventOperationToken
             )
             if (!sumupResult.success || !sumupResult.checkoutId) {
                 if ("paymentUncertain" in sumupResult && sumupResult.paymentUncertain) {
@@ -1681,11 +1692,22 @@ export async function createOrder(data: {
             }
         }
         return { success: false, error: "Failed to create order" }
+    } finally {
+        await releaseSumUpEventOperation(data.eventId, sumUpEventOperationToken).catch((error) => {
+            console.error("Create Order event operation release error:", error)
+        })
     }
 }
 
-export async function triggerSumUpPayment(amount: number, eventId: string, posDeviceId: string | undefined, orderId: string) {
-    let eventOperationToken: string | null = null
+async function triggerSumUpPaymentWithLease(
+    amount: number,
+    eventId: string,
+    posDeviceId: string | undefined,
+    orderId: string,
+    existingEventOperationToken?: string | null
+) {
+    let eventOperationToken = existingEventOperationToken || null
+    const ownsEventOperation = !existingEventOperationToken
     let checkoutAccepted = false
     try {
         const sessionCheck = await ensurePosActionSession()
@@ -1754,7 +1776,7 @@ export async function triggerSumUpPayment(amount: number, eventId: string, posDe
         if (!refundCredentials) {
             return { success: false, error: "Configurazione SumUp mancante nella periferica associata alla cassa" }
         }
-        eventOperationToken = await claimSumUpEventOperation(eventId, true)
+        eventOperationToken ||= await claimSumUpEventOperation(eventId, true)
         if (!eventOperationToken) {
             return { success: false, error: "La festa è in fase di archiviazione o eliminazione" }
         }
@@ -1832,10 +1854,16 @@ export async function triggerSumUpPayment(amount: number, eventId: string, posDe
             ...(checkoutAccepted ? { paymentUncertain: true } : {})
         }
     } finally {
-        await releaseSumUpEventOperation(eventId, eventOperationToken).catch((error) => {
-            console.error("SumUp event operation release error:", error)
-        })
+        if (ownsEventOperation) {
+            await releaseSumUpEventOperation(eventId, eventOperationToken).catch((error) => {
+                console.error("SumUp event operation release error:", error)
+            })
+        }
     }
+}
+
+export async function triggerSumUpPayment(amount: number, eventId: string, posDeviceId: string | undefined, orderId: string) {
+    return triggerSumUpPaymentWithLease(amount, eventId, posDeviceId, orderId)
 }
 
 export async function loadPendingOrderByCode(data: {
@@ -2255,6 +2283,7 @@ export async function completePendingOrderPayment(data: {
     let paymentClaimToken: string | undefined
     let paymentClaimSessionId: string | undefined
     let sumUpOrderInProgressId: string | undefined
+    let sumUpEventOperationToken: string | null = null
     try {
         const sessionCheck = await ensurePosActionSession()
         if (!sessionCheck.success) return sessionCheck
@@ -2541,6 +2570,14 @@ export async function completePendingOrderPayment(data: {
             paymentClaimToken = undefined
             return { success: false, error: "I pagamenti sul terminale SumUp sono bloccati nelle sessioni TEST" }
         }
+        if (isSumUpPayment) {
+            sumUpEventOperationToken = await claimSumUpEventOperation(data.eventId, true)
+            if (!sumUpEventOperationToken) {
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+                paymentClaimToken = undefined
+                return { success: false, error: "La festa è in fase di archiviazione o eliminazione" }
+            }
+        }
         const pendingOrderPaymentGuard = {
             _id: data.orderId,
             eventId: data.eventId,
@@ -2618,11 +2655,12 @@ export async function completePendingOrderPayment(data: {
                 return { success: false, error: reservation.error }
             }
 
-            const sumupResult = await triggerSumUpPayment(
+            const sumupResult = await triggerSumUpPaymentWithLease(
                 payableAmount,
                 data.eventId,
                 data.posDeviceId,
-                order._id.toString()
+                order._id.toString(),
+                sumUpEventOperationToken
             )
             if (!sumupResult.success || !sumupResult.checkoutId) {
                 if ("paymentUncertain" in sumupResult && sumupResult.paymentUncertain) {
@@ -2792,6 +2830,10 @@ export async function completePendingOrderPayment(data: {
             }
         }
         return { success: false, error: "Errore durante la chiusura dell'ordine" }
+    } finally {
+        await releaseSumUpEventOperation(data.eventId, sumUpEventOperationToken).catch((error) => {
+            console.error("Complete pending order event operation release error:", error)
+        })
     }
 }
 

@@ -88,6 +88,7 @@ export interface IOrder extends Document {
     sumupLateSuccessDetectedAt?: Date;
     sumupWebhookClaimToken?: string;
     sumupWebhookClaimedAt?: Date;
+    sumupPrintCompletedAt?: Date;
     posDeviceId?: Types.ObjectId;
     stockOverrideApproved?: boolean;
     stockAdjustments?: Array<{
@@ -244,6 +245,7 @@ const OrderSchema = new Schema<IOrder>({
     sumupLateSuccessDetectedAt: { type: Date },
     sumupWebhookClaimToken: { type: String },
     sumupWebhookClaimedAt: { type: Date },
+    sumupPrintCompletedAt: { type: Date },
     posDeviceId: { type: Schema.Types.ObjectId, ref: 'PosDevice' },
     cashSessionId: { type: Schema.Types.ObjectId, ref: 'CashSession' },
     stockOverrideApproved: { type: Boolean, default: false },

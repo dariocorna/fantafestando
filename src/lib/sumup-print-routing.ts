@@ -6,8 +6,22 @@ export async function hasPendingSumUpPrintRouting(eventId: string, productIds: s
 
     return Boolean(await Order.exists({
         eventId,
-        status: "PENDING",
-        sumupCheckoutId: { $exists: true, $nin: [null, ""] },
+        $and: [{
+            $or: [
+                {
+                    status: "PENDING",
+                    sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+                },
+                {
+                    status: "PAID",
+                    sumupPrintCompletedAt: { $exists: false },
+                    $or: [
+                        { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                        { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                    ]
+                }
+            ]
+        }],
         $or: [
             { "cart.productId": { $in: normalizedProductIds } },
             { "cart.includedComponents.productId": { $in: normalizedProductIds } }
