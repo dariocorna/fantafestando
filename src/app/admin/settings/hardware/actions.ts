@@ -550,6 +550,17 @@ export async function updatePeripheralAction(formData: FormData) {
         return { error: "Periferica non trovata nella festa selezionata" };
     }
 
+    const currentMerchantCode = getConfigString(currentPeripheral.config, "merchantCode");
+    const currentReaderId = getConfigString(currentPeripheral.config, "readerId");
+    const currentApiKey = getConfigString(currentPeripheral.config, "apiKey");
+    const currentAffiliateAppId = getConfigString(currentPeripheral.config, "affiliateAppId");
+    const currentAffiliateKey = getConfigString(currentPeripheral.config, "affiliateKey");
+    const migratesLegacySumUpConfiguration = currentPeripheral.type === "SUMUP"
+        && type === "SUMUP"
+        && !currentApiKey
+        && Boolean(currentAffiliateKey)
+        && Boolean(apiKey)
+        && Boolean(affiliateKey);
     const changesSumUpConfiguration = currentPeripheral.type === "SUMUP" && (
         type !== "SUMUP"
         || Boolean(apiKey)
@@ -562,18 +573,13 @@ export async function updatePeripheralAction(formData: FormData) {
         if (await hasPendingSumUpCheckout(scopedEventId, { paymentTerminalId: id })) {
             return { error: PENDING_SUMUP_HARDWARE_ERROR };
         }
-        if (await hasLegacySumUpRefundDependency(scopedEventId, { paymentTerminalId: id })) {
+        if (!migratesLegacySumUpConfiguration
+            && await hasLegacySumUpRefundDependency(scopedEventId, { paymentTerminalId: id })) {
             return { error: LEGACY_SUMUP_REFUND_HARDWARE_ERROR };
         }
     }
 
     if (type === "SUMUP") {
-        const currentMerchantCode = getConfigString(currentPeripheral.config, "merchantCode");
-        const currentReaderId = getConfigString(currentPeripheral.config, "readerId");
-        const currentApiKey = getConfigString(currentPeripheral.config, "apiKey");
-        const currentAffiliateAppId = getConfigString(currentPeripheral.config, "affiliateAppId");
-        const currentAffiliateKey = getConfigString(currentPeripheral.config, "affiliateKey");
-
         if (!currentApiKey && currentAffiliateKey && (!apiKey || !affiliateKey)) {
             return { error: "Per migrare il terminale SumUp inserisci sia API Key sia Affiliate Key" };
         }

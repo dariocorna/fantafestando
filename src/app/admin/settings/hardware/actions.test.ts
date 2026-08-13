@@ -561,6 +561,37 @@ describe("SumUp peripheral configuration", () => {
         );
     });
 
+    test("allows complete in-place credential migration needed by a legacy refund", async () => {
+        mocks.peripheralFindOne.mockReturnValue({
+            lean: vi.fn().mockResolvedValue({
+                _id: "peripheral-1",
+                type: "SUMUP",
+                config: {
+                    merchantId: "legacy-merchant",
+                    affiliateKey: "encrypted:legacy-api-key"
+                }
+            })
+        });
+        mocks.posDeviceDistinct.mockResolvedValue(["pos-1"]);
+        mocks.orderExists.mockResolvedValueOnce(false).mockResolvedValue(true);
+
+        await expect(updatePeripheralAction(sumUpForm())).resolves.toEqual({ success: true });
+
+        expect(mocks.orderExists).toHaveBeenCalledTimes(1);
+        expect(mocks.peripheralFindOneAndUpdate).toHaveBeenCalledWith(
+            { _id: "peripheral-1", eventId: "event-1" },
+            expect.objectContaining({
+                type: "SUMUP",
+                config: expect.objectContaining({
+                    merchantCode: "MK10CL2A",
+                    apiKey: "encrypted:sup_sk_api",
+                    affiliateKey: "encrypted:affiliate-secret"
+                })
+            }),
+            { returnDocument: "after" }
+        );
+    });
+
     test("returns a validation error instead of crashing on an incomplete stored record", async () => {
         mocks.peripheralFindOne.mockReturnValue({
             lean: vi.fn().mockResolvedValue({ _id: "peripheral-1", type: "SUMUP" })
