@@ -62,3 +62,19 @@ export async function completeSumUpPrintIntentsIfSent(eventId: string, orderId: 
     );
     return (completed.matchedCount ?? completed.modifiedCount) === 1;
 }
+
+export async function completeSumUpPrintIntentsForSentJob(eventId: string, jobId: string) {
+    if (!eventId || !jobId) return false;
+
+    const job = await PrintJob.findOne({
+        _id: jobId,
+        eventId,
+        status: "SENT",
+        source: "ORDER",
+        idempotencyKey: /^SUMUP_CALLBACK:/
+    }).select("orderId").lean() as { orderId?: unknown } | null;
+
+    return job?.orderId
+        ? completeSumUpPrintIntentsIfSent(eventId, String(job.orderId))
+        : false;
+}

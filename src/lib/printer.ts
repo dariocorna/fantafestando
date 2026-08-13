@@ -43,7 +43,10 @@ import {
     refreshKitchenPrinterQueueLease,
     releaseKitchenPrinterQueueLease
 } from "./print-queue";
-import { completeSumUpPrintIntentsIfSent } from "./sumup-print-routing";
+import {
+    completeSumUpPrintIntentsForSentJob,
+    completeSumUpPrintIntentsIfSent
+} from "./sumup-print-routing";
 
 export interface PrinterCommandJob {
     ip: string;
@@ -2653,6 +2656,9 @@ export class PrinterService {
                         automaticRetryCount: dispatchResult.automaticRetryCount,
                         clearRetryClaim: true
                     });
+                if (dispatchResult.success) {
+                    await completeSumUpPrintIntentsForSentJob(eventId, job._id.toString());
+                }
                 return dispatchResult.success
                     ? { success: true } as const
                     : { success: false, error: "Invio stampa fallito" } as const;
@@ -2719,6 +2725,9 @@ export class PrinterService {
                 await this.updatePrintJobLog(job._id.toString(), dispatchResult.success
                     ? { status: "SENT", rawCapturePath: dispatchResult.rawCapturePath, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true }
                     : { status: "FAILED", errorMessage: dispatchResult.errorMessage, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true });
+                if (dispatchResult.success) {
+                    await completeSumUpPrintIntentsForSentJob(eventId, job._id.toString());
+                }
                 return dispatchResult.success
                     ? { success: true } as const
                     : { success: false, error: "Invio stampa fallito" } as const;
@@ -2746,6 +2755,9 @@ export class PrinterService {
             await this.updatePrintJobLog(job._id.toString(), dispatchResult.success
                 ? { status: "SENT", rawCapturePath: dispatchResult.rawCapturePath, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true }
                 : { status: "FAILED", errorMessage: dispatchResult.errorMessage, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true });
+            if (dispatchResult.success) {
+                await completeSumUpPrintIntentsForSentJob(eventId, job._id.toString());
+            }
             return dispatchResult.success
                 ? { success: true } as const
                 : { success: false, error: "Invio stampa fallito" } as const;

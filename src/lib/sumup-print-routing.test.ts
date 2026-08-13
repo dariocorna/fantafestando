@@ -1,20 +1,28 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
-const { orderExists, orderUpdateOne, printJobExists } = vi.hoisted(() => ({
+const { orderExists, orderUpdateOne, printJobExists, printJobFindOne } = vi.hoisted(() => ({
     orderExists: vi.fn(),
     orderUpdateOne: vi.fn(),
-    printJobExists: vi.fn()
+    printJobExists: vi.fn(),
+    printJobFindOne: vi.fn()
 }));
 
 vi.mock("@/models/Order", () => ({ default: { exists: orderExists, updateOne: orderUpdateOne } }));
-vi.mock("@/models/PrintJob", () => ({ default: { exists: printJobExists } }));
+vi.mock("@/models/PrintJob", () => ({
+    default: { exists: printJobExists, findOne: printJobFindOne }
+}));
 
-import { completeSumUpPrintIntentsIfSent, hasPendingSumUpPrintRouting } from "./sumup-print-routing";
+import {
+    completeSumUpPrintIntentsForSentJob,
+    completeSumUpPrintIntentsIfSent,
+    hasPendingSumUpPrintRouting
+} from "./sumup-print-routing";
 
 beforeEach(() => {
     orderExists.mockReset();
     orderUpdateOne.mockReset();
     printJobExists.mockReset();
+    printJobFindOne.mockReset();
 });
 
 test("finds pending SumUp orders using products directly or as menu components", async () => {
@@ -112,4 +120,29 @@ test("does not complete an order when no scoped intent was ever persisted", asyn
 
     expect(printJobExists).toHaveBeenCalledOnce();
     expect(orderUpdateOne).not.toHaveBeenCalled();
+});
+
+test("completes the parent order after a scoped intent reaches SENT", async () => {
+    const lean = vi.fn().mockResolvedValue({ orderId: "order-1" });
+    const select = vi.fn().mockReturnValue({ lean });
+    printJobFindOne.mockReturnValue({ select });
+    printJobExists
+        .mockResolvedValueOnce({ _id: "job-1" })
+        .mockResolvedValueOnce(null);
+    orderUpdateOne.mockResolvedValue({ matchedCount: 1 });
+
+    await expect(completeSumUpPrintIntentsForSentJob("event-1", "job-1")).resolves.toBe(true);
+
+    expect(printJobFindOne).toHaveBeenCalledWith({
+        _id: "job-1",
+        eventId: "event-1",
+        status: "SENT",
+        source: "ORDER",
+        idempotencyKey: /^SUMUP_CALLBACK:/
+    });
+    expect(select).toHaveBeenCalledWith("orderId");
+    expect(orderUpdateOne).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: "order-1", eventId: "event-1" }),
+        { $set: { sumupPrintCompletedAt: expect.any(Date) } }
+    );
 });
