@@ -77,6 +77,16 @@ describe("resetEventOrdersAction SumUp guard", () => {
                 }),
             ]),
         })
+        const paidClause = orderExistsMock.mock.calls[0][0].$or.find(
+            (clause: { status?: string }) => clause.status === "PAID"
+        )
+        expect(paidClause).toEqual({
+            status: "PAID",
+            $or: [
+                { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+            ]
+        })
         expect(orderFindMock).not.toHaveBeenCalled()
         expect(claimSumUpEventOperationMock).toHaveBeenCalledWith("event-1")
         expect(releaseSumUpEventOperationMock).toHaveBeenCalledWith("event-1", "event-operation-1")

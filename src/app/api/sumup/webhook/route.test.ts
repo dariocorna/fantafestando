@@ -15,6 +15,8 @@ const {
     claimCashSessionPaymentMock,
     refreshCashSessionPaymentClaimMock,
     releaseCashSessionPaymentClaimMock,
+    claimSumUpEventOperationMock,
+    releaseSumUpEventOperationMock,
 } = vi.hoisted(() => ({
     orderFindOneAndUpdateMock: vi.fn(),
     orderFindOneMock: vi.fn(),
@@ -29,6 +31,8 @@ const {
     claimCashSessionPaymentMock: vi.fn(),
     refreshCashSessionPaymentClaimMock: vi.fn(),
     releaseCashSessionPaymentClaimMock: vi.fn(),
+    claimSumUpEventOperationMock: vi.fn(),
+    releaseSumUpEventOperationMock: vi.fn(),
 }))
 
 vi.mock("@/lib/mongoose", () => ({ default: vi.fn() }))
@@ -55,6 +59,10 @@ vi.mock("@/lib/cash-session-payment-claim", () => ({
     claimCashSessionPayment: claimCashSessionPaymentMock,
     refreshCashSessionPaymentClaim: refreshCashSessionPaymentClaimMock,
     releaseCashSessionPaymentClaim: releaseCashSessionPaymentClaimMock,
+}))
+vi.mock("@/lib/sumup-event-operation", () => ({
+    claimSumUpEventOperation: claimSumUpEventOperationMock,
+    releaseSumUpEventOperation: releaseSumUpEventOperationMock,
 }))
 
 import { POST } from "./route"
@@ -122,6 +130,8 @@ describe("POST /api/sumup/webhook", () => {
         claimCashSessionPaymentMock.mockResolvedValue({ success: true, token: "session-claim", isTest: false })
         refreshCashSessionPaymentClaimMock.mockResolvedValue(true)
         releaseCashSessionPaymentClaimMock.mockResolvedValue(undefined)
+        claimSumUpEventOperationMock.mockResolvedValue("event-operation-1")
+        releaseSumUpEventOperationMock.mockResolvedValue(undefined)
         routeOrderToPrintersMock.mockResolvedValue([])
     })
 
@@ -151,6 +161,18 @@ describe("POST /api/sumup/webhook", () => {
             "pos-1",
             { idempotencyScope: "SUMUP_CALLBACK" },
         )
+        expect(claimSumUpEventOperationMock).toHaveBeenCalledWith("event-1", true)
+        expect(releaseSumUpEventOperationMock).toHaveBeenCalledWith("event-1", "event-operation-1")
+    })
+
+    test("keeps the webhook retryable while a storno owns the event", async () => {
+        claimSumUpEventOperationMock.mockResolvedValue(null)
+
+        const response = await POST(webhookRequest())
+
+        expect(response.status).toBe(503)
+        await expect(response.json()).resolves.toEqual({ error: "Print dispatch retry required" })
+        expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
     })
 
     test("verifies the callback from the order snapshot after its POS has been removed", async () => {

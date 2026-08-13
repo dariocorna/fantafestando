@@ -1922,6 +1922,7 @@ export class PrinterService {
         const idempotencyPrefix = options?.idempotencyScope?.trim()
             ? `${options.idempotencyScope.trim()}:${order._id.toString()}`
             : undefined;
+        if (idempotencyPrefix && order.status !== "PAID") return [];
         if (idempotencyPrefix && order.sumupPrintCompletedAt) return [];
         const printIntentKey = (suffix: string) => idempotencyPrefix
             ? `${idempotencyPrefix}:${suffix}`

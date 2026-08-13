@@ -11,7 +11,9 @@ const {
     isEncryptedSecretMock,
     transitionClaimedOrderStockMock,
     refundSumUpTransactionMock,
-    getSumUpRefundStateMock
+    getSumUpRefundStateMock,
+    claimSumUpEventOperationMock,
+    releaseSumUpEventOperationMock
 } = vi.hoisted(() => ({
     ensureAdminSessionMock: vi.fn(),
     getAdminContextEventIdMock: vi.fn(),
@@ -23,7 +25,9 @@ const {
     isEncryptedSecretMock: vi.fn(),
     transitionClaimedOrderStockMock: vi.fn(),
     refundSumUpTransactionMock: vi.fn(),
-    getSumUpRefundStateMock: vi.fn()
+    getSumUpRefundStateMock: vi.fn(),
+    claimSumUpEventOperationMock: vi.fn(),
+    releaseSumUpEventOperationMock: vi.fn()
 }))
 
 vi.mock("@/lib/authz", () => ({ ensureAdminSession: ensureAdminSessionMock }))
@@ -51,6 +55,10 @@ vi.mock("@/lib/sumup", () => ({
 }))
 vi.mock("@/lib/sumup-refund", () => ({ getSumUpRefundState: getSumUpRefundStateMock }))
 vi.mock("@/lib/cash-session-stock", () => ({ transitionClaimedOrderStock: transitionClaimedOrderStockMock }))
+vi.mock("@/lib/sumup-event-operation", () => ({
+    claimSumUpEventOperation: claimSumUpEventOperationMock,
+    releaseSumUpEventOperation: releaseSumUpEventOperationMock
+}))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
 import { stornoPaidOrderById } from "./actions"
@@ -94,6 +102,21 @@ describe("stornoPaidOrderById stock claim", () => {
         getAdminContextEventIdMock.mockResolvedValue("event-1")
         orderUpdateOneMock.mockResolvedValue({ matchedCount: 1 })
         getSumUpRefundStateMock.mockResolvedValue({ success: true, fullyRefunded: false })
+        claimSumUpEventOperationMock.mockResolvedValue("event-operation-1")
+        releaseSumUpEventOperationMock.mockResolvedValue(undefined)
+    })
+
+    test("does not start a refund while SumUp print dispatch owns the event", async () => {
+        claimSumUpEventOperationMock.mockResolvedValue(null)
+
+        await expect(stornoPaidOrderById("order-1")).resolves.toEqual({
+            success: false,
+            error: expect.stringMatching(/già in corso/i)
+        })
+
+        expect(orderFindOneAndUpdateMock).not.toHaveBeenCalled()
+        expect(refundSumUpTransactionMock).not.toHaveBeenCalled()
+        expect(releaseSumUpEventOperationMock).toHaveBeenCalledWith("event-1", null)
     })
 
     test("does not refund or restore stock when a session transition already claimed the order", async () => {

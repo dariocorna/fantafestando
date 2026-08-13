@@ -234,6 +234,20 @@ describe("PrinterService.routeOrderToPrinters", () => {
         expect(printComandaSpy).toHaveBeenCalledTimes(3);
     });
 
+    test("does not emit SumUp fulfillment tickets after the order is cancelled", async () => {
+        mockOrder(buildOrder("order-refunded", { status: "CANCELLED" }));
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        await expect(PrinterService.routeOrderToPrinters(
+            "order-refunded",
+            "pos-1",
+            { idempotencyScope: "SUMUP_CALLBACK" }
+        )).resolves.toEqual([]);
+
+        expect(printComandaSpy).not.toHaveBeenCalled();
+        expect(eventFindByIdMock).not.toHaveBeenCalled();
+    });
+
     test("skips all comanda copies when the category is marked as non printable", async () => {
         mockOrder(buildOrder("order-skip-single"));
         mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });

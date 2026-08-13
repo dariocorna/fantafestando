@@ -1,6 +1,7 @@
 import type { TransactionFull } from "@sumup/sdk"
 import { claimCashSessionPayment, refreshCashSessionPaymentClaim, releaseCashSessionPaymentClaim } from "@/lib/cash-session-payment-claim"
 import { PrinterService } from "@/lib/printer"
+import { claimSumUpEventOperation, releaseSumUpEventOperation } from "@/lib/sumup-event-operation"
 import { transitionSumUpOrderStock } from "@/lib/sumup-order-stock"
 import Order from "@/models/Order"
 
@@ -66,7 +67,12 @@ export function sumUpTransactionsMatch(left: VerifiedSumUpTransaction, right: Ve
 
 export async function dispatchSumUpOrderPrints(order: ClaimedSumUpOrder) {
     const orderId = order._id.toString()
+    const eventId = order.eventId?.toString()
+    let eventOperationToken: string | null = null
     try {
+        if (!eventId) return "RETRY_REQUIRED" as const
+        eventOperationToken = await claimSumUpEventOperation(eventId, true)
+        if (!eventOperationToken) return "RETRY_REQUIRED" as const
         const results = await PrinterService.routeOrderToPrinters(
             orderId,
             order.posDeviceId?.toString(),
@@ -77,6 +83,10 @@ export async function dispatchSumUpOrderPrints(order: ClaimedSumUpOrder) {
     } catch (error) {
         console.error("[SumUp] Errore durante il trigger delle stampe:", error)
         return "RETRY_REQUIRED" as const
+    } finally {
+        await releaseSumUpEventOperation(eventId || "", eventOperationToken).catch((error) => {
+            console.error("[SumUp] Event operation release error:", error)
+        })
     }
 }
 

@@ -466,8 +466,7 @@ export async function resetEventOrdersAction(formData: FormData): Promise<
                         $or: [
                             { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
                             { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
-                        ],
-                        "stornoMeta.refundStatus": { $ne: "DONE" }
+                        ]
                     },
                     {
                         status: "CANCELLED",
@@ -547,8 +546,13 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
     let leaseRequestedAt: Date | undefined
     let leaseOrderStatus: "PAID" | "CANCELLED" | undefined
     let leaseClaimed = false
+    let eventOperationToken: string | null = null
     try {
         await dbConnect()
+        eventOperationToken = await claimSumUpEventOperation(eventId)
+        if (!eventOperationToken) {
+            return { success: false, error: "Operazione bloccata: un pagamento SumUp o una modifica della festa è già in corso" }
+        }
         const now = new Date()
         leaseRequestedAt = now
         const staleBefore = new Date(now.getTime() - STORNO_LEASE_MS)
@@ -916,6 +920,10 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
         }
         console.error("Storno Order Error:", error)
         return { success: false, error: "Errore interno durante lo storno ordine" }
+    } finally {
+        await releaseSumUpEventOperation(eventId, eventOperationToken).catch((error) => {
+            console.error("Storno event operation release error:", error)
+        })
     }
 }
 
