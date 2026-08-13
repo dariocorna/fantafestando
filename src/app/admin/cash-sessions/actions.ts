@@ -136,7 +136,7 @@ async function hasUnrefundedSumUpOrders(sessionId: string) {
             },
             {
                 status: "CANCELLED",
-                sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                sumupRecoveryCancelledAt: { $exists: true, $ne: null },
                 "stornoMeta.refundStatus": { $ne: "DONE" }
             }
         ]

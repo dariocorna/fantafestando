@@ -60,7 +60,7 @@ describe("resetEventOrdersAction SumUp guard", () => {
             $or: expect.arrayContaining([
                 expect.objectContaining({ status: "PENDING", sumupCheckoutId: expect.any(Object) }),
                 expect.objectContaining({ status: "PAID" }),
-                expect.objectContaining({ status: "CANCELLED", sumupLateSuccessDetectedAt: expect.any(Object) }),
+                expect.objectContaining({ status: "CANCELLED", sumupRecoveryCancelledAt: expect.any(Object) }),
             ]),
         })
         expect(orderFindMock).not.toHaveBeenCalled()

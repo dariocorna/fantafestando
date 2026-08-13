@@ -462,7 +462,7 @@ export async function resetEventOrdersAction(formData: FormData): Promise<
                 },
                 {
                     status: "CANCELLED",
-                    sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                    sumupRecoveryCancelledAt: { $exists: true, $ne: null },
                     "stornoMeta.refundStatus": { $ne: "DONE" }
                 }
             ]

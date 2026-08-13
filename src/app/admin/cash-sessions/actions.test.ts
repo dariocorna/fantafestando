@@ -361,7 +361,7 @@ describe("setCashSessionTestAction", () => {
                     },
                     {
                         status: "CANCELLED",
-                        sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                        sumupRecoveryCancelledAt: { $exists: true, $ne: null },
                         "stornoMeta.refundStatus": { $ne: "DONE" }
                     }
                 ]
@@ -407,7 +407,7 @@ describe("setCashSessionTestAction", () => {
             $or: expect.arrayContaining([
                 {
                     status: "CANCELLED",
-                    sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                    sumupRecoveryCancelledAt: { $exists: true, $ne: null },
                     "stornoMeta.refundStatus": { $ne: "DONE" }
                 }
             ])
@@ -443,7 +443,7 @@ describe("deleteCashSessionAction", () => {
             $or: expect.arrayContaining([
                 {
                     status: "CANCELLED",
-                    sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                    sumupRecoveryCancelledAt: { $exists: true, $ne: null },
                     "stornoMeta.refundStatus": { $ne: "DONE" }
                 }
             ])
