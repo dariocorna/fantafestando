@@ -74,9 +74,8 @@ export async function dispatchSumUpOrderPrints(order: ClaimedSumUpOrder) {
         )
         return results?.includes("RECOVERY_PENDING") ? "RECOVERY_PENDING" as const : "COMPLETED" as const
     } catch (error) {
-        // Il pagamento e' gia' autorevole: il monitor stampa mantiene visibile il guasto.
         console.error("[SumUp] Errore durante il trigger delle stampe:", error)
-        return "COMPLETED" as const
+        return "RETRY_REQUIRED" as const
     }
 }
 
@@ -165,7 +164,10 @@ export async function finalizeClaimedSumUpOrder(params: {
             return { success: false, error: "SumUp claim lost before payment completion", httpStatus: 409 }
         }
 
-        await dispatchSumUpOrderPrints({ ...order, status: "PAID" })
+        const printStatus = await dispatchSumUpOrderPrints({ ...order, status: "PAID" })
+        if (printStatus === "RETRY_REQUIRED") {
+            return { success: false, error: "Print dispatch retry required", httpStatus: 503 }
+        }
         return { success: true, status: "PAID" }
     } finally {
         await releaseCashSessionPaymentClaim(cashSessionId || "", paymentClaimToken).catch((error) => {

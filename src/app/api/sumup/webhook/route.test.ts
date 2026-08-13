@@ -191,6 +191,19 @@ describe("POST /api/sumup/webhook", () => {
         )
     })
 
+    test("keeps webhook retries active when print dispatch fails before persisting an intent", async () => {
+        routeOrderToPrintersMock.mockRejectedValue(new Error("database unavailable"))
+
+        const response = await POST(webhookRequest())
+
+        expect(response.status).toBe(503)
+        await expect(response.json()).resolves.toEqual({ error: "Print dispatch retry required" })
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            { _id: "order-1", status: "PENDING", sumupWebhookClaimToken: expect.any(String) },
+            expect.objectContaining({ $set: expect.objectContaining({ status: "PAID" }) }),
+        )
+    })
+
     test("uses simple_status as authoritative and rolls back a refunded payment", async () => {
         getByClientMock.mockResolvedValue({
             success: true,
