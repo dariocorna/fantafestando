@@ -369,14 +369,14 @@ describe("PrinterService.printComanda connection retry", () => {
         );
     });
 
-    test("does not dispatch an idempotent intent when its log cannot be persisted", async () => {
+    test("requests a callback retry when an idempotent intent cannot be persisted", async () => {
         vi.spyOn(console, "error").mockImplementation(() => undefined);
         printJobCreateMock.mockRejectedValueOnce(new Error("database unavailable"));
 
         await expect(PrinterService.printComanda({
             ...baseJob(),
             idempotencyKey: "SUMUP_CALLBACK:order-1:cashier-summary"
-        }, 1)).resolves.toBe(false);
+        }, 1)).resolves.toBe("RETRY_REQUIRED");
 
         expect(isPrinterConnectedMock).not.toHaveBeenCalled();
         expect(executeMock).not.toHaveBeenCalled();

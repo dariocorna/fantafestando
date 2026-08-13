@@ -192,7 +192,7 @@ describe("POST /api/sumup/webhook", () => {
     })
 
     test("keeps webhook retries active when print dispatch fails before persisting an intent", async () => {
-        routeOrderToPrintersMock.mockRejectedValue(new Error("database unavailable"))
+        routeOrderToPrintersMock.mockResolvedValue(["RETRY_REQUIRED"])
 
         const response = await POST(webhookRequest())
 

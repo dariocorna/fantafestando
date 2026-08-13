@@ -180,7 +180,7 @@ type PrintDispatchAttemptResult =
         automaticRetryCount: number;
     };
 
-type PrintDispatchResult = boolean | "RECOVERY_PENDING";
+type PrintDispatchResult = boolean | "RECOVERY_PENDING" | "RETRY_REQUIRED";
 
 type BufferJsonLike = {
     type?: unknown;
@@ -1072,7 +1072,7 @@ export class PrinterService {
         heldSince?: Date;
         liveClaimExpiresAt?: Date;
         idempotencyKey?: string;
-    }): Promise<{ id?: string; created: boolean; retryClaimedAt?: Date; recoveryPending?: boolean }> {
+    }): Promise<{ id?: string; created: boolean; retryClaimedAt?: Date; recoveryPending?: boolean; persistenceFailed?: boolean }> {
         if (!params.eventId) return { created: true };
 
         const retryClaimedAt = params.idempotencyKey?.startsWith("SUMUP_CALLBACK:") && !params.queueRecoverable
@@ -1153,7 +1153,7 @@ export class PrinterService {
                     ).select("_id").lean() as ({ _id: { toString(): string } } | null);
                 } catch (reclaimError) {
                     console.error("Unable to reclaim persisted SumUp print intent:", reclaimError);
-                    return { created: true };
+                    return { created: false, persistenceFailed: true };
                 }
 
                 if (reclaimed) {
@@ -1174,7 +1174,7 @@ export class PrinterService {
                     : { created: false };
             }
             console.error("Unable to persist print job log:", error);
-            return { created: true };
+            return { created: false, persistenceFailed: true };
         }
     }
 
@@ -1526,7 +1526,12 @@ export class PrinterService {
             document: document as unknown as Record<string, unknown>,
             liveClaimExpiresAt: kitchenLease?.expiresAt
         });
-        if (!log.created) return log.recoveryPending ? "RECOVERY_PENDING" : true;
+        if (!log.created) {
+            if (log.persistenceFailed) {
+                return job.idempotencyKey?.startsWith("SUMUP_CALLBACK:") ? "RETRY_REQUIRED" : false;
+            }
+            return log.recoveryPending ? "RECOVERY_PENDING" : true;
+        }
         const logId = log.id;
         if (job.idempotencyKey && !logId) return false;
 
@@ -1817,7 +1822,12 @@ export class PrinterService {
             copies,
             document
         });
-        if (!log.created) return log.recoveryPending ? "RECOVERY_PENDING" : true;
+        if (!log.created) {
+            if (log.persistenceFailed) {
+                return job.idempotencyKey?.startsWith("SUMUP_CALLBACK:") ? "RETRY_REQUIRED" : false;
+            }
+            return log.recoveryPending ? "RECOVERY_PENDING" : true;
+        }
         const logId = log.id;
         if (job.idempotencyKey && !logId) return false;
 

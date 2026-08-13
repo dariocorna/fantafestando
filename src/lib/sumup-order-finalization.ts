@@ -72,6 +72,7 @@ export async function dispatchSumUpOrderPrints(order: ClaimedSumUpOrder) {
             order.posDeviceId?.toString(),
             { idempotencyScope: "SUMUP_CALLBACK" },
         )
+        if (results?.includes("RETRY_REQUIRED")) return "RETRY_REQUIRED" as const
         return results?.includes("RECOVERY_PENDING") ? "RECOVERY_PENDING" as const : "COMPLETED" as const
     } catch (error) {
         console.error("[SumUp] Errore durante il trigger delle stampe:", error)
