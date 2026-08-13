@@ -51,7 +51,7 @@ interface SortableCategoryTableProps {
     eventId: string;
     printers: { id: string; name: string; ip: string; port?: number }[];
     updateAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>;
-    deleteAction: (formData: FormData) => Promise<void>;
+    deleteAction: (formData: FormData) => Promise<unknown>;
 }
 
 export function SortableCategoryTable({

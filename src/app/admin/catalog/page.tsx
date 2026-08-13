@@ -53,6 +53,9 @@ import {
     type MenuComponentInput,
 } from "@/lib/fixed-menu";
 import { ProductTable } from "./product-table";
+import { hasPendingSumUpPrintRouting } from "@/lib/sumup-print-routing";
+
+const PENDING_SUMUP_CATALOG_ERROR = "Operazione bloccata: un pagamento SumUp in attesa usa questi prodotti. Completa o recupera il pagamento prima di modificare il routing di stampa.";
 
 function getReferencedId(value: unknown): string | undefined {
     if (!value) return undefined;
@@ -572,6 +575,11 @@ export default async function AdminCatalog() {
         if (!id || !scopedEventId) return;
         if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
         await dbConnect();
+        const categoryProductIds = (await Product.distinct("_id", { eventId: scopedEventId, categoryId: id }))
+            .map((value: unknown) => String(value));
+        if (await hasPendingSumUpPrintRouting(scopedEventId, categoryProductIds)) {
+            return { error: PENDING_SUMUP_CATALOG_ERROR };
+        }
         const deletedCategory = await Category.findOneAndDelete({ _id: id, eventId: scopedEventId }).select("_id").lean();
         if (!deletedCategory) return;
         // Also delete products in this category to keep consistency
@@ -622,6 +630,11 @@ export default async function AdminCatalog() {
         if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return { error: "Festa non valida" };
 
         await dbConnect();
+        const categoryProductIds = (await Product.distinct("_id", { eventId: scopedEventId, categoryId: id }))
+            .map((value: unknown) => String(value));
+        if (await hasPendingSumUpPrintRouting(scopedEventId, categoryProductIds)) {
+            return { error: PENDING_SUMUP_CATALOG_ERROR };
+        }
         if (printerId) {
             const printer = await Printer.findOne({ _id: printerId, eventId: scopedEventId, type: "KITCHEN" }).select("_id").lean();
             if (!printer) return { error: "Stampante reparto non valida" };
@@ -655,6 +668,9 @@ export default async function AdminCatalog() {
         if (!id || !scopedEventId) return;
         if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
         await dbConnect();
+        if (await hasPendingSumUpPrintRouting(scopedEventId, [id])) {
+            return { error: PENDING_SUMUP_CATALOG_ERROR };
+        }
         await Product.findOneAndDelete({ _id: id, eventId: scopedEventId });
         revalidateCatalogSurfaces();
     }
@@ -668,6 +684,9 @@ export default async function AdminCatalog() {
         if (!id || !currentEventId) return { error: "Dati prodotto non validi" };
 
         await dbConnect();
+        if (await hasPendingSumUpPrintRouting(currentEventId, [id])) {
+            return { error: PENDING_SUMUP_CATALOG_ERROR };
+        }
         const existingProduct = await Product.findOne({ _id: id, eventId: currentEventId }).select("kind").lean() as ({ kind?: string } | null);
         if (!existingProduct) {
             return { error: "Prodotto non trovato" };
@@ -750,6 +769,9 @@ export default async function AdminCatalog() {
         }
 
         await dbConnect();
+        if (await hasPendingSumUpPrintRouting(currentEventId, productIds)) {
+            return { error: PENDING_SUMUP_CATALOG_ERROR };
+        }
         await Product.updateMany(
             {
                 eventId: currentEventId,
