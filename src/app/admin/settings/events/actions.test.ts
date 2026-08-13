@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
     authorize: vi.fn(),
     dbConnect: vi.fn(),
     revalidatePath: vi.fn(),
+    orderExists: vi.fn(),
     deletePrintJobs: vi.fn(),
     deleteCashSessions: vi.fn(),
     deleteOrders: vi.fn(),
@@ -26,7 +27,7 @@ vi.mock("@/lib/mongoose", () => ({ default: mocks.dbConnect }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("@/models/PrintJob", () => ({ default: { deleteMany: mocks.deletePrintJobs } }));
 vi.mock("@/models/CashSession", () => ({ default: { deleteMany: mocks.deleteCashSessions } }));
-vi.mock("@/models/Order", () => ({ default: { deleteMany: mocks.deleteOrders } }));
+vi.mock("@/models/Order", () => ({ default: { deleteMany: mocks.deleteOrders, exists: mocks.orderExists } }));
 vi.mock("@/models/OrderCounter", () => ({ default: { deleteMany: mocks.deleteOrderCounters } }));
 vi.mock("@/models/PosDevice", () => ({ default: { deleteMany: mocks.deletePosDevices } }));
 vi.mock("@/models/Peripheral", () => ({ default: { deleteMany: mocks.deletePeripherals } }));
@@ -48,6 +49,7 @@ describe("event lifecycle actions", () => {
         vi.clearAllMocks();
         mocks.authorize.mockResolvedValue(null);
         mocks.dbConnect.mockResolvedValue(undefined);
+        mocks.orderExists.mockResolvedValue(false);
     });
 
     test("preserves the complete event deletion cascade", async () => {
@@ -93,5 +95,43 @@ describe("event lifecycle actions", () => {
 
         expect(mocks.dbConnect).not.toHaveBeenCalled();
         expect(mocks.deleteEvent).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ["archive", archiveEventAction],
+        ["delete", deleteEventAction]
+    ] as const)("blocks event %s while SumUp payments are unresolved", async (_operation, action) => {
+        mocks.orderExists.mockResolvedValue(true);
+        const formData = new FormData();
+        formData.set("eventId", "event-4");
+
+        await expect(action(formData)).resolves.toEqual({
+            error: expect.stringMatching(/pagamenti SumUp in attesa o non ancora rimborsati/i)
+        });
+
+        expect(mocks.orderExists).toHaveBeenCalledWith({
+            eventId: "event-4",
+            $or: [
+                {
+                    status: "PENDING",
+                    sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+                },
+                {
+                    status: "PAID",
+                    $or: [
+                        { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                        { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                    ]
+                },
+                {
+                    status: "CANCELLED",
+                    sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                    "stornoMeta.refundStatus": { $ne: "DONE" }
+                }
+            ]
+        });
+        expect(mocks.archiveEvent).not.toHaveBeenCalled();
+        expect(mocks.deleteEvent).not.toHaveBeenCalled();
+        expect(mocks.deleteOrders).not.toHaveBeenCalled();
     });
 });

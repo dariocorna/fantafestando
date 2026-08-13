@@ -26,6 +26,32 @@ function escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const BLOCKING_SUMUP_EVENT_ERROR = "Operazione bloccata: la festa contiene pagamenti SumUp in attesa o non ancora rimborsati.";
+
+async function hasBlockingSumUpPayments(eventId: string) {
+    return Boolean(await Order.exists({
+        eventId,
+        $or: [
+            {
+                status: "PENDING",
+                sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+            },
+            {
+                status: "PAID",
+                $or: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            },
+            {
+                status: "CANCELLED",
+                sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                "stornoMeta.refundStatus": { $ne: "DONE" }
+            }
+        ]
+    }));
+}
+
 export async function createEventAction(formData: FormData) {
     const authError = await requireAdminAuthorization();
     if (authError) return authError;
@@ -184,6 +210,9 @@ export async function archiveEventAction(formData: FormData) {
     if (!eventId) return;
 
     await dbConnect();
+    if (await hasBlockingSumUpPayments(eventId)) {
+        return { error: BLOCKING_SUMUP_EVENT_ERROR };
+    }
     await Event.findByIdAndUpdate(eventId, {
         archived: true,
         active: false
@@ -199,6 +228,9 @@ export async function deleteEventAction(formData: FormData) {
     if (!eventId) return;
 
     await dbConnect();
+    if (await hasBlockingSumUpPayments(eventId)) {
+        return { error: BLOCKING_SUMUP_EVENT_ERROR };
+    }
     await PrintJob.deleteMany({ eventId });
     await CashSession.deleteMany({ eventId });
     await Order.deleteMany({ eventId });
