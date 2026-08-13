@@ -361,6 +361,40 @@ describe("POST /api/sumup/webhook", () => {
         expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
     })
 
+    test("resolves a recovery cancellation after an authoritative negative transaction", async () => {
+        const recoveredCancellation = {
+            ...pendingOrder,
+            status: "CANCELLED" as const,
+            sumupCheckoutId: "initiating:order-1",
+            sumupRecoveryCancelledAt: new Date("2026-08-12T11:20:00Z"),
+        }
+        const failedTransaction = {
+            ...successfulTransaction,
+            status: "FAILED",
+            simple_status: "FAILED",
+        }
+        orderFindOneMock
+            .mockReturnValueOnce(selectLean(null))
+            .mockReturnValueOnce(selectLean(recoveredCancellation))
+        getByForeignMock.mockResolvedValue({ success: true, transaction: failedTransaction })
+        getByClientMock.mockResolvedValue({ success: true, transaction: failedTransaction })
+
+        const response = await POST(webhookRequest("failed", "order-1"))
+
+        expect(response.status).toBe(200)
+        await expect(response.json()).resolves.toEqual({ success: true, message: "Already cancelled" })
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            { _id: "order-1", status: "CANCELLED", sumupRecoveryCancelledAt: { $exists: true } },
+            {
+                $set: {
+                    sumupCheckoutId: "client-tx-1",
+                    sumupRecoveryResolvedAt: expect.any(Date),
+                },
+                $unset: { sumupRefundCredentials: 1 },
+            },
+        )
+    })
+
     test("acknowledges a duplicate late callback after its payment was refunded", async () => {
         orderFindOneMock.mockReturnValue(selectLean({
             ...pendingOrder,

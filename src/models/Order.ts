@@ -84,6 +84,7 @@ export interface IOrder extends Document {
     };
     sumupInitiatedAt?: Date;
     sumupRecoveryCancelledAt?: Date;
+    sumupRecoveryResolvedAt?: Date;
     sumupLateSuccessDetectedAt?: Date;
     sumupWebhookClaimToken?: string;
     sumupWebhookClaimedAt?: Date;
@@ -239,6 +240,7 @@ const OrderSchema = new Schema<IOrder>({
     },
     sumupInitiatedAt: { type: Date },
     sumupRecoveryCancelledAt: { type: Date },
+    sumupRecoveryResolvedAt: { type: Date },
     sumupLateSuccessDetectedAt: { type: Date },
     sumupWebhookClaimToken: { type: String },
     sumupWebhookClaimedAt: { type: Date },

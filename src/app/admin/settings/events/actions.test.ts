@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
     dbConnect: vi.fn(),
     revalidatePath: vi.fn(),
     orderExists: vi.fn(),
+    claimSumUpEventOperation: vi.fn(),
+    releaseSumUpEventOperation: vi.fn(),
     deletePrintJobs: vi.fn(),
     deleteCashSessions: vi.fn(),
     deleteOrders: vi.fn(),
@@ -24,6 +26,10 @@ vi.mock("../action-context", () => ({
 }));
 
 vi.mock("@/lib/mongoose", () => ({ default: mocks.dbConnect }));
+vi.mock("@/lib/sumup-event-operation", () => ({
+    claimSumUpEventOperation: mocks.claimSumUpEventOperation,
+    releaseSumUpEventOperation: mocks.releaseSumUpEventOperation
+}));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("@/models/PrintJob", () => ({ default: { deleteMany: mocks.deletePrintJobs } }));
 vi.mock("@/models/CashSession", () => ({ default: { deleteMany: mocks.deleteCashSessions } }));
@@ -37,8 +43,8 @@ vi.mock("@/models/Ingredient", () => ({ default: { deleteMany: mocks.deleteIngre
 vi.mock("@/models/Category", () => ({ default: { deleteMany: mocks.deleteCategories } }));
 vi.mock("@/models/Event", () => ({
     default: {
-        findByIdAndDelete: mocks.deleteEvent,
-        findByIdAndUpdate: mocks.archiveEvent,
+        findOneAndDelete: mocks.deleteEvent,
+        findOneAndUpdate: mocks.archiveEvent,
     }
 }));
 
@@ -50,6 +56,7 @@ describe("event lifecycle actions", () => {
         mocks.authorize.mockResolvedValue(null);
         mocks.dbConnect.mockResolvedValue(undefined);
         mocks.orderExists.mockResolvedValue(false);
+        mocks.claimSumUpEventOperation.mockResolvedValue("event-claim-1");
     });
 
     test("preserves the complete event deletion cascade", async () => {
@@ -69,7 +76,10 @@ describe("event lifecycle actions", () => {
         expect(mocks.deleteProducts).toHaveBeenCalledWith(scope);
         expect(mocks.deleteIngredients).toHaveBeenCalledWith(scope);
         expect(mocks.deleteCategories).toHaveBeenCalledWith(scope);
-        expect(mocks.deleteEvent).toHaveBeenCalledWith("event-1");
+        expect(mocks.deleteEvent).toHaveBeenCalledWith({
+            _id: "event-1",
+            "sumupOperationClaim.token": "event-claim-1"
+        });
         expect(mocks.revalidatePath).toHaveBeenCalledWith("/admin/settings/events");
     });
 
@@ -79,10 +89,10 @@ describe("event lifecycle actions", () => {
 
         await archiveEventAction(formData);
 
-        expect(mocks.archiveEvent).toHaveBeenCalledWith("event-2", {
-            archived: true,
-            active: false
-        });
+        expect(mocks.archiveEvent).toHaveBeenCalledWith(
+            { _id: "event-2", "sumupOperationClaim.token": "event-claim-1" },
+            { $set: { archived: true, active: false }, $unset: { sumupOperationClaim: 1 } }
+        );
         expect(mocks.revalidatePath).toHaveBeenCalledWith("/admin/settings/events");
     });
 
@@ -126,6 +136,7 @@ describe("event lifecycle actions", () => {
                 {
                     status: "CANCELLED",
                     sumupRecoveryCancelledAt: { $exists: true, $ne: null },
+                    sumupRecoveryResolvedAt: { $exists: false },
                     "stornoMeta.refundStatus": { $ne: "DONE" }
                 }
             ]

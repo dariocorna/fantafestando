@@ -56,6 +56,19 @@ async function handleRecoveredCancellation(
         return NextResponse.json({ success: true, message: "Late payment already refunded" })
     }
     if (outcome === "FAILED") {
+        const resolved = await Order.updateOne(
+            { _id: order._id, status: "CANCELLED", sumupRecoveryCancelledAt: { $exists: true } },
+            {
+                $set: {
+                    sumupCheckoutId: clientTransactionId,
+                    sumupRecoveryResolvedAt: new Date(),
+                },
+                $unset: { sumupRefundCredentials: 1 },
+            },
+        )
+        if (!resolved.acknowledged || resolved.matchedCount !== 1) {
+            return NextResponse.json({ error: "Negative SumUp reconciliation conflict" }, { status: 409 })
+        }
         return NextResponse.json({ success: true, message: "Already cancelled" })
     }
     if (outcome === "PENDING") {

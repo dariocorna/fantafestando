@@ -16,7 +16,9 @@ const {
     transitionSumUpOrderStockMock,
     claimCashSessionPaymentMock,
     refreshCashSessionPaymentClaimMock,
-    releaseCashSessionPaymentClaimMock
+    releaseCashSessionPaymentClaimMock,
+    claimSumUpEventOperationMock,
+    releaseSumUpEventOperationMock
 } = vi.hoisted(() => ({
     ensurePosAccessMock: vi.fn(),
     posDeviceFindOneMock: vi.fn(),
@@ -33,7 +35,9 @@ const {
     transitionSumUpOrderStockMock: vi.fn(),
     claimCashSessionPaymentMock: vi.fn(),
     refreshCashSessionPaymentClaimMock: vi.fn(),
-    releaseCashSessionPaymentClaimMock: vi.fn()
+    releaseCashSessionPaymentClaimMock: vi.fn(),
+    claimSumUpEventOperationMock: vi.fn(),
+    releaseSumUpEventOperationMock: vi.fn()
 }))
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
@@ -54,6 +58,10 @@ vi.mock("@/models/Event", () => ({ default: {} }))
 vi.mock("@/lib/printer", () => ({ PrinterService: {} }))
 vi.mock("@/lib/pizza-ticket", () => ({ resolveDishTicketsForCart: vi.fn() }))
 vi.mock("@/lib/sumup", () => ({ createSumUpCheckout: createSumUpCheckoutMock }))
+vi.mock("@/lib/sumup-event-operation", () => ({
+    claimSumUpEventOperation: claimSumUpEventOperationMock,
+    releaseSumUpEventOperation: releaseSumUpEventOperationMock
+}))
 vi.mock("@/lib/secrets", () => ({
     decryptSecret: decryptSecretMock,
     encryptSecret: encryptSecretMock,
@@ -164,6 +172,8 @@ describe("triggerSumUpPayment", () => {
         claimCashSessionPaymentMock.mockResolvedValue({ success: true, token: "claim-1", isTest: false })
         refreshCashSessionPaymentClaimMock.mockResolvedValue(true)
         releaseCashSessionPaymentClaimMock.mockResolvedValue(undefined)
+        claimSumUpEventOperationMock.mockResolvedValue("event-claim-1")
+        releaseSumUpEventOperationMock.mockResolvedValue(undefined)
         planStockAdjustmentsForPaymentMock.mockResolvedValue({
             success: true,
             adjustments: [{ entityType: "PRODUCT", entityId: "product-1", quantity: 1 }]
@@ -243,6 +253,28 @@ describe("triggerSumUpPayment", () => {
             affiliateKey: "affiliate-key-1",
             foreignTransactionId: "order-1"
         })
+        expect(claimSumUpEventOperationMock).toHaveBeenCalledWith("event-1", true)
+        expect(orderUpdateOneMock).toHaveBeenNthCalledWith(2, {
+            _id: "order-1",
+            eventId: "event-1",
+            posDeviceId: "pos-1",
+            status: "PENDING",
+            sumupCheckoutId: "initiating:order-1"
+        }, { $set: { sumupCheckoutId: "client-tx-1" } })
+        expect(releaseSumUpEventOperationMock).toHaveBeenCalledWith("event-1", "event-claim-1")
+    })
+
+    test("does not call SumUp while the event lifecycle owns the lease", async () => {
+        posDeviceFindOneMock
+            .mockReturnValueOnce(populatedCapabilities())
+            .mockReturnValueOnce(populatedSumUpTerminal())
+        claimSumUpEventOperationMock.mockResolvedValue(null)
+
+        const result = await triggerSumUpPayment(12.5, "event-1", "pos-1", "order-1")
+
+        expect(result).toEqual({ success: false, error: "La festa è in fase di archiviazione o eliminazione" })
+        expect(orderUpdateOneMock).not.toHaveBeenCalled()
+        expect(createSumUpCheckoutMock).not.toHaveBeenCalled()
     })
 
     test("rejects a terminal missing the new SumUp configuration shape", async () => {
@@ -363,6 +395,8 @@ describe("createOrder SumUp lifecycle", () => {
         claimCashSessionPaymentMock.mockResolvedValue({ success: true, token: "claim-1", isTest: false })
         refreshCashSessionPaymentClaimMock.mockResolvedValue(true)
         releaseCashSessionPaymentClaimMock.mockResolvedValue(undefined)
+        claimSumUpEventOperationMock.mockResolvedValue("event-claim-1")
+        releaseSumUpEventOperationMock.mockResolvedValue(undefined)
         planStockAdjustmentsForPaymentMock.mockResolvedValue({
             success: true,
             adjustments: [{ entityType: "PRODUCT", entityId: "product-1", quantity: 1 }]
@@ -496,6 +530,8 @@ describe("completePendingOrderPayment SumUp lifecycle", () => {
         claimCashSessionPaymentMock.mockResolvedValue({ success: true, token: "claim-1", isTest: false })
         refreshCashSessionPaymentClaimMock.mockResolvedValue(true)
         releaseCashSessionPaymentClaimMock.mockResolvedValue(undefined)
+        claimSumUpEventOperationMock.mockResolvedValue("event-claim-1")
+        releaseSumUpEventOperationMock.mockResolvedValue(undefined)
         planStockAdjustmentsForPaymentMock.mockResolvedValue({
             success: true,
             adjustments: [{ entityType: "PRODUCT", entityId: "product-1", quantity: 1 }]

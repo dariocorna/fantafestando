@@ -11,6 +11,7 @@ import Event from "@/models/Event"
 import { revalidatePath } from "next/cache"
 import { PrinterService } from "@/lib/printer"
 import { createSumUpCheckout } from "@/lib/sumup"
+import { claimSumUpEventOperation, releaseSumUpEventOperation } from "@/lib/sumup-event-operation"
 import { decryptSecret } from "@/lib/secrets"
 import { buildSumUpRefundCredentialsSnapshot } from "@/lib/sumup-order-credentials"
 import { getOrderCodeFromOrder, parseOrderNumberInput } from "@/lib/order-code"
@@ -1553,7 +1554,7 @@ export async function createOrder(data: {
                 order._id.toString()
             )
             if (!sumupResult.success || !sumupResult.checkoutId) {
-                if (sumupResult.paymentUncertain) {
+                if ("paymentUncertain" in sumupResult && sumupResult.paymentUncertain) {
                     await releaseCashSessionPaymentClaim(paymentClaimSessionId || "", paymentClaimToken)
                     paymentClaimToken = undefined
                     return {
@@ -1606,7 +1607,7 @@ export async function createOrder(data: {
                     _id: order._id,
                     eventId: data.eventId,
                     status: "PENDING",
-                    sumupCheckoutId: initiationMarker
+                    sumupCheckoutId: { $in: [initiationMarker, sumupResult.checkoutId] }
                 },
                 { $set: { sumupCheckoutId: sumupResult.checkoutId } }
             )
@@ -1684,6 +1685,8 @@ export async function createOrder(data: {
 }
 
 export async function triggerSumUpPayment(amount: number, eventId: string, posDeviceId: string | undefined, orderId: string) {
+    let eventOperationToken: string | null = null
+    let checkoutAccepted = false
     try {
         const sessionCheck = await ensurePosActionSession()
         if (!sessionCheck.success) return sessionCheck
@@ -1751,6 +1754,10 @@ export async function triggerSumUpPayment(amount: number, eventId: string, posDe
         if (!refundCredentials) {
             return { success: false, error: "Configurazione SumUp mancante nella periferica associata alla cassa" }
         }
+        eventOperationToken = await claimSumUpEventOperation(eventId, true)
+        if (!eventOperationToken) {
+            return { success: false, error: "La festa è in fase di archiviazione o eliminazione" }
+        }
         const snapshotSaved = await Order.updateOne(
             {
                 _id: normalizedOrderId,
@@ -1798,10 +1805,36 @@ export async function triggerSumUpPayment(amount: number, eventId: string, posDe
             }
         }
 
+        checkoutAccepted = true
+        const checkoutLinked = await Order.updateOne(
+            {
+                _id: normalizedOrderId,
+                eventId,
+                posDeviceId,
+                status: "PENDING",
+                sumupCheckoutId: `initiating:${normalizedOrderId}`
+            },
+            { $set: { sumupCheckoutId: result.id } }
+        )
+        if (!checkoutLinked.acknowledged || checkoutLinked.matchedCount !== 1) {
+            return {
+                success: false,
+                error: "Checkout SumUp avviato ma non collegato all'ordine",
+                paymentUncertain: true
+            }
+        }
         return { success: true, checkoutId: result.id }
     } catch (error) {
         console.error("SumUp Context Error:", error)
-        return { success: false, error: "Errore durante l'inizializzazione del pagamento" }
+        return {
+            success: false,
+            error: "Errore durante l'inizializzazione del pagamento",
+            ...(checkoutAccepted ? { paymentUncertain: true } : {})
+        }
+    } finally {
+        await releaseSumUpEventOperation(eventId, eventOperationToken).catch((error) => {
+            console.error("SumUp event operation release error:", error)
+        })
     }
 }
 
@@ -2592,7 +2625,7 @@ export async function completePendingOrderPayment(data: {
                 order._id.toString()
             )
             if (!sumupResult.success || !sumupResult.checkoutId) {
-                if (sumupResult.paymentUncertain) {
+                if ("paymentUncertain" in sumupResult && sumupResult.paymentUncertain) {
                     await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
                     paymentClaimToken = undefined
                     return {
@@ -2642,7 +2675,12 @@ export async function completePendingOrderPayment(data: {
             }
 
             const linked = await Order.updateOne(
-                { _id: order._id, eventId: data.eventId, status: "PENDING", sumupCheckoutId: initiationMarker },
+                {
+                    _id: order._id,
+                    eventId: data.eventId,
+                    status: "PENDING",
+                    sumupCheckoutId: { $in: [initiationMarker, sumupResult.checkoutId] }
+                },
                 { $set: { sumupCheckoutId: sumupResult.checkoutId } }
             )
             await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)

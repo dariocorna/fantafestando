@@ -362,6 +362,7 @@ describe("setCashSessionTestAction", () => {
                     {
                         status: "CANCELLED",
                         sumupRecoveryCancelledAt: { $exists: true, $ne: null },
+                        sumupRecoveryResolvedAt: { $exists: false },
                         "stornoMeta.refundStatus": { $ne: "DONE" }
                     }
                 ]
@@ -408,6 +409,7 @@ describe("setCashSessionTestAction", () => {
                 {
                     status: "CANCELLED",
                     sumupRecoveryCancelledAt: { $exists: true, $ne: null },
+                    sumupRecoveryResolvedAt: { $exists: false },
                     "stornoMeta.refundStatus": { $ne: "DONE" }
                 }
             ])
@@ -444,6 +446,7 @@ describe("deleteCashSessionAction", () => {
                 {
                     status: "CANCELLED",
                     sumupRecoveryCancelledAt: { $exists: true, $ne: null },
+                    sumupRecoveryResolvedAt: { $exists: false },
                     "stornoMeta.refundStatus": { $ne: "DONE" }
                 }
             ])

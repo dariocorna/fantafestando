@@ -21,6 +21,7 @@ import PrintJob from "@/models/PrintJob";
 import Product from "@/models/Product";
 import { revalidatePath } from "next/cache";
 import { requireAdminAuthorization } from "../action-context";
+import { claimSumUpEventOperation, releaseSumUpEventOperation } from "@/lib/sumup-event-operation";
 
 function escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -46,6 +47,7 @@ async function hasBlockingSumUpPayments(eventId: string) {
             {
                 status: "CANCELLED",
                 sumupRecoveryCancelledAt: { $exists: true, $ne: null },
+                sumupRecoveryResolvedAt: { $exists: false },
                 "stornoMeta.refundStatus": { $ne: "DONE" }
             }
         ]
@@ -210,13 +212,18 @@ export async function archiveEventAction(formData: FormData) {
     if (!eventId) return;
 
     await dbConnect();
+    const operationToken = await claimSumUpEventOperation(eventId);
+    if (!operationToken) {
+        return { error: "Operazione bloccata: un pagamento SumUp o una modifica della festa è già in corso." };
+    }
     if (await hasBlockingSumUpPayments(eventId)) {
+        await releaseSumUpEventOperation(eventId, operationToken);
         return { error: BLOCKING_SUMUP_EVENT_ERROR };
     }
-    await Event.findByIdAndUpdate(eventId, {
-        archived: true,
-        active: false
-    });
+    await Event.findOneAndUpdate(
+        { _id: eventId, "sumupOperationClaim.token": operationToken },
+        { $set: { archived: true, active: false }, $unset: { sumupOperationClaim: 1 } }
+    );
     revalidatePath("/admin/settings/events");
 }
 
@@ -228,7 +235,12 @@ export async function deleteEventAction(formData: FormData) {
     if (!eventId) return;
 
     await dbConnect();
+    const operationToken = await claimSumUpEventOperation(eventId);
+    if (!operationToken) {
+        return { error: "Operazione bloccata: un pagamento SumUp o una modifica della festa è già in corso." };
+    }
     if (await hasBlockingSumUpPayments(eventId)) {
+        await releaseSumUpEventOperation(eventId, operationToken);
         return { error: BLOCKING_SUMUP_EVENT_ERROR };
     }
     await PrintJob.deleteMany({ eventId });
@@ -241,7 +253,7 @@ export async function deleteEventAction(formData: FormData) {
     await Product.deleteMany({ eventId });
     await Ingredient.deleteMany({ eventId });
     await Category.deleteMany({ eventId });
-    await Event.findByIdAndDelete(eventId);
+    await Event.findOneAndDelete({ _id: eventId, "sumupOperationClaim.token": operationToken });
 
     revalidatePath("/admin/settings/events");
 }
