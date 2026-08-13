@@ -9,7 +9,8 @@ const {
     posDeviceFindByIdMock,
     productFindMock,
     categoryFindMock,
-    printJobExistsMock
+    printJobExistsMock,
+    completeSumUpPrintIntentsIfSentMock
 } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     orderFindByIdMock: vi.fn(),
@@ -18,7 +19,8 @@ const {
     posDeviceFindByIdMock: vi.fn(),
     productFindMock: vi.fn(),
     categoryFindMock: vi.fn(),
-    printJobExistsMock: vi.fn()
+    printJobExistsMock: vi.fn(),
+    completeSumUpPrintIntentsIfSentMock: vi.fn()
 }));
 
 vi.mock("@/lib/mongoose", () => ({
@@ -58,6 +60,10 @@ vi.mock("@/models/Category", () => ({
 
 vi.mock("@/models/PrintJob", () => ({
     default: { exists: printJobExistsMock }
+}));
+
+vi.mock("@/lib/sumup-print-routing", () => ({
+    completeSumUpPrintIntentsIfSent: completeSumUpPrintIntentsIfSentMock
 }));
 
 import { PrinterService } from "@/lib/printer";
@@ -128,6 +134,7 @@ describe("PrinterService.routeOrderToPrinters", () => {
         vi.clearAllMocks();
         orderUpdateOneMock.mockResolvedValue({ acknowledged: true });
         printJobExistsMock.mockResolvedValue(null);
+        completeSumUpPrintIntentsIfSentMock.mockResolvedValue(true);
     });
 
     test("keeps only cashier summary and customer copy when no department printer is configured", async () => {
@@ -210,10 +217,7 @@ describe("PrinterService.routeOrderToPrinters", () => {
         expect(keys).toHaveLength(3);
         expect(new Set(keys).size).toBe(3);
         expect(keys.every((key) => key?.startsWith("SUMUP_CALLBACK:order-sumup-recovery:"))).toBe(true);
-        expect(orderUpdateOneMock).toHaveBeenCalledWith(
-            { _id: expect.any(Object), sumupPrintCompletedAt: { $exists: false } },
-            { $set: { sumupPrintCompletedAt: expect.any(Date) } }
-        );
+        expect(completeSumUpPrintIntentsIfSentMock).toHaveBeenCalledWith("evt-1", "order-sumup-recovery");
 
         mockOrder(buildOrder("order-sumup-recovery", { sumupPrintCompletedAt: new Date() }));
         mockCategories([{

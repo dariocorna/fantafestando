@@ -13,7 +13,9 @@ const {
     refundSumUpTransactionMock,
     getSumUpRefundStateMock,
     claimSumUpEventOperationMock,
-    releaseSumUpEventOperationMock
+    releaseSumUpEventOperationMock,
+    startSumUpEventOperationHeartbeatMock,
+    stopSumUpEventOperationHeartbeatMock
 } = vi.hoisted(() => ({
     ensureAdminSessionMock: vi.fn(),
     getAdminContextEventIdMock: vi.fn(),
@@ -27,7 +29,9 @@ const {
     refundSumUpTransactionMock: vi.fn(),
     getSumUpRefundStateMock: vi.fn(),
     claimSumUpEventOperationMock: vi.fn(),
-    releaseSumUpEventOperationMock: vi.fn()
+    releaseSumUpEventOperationMock: vi.fn(),
+    startSumUpEventOperationHeartbeatMock: vi.fn(),
+    stopSumUpEventOperationHeartbeatMock: vi.fn()
 }))
 
 vi.mock("@/lib/authz", () => ({ ensureAdminSession: ensureAdminSessionMock }))
@@ -57,7 +61,8 @@ vi.mock("@/lib/sumup-refund", () => ({ getSumUpRefundState: getSumUpRefundStateM
 vi.mock("@/lib/cash-session-stock", () => ({ transitionClaimedOrderStock: transitionClaimedOrderStockMock }))
 vi.mock("@/lib/sumup-event-operation", () => ({
     claimSumUpEventOperation: claimSumUpEventOperationMock,
-    releaseSumUpEventOperation: releaseSumUpEventOperationMock
+    releaseSumUpEventOperation: releaseSumUpEventOperationMock,
+    startSumUpEventOperationHeartbeat: startSumUpEventOperationHeartbeatMock
 }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
@@ -104,6 +109,7 @@ describe("stornoPaidOrderById stock claim", () => {
         getSumUpRefundStateMock.mockResolvedValue({ success: true, fullyRefunded: false })
         claimSumUpEventOperationMock.mockResolvedValue("event-operation-1")
         releaseSumUpEventOperationMock.mockResolvedValue(undefined)
+        startSumUpEventOperationHeartbeatMock.mockReturnValue(stopSumUpEventOperationHeartbeatMock)
     })
 
     test("does not start a refund while SumUp print dispatch owns the event", async () => {

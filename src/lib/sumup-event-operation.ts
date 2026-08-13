@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import Event from "@/models/Event";
 
 const SUMUP_EVENT_OPERATION_LEASE_MS = 5 * 60 * 1000;
+const SUMUP_EVENT_OPERATION_HEARTBEAT_MS = 30 * 1000;
 
 export async function claimSumUpEventOperation(eventId: string, activeOnly = false) {
     const token = randomUUID();
@@ -35,4 +36,23 @@ export async function releaseSumUpEventOperation(eventId: string, token: string 
         { _id: eventId, "sumupOperationClaim.token": token },
         { $unset: { sumupOperationClaim: 1 } }
     );
+}
+
+export async function refreshSumUpEventOperation(eventId: string, token: string) {
+    if (!eventId || !token) return false;
+    const result = await Event.updateOne(
+        { _id: eventId, "sumupOperationClaim.token": token },
+        { $set: { "sumupOperationClaim.expiresAt": new Date(Date.now() + SUMUP_EVENT_OPERATION_LEASE_MS) } }
+    );
+    return (result.matchedCount ?? result.modifiedCount) === 1;
+}
+
+export function startSumUpEventOperationHeartbeat(eventId: string, token: string) {
+    const timer = setInterval(() => {
+        void refreshSumUpEventOperation(eventId, token).catch((error) => {
+            console.error("SumUp event operation heartbeat error:", error);
+        });
+    }, SUMUP_EVENT_OPERATION_HEARTBEAT_MS);
+    timer.unref?.();
+    return () => clearInterval(timer);
 }

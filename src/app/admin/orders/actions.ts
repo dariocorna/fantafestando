@@ -33,7 +33,11 @@ import {
 import { transitionSumUpOrderStock } from "@/lib/sumup-order-stock";
 import { type StockAdjustment } from "@/lib/stock-operations";
 import { transitionClaimedOrderStock } from "@/lib/cash-session-stock";
-import { claimSumUpEventOperation, releaseSumUpEventOperation } from "@/lib/sumup-event-operation";
+import {
+    claimSumUpEventOperation,
+    releaseSumUpEventOperation,
+    startSumUpEventOperationHeartbeat
+} from "@/lib/sumup-event-operation";
 import { completeSumUpPrintIntentsIfSent } from "@/lib/sumup-print-routing";
 import { revalidatePath } from "next/cache";
 
@@ -550,12 +554,14 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
     let leaseOrderStatus: "PAID" | "CANCELLED" | undefined
     let leaseClaimed = false
     let eventOperationToken: string | null = null
+    let stopEventOperationHeartbeat: (() => void) | undefined
     try {
         await dbConnect()
         eventOperationToken = await claimSumUpEventOperation(eventId)
         if (!eventOperationToken) {
             return { success: false, error: "Operazione bloccata: un pagamento SumUp o una modifica della festa è già in corso" }
         }
+        stopEventOperationHeartbeat = startSumUpEventOperationHeartbeat(eventId, eventOperationToken)
         const now = new Date()
         leaseRequestedAt = now
         const staleBefore = new Date(now.getTime() - STORNO_LEASE_MS)
@@ -924,6 +930,7 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
         console.error("Storno Order Error:", error)
         return { success: false, error: "Errore interno durante lo storno ordine" }
     } finally {
+        stopEventOperationHeartbeat?.()
         await releaseSumUpEventOperation(eventId, eventOperationToken).catch((error) => {
             console.error("Storno event operation release error:", error)
         })

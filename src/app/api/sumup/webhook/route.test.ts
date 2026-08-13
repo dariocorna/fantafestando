@@ -17,6 +17,8 @@ const {
     releaseCashSessionPaymentClaimMock,
     claimSumUpEventOperationMock,
     releaseSumUpEventOperationMock,
+    startSumUpEventOperationHeartbeatMock,
+    stopSumUpEventOperationHeartbeatMock,
 } = vi.hoisted(() => ({
     orderFindOneAndUpdateMock: vi.fn(),
     orderFindOneMock: vi.fn(),
@@ -33,6 +35,8 @@ const {
     releaseCashSessionPaymentClaimMock: vi.fn(),
     claimSumUpEventOperationMock: vi.fn(),
     releaseSumUpEventOperationMock: vi.fn(),
+    startSumUpEventOperationHeartbeatMock: vi.fn(),
+    stopSumUpEventOperationHeartbeatMock: vi.fn(),
 }))
 
 vi.mock("@/lib/mongoose", () => ({ default: vi.fn() }))
@@ -63,6 +67,7 @@ vi.mock("@/lib/cash-session-payment-claim", () => ({
 vi.mock("@/lib/sumup-event-operation", () => ({
     claimSumUpEventOperation: claimSumUpEventOperationMock,
     releaseSumUpEventOperation: releaseSumUpEventOperationMock,
+    startSumUpEventOperationHeartbeat: startSumUpEventOperationHeartbeatMock,
 }))
 
 import { POST } from "./route"
@@ -132,6 +137,7 @@ describe("POST /api/sumup/webhook", () => {
         releaseCashSessionPaymentClaimMock.mockResolvedValue(undefined)
         claimSumUpEventOperationMock.mockResolvedValue("event-operation-1")
         releaseSumUpEventOperationMock.mockResolvedValue(undefined)
+        startSumUpEventOperationHeartbeatMock.mockReturnValue(stopSumUpEventOperationHeartbeatMock)
         routeOrderToPrintersMock.mockResolvedValue([])
     })
 

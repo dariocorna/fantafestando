@@ -43,6 +43,7 @@ import {
     refreshKitchenPrinterQueueLease,
     releaseKitchenPrinterQueueLease
 } from "./print-queue";
+import { completeSumUpPrintIntentsIfSent } from "./sumup-print-routing";
 
 export interface PrinterCommandJob {
     ip: string;
@@ -1924,18 +1925,21 @@ export class PrinterService {
             : undefined;
         if (idempotencyPrefix && order.status !== "PAID") return [];
         if (idempotencyPrefix && order.sumupPrintCompletedAt) return [];
+        const eventId = order.eventId?.toString();
         const printIntentKey = (suffix: string) => idempotencyPrefix
             ? `${idempotencyPrefix}:${suffix}`
             : undefined;
         const completeSumUpPrintIntents = async (results: PrintDispatchResult[]) => {
-            if (!idempotencyPrefix || !results.every((result) => result === true)) return;
+            if (!idempotencyPrefix || !eventId || results.some((result) => result === "RETRY_REQUIRED" || result === "RECOVERY_PENDING")) return;
+            if (results.length > 0) {
+                await completeSumUpPrintIntentsIfSent(eventId, order._id.toString());
+                return;
+            }
             await Order.updateOne(
-                { _id: order._id, sumupPrintCompletedAt: { $exists: false } },
+                { _id: order._id, status: "PAID", sumupPrintCompletedAt: { $exists: false } },
                 { $set: { sumupPrintCompletedAt: new Date() } }
             );
         };
-
-        const eventId = order.eventId?.toString();
 
         const event = eventId
             ? await Event.findById(eventId).select("name settings.menuHeaderLogoUrl settings.receiptHeaderLogoUrl").lean() as ({ name?: string; settings?: { menuHeaderLogoUrl?: string; receiptHeaderLogoUrl?: string } } | null)

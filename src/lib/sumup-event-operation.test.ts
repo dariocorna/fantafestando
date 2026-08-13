@@ -1,4 +1,4 @@
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ findOneAndUpdate: vi.fn(), updateOne: vi.fn() }));
 
@@ -6,9 +6,15 @@ vi.mock("@/models/Event", () => ({
     default: { findOneAndUpdate: mocks.findOneAndUpdate, updateOne: mocks.updateOne }
 }));
 
-import { claimSumUpEventOperation, releaseSumUpEventOperation } from "./sumup-event-operation";
+import {
+    claimSumUpEventOperation,
+    refreshSumUpEventOperation,
+    releaseSumUpEventOperation,
+    startSumUpEventOperationHeartbeat
+} from "./sumup-event-operation";
 
 beforeEach(() => vi.clearAllMocks());
+afterEach(() => vi.useRealTimers());
 
 test("claims an active event with an expiring atomic lease", async () => {
     const lean = vi.fn().mockResolvedValue({ _id: "event-1" });
@@ -52,4 +58,33 @@ test("releases only the owned event lease", async () => {
         { _id: "event-1", "sumupOperationClaim.token": "claim-1" },
         { $unset: { sumupOperationClaim: 1 } }
     );
+});
+
+test("refreshes only the owned event lease", async () => {
+    mocks.updateOne.mockResolvedValue({ matchedCount: 1 });
+
+    await expect(refreshSumUpEventOperation("event-1", "claim-1")).resolves.toBe(true);
+
+    expect(mocks.updateOne).toHaveBeenCalledWith(
+        { _id: "event-1", "sumupOperationClaim.token": "claim-1" },
+        { $set: { "sumupOperationClaim.expiresAt": expect.any(Date) } }
+    );
+});
+
+test("keeps a long-running event operation lease alive", async () => {
+    vi.useFakeTimers();
+    mocks.updateOne.mockResolvedValue({ matchedCount: 1 });
+
+    const stop = startSumUpEventOperationHeartbeat("event-1", "claim-1");
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(mocks.updateOne).toHaveBeenCalledWith(
+        { _id: "event-1", "sumupOperationClaim.token": "claim-1" },
+        { $set: { "sumupOperationClaim.expiresAt": expect.any(Date) } }
+    );
+
+    stop();
+    mocks.updateOne.mockClear();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(mocks.updateOne).not.toHaveBeenCalled();
 });
