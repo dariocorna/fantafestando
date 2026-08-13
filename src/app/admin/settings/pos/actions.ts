@@ -38,9 +38,21 @@ async function hasPendingSumUpCheckout(
 
     return Boolean(await Order.exists({
         eventId,
-        status: "PENDING",
         posDeviceId,
-        sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+        $or: [
+            {
+                status: "PENDING",
+                sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+            },
+            {
+                status: "PAID",
+                sumupPrintCompletedAt: { $exists: false },
+                $or: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            }
+        ]
     }));
 }
 

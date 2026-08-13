@@ -91,6 +91,27 @@ function legacySumUpRefundQuery() {
     };
 }
 
+function activeSumUpCheckoutOrPrintQuery() {
+    return {
+        eventId: "event-1",
+        posDeviceId: "pos-1",
+        $or: [
+            {
+                status: "PENDING",
+                sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+            },
+            {
+                status: "PAID",
+                sumupPrintCompletedAt: { $exists: false },
+                $or: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            }
+        ]
+    };
+}
+
 describe("pending SumUp checkout hardware guards", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -125,12 +146,7 @@ describe("pending SumUp checkout hardware guards", () => {
             eventId: "event-1",
             type: "SUMUP"
         });
-        expect(mocks.orderExists).toHaveBeenCalledWith({
-            eventId: "event-1",
-            status: "PENDING",
-            posDeviceId: "pos-1",
-            sumupCheckoutId: { $exists: true, $nin: [null, ""] }
-        });
+        expect(mocks.orderExists).toHaveBeenCalledWith(activeSumUpCheckoutOrPrintQuery());
         expect(mocks.posDeviceFindOneAndDelete).not.toHaveBeenCalled();
     });
 
@@ -154,12 +170,7 @@ describe("pending SumUp checkout hardware guards", () => {
                 error: expect.stringMatching(/ordine SumUp in attesa/i)
             });
 
-            expect(mocks.orderExists).toHaveBeenCalledWith({
-                eventId: "event-1",
-                status: "PENDING",
-                posDeviceId: "pos-1",
-                sumupCheckoutId: { $exists: true, $nin: [null, ""] }
-            });
+            expect(mocks.orderExists).toHaveBeenCalledWith(activeSumUpCheckoutOrPrintQuery());
             expect(mocks.posDeviceFindOneAndUpdate).not.toHaveBeenCalled();
         }
     );
@@ -208,12 +219,7 @@ describe("pending SumUp checkout hardware guards", () => {
             error: expect.stringMatching(/ordine SumUp in attesa/i)
         });
 
-        expect(mocks.orderExists).toHaveBeenCalledWith({
-            eventId: "event-1",
-            status: "PENDING",
-            posDeviceId: "pos-1",
-            sumupCheckoutId: { $exists: true, $nin: [null, ""] }
-        });
+        expect(mocks.orderExists).toHaveBeenCalledWith(activeSumUpCheckoutOrPrintQuery());
         expect(mocks.posDeviceFindOneAndUpdate).not.toHaveBeenCalled();
         expect(mocks.releaseSumUpEventOperation).toHaveBeenCalledWith("event-1", "event-operation-1");
     });
@@ -228,12 +234,7 @@ describe("pending SumUp checkout hardware guards", () => {
         });
 
         expect(mocks.orderExists).toHaveBeenCalledTimes(1);
-        expect(mocks.orderExists).toHaveBeenCalledWith({
-            eventId: "event-1",
-            status: "PENDING",
-            posDeviceId: "pos-1",
-            sumupCheckoutId: { $exists: true, $nin: [null, ""] }
-        });
+        expect(mocks.orderExists).toHaveBeenCalledWith(activeSumUpCheckoutOrPrintQuery());
         expect(mocks.posDeviceFindOneAndUpdate).toHaveBeenCalled();
         expect(mocks.claimSumUpEventOperation).toHaveBeenCalledWith("event-1");
         expect(mocks.releaseSumUpEventOperation).toHaveBeenCalledWith("event-1", "event-operation-1");

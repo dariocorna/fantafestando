@@ -34,6 +34,7 @@ import { transitionSumUpOrderStock } from "@/lib/sumup-order-stock";
 import { type StockAdjustment } from "@/lib/stock-operations";
 import { transitionClaimedOrderStock } from "@/lib/cash-session-stock";
 import { claimSumUpEventOperation, releaseSumUpEventOperation } from "@/lib/sumup-event-operation";
+import { completeSumUpPrintIntentsIfSent } from "@/lib/sumup-print-routing";
 import { revalidatePath } from "next/cache";
 
 interface OrderForStornoProjection {
@@ -388,6 +389,8 @@ export async function reprintOrderById(orderId: string) {
                     error: `Reinvio non completato: ${failedCount} ${failedCount === 1 ? "copia non inviata" : "copie non inviate"}. Riprova.`
                 }
             }
+
+            await completeSumUpPrintIntentsIfSent(eventId, normalizedOrderId)
 
             return { success: true }
         }

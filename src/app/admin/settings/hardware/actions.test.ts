@@ -167,6 +167,27 @@ function legacySumUpRefundQuery(posDeviceId: string | { $in: string[] }) {
     };
 }
 
+function activeSumUpCheckoutOrPrintQuery(posDeviceId: { $in: string[] }) {
+    return {
+        eventId: "event-1",
+        posDeviceId,
+        $or: [
+            {
+                status: "PENDING",
+                sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+            },
+            {
+                status: "PAID",
+                sumupPrintCompletedAt: { $exists: false },
+                $or: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            }
+        ]
+    };
+}
+
 describe("printer queue lifecycle guards", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -312,12 +333,7 @@ describe("printer queue lifecycle guards", () => {
             printerId: "printer-1",
             paymentTerminalId: { $in: ["terminal-1"] }
         });
-        expect(mocks.orderExists).toHaveBeenCalledWith({
-            eventId: "event-1",
-            status: "PENDING",
-            posDeviceId: { $in: ["pos-1"] },
-            sumupCheckoutId: { $exists: true, $nin: [null, ""] }
-        });
+        expect(mocks.orderExists).toHaveBeenCalledWith(activeSumUpCheckoutOrPrintQuery({ $in: ["pos-1"] }));
         expect(mocks.printerFindOneAndDelete).not.toHaveBeenCalled();
         expect(mocks.posDeviceDeleteMany).not.toHaveBeenCalled();
     });
@@ -388,12 +404,7 @@ describe("printer queue lifecycle guards", () => {
             printerId: { $in: ["printer-1"] },
             paymentTerminalId: { $in: ["terminal-1"] }
         });
-        expect(mocks.orderExists).toHaveBeenCalledWith({
-            eventId: "event-1",
-            status: "PENDING",
-            posDeviceId: { $in: ["pos-1"] },
-            sumupCheckoutId: { $exists: true, $nin: [null, ""] }
-        });
+        expect(mocks.orderExists).toHaveBeenCalledWith(activeSumUpCheckoutOrPrintQuery({ $in: ["pos-1"] }));
         expect(mocks.printerFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
@@ -430,12 +441,7 @@ describe("printer queue lifecycle guards", () => {
         await expect(updatePrinterAction(printerForm("KITCHEN"))).resolves.toEqual({ success: true });
 
         expect(mocks.orderExists).toHaveBeenCalledTimes(1);
-        expect(mocks.orderExists).toHaveBeenCalledWith({
-            eventId: "event-1",
-            status: "PENDING",
-            posDeviceId: { $in: ["pos-1"] },
-            sumupCheckoutId: { $exists: true, $nin: [null, ""] }
-        });
+        expect(mocks.orderExists).toHaveBeenCalledWith(activeSumUpCheckoutOrPrintQuery({ $in: ["pos-1"] }));
         expect(mocks.printerFindOneAndUpdate).toHaveBeenCalled();
     });
 
@@ -728,12 +734,7 @@ describe("SumUp peripheral configuration", () => {
             eventId: "event-1",
             paymentTerminalId: "peripheral-1"
         });
-        expect(mocks.orderExists).toHaveBeenCalledWith({
-            eventId: "event-1",
-            status: "PENDING",
-            posDeviceId: { $in: ["pos-1"] },
-            sumupCheckoutId: { $exists: true, $nin: [null, ""] }
-        });
+        expect(mocks.orderExists).toHaveBeenCalledWith(activeSumUpCheckoutOrPrintQuery({ $in: ["pos-1"] }));
         expect(mocks.encryptSecret).not.toHaveBeenCalled();
         expect(mocks.peripheralFindOneAndUpdate).not.toHaveBeenCalled();
     });

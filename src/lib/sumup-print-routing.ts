@@ -1,4 +1,5 @@
 import Order from "@/models/Order";
+import PrintJob from "@/models/PrintJob";
 
 export async function hasPendingSumUpPrintRouting(eventId: string, productIds: string[]) {
     const normalizedProductIds = productIds.map((id) => id.trim()).filter(Boolean);
@@ -27,4 +28,37 @@ export async function hasPendingSumUpPrintRouting(eventId: string, productIds: s
             { "cart.includedComponents.productId": { $in: normalizedProductIds } }
         ]
     }));
+}
+
+export async function completeSumUpPrintIntentsIfSent(eventId: string, orderId: string) {
+    if (!eventId || !orderId) return false;
+
+    const scopedIntent = {
+        eventId,
+        orderId,
+        source: "ORDER",
+        idempotencyKey: /^SUMUP_CALLBACK:/
+    };
+    if (!await PrintJob.exists({ ...scopedIntent, status: "SENT" })) return false;
+
+    const incompleteIntent = await PrintJob.exists({
+        ...scopedIntent,
+        status: { $ne: "SENT" }
+    });
+    if (incompleteIntent) return false;
+
+    const completed = await Order.updateOne(
+        {
+            _id: orderId,
+            eventId,
+            status: "PAID",
+            sumupPrintCompletedAt: { $exists: false },
+            $or: [
+                { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+            ]
+        },
+        { $set: { sumupPrintCompletedAt: new Date() } }
+    );
+    return (completed.matchedCount ?? completed.modifiedCount) === 1;
 }
