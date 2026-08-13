@@ -57,6 +57,9 @@ describe("event lifecycle actions", () => {
         mocks.dbConnect.mockResolvedValue(undefined);
         mocks.orderExists.mockResolvedValue(false);
         mocks.claimSumUpEventOperation.mockResolvedValue("event-claim-1");
+        mocks.archiveEvent.mockImplementation((_filter, _update, options) => options
+            ? { select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue({ _id: "event-1" }) }) }
+            : Promise.resolve({ _id: "event-1" }));
     });
 
     test("preserves the complete event deletion cascade", async () => {
@@ -66,6 +69,11 @@ describe("event lifecycle actions", () => {
         await deleteEventAction(formData);
 
         const scope = { eventId: "event-1" };
+        expect(mocks.archiveEvent).toHaveBeenCalledWith(
+            { _id: "event-1", "sumupOperationClaim.token": "event-claim-1" },
+            { $set: { archived: true, active: false } },
+            { returnDocument: "after" }
+        );
         expect(mocks.deletePrintJobs).toHaveBeenCalledWith(scope);
         expect(mocks.deleteCashSessions).toHaveBeenCalledWith(scope);
         expect(mocks.deleteOrders).toHaveBeenCalledWith(scope);

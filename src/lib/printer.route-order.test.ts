@@ -252,6 +252,38 @@ describe("PrinterService.routeOrderToPrinters", () => {
         expect(eventFindByIdMock).not.toHaveBeenCalled();
     });
 
+    test("does not start a SumUp print job after event lease ownership is lost", async () => {
+        mockOrder(buildOrder("order-lease-lost"));
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100
+            }
+        });
+        mockProducts([{
+            _id: { toString: () => "prod-1" },
+            categoryId: { toString: () => "cat-1" },
+            basePrice: 7
+        }]);
+        mockCategories([{ _id: { toString: () => "cat-1" } }]);
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters(
+            "order-lease-lost",
+            "pos-1",
+            {
+                idempotencyScope: "SUMUP_CALLBACK",
+                ensureEventOperationOwned: vi.fn().mockResolvedValue(false)
+            }
+        );
+
+        expect(result).toEqual(["RETRY_REQUIRED", "RETRY_REQUIRED"]);
+        expect(printComandaSpy).not.toHaveBeenCalled();
+        expect(completeSumUpPrintIntentsIfSentMock).not.toHaveBeenCalled();
+    });
+
     test("skips all comanda copies when the category is marked as non printable", async () => {
         mockOrder(buildOrder("order-skip-single"));
         mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });

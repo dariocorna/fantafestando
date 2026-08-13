@@ -243,6 +243,14 @@ export async function deleteEventAction(formData: FormData) {
         await releaseSumUpEventOperation(eventId, operationToken);
         return { error: BLOCKING_SUMUP_EVENT_ERROR };
     }
+    const eventUnavailable = await Event.findOneAndUpdate(
+        { _id: eventId, "sumupOperationClaim.token": operationToken },
+        { $set: { archived: true, active: false } },
+        { returnDocument: "after" }
+    ).select("_id").lean();
+    if (!eventUnavailable) {
+        return { error: "Operazione bloccata: il controllo esclusivo sulla festa non è più valido." };
+    }
     await PrintJob.deleteMany({ eventId });
     await CashSession.deleteMany({ eventId });
     await Order.deleteMany({ eventId });

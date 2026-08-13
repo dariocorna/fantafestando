@@ -109,7 +109,10 @@ describe("stornoPaidOrderById stock claim", () => {
         getSumUpRefundStateMock.mockResolvedValue({ success: true, fullyRefunded: false })
         claimSumUpEventOperationMock.mockResolvedValue("event-operation-1")
         releaseSumUpEventOperationMock.mockResolvedValue(undefined)
-        startSumUpEventOperationHeartbeatMock.mockReturnValue(stopSumUpEventOperationHeartbeatMock)
+        startSumUpEventOperationHeartbeatMock.mockReturnValue({
+            ensureOwned: vi.fn().mockResolvedValue(true),
+            stop: stopSumUpEventOperationHeartbeatMock
+        })
     })
 
     test("does not start a refund while SumUp print dispatch owns the event", async () => {

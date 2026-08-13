@@ -554,14 +554,17 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
     let leaseOrderStatus: "PAID" | "CANCELLED" | undefined
     let leaseClaimed = false
     let eventOperationToken: string | null = null
-    let stopEventOperationHeartbeat: (() => void) | undefined
+    let eventOperationHeartbeat: ReturnType<typeof startSumUpEventOperationHeartbeat> | undefined
     try {
         await dbConnect()
         eventOperationToken = await claimSumUpEventOperation(eventId)
         if (!eventOperationToken) {
             return { success: false, error: "Operazione bloccata: un pagamento SumUp o una modifica della festa è già in corso" }
         }
-        stopEventOperationHeartbeat = startSumUpEventOperationHeartbeat(eventId, eventOperationToken)
+        eventOperationHeartbeat = startSumUpEventOperationHeartbeat(eventId, eventOperationToken)
+        if (!await eventOperationHeartbeat.ensureOwned()) {
+            return { success: false, error: "Operazione SumUp non più esclusiva: riprova" }
+        }
         const now = new Date()
         leaseRequestedAt = now
         const staleBefore = new Date(now.getTime() - STORNO_LEASE_MS)
@@ -772,6 +775,9 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                 }
 
                 if (refundStatus !== "DONE") {
+                    if (!await eventOperationHeartbeat.ensureOwned()) {
+                        return { success: false, error: "Operazione SumUp non più esclusiva: riprova" }
+                    }
                     const attemptRecorded = await Order.updateOne(
                         leaseFilter,
                         {
@@ -847,6 +853,9 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
         }
 
         if (lockedOrder.stockEffectStatus !== "REVERTED") {
+            if (!await eventOperationHeartbeat.ensureOwned()) {
+                return { success: false, error: "Operazione SumUp non più esclusiva: riprova" }
+            }
             const stockAdjustments = Array.isArray(lockedOrder.stockAdjustments)
                 ? lockedOrder.stockAdjustments
                 : buildStockAdjustmentsFromOrder(lockedOrder)
@@ -878,6 +887,9 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
             }
         }
 
+        if (!await eventOperationHeartbeat.ensureOwned()) {
+            return { success: false, error: "Operazione SumUp non più esclusiva: riprova" }
+        }
         const completed = await Order.updateOne(
             leaseFilter,
             {
@@ -930,7 +942,7 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
         console.error("Storno Order Error:", error)
         return { success: false, error: "Errore interno durante lo storno ordine" }
     } finally {
-        stopEventOperationHeartbeat?.()
+        eventOperationHeartbeat?.stop()
         await releaseSumUpEventOperation(eventId, eventOperationToken).catch((error) => {
             console.error("Storno event operation release error:", error)
         })

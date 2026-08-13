@@ -384,7 +384,8 @@ export class PrinterService {
     }
 
     private static async dispatchJobsSequentiallyPerDestination(
-        entries: Array<{ job: PrinterCommandJob; copies: number }>
+        entries: Array<{ job: PrinterCommandJob; copies: number }>,
+        ensureEventOperationOwned?: () => Promise<boolean>
     ): Promise<PrintDispatchResult[]> {
         const results = new Array<PrintDispatchResult>(entries.length);
         const entriesByDestination = new Map<string, Array<{ entry: { job: PrinterCommandJob; copies: number }; index: number }>>();
@@ -411,6 +412,11 @@ export class PrinterService {
                 let destinationFailed = false;
 
                 for (const { entry, index } of destinationEntries) {
+                    if (ensureEventOperationOwned && !await ensureEventOperationOwned()) {
+                        results[index] = "RETRY_REQUIRED";
+                        destinationFailed = true;
+                        continue;
+                    }
                     results[index] = destinationFailed
                         ? await this.printComanda(entry.job, entry.copies, {
                             immediateFailureReason: "Skipped after previous destination failure"
@@ -1886,12 +1892,12 @@ export class PrinterService {
     static async routeOrderToPrinters(
         orderId: string,
         posDeviceId: string | undefined,
-        options: { idempotencyScope: string }
+        options: { idempotencyScope: string; ensureEventOperationOwned?: () => Promise<boolean> }
     ): Promise<PrintDispatchResult[] | undefined>;
     static async routeOrderToPrinters(
         orderId: string,
         posDeviceId?: string,
-        options?: { idempotencyScope?: string }
+        options?: { idempotencyScope?: string; ensureEventOperationOwned?: () => Promise<boolean> }
     ) {
         await dbConnect();
         const order = await Order.findById(orderId).lean() as ({
@@ -2297,7 +2303,10 @@ export class PrinterService {
                 printJobs.push({ job, copies: 1 });
             });
 
-        const results = await this.dispatchJobsSequentiallyPerDestination(printJobs);
+        const results = await this.dispatchJobsSequentiallyPerDestination(
+            printJobs,
+            options?.ensureEventOperationOwned
+        );
 
         const attachment = order.easterEggAttachment;
         const attachmentRasterData = this.normalizeBinaryPayload(attachment?.rasterData);
@@ -2328,6 +2337,9 @@ export class PrinterService {
         }).label === rasterDestinationKey);
 
         const rasterPrinted = await this.enqueueJobForDestination(rasterDestinationKey, async () => {
+            if (options?.ensureEventOperationOwned && !await options.ensureEventOperationOwned()) {
+                return "RETRY_REQUIRED" as const;
+            }
             if (cashierHasPriorJobs) {
                 await wait(PRINTER_RASTER_AFTER_ORDER_DELAY_MS);
             }
@@ -2359,7 +2371,7 @@ export class PrinterService {
 
         results.push(rasterPrinted);
 
-        if (rasterPrinted) {
+        if (rasterPrinted === true) {
             await Order.updateOne(
                 { _id: order._id },
                 {

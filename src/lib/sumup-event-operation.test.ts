@@ -75,7 +75,7 @@ test("keeps a long-running event operation lease alive", async () => {
     vi.useFakeTimers();
     mocks.updateOne.mockResolvedValue({ matchedCount: 1 });
 
-    const stop = startSumUpEventOperationHeartbeat("event-1", "claim-1");
+    const heartbeat = startSumUpEventOperationHeartbeat("event-1", "claim-1");
     await vi.advanceTimersByTimeAsync(30_000);
 
     expect(mocks.updateOne).toHaveBeenCalledWith(
@@ -83,8 +83,20 @@ test("keeps a long-running event operation lease alive", async () => {
         { $set: { "sumupOperationClaim.expiresAt": expect.any(Date) } }
     );
 
-    stop();
+    heartbeat.stop();
     mocks.updateOne.mockClear();
     await vi.advanceTimersByTimeAsync(30_000);
     expect(mocks.updateOne).not.toHaveBeenCalled();
+});
+
+test("reports ownership loss permanently after a rejected refresh", async () => {
+    mocks.updateOne.mockResolvedValue({ matchedCount: 0 });
+    const heartbeat = startSumUpEventOperationHeartbeat("event-1", "claim-1");
+
+    await expect(heartbeat.ensureOwned()).resolves.toBe(false);
+    mocks.updateOne.mockResolvedValue({ matchedCount: 1 });
+    await expect(heartbeat.ensureOwned()).resolves.toBe(false);
+
+    expect(mocks.updateOne).toHaveBeenCalledOnce();
+    heartbeat.stop();
 });

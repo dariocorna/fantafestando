@@ -48,11 +48,25 @@ export async function refreshSumUpEventOperation(eventId: string, token: string)
 }
 
 export function startSumUpEventOperationHeartbeat(eventId: string, token: string) {
-    const timer = setInterval(() => {
-        void refreshSumUpEventOperation(eventId, token).catch((error) => {
+    let ownershipLost = false;
+    const refresh = async () => {
+        if (ownershipLost) return false;
+        try {
+            const owned = await refreshSumUpEventOperation(eventId, token);
+            if (!owned) ownershipLost = true;
+            return owned;
+        } catch (error) {
+            ownershipLost = true;
             console.error("SumUp event operation heartbeat error:", error);
-        });
+            return false;
+        }
+    };
+    const timer = setInterval(() => {
+        void refresh();
     }, SUMUP_EVENT_OPERATION_HEARTBEAT_MS);
     timer.unref?.();
-    return () => clearInterval(timer);
+    return {
+        ensureOwned: refresh,
+        stop: () => clearInterval(timer)
+    };
 }

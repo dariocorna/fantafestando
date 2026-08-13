@@ -137,7 +137,10 @@ describe("POST /api/sumup/webhook", () => {
         releaseCashSessionPaymentClaimMock.mockResolvedValue(undefined)
         claimSumUpEventOperationMock.mockResolvedValue("event-operation-1")
         releaseSumUpEventOperationMock.mockResolvedValue(undefined)
-        startSumUpEventOperationHeartbeatMock.mockReturnValue(stopSumUpEventOperationHeartbeatMock)
+        startSumUpEventOperationHeartbeatMock.mockReturnValue({
+            ensureOwned: vi.fn().mockResolvedValue(true),
+            stop: stopSumUpEventOperationHeartbeatMock
+        })
         routeOrderToPrintersMock.mockResolvedValue([])
     })
 
@@ -165,7 +168,10 @@ describe("POST /api/sumup/webhook", () => {
         expect(routeOrderToPrintersMock).toHaveBeenCalledWith(
             "order-1",
             "pos-1",
-            { idempotencyScope: "SUMUP_CALLBACK" },
+            {
+                idempotencyScope: "SUMUP_CALLBACK",
+                ensureEventOperationOwned: expect.any(Function),
+            },
         )
         expect(claimSumUpEventOperationMock).toHaveBeenCalledWith("event-1", true)
         expect(releaseSumUpEventOperationMock).toHaveBeenCalledWith("event-1", "event-operation-1")
@@ -493,7 +499,10 @@ describe("POST /api/sumup/webhook", () => {
         expect(routeOrderToPrintersMock).toHaveBeenCalledWith(
             "order-1",
             "pos-1",
-            { idempotencyScope: "SUMUP_CALLBACK" },
+            {
+                idempotencyScope: "SUMUP_CALLBACK",
+                ensureEventOperationOwned: expect.any(Function),
+            },
         )
     })
 

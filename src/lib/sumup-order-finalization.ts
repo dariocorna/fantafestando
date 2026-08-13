@@ -73,16 +73,20 @@ export async function dispatchSumUpOrderPrints(order: ClaimedSumUpOrder) {
     const orderId = order._id.toString()
     const eventId = order.eventId?.toString()
     let eventOperationToken: string | null = null
-    let stopEventOperationHeartbeat: (() => void) | undefined
+    let eventOperationHeartbeat: ReturnType<typeof startSumUpEventOperationHeartbeat> | undefined
     try {
         if (!eventId) return "RETRY_REQUIRED" as const
         eventOperationToken = await claimSumUpEventOperation(eventId, true)
         if (!eventOperationToken) return "RETRY_REQUIRED" as const
-        stopEventOperationHeartbeat = startSumUpEventOperationHeartbeat(eventId, eventOperationToken)
+        eventOperationHeartbeat = startSumUpEventOperationHeartbeat(eventId, eventOperationToken)
+        if (!await eventOperationHeartbeat.ensureOwned()) return "RETRY_REQUIRED" as const
         const results = await PrinterService.routeOrderToPrinters(
             orderId,
             order.posDeviceId?.toString(),
-            { idempotencyScope: "SUMUP_CALLBACK" },
+            {
+                idempotencyScope: "SUMUP_CALLBACK",
+                ensureEventOperationOwned: eventOperationHeartbeat.ensureOwned,
+            },
         )
         if (results?.includes("RETRY_REQUIRED")) return "RETRY_REQUIRED" as const
         return results?.includes("RECOVERY_PENDING") ? "RECOVERY_PENDING" as const : "COMPLETED" as const
@@ -90,7 +94,7 @@ export async function dispatchSumUpOrderPrints(order: ClaimedSumUpOrder) {
         console.error("[SumUp] Errore durante il trigger delle stampe:", error)
         return "RETRY_REQUIRED" as const
     } finally {
-        stopEventOperationHeartbeat?.()
+        eventOperationHeartbeat?.stop()
         await releaseSumUpEventOperation(eventId || "", eventOperationToken).catch((error) => {
             console.error("[SumUp] Event operation release error:", error)
         })
