@@ -29,7 +29,9 @@ const mocks = vi.hoisted(() => ({
     peripheralFindOne: vi.fn(),
     peripheralFindOneAndDelete: vi.fn(),
     peripheralFindOneAndUpdate: vi.fn(),
-    encryptSecret: vi.fn((value: string) => `encrypted:${value}`)
+    encryptSecret: vi.fn((value: string) => `encrypted:${value}`),
+    claimSumUpEventOperation: vi.fn(),
+    releaseSumUpEventOperation: vi.fn()
 }));
 
 vi.mock("../action-context", () => ({
@@ -55,6 +57,10 @@ vi.mock("@/lib/print-queue", () => ({
 vi.mock("@/lib/secrets", () => ({ encryptSecret: mocks.encryptSecret }));
 vi.mock("@/lib/sumup-print-routing", () => ({
     hasPendingSumUpPrintRouting: mocks.hasPendingSumUpPrintRouting
+}));
+vi.mock("@/lib/sumup-event-operation", () => ({
+    claimSumUpEventOperation: mocks.claimSumUpEventOperation,
+    releaseSumUpEventOperation: mocks.releaseSumUpEventOperation
 }));
 vi.mock("@/models/Category", () => ({
     default: { updateMany: mocks.categoryUpdateMany, distinct: mocks.categoryDistinct }
@@ -190,6 +196,8 @@ describe("printer queue lifecycle guards", () => {
         mocks.categoryDistinct.mockResolvedValue([]);
         mocks.productDistinct.mockResolvedValue([]);
         mocks.hasPendingSumUpPrintRouting.mockResolvedValue(false);
+        mocks.claimSumUpEventOperation.mockResolvedValue("event-operation-1");
+        mocks.releaseSumUpEventOperation.mockResolvedValue(undefined);
     });
 
     test("blocks deletion while held or claimed jobs still reference the printer", async () => {
@@ -389,6 +397,25 @@ describe("printer queue lifecycle guards", () => {
         expect(mocks.printerFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
+    test("does not change a print destination while checkout initiation owns the event", async () => {
+        mocks.printerFindOne.mockReturnValue(queryResult({
+            _id: "printer-1",
+            ip: "10.0.0.20",
+            port: 9100,
+            isVirtual: false,
+            type: "KITCHEN"
+        }));
+        mocks.claimSumUpEventOperation.mockResolvedValue(null);
+
+        await expect(updatePrinterAction(printerForm("KITCHEN"))).resolves.toEqual({
+            error: expect.stringMatching(/già in corso/i)
+        });
+
+        expect(mocks.hasPendingSumUpPrintRouting).not.toHaveBeenCalled();
+        expect(mocks.printerFindOneAndUpdate).not.toHaveBeenCalled();
+        expect(mocks.releaseSumUpEventOperation).not.toHaveBeenCalled();
+    });
+
     test("does not apply the legacy refund guard when updating a printer", async () => {
         mocks.normalizePrinterConfig.mockReturnValue({
             success: true,
@@ -476,6 +503,8 @@ describe("SumUp peripheral configuration", () => {
         mocks.posDeviceDistinct.mockResolvedValue([]);
         mocks.posDeviceUpdateMany.mockResolvedValue({ acknowledged: true });
         mocks.orderExists.mockResolvedValue(false);
+        mocks.claimSumUpEventOperation.mockResolvedValue("event-operation-1");
+        mocks.releaseSumUpEventOperation.mockResolvedValue(undefined);
     });
 
     test("creates a complete Cloud API configuration with both secrets encrypted", async () => {

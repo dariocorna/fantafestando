@@ -5,11 +5,15 @@ const {
     getAdminContextEventIdMock,
     orderExistsMock,
     orderFindMock,
+    claimSumUpEventOperationMock,
+    releaseSumUpEventOperationMock,
 } = vi.hoisted(() => ({
     ensureAdminSessionMock: vi.fn(),
     getAdminContextEventIdMock: vi.fn(),
     orderExistsMock: vi.fn(),
     orderFindMock: vi.fn(),
+    claimSumUpEventOperationMock: vi.fn(),
+    releaseSumUpEventOperationMock: vi.fn(),
 }))
 
 vi.mock("@/lib/authz", () => ({ ensureAdminSession: ensureAdminSessionMock }))
@@ -33,6 +37,10 @@ vi.mock("@/lib/sumup-refund", () => ({}))
 vi.mock("@/lib/sumup-order-finalization", () => ({}))
 vi.mock("@/lib/sumup-order-stock", () => ({}))
 vi.mock("@/lib/cash-session-stock", () => ({}))
+vi.mock("@/lib/sumup-event-operation", () => ({
+    claimSumUpEventOperation: claimSumUpEventOperationMock,
+    releaseSumUpEventOperation: releaseSumUpEventOperationMock,
+}))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
 import { resetEventOrdersAction } from "./actions"
@@ -42,6 +50,8 @@ describe("resetEventOrdersAction SumUp guard", () => {
         vi.clearAllMocks()
         ensureAdminSessionMock.mockResolvedValue({ ok: true })
         getAdminContextEventIdMock.mockResolvedValue("event-1")
+        claimSumUpEventOperationMock.mockResolvedValue("event-operation-1")
+        releaseSumUpEventOperationMock.mockResolvedValue(undefined)
     })
 
     test("does not delete an event while a certified SumUp payment is unresolved", async () => {
@@ -68,5 +78,22 @@ describe("resetEventOrdersAction SumUp guard", () => {
             ]),
         })
         expect(orderFindMock).not.toHaveBeenCalled()
+        expect(claimSumUpEventOperationMock).toHaveBeenCalledWith("event-1")
+        expect(releaseSumUpEventOperationMock).toHaveBeenCalledWith("event-1", "event-operation-1")
+    })
+
+    test("does not inspect or delete orders when another SumUp operation owns the event", async () => {
+        claimSumUpEventOperationMock.mockResolvedValue(null)
+        const formData = new FormData()
+        formData.set("confirmationToken", "RESET")
+
+        await expect(resetEventOrdersAction(formData)).resolves.toEqual({
+            success: false,
+            error: expect.stringMatching(/già in corso/i),
+        })
+
+        expect(orderExistsMock).not.toHaveBeenCalled()
+        expect(orderFindMock).not.toHaveBeenCalled()
+        expect(releaseSumUpEventOperationMock).not.toHaveBeenCalled()
     })
 })

@@ -33,6 +33,7 @@ import {
 import { transitionSumUpOrderStock } from "@/lib/sumup-order-stock";
 import { type StockAdjustment } from "@/lib/stock-operations";
 import { transitionClaimedOrderStock } from "@/lib/cash-session-stock";
+import { claimSumUpEventOperation, releaseSumUpEventOperation } from "@/lib/sumup-event-operation";
 import { revalidatePath } from "next/cache";
 
 interface OrderForStornoProjection {
@@ -444,70 +445,81 @@ export async function resetEventOrdersAction(formData: FormData): Promise<
 
     try {
         await dbConnect()
-
-        const protectedSumUpOrder = await Order.exists({
-            eventId,
-            $or: [
-                {
-                    status: "PENDING",
-                    sumupCheckoutId: { $exists: true, $nin: [null, ""] }
-                },
-                {
-                    status: "PAID",
-                    $or: [
-                        { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
-                        { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
-                    ],
-                    "stornoMeta.refundStatus": { $ne: "DONE" }
-                },
-                {
-                    status: "CANCELLED",
-                    sumupRecoveryCancelledAt: { $exists: true, $ne: null },
-                    sumupRecoveryResolvedAt: { $exists: false },
-                    "stornoMeta.refundStatus": { $ne: "DONE" }
-                }
-            ]
-        })
-        if (protectedSumUpOrder) {
+        const operationToken = await claimSumUpEventOperation(eventId)
+        if (!operationToken) {
             return {
                 success: false,
-                error: "Completa o rimborsa tutti i pagamenti SumUp prima di azzerare gli ordini della festa"
+                error: "Operazione bloccata: un pagamento SumUp o una modifica della festa è già in corso"
             }
         }
 
-        const orderIds = (await Order.find({ eventId }).select("_id").lean() as Array<{ _id: { toString(): string } | string }>)
-            .map((order) => order._id.toString())
-
-        const printJobClauses: Array<Record<string, unknown>> = [
-            { source: { $in: ["ORDER", "CASH_SESSION"] } }
-        ]
-        if (orderIds.length > 0) {
-            printJobClauses.push({ orderId: { $in: orderIds } })
-        }
-
-        const [
-            deletedOrdersResult,
-            deletedOrderCountersResult,
-            deletedPrintJobsResult,
-            deletedCashSessionsResult
-        ] = await Promise.all([
-            Order.deleteMany({ eventId }),
-            OrderCounter.deleteMany({ eventId }),
-            PrintJob.deleteMany({ eventId, $or: printJobClauses }),
-            CashSession.deleteMany({ eventId })
-        ])
-
-        revalidatePath("/admin/orders")
-        revalidatePath("/admin")
-
-        return {
-            success: true,
-            summary: {
-                deletedOrders: deletedOrdersResult.deletedCount || 0,
-                deletedOrderCounters: deletedOrderCountersResult.deletedCount || 0,
-                deletedPrintJobs: deletedPrintJobsResult.deletedCount || 0,
-                deletedCashSessions: deletedCashSessionsResult.deletedCount || 0
+        try {
+            const protectedSumUpOrder = await Order.exists({
+                eventId,
+                $or: [
+                    {
+                        status: "PENDING",
+                        sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+                    },
+                    {
+                        status: "PAID",
+                        $or: [
+                            { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                            { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                        ],
+                        "stornoMeta.refundStatus": { $ne: "DONE" }
+                    },
+                    {
+                        status: "CANCELLED",
+                        sumupRecoveryCancelledAt: { $exists: true, $ne: null },
+                        sumupRecoveryResolvedAt: { $exists: false },
+                        "stornoMeta.refundStatus": { $ne: "DONE" }
+                    }
+                ]
+            })
+            if (protectedSumUpOrder) {
+                return {
+                    success: false,
+                    error: "Completa o rimborsa tutti i pagamenti SumUp prima di azzerare gli ordini della festa"
+                }
             }
+
+            const orderIds = (await Order.find({ eventId }).select("_id").lean() as Array<{ _id: { toString(): string } | string }>)
+                .map((order) => order._id.toString())
+
+            const printJobClauses: Array<Record<string, unknown>> = [
+                { source: { $in: ["ORDER", "CASH_SESSION"] } }
+            ]
+            if (orderIds.length > 0) {
+                printJobClauses.push({ orderId: { $in: orderIds } })
+            }
+
+            const [
+                deletedOrdersResult,
+                deletedOrderCountersResult,
+                deletedPrintJobsResult,
+                deletedCashSessionsResult
+            ] = await Promise.all([
+                Order.deleteMany({ eventId }),
+                OrderCounter.deleteMany({ eventId }),
+                PrintJob.deleteMany({ eventId, $or: printJobClauses }),
+                CashSession.deleteMany({ eventId })
+            ])
+
+            revalidatePath("/admin/orders")
+            revalidatePath("/admin")
+
+            return {
+                success: true,
+                summary: {
+                    deletedOrders: deletedOrdersResult.deletedCount || 0,
+                    deletedOrderCounters: deletedOrderCountersResult.deletedCount || 0,
+                    deletedPrintJobs: deletedPrintJobsResult.deletedCount || 0,
+                    deletedCashSessions: deletedCashSessionsResult.deletedCount || 0
+                }
+            }
+        } finally {
+            await releaseSumUpEventOperation(eventId, operationToken)
         }
     } catch (error) {
         console.error("Reset ordini festa error:", error)

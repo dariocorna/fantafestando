@@ -29,6 +29,23 @@ test("claims an active event with an expiring atomic lease", async () => {
     );
 });
 
+test("allows maintenance operations to claim an archived event", async () => {
+    const lean = vi.fn().mockResolvedValue({ _id: "event-1" });
+    const select = vi.fn().mockReturnValue({ lean });
+    mocks.findOneAndUpdate.mockReturnValue({ select });
+
+    await expect(claimSumUpEventOperation("event-1")).resolves.toEqual(expect.any(String));
+
+    expect(mocks.findOneAndUpdate).toHaveBeenCalledWith(
+        {
+            _id: "event-1",
+            $or: expect.any(Array)
+        },
+        expect.any(Object),
+        { returnDocument: "after" }
+    );
+});
+
 test("releases only the owned event lease", async () => {
     await releaseSumUpEventOperation("event-1", "claim-1");
     expect(mocks.updateOne).toHaveBeenCalledWith(

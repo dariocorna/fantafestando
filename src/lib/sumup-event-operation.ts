@@ -9,8 +9,7 @@ export async function claimSumUpEventOperation(eventId: string, activeOnly = fal
     const claimed = await Event.findOneAndUpdate(
         {
             _id: eventId,
-            archived: { $ne: true },
-            ...(activeOnly ? { active: true } : {}),
+            ...(activeOnly ? { active: true, archived: { $ne: true } } : {}),
             $or: [
                 { sumupOperationClaim: { $exists: false } },
                 { "sumupOperationClaim.expiresAt": { $lte: now } }

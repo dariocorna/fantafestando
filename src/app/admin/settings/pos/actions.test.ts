@@ -12,7 +12,9 @@ const mocks = vi.hoisted(() => ({
     posDeviceFindOne: vi.fn(),
     posDeviceFindOneAndDelete: vi.fn(),
     posDeviceFindOneAndUpdate: vi.fn(),
-    printerFindOne: vi.fn()
+    printerFindOne: vi.fn(),
+    claimSumUpEventOperation: vi.fn(),
+    releaseSumUpEventOperation: vi.fn()
 }));
 
 vi.mock("../action-context", () => ({
@@ -37,6 +39,10 @@ vi.mock("@/models/PosDevice", () => ({
     }
 }));
 vi.mock("@/models/Printer", () => ({ default: { findOne: mocks.printerFindOne } }));
+vi.mock("@/lib/sumup-event-operation", () => ({
+    claimSumUpEventOperation: mocks.claimSumUpEventOperation,
+    releaseSumUpEventOperation: mocks.releaseSumUpEventOperation
+}));
 
 import { deletePosDeviceAction, updatePosDeviceAction } from "./actions";
 
@@ -103,6 +109,8 @@ describe("pending SumUp checkout hardware guards", () => {
         mocks.posDeviceFindOneAndDelete.mockReturnValue(queryResult({ _id: "pos-1" }));
         mocks.posDeviceFindOneAndUpdate.mockReturnValue(queryResult({ _id: "pos-1" }));
         mocks.printerFindOne.mockReturnValue(queryResult({ _id: "printer-1" }));
+        mocks.claimSumUpEventOperation.mockResolvedValue("event-operation-1");
+        mocks.releaseSumUpEventOperation.mockResolvedValue(undefined);
     });
 
     test("blocks deleting a POS whose SumUp checkout is pending", async () => {
@@ -207,6 +215,7 @@ describe("pending SumUp checkout hardware guards", () => {
             sumupCheckoutId: { $exists: true, $nin: [null, ""] }
         });
         expect(mocks.posDeviceFindOneAndUpdate).not.toHaveBeenCalled();
+        expect(mocks.releaseSumUpEventOperation).toHaveBeenCalledWith("event-1", "event-operation-1");
     });
 
     test("allows changing only the printer when no SumUp checkout is pending", async () => {
@@ -226,6 +235,8 @@ describe("pending SumUp checkout hardware guards", () => {
             sumupCheckoutId: { $exists: true, $nin: [null, ""] }
         });
         expect(mocks.posDeviceFindOneAndUpdate).toHaveBeenCalled();
+        expect(mocks.claimSumUpEventOperation).toHaveBeenCalledWith("event-1");
+        expect(mocks.releaseSumUpEventOperation).toHaveBeenCalledWith("event-1", "event-operation-1");
     });
 
     test("allows replacing a SumUp terminal when no checkout is pending", async () => {
@@ -245,5 +256,17 @@ describe("pending SumUp checkout hardware guards", () => {
 
         expect(mocks.orderExists).not.toHaveBeenCalled();
         expect(mocks.posDeviceFindOneAndDelete).toHaveBeenCalled();
+    });
+
+    test("does not change the printer when checkout initiation owns the event", async () => {
+        mocks.claimSumUpEventOperation.mockResolvedValue(null);
+
+        await expect(updatePosDeviceAction(posDeviceForm({ printerId: "printer-2" }))).resolves.toEqual({
+            error: expect.stringMatching(/già in corso/i)
+        });
+
+        expect(mocks.orderExists).not.toHaveBeenCalled();
+        expect(mocks.posDeviceFindOneAndUpdate).not.toHaveBeenCalled();
+        expect(mocks.releaseSumUpEventOperation).not.toHaveBeenCalled();
     });
 });

@@ -54,8 +54,10 @@ import {
 } from "@/lib/fixed-menu";
 import { ProductTable } from "./product-table";
 import { hasPendingSumUpPrintRouting } from "@/lib/sumup-print-routing";
+import { claimSumUpEventOperation, releaseSumUpEventOperation } from "@/lib/sumup-event-operation";
 
 const PENDING_SUMUP_CATALOG_ERROR = "Operazione bloccata: un pagamento SumUp in attesa usa questi prodotti. Completa o recupera il pagamento prima di modificare il routing di stampa.";
+const SUMUP_EVENT_OPERATION_ERROR = "Operazione bloccata: un pagamento SumUp o una modifica della festa è già in corso.";
 
 function getReferencedId(value: unknown): string | undefined {
     if (!value) return undefined;
@@ -575,16 +577,22 @@ export default async function AdminCatalog() {
         if (!id || !scopedEventId) return;
         if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
         await dbConnect();
-        const categoryProductIds = (await Product.distinct("_id", { eventId: scopedEventId, categoryId: id }))
-            .map((value: unknown) => String(value));
-        if (await hasPendingSumUpPrintRouting(scopedEventId, categoryProductIds)) {
-            return { error: PENDING_SUMUP_CATALOG_ERROR };
+        const operationToken = await claimSumUpEventOperation(scopedEventId);
+        if (!operationToken) return { error: SUMUP_EVENT_OPERATION_ERROR };
+        try {
+            const categoryProductIds = (await Product.distinct("_id", { eventId: scopedEventId, categoryId: id }))
+                .map((value: unknown) => String(value));
+            if (await hasPendingSumUpPrintRouting(scopedEventId, categoryProductIds)) {
+                return { error: PENDING_SUMUP_CATALOG_ERROR };
+            }
+            const deletedCategory = await Category.findOneAndDelete({ _id: id, eventId: scopedEventId }).select("_id").lean();
+            if (!deletedCategory) return;
+            // Also delete products in this category to keep consistency
+            await Product.deleteMany({ eventId: scopedEventId, categoryId: id });
+            revalidateCatalogSurfaces();
+        } finally {
+            await releaseSumUpEventOperation(scopedEventId, operationToken);
         }
-        const deletedCategory = await Category.findOneAndDelete({ _id: id, eventId: scopedEventId }).select("_id").lean();
-        if (!deletedCategory) return;
-        // Also delete products in this category to keep consistency
-        await Product.deleteMany({ eventId: scopedEventId, categoryId: id });
-        revalidateCatalogSurfaces();
     }
 
     async function deleteIngredient(formData: FormData) {
@@ -630,30 +638,36 @@ export default async function AdminCatalog() {
         if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return { error: "Festa non valida" };
 
         await dbConnect();
-        const categoryProductIds = (await Product.distinct("_id", { eventId: scopedEventId, categoryId: id }))
-            .map((value: unknown) => String(value));
-        if (await hasPendingSumUpPrintRouting(scopedEventId, categoryProductIds)) {
-            return { error: PENDING_SUMUP_CATALOG_ERROR };
-        }
-        if (printerId) {
-            const printer = await Printer.findOne({ _id: printerId, eventId: scopedEventId, type: "KITCHEN" }).select("_id").lean();
-            if (!printer) return { error: "Stampante reparto non valida" };
-        }
-        const pizzaCategoryValidationError = validatePizzaCategoryConfiguration({
-            pizzaFlowEnabled,
-            printerId: printerId || undefined,
-            skipKitchenPrint
-        });
-        if (pizzaCategoryValidationError) {
-            return { error: pizzaCategoryValidationError };
-        }
+        const operationToken = await claimSumUpEventOperation(scopedEventId);
+        if (!operationToken) return { error: SUMUP_EVENT_OPERATION_ERROR };
+        try {
+            const categoryProductIds = (await Product.distinct("_id", { eventId: scopedEventId, categoryId: id }))
+                .map((value: unknown) => String(value));
+            if (await hasPendingSumUpPrintRouting(scopedEventId, categoryProductIds)) {
+                return { error: PENDING_SUMUP_CATALOG_ERROR };
+            }
+            if (printerId) {
+                const printer = await Printer.findOne({ _id: printerId, eventId: scopedEventId, type: "KITCHEN" }).select("_id").lean();
+                if (!printer) return { error: "Stampante reparto non valida" };
+            }
+            const pizzaCategoryValidationError = validatePizzaCategoryConfiguration({
+                pizzaFlowEnabled,
+                printerId: printerId || undefined,
+                skipKitchenPrint
+            });
+            if (pizzaCategoryValidationError) {
+                return { error: pizzaCategoryValidationError };
+            }
 
-        await Category.findOneAndUpdate(
-            { _id: id, eventId: scopedEventId },
-            { name, uiColor, printerId: printerId || null, skipKitchenPrint, printKitchenCopyAtCashier, pizzaFlowEnabled, pizzaBarcodeEnabled }
-        );
-        revalidateCatalogSurfaces();
-        return { success: true };
+            await Category.findOneAndUpdate(
+                { _id: id, eventId: scopedEventId },
+                { name, uiColor, printerId: printerId || null, skipKitchenPrint, printKitchenCopyAtCashier, pizzaFlowEnabled, pizzaBarcodeEnabled }
+            );
+            revalidateCatalogSurfaces();
+            return { success: true };
+        } finally {
+            await releaseSumUpEventOperation(scopedEventId, operationToken);
+        }
     }
 
     async function deleteProduct(formData: FormData) {
@@ -668,11 +682,17 @@ export default async function AdminCatalog() {
         if (!id || !scopedEventId) return;
         if (normalizedSubmittedEventId && normalizedSubmittedEventId !== scopedEventId) return;
         await dbConnect();
-        if (await hasPendingSumUpPrintRouting(scopedEventId, [id])) {
-            return { error: PENDING_SUMUP_CATALOG_ERROR };
+        const operationToken = await claimSumUpEventOperation(scopedEventId);
+        if (!operationToken) return { error: SUMUP_EVENT_OPERATION_ERROR };
+        try {
+            if (await hasPendingSumUpPrintRouting(scopedEventId, [id])) {
+                return { error: PENDING_SUMUP_CATALOG_ERROR };
+            }
+            await Product.findOneAndDelete({ _id: id, eventId: scopedEventId });
+            revalidateCatalogSurfaces();
+        } finally {
+            await releaseSumUpEventOperation(scopedEventId, operationToken);
         }
-        await Product.findOneAndDelete({ _id: id, eventId: scopedEventId });
-        revalidateCatalogSurfaces();
     }
 
     async function updateProduct(formData: FormData) {
@@ -684,57 +704,63 @@ export default async function AdminCatalog() {
         if (!id || !currentEventId) return { error: "Dati prodotto non validi" };
 
         await dbConnect();
-        if (await hasPendingSumUpPrintRouting(currentEventId, [id])) {
-            return { error: PENDING_SUMUP_CATALOG_ERROR };
-        }
-        const existingProduct = await Product.findOne({ _id: id, eventId: currentEventId }).select("kind").lean() as ({ kind?: string } | null);
-        if (!existingProduct) {
-            return { error: "Prodotto non trovato" };
-        }
-        const parsed = await parseProductPayload(formData, currentEventId, { existingProductId: id });
-        if (!parsed.success) {
-            return { error: parsed.error };
-        }
+        const operationToken = await claimSumUpEventOperation(currentEventId);
+        if (!operationToken) return { error: SUMUP_EVENT_OPERATION_ERROR };
+        try {
+            if (await hasPendingSumUpPrintRouting(currentEventId, [id])) {
+                return { error: PENDING_SUMUP_CATALOG_ERROR };
+            }
+            const existingProduct = await Product.findOne({ _id: id, eventId: currentEventId }).select("kind").lean() as ({ kind?: string } | null);
+            if (!existingProduct) {
+                return { error: "Prodotto non trovato" };
+            }
+            const parsed = await parseProductPayload(formData, currentEventId, { existingProductId: id });
+            if (!parsed.success) {
+                return { error: parsed.error };
+            }
 
-        const updateSet: Record<string, unknown> = {
-            name: parsed.payload.name,
-            categoryId: parsed.payload.categoryId,
-            basePrice: parsed.payload.basePrice,
-            volunteerPrice: parsed.payload.volunteerPrice,
-            kind: parsed.payload.kind,
-            availableOnlyInMenus: parsed.payload.availableOnlyInMenus,
-            splitKitchenPrintPerUnit: parsed.payload.splitKitchenPrintPerUnit,
-            salesChannels: parsed.payload.salesChannels,
-            stockQuantity: parsed.payload.stockQuantity,
-            isSoldOut: parsed.payload.isSoldOut,
-            availableDays: parsed.payload.availableDays,
-            recipeItems: parsed.payload.recipeItems,
-            menuComponents: parsed.payload.menuComponents,
-            menuChoiceGroups: parsed.payload.menuChoiceGroups,
-            ...(parsed.payload.shortName ? { shortName: parsed.payload.shortName } : {}),
-            ...(parsed.payload.description ? { description: parsed.payload.description } : {})
-        };
-        const updateUnset: Record<string, 1> = {
-            ...(parsed.payload.shortName ? {} : { shortName: 1 }),
-            ...(parsed.payload.description ? {} : { description: 1 }),
-        };
+            const updateSet: Record<string, unknown> = {
+                name: parsed.payload.name,
+                categoryId: parsed.payload.categoryId,
+                basePrice: parsed.payload.basePrice,
+                volunteerPrice: parsed.payload.volunteerPrice,
+                kind: parsed.payload.kind,
+                availableOnlyInMenus: parsed.payload.availableOnlyInMenus,
+                splitKitchenPrintPerUnit: parsed.payload.splitKitchenPrintPerUnit,
+                salesChannels: parsed.payload.salesChannels,
+                stockQuantity: parsed.payload.stockQuantity,
+                isSoldOut: parsed.payload.isSoldOut,
+                availableDays: parsed.payload.availableDays,
+                recipeItems: parsed.payload.recipeItems,
+                menuComponents: parsed.payload.menuComponents,
+                menuChoiceGroups: parsed.payload.menuChoiceGroups,
+                ...(parsed.payload.shortName ? { shortName: parsed.payload.shortName } : {}),
+                ...(parsed.payload.description ? { description: parsed.payload.description } : {})
+            };
+            const updateUnset: Record<string, 1> = {
+                ...(parsed.payload.shortName ? {} : { shortName: 1 }),
+                ...(parsed.payload.description ? {} : { description: 1 }),
+            };
 
-        if (parsed.payload.kind === "FIXED_MENU" || parsed.payload.availableOnlyInMenus) {
-            updateSet.variants = [];
-        } else if (normalizeProductKind(existingProduct.kind) === "FIXED_MENU") {
-            updateSet.variants = [];
+            if (parsed.payload.kind === "FIXED_MENU" || parsed.payload.availableOnlyInMenus) {
+                updateSet.variants = [];
+            } else if (normalizeProductKind(existingProduct.kind) === "FIXED_MENU") {
+                updateSet.variants = [];
+            }
+
+            await Product.findOneAndUpdate(
+                { _id: id, eventId: currentEventId },
+                {
+                    $set: updateSet,
+                    ...(Object.keys(updateUnset).length > 0 ? { $unset: updateUnset } : {})
+                },
+                { runValidators: true }
+            );
+            revalidateCatalogSurfaces();
+            return { success: true };
+        } finally {
+            await releaseSumUpEventOperation(currentEventId, operationToken);
         }
-
-        await Product.findOneAndUpdate(
-            { _id: id, eventId: currentEventId },
-            {
-                $set: updateSet,
-                ...(Object.keys(updateUnset).length > 0 ? { $unset: updateUnset } : {})
-            },
-            { runValidators: true }
-        );
-        revalidateCatalogSurfaces();
-        return { success: true };
     }
 
     async function bulkUpdateProductKitchenPrintMode(formData: FormData) {
@@ -769,23 +795,29 @@ export default async function AdminCatalog() {
         }
 
         await dbConnect();
-        if (await hasPendingSumUpPrintRouting(currentEventId, productIds)) {
-            return { error: PENDING_SUMUP_CATALOG_ERROR };
-        }
-        await Product.updateMany(
-            {
-                eventId: currentEventId,
-                _id: { $in: productIds },
-                kind: "STANDARD"
-            },
-            {
-                $set: {
-                    splitKitchenPrintPerUnit: nextModeRaw === "true"
-                }
+        const operationToken = await claimSumUpEventOperation(currentEventId);
+        if (!operationToken) return { error: SUMUP_EVENT_OPERATION_ERROR };
+        try {
+            if (await hasPendingSumUpPrintRouting(currentEventId, productIds)) {
+                return { error: PENDING_SUMUP_CATALOG_ERROR };
             }
-        );
-        revalidatePath("/admin/catalog");
-        return { success: true };
+            await Product.updateMany(
+                {
+                    eventId: currentEventId,
+                    _id: { $in: productIds },
+                    kind: "STANDARD"
+                },
+                {
+                    $set: {
+                        splitKitchenPrintPerUnit: nextModeRaw === "true"
+                    }
+                }
+            );
+            revalidatePath("/admin/catalog");
+            return { success: true };
+        } finally {
+            await releaseSumUpEventOperation(currentEventId, operationToken);
+        }
     }
 
     async function addVariant(formData: FormData) {
