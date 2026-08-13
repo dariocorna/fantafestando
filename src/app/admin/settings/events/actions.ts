@@ -45,7 +45,7 @@ async function hasBlockingSumUpPayments(eventId: string) {
             },
             {
                 status: "CANCELLED",
-                sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                sumupRecoveryCancelledAt: { $exists: true, $ne: null },
                 "stornoMeta.refundStatus": { $ne: "DONE" }
             }
         ]
