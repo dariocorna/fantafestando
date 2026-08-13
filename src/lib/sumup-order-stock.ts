@@ -22,8 +22,38 @@ async function isSumUpOrderAtTarget(params: {
         _id: params.orderId,
         eventId: params.eventId,
         status: "PENDING",
-        stockEffectStatus: params.target
+        stockEffectStatus: params.target,
+        stockEffectClaim: null
     }))
+}
+
+async function resumeInterruptedOpposingTransition(params: {
+    eventId: string
+    orderId: string
+    target: "APPLIED" | "REVERTED"
+    adjustments: StockAdjustment[]
+}) {
+    const interrupted = await Order.findOne({
+        _id: params.orderId,
+        eventId: params.eventId,
+        status: "PENDING",
+        stockEffectStatus: params.target,
+        "stockEffectClaim.target": params.target === "APPLIED" ? "REVERTED" : "APPLIED"
+    }).select("stockEffectClaim").lean() as ({
+        stockEffectClaim?: { token?: string; target?: "APPLIED" | "REVERTED" }
+    } | null)
+    const token = interrupted?.stockEffectClaim?.token
+    const target = interrupted?.stockEffectClaim?.target
+    if (!token || !target) return null
+
+    return transitionClaimedOrderStock({
+        eventId: params.eventId,
+        orderId: params.orderId,
+        token,
+        target,
+        adjustments: params.adjustments,
+        releaseClaim: true
+    })
 }
 
 async function compensateSumUpOrderStock(params: {
@@ -128,9 +158,13 @@ export async function transitionSumUpOrderStock(params: {
         { $set: { stockEffectClaim: { token: params.token, target: params.target } } }
     )
     if ((claimed.matchedCount ?? claimed.modifiedCount) !== 1) {
-        return await isSumUpOrderAtTarget(params)
-            ? { success: true }
-            : { success: false, error: "Ordine non disponibile o modifica scorte già in corso" }
+        if (await isSumUpOrderAtTarget(params)) return { success: true }
+        const resumed = await resumeInterruptedOpposingTransition(params)
+        if (resumed) {
+            if (!resumed.success) return resumed
+            return transitionSumUpOrderStock(params)
+        }
+        return { success: false, error: "Ordine non disponibile o modifica scorte già in corso" }
     }
 
     let result: Awaited<ReturnType<typeof transitionClaimedOrderStock>>

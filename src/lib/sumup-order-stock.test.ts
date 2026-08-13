@@ -4,6 +4,7 @@ const {
     ingredientExistsMock,
     ingredientUpdateOneMock,
     orderExistsMock,
+    orderFindOneMock,
     orderUpdateOneMock,
     productExistsMock,
     productUpdateOneMock,
@@ -12,6 +13,7 @@ const {
     ingredientExistsMock: vi.fn(),
     ingredientUpdateOneMock: vi.fn(),
     orderExistsMock: vi.fn(),
+    orderFindOneMock: vi.fn(),
     orderUpdateOneMock: vi.fn(),
     productExistsMock: vi.fn(),
     productUpdateOneMock: vi.fn(),
@@ -19,7 +21,7 @@ const {
 }))
 
 vi.mock("@/models/Order", () => ({
-    default: { updateOne: orderUpdateOneMock, exists: orderExistsMock }
+    default: { updateOne: orderUpdateOneMock, exists: orderExistsMock, findOne: orderFindOneMock }
 }))
 vi.mock("@/models/Product", () => ({
     default: { updateOne: productUpdateOneMock, exists: productExistsMock }
@@ -108,14 +110,36 @@ describe("SumUp order stock transition", () => {
                 eventId?: string
                 status?: string
                 stockEffectStatus?: StockTarget
+                stockEffectClaim?: null
             }
             return query._id === order._id
                 && (!query.eventId || query.eventId === order.eventId)
                 && (!query.status || query.status === order.status)
                 && (!query.stockEffectStatus || query.stockEffectStatus === order.stockEffectStatus)
+                && (query.stockEffectClaim !== null || !order.stockEffectClaim)
                 ? { _id: order._id }
                 : null
         })
+        orderFindOneMock.mockImplementation((rawQuery: unknown) => ({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockImplementation(async () => {
+                    const query = rawQuery as {
+                        _id?: string
+                        eventId?: string
+                        status?: string
+                        stockEffectStatus?: StockTarget
+                        "stockEffectClaim.target"?: StockTarget
+                    }
+                    return query._id === order._id
+                        && query.eventId === order.eventId
+                        && query.status === order.status
+                        && query.stockEffectStatus === order.stockEffectStatus
+                        && query["stockEffectClaim.target"] === order.stockEffectClaim?.target
+                        ? { stockEffectClaim: order.stockEffectClaim }
+                        : null
+                })
+            })
+        }))
 
         productUpdateOneMock.mockImplementation(async (rawQuery: unknown, rawUpdate: unknown) => {
             if (Array.isArray(rawUpdate)) return { matchedCount: 1, modifiedCount: 1 }
@@ -285,5 +309,37 @@ describe("SumUp order stock transition", () => {
 
         expect(result).toEqual({ success: true })
         expect(productUpdateOneMock).not.toHaveBeenCalled()
+    })
+
+    test("finishes an interrupted reservation before reverting its partial stock writes", async () => {
+        order.stockEffectClaim = { token: "interrupted-reserve", target: "APPLIED" }
+        stocks.set("p1", 1)
+        stocks.set("p2", 2)
+        operationKeys.set("p1", new Set(["interrupted-reserve:o1:0"]))
+        operationKeys.set("p2", new Set())
+
+        const result = await transitionSumUpOrderStock({
+            eventId: "e1",
+            orderId: "o1",
+            token: "recovery-release",
+            target: "REVERTED",
+            adjustments: [
+                { entityType: "PRODUCT", entityId: "p1", quantity: 1 },
+                { entityType: "PRODUCT", entityId: "p2", quantity: 1 }
+            ]
+        })
+
+        expect(result).toEqual({ success: true })
+        expect(stocks).toEqual(new Map([["p1", 2], ["p2", 2]]))
+        expect(operationKeys.get("p1")).toEqual(new Set([
+            "interrupted-reserve:o1:0",
+            "recovery-release:o1:0"
+        ]))
+        expect(operationKeys.get("p2")).toEqual(new Set([
+            "interrupted-reserve:o1:1",
+            "recovery-release:o1:1"
+        ]))
+        expect(order).toMatchObject({ stockEffectStatus: "REVERTED" })
+        expect(order.stockEffectClaim).toBeUndefined()
     })
 })
