@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const {
     dbConnectMock,
     printJobCreateMock,
+    printJobFindOneMock,
+    printJobFindOneAndUpdateMock,
     printJobDistinctMock,
     printJobUpdateManyMock,
     printJobUpdateOneMock,
@@ -19,6 +21,8 @@ const {
 } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     printJobCreateMock: vi.fn(),
+    printJobFindOneMock: vi.fn(),
+    printJobFindOneAndUpdateMock: vi.fn(),
     printJobDistinctMock: vi.fn(),
     printJobUpdateManyMock: vi.fn(),
     printJobUpdateOneMock: vi.fn(),
@@ -41,6 +45,8 @@ vi.mock("@/lib/mongoose", () => ({
 vi.mock("@/models/PrintJob", () => ({
     default: {
         create: printJobCreateMock,
+        findOne: printJobFindOneMock,
+        findOneAndUpdate: printJobFindOneAndUpdateMock,
         distinct: printJobDistinctMock,
         updateMany: printJobUpdateManyMock,
         updateOne: printJobUpdateOneMock,
@@ -116,6 +122,14 @@ vi.mock("node-thermal-printer", () => {
 import { PrinterService } from "@/lib/printer";
 import { holdFailedKitchenPrintJobs } from "@/lib/print-queue";
 
+function queryResult(value: unknown) {
+    return {
+        select: vi.fn().mockReturnValue({
+            lean: vi.fn().mockResolvedValue(value)
+        })
+    };
+}
+
 function buildDocument(input: {
     printType?: string;
     title?: string;
@@ -184,6 +198,8 @@ describe("PrinterService.printComanda connection retry", () => {
         vi.useRealTimers();
 
         printJobCreateMock.mockResolvedValue({ _id: { toString: () => "job-1" } });
+        printJobFindOneMock.mockReturnValue(queryResult({ status: "SENT" }));
+        printJobFindOneAndUpdateMock.mockReturnValue(queryResult(null));
         printJobDistinctMock.mockResolvedValue([]);
         printJobUpdateManyMock.mockResolvedValue({ modifiedCount: 0 });
         printJobUpdateOneMock.mockResolvedValue({ acknowledged: true, matchedCount: 1, modifiedCount: 1 });
@@ -230,6 +246,141 @@ describe("PrinterService.printComanda connection retry", () => {
                 $unset: { errorMessage: 1 }
             }
         );
+    });
+
+    test.each(["SENT", "FAILED", "HELD"] as const)("treats a terminal %s SumUp print intent as complete", async (status) => {
+        printJobCreateMock.mockRejectedValueOnce(Object.assign(new Error("duplicate"), { code: 11000 }));
+        printJobFindOneMock.mockReturnValue(queryResult({ status }));
+
+        await expect(PrinterService.printComanda({
+            ...baseJob(),
+            idempotencyKey: "SUMUP_CALLBACK:order-1:cashier-summary"
+        }, 1)).resolves.toBe(true);
+
+        expect(isPrinterConnectedMock).not.toHaveBeenCalled();
+        expect(executeMock).not.toHaveBeenCalled();
+        expect(printJobUpdateOneMock).not.toHaveBeenCalled();
+        expect(printJobFindOneAndUpdateMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                status: "QUEUED",
+                queueRecoverable: false,
+                heldSince: { $exists: false },
+                $and: expect.arrayContaining([
+                    expect.objectContaining({
+                        $or: expect.arrayContaining([
+                            { retryClaimedAt: { $exists: false } },
+                            { retryClaimedAt: { $lte: expect.any(Date) } }
+                        ])
+                    })
+                ])
+            }),
+            { $set: { retryClaimedAt: expect.any(Date) } },
+            { returnDocument: "after" }
+        );
+    });
+
+    test("reports recovery pending while another callback owns the SumUp print intent", async () => {
+        printJobCreateMock.mockRejectedValueOnce(Object.assign(new Error("duplicate"), { code: 11000 }));
+        printJobFindOneMock.mockReturnValue(queryResult({ status: "QUEUED" }));
+
+        await expect(PrinterService.printComanda({
+            ...baseJob(),
+            idempotencyKey: "SUMUP_CALLBACK:order-1:cashier-summary"
+        }, 1)).resolves.toBe("RECOVERY_PENDING");
+
+        expect(isPrinterConnectedMock).not.toHaveBeenCalled();
+        expect(executeMock).not.toHaveBeenCalled();
+    });
+
+    test("persists an active claim with a new non-queue SumUp print intent", async () => {
+        isPrinterConnectedMock.mockResolvedValue(true);
+        executeMock.mockResolvedValue(undefined);
+
+        await expect(PrinterService.printComanda({
+            ...baseJob(),
+            idempotencyKey: "SUMUP_CALLBACK:order-1:cashier-summary"
+        }, 1)).resolves.toBe(true);
+
+        expect(printJobCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+            queueRecoverable: false,
+            idempotencyKey: "SUMUP_CALLBACK:order-1:cashier-summary",
+            retryClaimedAt: expect.any(Date)
+        }));
+        expect(printJobUpdateOneMock).toHaveBeenCalledWith(
+            { _id: "job-1" },
+            expect.objectContaining({
+                $unset: { errorMessage: 1, retryClaimedAt: 1 }
+            })
+        );
+    });
+
+    test("atomically reclaims one abandoned SumUp print intent and clears its claim after dispatch", async () => {
+        const orderId = "507f1f77bcf86cd799439011";
+        printJobCreateMock.mockRejectedValue(Object.assign(new Error("duplicate"), { code: 11000 }));
+        printJobFindOneAndUpdateMock
+            .mockReturnValueOnce(queryResult({ _id: { toString: () => "persisted-job-1" } }))
+            .mockReturnValueOnce(queryResult(null));
+        printJobFindOneMock.mockReturnValue(queryResult({ status: "QUEUED" }));
+        isPrinterConnectedMock.mockResolvedValue(true);
+        executeMock.mockResolvedValue(undefined);
+
+        const job = {
+            ...baseJob(),
+            orderId,
+            idempotencyKey: `SUMUP_CALLBACK:${orderId}:cashier-summary`
+        };
+        const results = await Promise.all([
+            PrinterService.printComanda(job, 1),
+            PrinterService.printComanda(job, 1)
+        ]);
+
+        expect(results).toEqual([true, "RECOVERY_PENDING"]);
+        expect(executeMock).toHaveBeenCalledTimes(1);
+        expect(printJobFindOneAndUpdateMock).toHaveBeenCalledTimes(2);
+        expect(printJobFindOneAndUpdateMock).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                eventId: "evt-1",
+                orderId,
+                source: "MANUAL_TEST",
+                idempotencyKey: `SUMUP_CALLBACK:${orderId}:cashier-summary`,
+                status: "QUEUED",
+                queueRecoverable: false,
+                heldSince: { $exists: false },
+                $and: [
+                    expect.objectContaining({ $or: expect.any(Array) }),
+                    expect.objectContaining({ $or: expect.any(Array) }),
+                    expect.objectContaining({ $or: expect.any(Array) })
+                ]
+            }),
+            { $set: { retryClaimedAt: expect.any(Date) } },
+            { returnDocument: "after" }
+        );
+        expect(printJobUpdateOneMock).toHaveBeenCalledWith(
+            { _id: "persisted-job-1" },
+            {
+                $set: {
+                    status: "SENT",
+                    rawCapturePath: undefined,
+                    automaticRetryCount: 0
+                },
+                $unset: { errorMessage: 1, retryClaimedAt: 1 }
+            }
+        );
+    });
+
+    test("requests a callback retry when an idempotent intent cannot be persisted", async () => {
+        vi.spyOn(console, "error").mockImplementation(() => undefined);
+        printJobCreateMock.mockRejectedValueOnce(new Error("database unavailable"));
+
+        await expect(PrinterService.printComanda({
+            ...baseJob(),
+            idempotencyKey: "SUMUP_CALLBACK:order-1:cashier-summary"
+        }, 1)).resolves.toBe("RETRY_REQUIRED");
+
+        expect(isPrinterConnectedMock).not.toHaveBeenCalled();
+        expect(executeMock).not.toHaveBeenCalled();
+        expect(printJobUpdateOneMock).not.toHaveBeenCalled();
     });
 
     test("automatically retries not reachable jobs before succeeding", async () => {

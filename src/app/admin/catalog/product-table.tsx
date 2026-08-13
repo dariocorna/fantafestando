@@ -101,7 +101,7 @@ interface ProductTableProps {
     productOptions: ProductOption[];
     ingredients: ProductRecipeIngredientOption[];
     updateAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>;
-    deleteAction: (formData: FormData) => Promise<void>;
+    deleteAction: (formData: FormData) => Promise<unknown>;
     addVariantAction: (formData: FormData) => Promise<void>;
     removeVariantAction: (formData: FormData) => Promise<void>;
     bulkUpdateProductKitchenPrintModeAction: (formData: FormData) => Promise<{ success?: boolean; error?: string } | void>;

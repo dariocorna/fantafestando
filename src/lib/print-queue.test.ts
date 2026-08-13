@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
     eventDistinct: vi.fn(),
     printerDistinct: vi.fn(),
     printerFindOneAndUpdate: vi.fn(),
-    printerUpdateOne: vi.fn()
+    printerUpdateOne: vi.fn(),
+    completeSumUpPrintIntentsForSentJob: vi.fn()
 }));
 
 vi.mock("@/lib/mongoose", () => ({ default: mocks.dbConnect }));
@@ -30,6 +31,9 @@ vi.mock("@/models/Printer", () => ({
         findOneAndUpdate: mocks.printerFindOneAndUpdate,
         updateOne: mocks.printerUpdateOne
     }
+}));
+vi.mock("@/lib/sumup-print-routing", () => ({
+    completeSumUpPrintIntentsForSentJob: mocks.completeSumUpPrintIntentsForSentJob
 }));
 
 import {
@@ -66,6 +70,7 @@ describe("print queue", () => {
         mocks.printerDistinct.mockResolvedValue([]);
         mocks.printerFindOneAndUpdate.mockReturnValue(queryResult(null));
         mocks.printerUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+        mocks.completeSumUpPrintIntentsForSentJob.mockResolvedValue(false);
     });
 
     test("holds only failed ORDER kitchen jobs backed by a KITCHEN printer", async () => {
@@ -378,6 +383,8 @@ describe("print queue", () => {
                 $set: expect.objectContaining({ status: "SENT", rawCapturePath: "/capture.bin", automaticRetryCount: 1 })
             })
         );
+        expect(mocks.completeSumUpPrintIntentsForSentJob).toHaveBeenCalledOnce();
+        expect(mocks.completeSumUpPrintIntentsForSentJob).toHaveBeenCalledWith("event-1", "job-sent");
         expect(mocks.printJobUpdateOne).toHaveBeenNthCalledWith(
             2,
             expect.objectContaining({ _id: "job-failed", status: "QUEUED", queueClaimToken: expect.any(String) }),

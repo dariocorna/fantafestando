@@ -5,7 +5,10 @@ export interface IPeripheral extends Document {
     name: string;
     type: "SUMUP" | "CASH_BOX" | "ELECTRONIC_MANUAL" | "OTHER";
     config: {
-        merchantId?: string;
+        merchantCode?: string;
+        readerId?: string;
+        apiKey?: string;
+        affiliateAppId?: string;
         affiliateKey?: string;
         [key: string]: unknown;
     };

@@ -11,7 +11,9 @@ import Event from "@/models/Event"
 import { revalidatePath } from "next/cache"
 import { PrinterService } from "@/lib/printer"
 import { createSumUpCheckout } from "@/lib/sumup"
+import { claimSumUpEventOperation, releaseSumUpEventOperation } from "@/lib/sumup-event-operation"
 import { decryptSecret } from "@/lib/secrets"
+import { buildSumUpRefundCredentialsSnapshot } from "@/lib/sumup-order-credentials"
 import { getOrderCodeFromOrder, parseOrderNumberInput } from "@/lib/order-code"
 import { resolveDishTicketsForCart } from "@/lib/pizza-ticket"
 import { getStockStatus, type StockMode } from "@/lib/inventory"
@@ -31,10 +33,11 @@ import {
 } from "@/lib/order-discounts"
 import {
     applyStockForPaidOrder,
-    validateStockForPendingOrder,
+    planStockAdjustmentsForPayment,
     rollbackStockAdjustments,
     type StockAdjustment,
 } from "@/lib/stock-operations"
+import { transitionSumUpOrderStock } from "@/lib/sumup-order-stock"
 import {
     requiresPendingState as computeRequiresPendingState,
     type PeripheralType,
@@ -67,6 +70,7 @@ import {
 } from "@/lib/cash-session-payment-claim"
 import { publishStockInvalidation } from "@/lib/pos-stock-realtime"
 import { holdFailedKitchenPrintJobs, recoverStaleManualPrintRetryClaims } from "@/lib/print-queue"
+import { completeSumUpPrintIntentsIfSent } from "@/lib/sumup-print-routing"
 
 interface PrintDispatchSummary {
     attempted: number
@@ -1171,8 +1175,20 @@ export async function closeCashSession(data: {
         if (claimed.isTest) {
             const sumUpOrder = await Order.exists({
                 cashSessionId: claimed._id,
-                status: "PAID",
-                $or: [{ sumupCheckoutId: { $exists: true, $ne: "" } }, { sumupPaymentId: { $exists: true, $ne: "" } }]
+                $or: [
+                    {
+                        status: "PAID",
+                        $or: [
+                            { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                            { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                        ]
+                    },
+                    {
+                        status: "CANCELLED",
+                        sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                        "stornoMeta.refundStatus": { $ne: "DONE" }
+                    }
+                ]
             })
             if (sumUpOrder) {
                 await releaseTransitionClaim()
@@ -1338,13 +1354,15 @@ export async function createOrder(data: {
     lineDiscounts?: LineDiscountInput[],
     pricingMode?: PosPricingMode,
     paymentMethod: "CASH" | "CARD" | "OTHER",
-    sumupCheckoutId?: string,
     posDeviceId?: string,
     allowStockOverride?: boolean
 }) {
     let stockAdjustmentsToRollback: StockAdjustment[] = []
+    let pendingStockAdjustments: StockAdjustment[] = []
     let paymentClaimToken: string | undefined
     let paymentClaimSessionId: string | undefined
+    let sumUpOrderInProgressId: string | undefined
+    let sumUpEventOperationToken: string | null = null
     try {
         const sessionCheck = await ensurePosActionSession()
         if (!sessionCheck.success) return sessionCheck
@@ -1363,7 +1381,6 @@ export async function createOrder(data: {
         if (paymentValidationError) {
             return { success: false, error: paymentValidationError }
         }
-
         const sessionResult = await getOpenCashSession(data.eventId, data.posDeviceId)
         if (!sessionResult.success) {
             return { success: false, error: sessionResult.error, cashSessionRequired: true }
@@ -1434,16 +1451,26 @@ export async function createOrder(data: {
         }
 
         if (requiresPendingState) {
-            const stockCheckResult = await validateStockForPendingOrder(data.eventId, stockPayload, stockMode, ingredientPlan)
-            if (!stockCheckResult.success) {
+            sumUpEventOperationToken = await claimSumUpEventOperation(data.eventId, true)
+            if (!sumUpEventOperationToken) {
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+                paymentClaimToken = undefined
+                return { success: false, error: "La festa è in fase di archiviazione o eliminazione" }
+            }
+        }
+
+        if (requiresPendingState) {
+            const stockPlan = await planStockAdjustmentsForPayment(data.eventId, stockPayload, stockMode, ingredientPlan)
+            if (!stockPlan.success) {
                 await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
                 paymentClaimToken = undefined
                 return {
                     success: false,
-                    error: stockCheckResult.error || "Scorte non sufficienti",
-                    stockShortages: stockCheckResult.stockShortages
+                    error: stockPlan.error || "Scorte non sufficienti",
+                    stockShortages: stockPlan.stockShortages
                 }
             }
+            pendingStockAdjustments = stockPlan.adjustments
         } else {
             const stockApplyResult = await applyStockForPaidOrder(data.eventId, stockPayload, stockMode, ingredientPlan)
             if (!stockApplyResult.success) {
@@ -1479,49 +1506,131 @@ export async function createOrder(data: {
             ingredientPlan,
             dishTickets,
             paymentMethod: data.paymentMethod,
-            sumupCheckoutId: requiresPendingState ? undefined : data.sumupCheckoutId,
             posDeviceId: data.posDeviceId,
             cashSessionId: sessionResult.session.id,
             stockOverrideApproved: Boolean(data.allowStockOverride),
-            stockAdjustments: stockAdjustmentsToRollback,
-            stockEffectStatus: requiresPendingState ? undefined : "APPLIED"
+            stockAdjustments: requiresPendingState ? pendingStockAdjustments : stockAdjustmentsToRollback,
+            stockEffectStatus: requiresPendingState ? "REVERTED" : "APPLIED"
         })
         stockAdjustmentsToRollback = []
 
         if (requiresPendingState) {
-            const legacyCheckoutId = data.sumupCheckoutId?.trim()
-            if (legacyCheckoutId) {
+            const initiationMarker = `initiating:${order._id.toString()}`
+            const sumupInitiatedAt = new Date()
+            const initiationResult = await Order.updateOne(
+                { _id: order._id, eventId: data.eventId, status: "PENDING" },
+                { $set: { sumupCheckoutId: initiationMarker, sumupInitiatedAt } }
+            )
+            if (!initiationResult.acknowledged || initiationResult.matchedCount !== 1) {
                 await Order.updateOne(
                     { _id: order._id, eventId: data.eventId, status: "PENDING" },
-                    { $set: { sumupCheckoutId: legacyCheckoutId } }
+                    { $set: { status: "CANCELLED" } }
                 )
-            } else {
-                const sumupResult = await triggerSumUpPayment(payableAmount, data.eventId, data.posDeviceId)
-                if (!sumupResult.success || !sumupResult.checkoutId) {
-                    await Order.updateOne(
-                        { _id: order._id, eventId: data.eventId, status: "PENDING" },
-                        { $set: { status: "CANCELLED" } }
-                    )
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId || "", paymentClaimToken)
+                paymentClaimToken = undefined
+                return { success: false, error: "Impossibile preparare il pagamento SumUp" }
+            }
+            sumUpOrderInProgressId = order._id.toString()
+
+            const reservationResult = await transitionSumUpOrderStock({
+                eventId: data.eventId,
+                orderId: order._id.toString(),
+                token: `SUMUP_RESERVE:${order._id.toString()}`,
+                target: "APPLIED",
+                adjustments: pendingStockAdjustments
+            })
+            if (!reservationResult.success) {
+                const cancellation = await Order.updateOne(
+                    { _id: order._id, eventId: data.eventId, status: "PENDING" },
+                    { $set: { status: "CANCELLED" } }
+                )
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId || "", paymentClaimToken)
+                paymentClaimToken = undefined
+                if (!cancellation.acknowledged || cancellation.matchedCount !== 1) {
+                    return {
+                        success: true,
+                        orderId: order._id.toString(),
+                        paymentCompleted: false,
+                        paymentUncertain: true
+                    }
+                }
+                sumUpOrderInProgressId = undefined
+                return { success: false, error: reservationResult.error }
+            }
+
+            const sumupResult = await triggerSumUpPaymentWithLease(
+                payableAmount,
+                data.eventId,
+                data.posDeviceId,
+                order._id.toString(),
+                sumUpEventOperationToken
+            )
+            if (!sumupResult.success || !sumupResult.checkoutId) {
+                if ("paymentUncertain" in sumupResult && sumupResult.paymentUncertain) {
                     await releaseCashSessionPaymentClaim(paymentClaimSessionId || "", paymentClaimToken)
                     paymentClaimToken = undefined
                     return {
-                        success: false,
-                        error: sumupResult.error || "Errore durante l'inizializzazione del pagamento elettronico"
+                        success: true,
+                        orderId: order._id.toString(),
+                        paymentCompleted: false,
+                        paymentUncertain: true
                     }
                 }
-
-                const checkoutLinkResult = await Order.updateOne(
-                    { _id: order._id, eventId: data.eventId, status: "PENDING" },
-                    { $set: { sumupCheckoutId: sumupResult.checkoutId } }
-                )
-                if (!checkoutLinkResult.acknowledged || checkoutLinkResult.matchedCount !== 1) {
-                    await Order.updateOne(
-                        { _id: order._id, eventId: data.eventId, status: "PENDING" },
-                        { $set: { status: "CANCELLED" } }
-                    )
+                const releaseResult = await transitionSumUpOrderStock({
+                    eventId: data.eventId,
+                    orderId: order._id.toString(),
+                    token: `SUMUP_RELEASE:${order._id.toString()}`,
+                    target: "REVERTED",
+                    adjustments: pendingStockAdjustments
+                })
+                if (!releaseResult.success) {
                     await releaseCashSessionPaymentClaim(paymentClaimSessionId || "", paymentClaimToken)
                     paymentClaimToken = undefined
-                    return { success: false, error: "Impossibile associare il checkout SumUp all'ordine" }
+                    return {
+                        success: true,
+                        orderId: order._id.toString(),
+                        paymentCompleted: false,
+                        paymentUncertain: true
+                    }
+                }
+                const cancellation = await Order.updateOne(
+                    { _id: order._id, eventId: data.eventId, status: "PENDING" },
+                    { $set: { status: "CANCELLED" } }
+                )
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId || "", paymentClaimToken)
+                paymentClaimToken = undefined
+                if (!cancellation.acknowledged || cancellation.matchedCount !== 1) {
+                    return {
+                        success: true,
+                        orderId: order._id.toString(),
+                        paymentCompleted: false,
+                        paymentUncertain: true
+                    }
+                }
+                sumUpOrderInProgressId = undefined
+                return {
+                    success: false,
+                    error: sumupResult.error || "Errore durante l'inizializzazione del pagamento elettronico"
+                }
+            }
+
+            const checkoutLinkResult = await Order.updateOne(
+                {
+                    _id: order._id,
+                    eventId: data.eventId,
+                    status: "PENDING",
+                    sumupCheckoutId: { $in: [initiationMarker, sumupResult.checkoutId] }
+                },
+                { $set: { sumupCheckoutId: sumupResult.checkoutId } }
+            )
+            if (!checkoutLinkResult.acknowledged || checkoutLinkResult.matchedCount !== 1) {
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId || "", paymentClaimToken)
+                paymentClaimToken = undefined
+                return {
+                    success: true,
+                    orderId: order._id.toString(),
+                    paymentCompleted: false,
+                    paymentUncertain: true
                 }
             }
         }
@@ -1556,6 +1665,7 @@ export async function createOrder(data: {
             success: true,
             orderId: order._id.toString(),
             paymentCompleted: order.status === "PAID",
+            ...(requiresPendingState ? { paymentPending: true } : {}),
             printSummary
         }
     } catch (error) {
@@ -1574,11 +1684,32 @@ export async function createOrder(data: {
             }
         }
         console.error("Create Order Error:", error)
+        if (sumUpOrderInProgressId) {
+            return {
+                success: true,
+                orderId: sumUpOrderInProgressId,
+                paymentCompleted: false,
+                paymentUncertain: true
+            }
+        }
         return { success: false, error: "Failed to create order" }
+    } finally {
+        await releaseSumUpEventOperation(data.eventId, sumUpEventOperationToken).catch((error) => {
+            console.error("Create Order event operation release error:", error)
+        })
     }
 }
 
-export async function triggerSumUpPayment(amount: number, eventId: string, posDeviceId?: string) {
+async function triggerSumUpPaymentWithLease(
+    amount: number,
+    eventId: string,
+    posDeviceId: string | undefined,
+    orderId: string,
+    existingEventOperationToken?: string | null
+) {
+    let eventOperationToken = existingEventOperationToken || null
+    const ownsEventOperation = !existingEventOperationToken
+    let checkoutAccepted = false
     try {
         const sessionCheck = await ensurePosActionSession()
         if (!sessionCheck.success) return sessionCheck
@@ -1607,41 +1738,133 @@ export async function triggerSumUpPayment(amount: number, eventId: string, posDe
                     paymentTerminalId?: {
                         name?: string
                         type?: string
-                        config?: { merchantId?: string, affiliateKey?: string }
+                        config?: {
+                            merchantCode?: string
+                            readerId?: string
+                            apiKey?: string
+                            affiliateAppId?: string
+                            affiliateKey?: string
+                        }
                     } | null
                 } | null
             )
 
+        const normalizedOrderId = orderId?.trim()
+        if (!normalizedOrderId) {
+            return { success: false, error: "Ordine SumUp non valido" }
+        }
+
         const terminal = posDevice?.paymentTerminalId
-        const merchantId = terminal?.config?.merchantId?.trim()
-        const decryptedApiKey = decryptSecret(terminal?.config?.affiliateKey)
+        const merchantCode = terminal?.config?.merchantCode?.trim()
+        const readerId = terminal?.config?.readerId?.trim()
+        const affiliateAppId = terminal?.config?.affiliateAppId?.trim()
+        const decryptedApiKey = decryptSecret(terminal?.config?.apiKey)
+        const decryptedAffiliateKey = decryptSecret(terminal?.config?.affiliateKey)
 
         if (!terminal || terminal.type !== "SUMUP") {
             return { success: false, error: "Terminale elettronico non valido o non configurato come SumUp" }
         }
 
-        if (!merchantId || !decryptedApiKey) {
+        if (!merchantCode || !readerId || !affiliateAppId || !decryptedApiKey || !decryptedAffiliateKey) {
             return { success: false, error: "Configurazione SumUp mancante nella periferica associata alla cassa" }
+        }
+
+        const refundCredentials = buildSumUpRefundCredentialsSnapshot({
+            merchantCode,
+            readerId,
+            apiKey: terminal.config?.apiKey
+        })
+        if (!refundCredentials) {
+            return { success: false, error: "Configurazione SumUp mancante nella periferica associata alla cassa" }
+        }
+        eventOperationToken ||= await claimSumUpEventOperation(eventId, true)
+        if (!eventOperationToken) {
+            return { success: false, error: "La festa è in fase di archiviazione o eliminazione" }
+        }
+        const snapshotSaved = await Order.updateOne(
+            {
+                _id: normalizedOrderId,
+                eventId,
+                posDeviceId,
+                status: "PENDING",
+                sumupCheckoutId: `initiating:${normalizedOrderId}`,
+                sumupRefundCredentials: { $exists: false }
+            },
+            { $set: { sumupRefundCredentials: refundCredentials } }
+        )
+        if (!snapshotSaved.acknowledged || snapshotSaved.matchedCount !== 1) {
+            return { success: false, error: "Ordine SumUp non preparato" }
         }
 
         console.log(`[SumUp] Inizializzazione pagamento di ${amount}€ su ${terminal.name || posDevice?.name || "POS"}...`)
 
-        const result = await createSumUpCheckout(
+        const result = await createSumUpCheckout({
             amount,
-            "EUR",
-            merchantId,
-            decryptedApiKey
-        )
+            currency: "EUR",
+            merchantCode,
+            readerId,
+            apiKey: decryptedApiKey,
+            affiliateAppId,
+            affiliateKey: decryptedAffiliateKey,
+            foreignTransactionId: normalizedOrderId
+        })
 
         if (!result.success) {
-            return { success: false, error: result.error }
+            if (result.uncertain !== true) {
+                await Order.updateOne(
+                    {
+                        _id: normalizedOrderId,
+                        eventId,
+                        status: "PENDING",
+                        sumupCheckoutId: `initiating:${normalizedOrderId}`
+                    },
+                    { $unset: { sumupRefundCredentials: 1 } }
+                )
+            }
+            return {
+                success: false,
+                error: result.error,
+                paymentUncertain: result.uncertain === true
+            }
         }
 
+        checkoutAccepted = true
+        const checkoutLinked = await Order.updateOne(
+            {
+                _id: normalizedOrderId,
+                eventId,
+                posDeviceId,
+                status: "PENDING",
+                sumupCheckoutId: `initiating:${normalizedOrderId}`
+            },
+            { $set: { sumupCheckoutId: result.id } }
+        )
+        if (!checkoutLinked.acknowledged || checkoutLinked.matchedCount !== 1) {
+            return {
+                success: false,
+                error: "Checkout SumUp avviato ma non collegato all'ordine",
+                paymentUncertain: true
+            }
+        }
         return { success: true, checkoutId: result.id }
     } catch (error) {
         console.error("SumUp Context Error:", error)
-        return { success: false, error: "Errore durante l'inizializzazione del pagamento" }
+        return {
+            success: false,
+            error: "Errore durante l'inizializzazione del pagamento",
+            ...(checkoutAccepted ? { paymentUncertain: true } : {})
+        }
+    } finally {
+        if (ownsEventOperation) {
+            await releaseSumUpEventOperation(eventId, eventOperationToken).catch((error) => {
+                console.error("SumUp event operation release error:", error)
+            })
+        }
     }
+}
+
+export async function triggerSumUpPayment(amount: number, eventId: string, posDeviceId: string | undefined, orderId: string) {
+    return triggerSumUpPaymentWithLease(amount, eventId, posDeviceId, orderId)
 }
 
 export async function loadPendingOrderByCode(data: {
@@ -1696,13 +1919,24 @@ export async function loadPendingOrderByCode(data: {
             foundOrder = await Order.findOne({
                 eventId: data.eventId,
                 status: "PENDING",
+                $nor: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ],
                 pickupNumber: parsedNumber
             }).select(pendingOrderLookupProjection).lean() as PendingOrderResult | null
         }
 
         // Legacy fallback: old pending orders used the last 4 chars of _id as code.
         if (!foundOrder && normalizedCode.length >= 4) {
-            const pendingOrders = await Order.find({ eventId: data.eventId, status: "PENDING" })
+            const pendingOrders = await Order.find({
+                eventId: data.eventId,
+                status: "PENDING",
+                $nor: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            })
                 .sort({ createdAt: -1 })
                 .limit(500)
                 .select(pendingOrderLookupProjection)
@@ -1799,7 +2033,14 @@ export async function listRecentPendingOrders(data: {
         const safeLimit = Math.min(Math.max(requestedLimit, 1), 20)
 
         await dbConnect()
-        const pendingOrders = await Order.find({ eventId: data.eventId, status: "PENDING" })
+        const pendingOrders = await Order.find({
+            eventId: data.eventId,
+            status: "PENDING",
+            $nor: [
+                { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+            ]
+        })
             .sort({ createdAt: -1 })
             .limit(safeLimit)
             .select("_id pickupNumber totalAmount customer createdAt")
@@ -2042,6 +2283,8 @@ export async function completePendingOrderPayment(data: {
     let stockAdjustmentsToRollback: StockAdjustment[] = []
     let paymentClaimToken: string | undefined
     let paymentClaimSessionId: string | undefined
+    let sumUpOrderInProgressId: string | undefined
+    let sumUpEventOperationToken: string | null = null
     try {
         const sessionCheck = await ensurePosActionSession()
         if (!sessionCheck.success) return sessionCheck
@@ -2059,6 +2302,8 @@ export async function completePendingOrderPayment(data: {
         if (paymentValidationError) {
             return { success: false, error: paymentValidationError }
         }
+        const isSumUpPayment = data.paymentMethod === "CARD"
+            && capabilitiesResult.capabilities.paymentTerminalType === "SUMUP"
 
         const sessionResult = await getOpenCashSession(data.eventId, data.posDeviceId)
         if (!sessionResult.success) {
@@ -2069,6 +2314,9 @@ export async function completePendingOrderPayment(data: {
         const order = await Order.findOne({ _id: data.orderId, eventId: data.eventId, status: "PENDING" })
         if (!order) {
             return { success: false, error: "Ordine non trovato o già chiuso" }
+        }
+        if (order.sumupCheckoutId?.trim() || order.sumupPaymentId?.trim()) {
+            return { success: false, error: "L'ordine è già associato a un pagamento SumUp" }
         }
 
         const persistedOrderCartInput = sanitizeCartItems(
@@ -2115,13 +2363,6 @@ export async function completePendingOrderPayment(data: {
 
         if (orderCartInput.length === 0) {
             return { success: false, error: "L'ordine deve contenere almeno un prodotto" }
-        }
-
-        if (data.customer) {
-            order.set("customer", {
-                name: data.customer.name || undefined,
-                table: data.customer.table || undefined
-            })
         }
 
         if (typeof data.totalAmount === "number" && (!Number.isFinite(data.totalAmount) || data.totalAmount < 0)) {
@@ -2291,6 +2532,33 @@ export async function completePendingOrderPayment(data: {
             order.dishTickets
         )
 
+        const orderPaymentDetails = {
+            ...(data.customer ? {
+                customer: {
+                    name: data.customer.name || undefined,
+                    table: data.customer.table || undefined
+                }
+            } : {}),
+            cart: pricingResult.pricing.cartWithDiscounts,
+            ingredientPlan,
+            dishTickets,
+            totalAmount: payableAmount,
+            discountApplied: pricingResult.pricing.discountApplied,
+            ...(pricingResult.pricing.orderDiscountMeta
+                ? { discountMeta: pricingResult.pricing.orderDiscountMeta }
+                : {}),
+            discountComponents: pricingResult.pricing.discountComponents,
+            pricingMode: pendingPricingMode === "VOLUNTEER" ? "VOLUNTEER" : "STANDARD",
+            paymentMethod: data.paymentMethod,
+            ...(data.posDeviceId ? { posDeviceId: data.posDeviceId } : {}),
+            cashSessionId: sessionResult.session.id,
+            stockOverrideApproved: Boolean(data.allowStockOverride)
+        }
+        const orderPaymentFieldsToUnset = {
+            ...(!pricingResult.pricing.orderDiscountMeta ? { discountMeta: 1 as const } : {}),
+            ...(!data.posDeviceId ? { posDeviceId: 1 as const } : {})
+        }
+
         const stockMode: StockMode = data.allowStockOverride ? "override" : "strict"
         const paymentClaim = await claimCashSessionPayment(sessionResult.session.id)
         if (!paymentClaim.success) {
@@ -2298,6 +2566,180 @@ export async function completePendingOrderPayment(data: {
         }
         paymentClaimToken = paymentClaim.token
         paymentClaimSessionId = sessionResult.session.id
+        if (paymentClaim.isTest && isSumUpPayment) {
+            await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+            paymentClaimToken = undefined
+            return { success: false, error: "I pagamenti sul terminale SumUp sono bloccati nelle sessioni TEST" }
+        }
+        if (isSumUpPayment) {
+            sumUpEventOperationToken = await claimSumUpEventOperation(data.eventId, true)
+            if (!sumUpEventOperationToken) {
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+                paymentClaimToken = undefined
+                return { success: false, error: "La festa è in fase di archiviazione o eliminazione" }
+            }
+        }
+        const pendingOrderPaymentGuard = {
+            _id: data.orderId,
+            eventId: data.eventId,
+            status: "PENDING",
+            $nor: [
+                { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+            ]
+        }
+        const orderStillManuallyPayable = await Order.exists(pendingOrderPaymentGuard)
+        if (!orderStillManuallyPayable) {
+            await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+            paymentClaimToken = undefined
+            return { success: false, error: "Ordine già associato a SumUp o non più in attesa" }
+        }
+
+        if (isSumUpPayment) {
+            const stockPlan = await planStockAdjustmentsForPayment(data.eventId, currentCart, stockMode, ingredientPlan)
+            if (!stockPlan.success) {
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+                paymentClaimToken = undefined
+                return {
+                    success: false,
+                    error: stockPlan.error || "Scorte non sufficienti",
+                    stockShortages: stockPlan.stockShortages
+                }
+            }
+
+            const initiationMarker = `initiating:${order._id.toString()}`
+            const claimedOrder = await Order.updateOne(
+                pendingOrderPaymentGuard,
+                {
+                    $set: {
+                        ...orderPaymentDetails,
+                        sumupCheckoutId: initiationMarker,
+                        sumupInitiatedAt: new Date(),
+                        stockAdjustments: stockPlan.adjustments,
+                        stockEffectStatus: "REVERTED"
+                    },
+                    ...(Object.keys(orderPaymentFieldsToUnset).length > 0
+                        ? { $unset: orderPaymentFieldsToUnset }
+                        : {})
+                }
+            )
+            if (!claimedOrder.acknowledged || claimedOrder.matchedCount !== 1) {
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+                paymentClaimToken = undefined
+                return { success: false, error: "Ordine già associato a SumUp o non più in attesa" }
+            }
+            sumUpOrderInProgressId = order._id.toString()
+
+            const reservation = await transitionSumUpOrderStock({
+                eventId: data.eventId,
+                orderId: order._id.toString(),
+                token: `SUMUP_RESERVE:${order._id.toString()}`,
+                target: "APPLIED",
+                adjustments: stockPlan.adjustments
+            })
+            if (!reservation.success) {
+                const markerCleanup = await Order.updateOne(
+                    { _id: order._id, eventId: data.eventId, status: "PENDING", sumupCheckoutId: initiationMarker },
+                    { $unset: { sumupCheckoutId: 1 } }
+                )
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+                paymentClaimToken = undefined
+                if (!markerCleanup.acknowledged || markerCleanup.matchedCount !== 1) {
+                    return {
+                        success: true,
+                        orderId: order._id.toString(),
+                        paymentCompleted: false,
+                        paymentUncertain: true
+                    }
+                }
+                sumUpOrderInProgressId = undefined
+                return { success: false, error: reservation.error }
+            }
+
+            const sumupResult = await triggerSumUpPaymentWithLease(
+                payableAmount,
+                data.eventId,
+                data.posDeviceId,
+                order._id.toString(),
+                sumUpEventOperationToken
+            )
+            if (!sumupResult.success || !sumupResult.checkoutId) {
+                if ("paymentUncertain" in sumupResult && sumupResult.paymentUncertain) {
+                    await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+                    paymentClaimToken = undefined
+                    return {
+                        success: true,
+                        orderId: order._id.toString(),
+                        paymentCompleted: false,
+                        paymentUncertain: true
+                    }
+                }
+
+                const releaseResult = await transitionSumUpOrderStock({
+                    eventId: data.eventId,
+                    orderId: order._id.toString(),
+                    token: `SUMUP_RELEASE:${order._id.toString()}`,
+                    target: "REVERTED",
+                    adjustments: stockPlan.adjustments
+                })
+                if (!releaseResult.success) {
+                    await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+                    paymentClaimToken = undefined
+                    return {
+                        success: true,
+                        orderId: order._id.toString(),
+                        paymentCompleted: false,
+                        paymentUncertain: true
+                    }
+                }
+                const markerCleanup = await Order.updateOne(
+                    { _id: order._id, eventId: data.eventId, status: "PENDING", sumupCheckoutId: initiationMarker },
+                    { $unset: { sumupCheckoutId: 1 } }
+                )
+                await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+                paymentClaimToken = undefined
+                if (!markerCleanup.acknowledged || markerCleanup.matchedCount !== 1) {
+                    return {
+                        success: true,
+                        orderId: order._id.toString(),
+                        paymentCompleted: false,
+                        paymentUncertain: true
+                    }
+                }
+                sumUpOrderInProgressId = undefined
+                return {
+                    success: false,
+                    error: sumupResult.error || "Errore durante l'inizializzazione del pagamento elettronico"
+                }
+            }
+
+            const linked = await Order.updateOne(
+                {
+                    _id: order._id,
+                    eventId: data.eventId,
+                    status: "PENDING",
+                    sumupCheckoutId: { $in: [initiationMarker, sumupResult.checkoutId] }
+                },
+                { $set: { sumupCheckoutId: sumupResult.checkoutId } }
+            )
+            await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+            paymentClaimToken = undefined
+            if (!linked.acknowledged || linked.matchedCount !== 1) {
+                return {
+                    success: true,
+                    orderId: order._id.toString(),
+                    paymentCompleted: false,
+                    paymentUncertain: true
+                }
+            }
+            return {
+                success: true,
+                orderId: order._id.toString(),
+                paymentCompleted: false,
+                paymentPending: true
+            }
+        }
+
         const stockApplyResult = await applyStockForPaidOrder(data.eventId, currentCart, stockMode, ingredientPlan)
         if (!stockApplyResult.success) {
             await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
@@ -2317,23 +2759,29 @@ export async function completePendingOrderPayment(data: {
             return { success: false, error: "La sessione cassa è stata chiusa durante il pagamento", cashSessionRequired: true }
         }
 
-        order.set("cart", pricingResult.pricing.cartWithDiscounts)
-        order.set("ingredientPlan", ingredientPlan)
-        order.set("dishTickets", dishTickets)
-        order.totalAmount = payableAmount
-        order.discountApplied = pricingResult.pricing.discountApplied
-        order.set("discountMeta", pricingResult.pricing.orderDiscountMeta || undefined)
-        order.set("discountComponents", pricingResult.pricing.discountComponents)
-        order.set("pricingMode", pendingPricingMode === "VOLUNTEER" ? "VOLUNTEER" : "STANDARD")
-        order.status = "PAID"
-        order.set("paidAt", new Date())
-        order.paymentMethod = data.paymentMethod
-        order.set("posDeviceId", data.posDeviceId || undefined)
-        order.set("cashSessionId", sessionResult.session.id)
-        order.set("stockOverrideApproved", Boolean(data.allowStockOverride))
-        order.set("stockAdjustments", stockAdjustmentsToRollback)
-        order.set("stockEffectStatus", "APPLIED")
-        await order.save()
+        const paidOrder = await Order.updateOne(
+            pendingOrderPaymentGuard,
+            {
+                $set: {
+                    ...orderPaymentDetails,
+                    status: "PAID",
+                    paidAt: new Date(),
+                    stockAdjustments: stockAdjustmentsToRollback,
+                    stockEffectStatus: "APPLIED"
+                },
+                ...(Object.keys(orderPaymentFieldsToUnset).length > 0
+                    ? { $unset: orderPaymentFieldsToUnset }
+                    : {})
+            }
+        )
+        if (!paidOrder.acknowledged || paidOrder.matchedCount !== 1) {
+            const appliedAdjustments = stockAdjustmentsToRollback
+            stockAdjustmentsToRollback = []
+            await rollbackStockAdjustments(data.eventId, appliedAdjustments)
+            await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
+            paymentClaimToken = undefined
+            return { success: false, error: "Ordine già associato a SumUp o non più in attesa" }
+        }
         stockAdjustmentsToRollback = []
         await releaseCashSessionPaymentClaim(paymentClaimSessionId, paymentClaimToken)
         paymentClaimToken = undefined
@@ -2374,7 +2822,19 @@ export async function completePendingOrderPayment(data: {
             }
         }
         console.error("Complete Pending Order Error:", error)
+        if (sumUpOrderInProgressId) {
+            return {
+                success: true,
+                orderId: sumUpOrderInProgressId,
+                paymentCompleted: false,
+                paymentUncertain: true
+            }
+        }
         return { success: false, error: "Errore durante la chiusura dell'ordine" }
+    } finally {
+        await releaseSumUpEventOperation(data.eventId, sumUpEventOperationToken).catch((error) => {
+            console.error("Complete pending order event operation release error:", error)
+        })
     }
 }
 
@@ -2422,6 +2882,9 @@ export async function retryFailedOrderPrintJobs(data: {
 
         const retried = results.filter((result) => result.success).length
         const failed = results.length - retried
+        if (retried > 0 && failed === 0) {
+            await completeSumUpPrintIntentsIfSent(eventId, data.orderId)
+        }
 
         return {
             success: true,

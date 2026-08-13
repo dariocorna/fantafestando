@@ -3,6 +3,7 @@ import dbConnect from "@/lib/mongoose";
 import Event from "@/models/Event";
 import PrintJob from "@/models/PrintJob";
 import Printer from "@/models/Printer";
+import { completeSumUpPrintIntentsForSentJob } from "@/lib/sumup-print-routing";
 
 const PRINT_QUEUE_LEASE_MS = 5 * 60 * 1000;
 
@@ -331,6 +332,7 @@ async function drainPrinterQueue(
                 };
                 const finalized = await PrintJob.updateOne(claim, successUpdate);
                 if ((finalized.matchedCount ?? finalized.modifiedCount) !== 1) break;
+                await completeSumUpPrintIntentsForSentJob(String(job.eventId), String(job._id));
                 sent += 1;
                 continue;
             }

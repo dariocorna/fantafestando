@@ -1,282 +1,312 @@
-import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
-import dbConnect from "@/lib/mongoose";
-import Order from "@/models/Order";
-import { PrinterService } from "@/lib/printer";
-import { type StockMode } from "@/lib/inventory";
+import crypto from "node:crypto"
+import { NextRequest, NextResponse } from "next/server"
+import dbConnect from "@/lib/mongoose"
 import {
-    applyStockForPaidOrder,
-    rollbackStockAdjustments,
-    type StockAdjustment,
-} from "@/lib/stock-operations";
+    resolveSumUpCredentialsForOrder,
+    type SumUpRefundCredentialsSnapshot,
+} from "@/lib/sumup-order-credentials"
 import {
-    claimCashSessionPayment,
-    refreshCashSessionPaymentClaim,
-    releaseCashSessionPaymentClaim,
-} from "@/lib/cash-session-payment-claim";
-import { publishStockInvalidation } from "@/lib/pos-stock-realtime";
+    getSumUpTransactionByClientTransactionId,
+    getSumUpTransactionByForeignTransactionId,
+} from "@/lib/sumup"
+import {
+    dispatchSumUpOrderPrints,
+    finalizeClaimedSumUpOrder,
+    getSumUpTransactionOutcome,
+    sumUpTransactionMatchesOrder,
+    sumUpTransactionsMatch,
+    type ClaimedSumUpOrder,
+    type VerifiedSumUpTransaction,
+} from "@/lib/sumup-order-finalization"
+import Order from "@/models/Order"
 
-const WEBHOOK_CLAIM_TTL_MS = 5 * 60 * 1000;
+const WEBHOOK_CLAIM_TTL_MS = 5 * 60 * 1000
 
-function safeEquals(a: string, b: string) {
-    const aBuf = Buffer.from(a);
-    const bBuf = Buffer.from(b);
-    if (aBuf.length !== bBuf.length) return false;
-    return crypto.timingSafeEqual(aBuf, bBuf);
+type WebhookOrder = ClaimedSumUpOrder & {
+    sumupCheckoutId?: string
+    sumupPaymentId?: string
+    sumupRefundCredentials?: SumUpRefundCredentialsSnapshot
+    sumupRecoveryCancelledAt?: Date
+    sumupLateSuccessDetectedAt?: Date
+    stornoMeta?: { refundStatus?: "SKIPPED" | "DONE" | "FAILED" }
 }
 
-function verifyWebhookSignature(rawBody: string, signatureHeader: string, secret: string) {
-    const normalizedSignature = signatureHeader.trim();
-    const expectedHex = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
-    const expectedBase64 = crypto.createHmac("sha256", secret).update(rawBody).digest("base64");
-    const expectedCandidates = [
-        expectedHex,
-        `sha256=${expectedHex}`,
-        expectedBase64,
-        `sha256=${expectedBase64}`
-    ];
-    return expectedCandidates.some(candidate => safeEquals(candidate, normalizedSignature));
+function extractPayloadClientTransactionId(payload: Record<string, unknown>) {
+    const nestedPayload = payload.payload
+    if (!nestedPayload || typeof nestedPayload !== "object") return undefined
+    const clientTransactionId = (nestedPayload as { client_transaction_id?: unknown }).client_transaction_id
+    return typeof clientTransactionId === "string" && clientTransactionId.trim()
+        ? clientTransactionId.trim()
+        : undefined
 }
 
-function extractSumUpTransactionId(payload: Record<string, unknown>): string | undefined {
-    const direct = typeof payload.transaction_id === "string" ? payload.transaction_id : undefined
-    if (direct?.trim()) return direct.trim()
+async function loadWebhookOrder(clientTransactionId: string) {
+    return await Order.findOne({ sumupCheckoutId: clientTransactionId })
+        .select("_id status totalAmount eventId cashSessionId posDeviceId stockEffectStatus stockAdjustments sumupCheckoutId sumupPaymentId sumupRecoveryCancelledAt sumupLateSuccessDetectedAt stornoMeta.refundStatus +sumupRefundCredentials")
+        .lean() as WebhookOrder | null
+}
 
-    const transaction = payload.transaction
-    if (transaction && typeof transaction === "object") {
-        const nested = (transaction as { id?: unknown }).id
-        if (typeof nested === "string" && nested.trim()) return nested.trim()
+async function handleRecoveredCancellation(
+    order: WebhookOrder,
+    transaction: VerifiedSumUpTransaction,
+    clientTransactionId: string,
+) {
+    const outcome = getSumUpTransactionOutcome(transaction)
+    if (outcome === "SUCCESS" && order.stornoMeta?.refundStatus === "DONE") {
+        return NextResponse.json({ success: true, message: "Late payment already refunded" })
+    }
+    if (outcome === "FAILED") {
+        const resolved = await Order.updateOne(
+            { _id: order._id, status: "CANCELLED", sumupRecoveryCancelledAt: { $exists: true } },
+            {
+                $set: {
+                    sumupCheckoutId: clientTransactionId,
+                    sumupRecoveryResolvedAt: new Date(),
+                },
+                $unset: { sumupRefundCredentials: 1 },
+            },
+        )
+        if (!resolved.acknowledged || resolved.matchedCount !== 1) {
+            return NextResponse.json({ error: "Negative SumUp reconciliation conflict" }, { status: 409 })
+        }
+        return NextResponse.json({ success: true, message: "Already cancelled" })
+    }
+    if (outcome === "PENDING") {
+        await Order.updateOne(
+            { _id: order._id, status: "CANCELLED", sumupRecoveryCancelledAt: { $exists: true } },
+            { $set: { sumupCheckoutId: clientTransactionId } },
+        )
+        return NextResponse.json({ error: "Late SumUp transaction is still pending" }, { status: 409 })
     }
 
-    const data = payload.data
-    if (data && typeof data === "object") {
-        const nested = (data as { transaction_id?: unknown }).transaction_id
-        if (typeof nested === "string" && nested.trim()) return nested.trim()
+    const paymentId = transaction.id?.trim()
+    const alreadyDetected = Boolean(order.sumupLateSuccessDetectedAt)
+    const detected = await Order.updateOne(
+        { _id: order._id, status: "CANCELLED", sumupRecoveryCancelledAt: { $exists: true } },
+        {
+            $set: {
+                sumupCheckoutId: clientTransactionId,
+                ...(paymentId ? { sumupPaymentId: paymentId } : {}),
+                ...(alreadyDetected ? {} : { sumupLateSuccessDetectedAt: new Date() }),
+            },
+        },
+    )
+    if (!detected.acknowledged || detected.matchedCount !== 1) {
+        return NextResponse.json({ error: "Late SumUp payment reconciliation conflict" }, { status: 409 })
+    }
+    return NextResponse.json(
+        { error: "Late SumUp payment detected after local cancellation; refund required" },
+        { status: 409 },
+    )
+}
+
+async function reconcileUncertainCheckout(req: NextRequest, clientTransactionId: string) {
+    const orderId = req.nextUrl.searchParams.get("orderId")?.trim()
+    if (!orderId) return { success: false as const, response: NextResponse.json({ error: "Order not found" }, { status: 404 }) }
+
+    const order = await Order.findOne({
+        _id: orderId,
+        sumupCheckoutId: `initiating:${orderId}`,
+        $and: [
+            {
+                $or: [
+                    { status: "PENDING" },
+                    { status: "CANCELLED", sumupRecoveryCancelledAt: { $exists: true } },
+                ],
+            },
+            {
+                $or: [
+                    { sumupWebhookClaimedAt: { $exists: false } },
+                    { sumupWebhookClaimedAt: { $lt: new Date(Date.now() - WEBHOOK_CLAIM_TTL_MS) } },
+                ],
+            },
+        ],
+    })
+        .select("_id status totalAmount eventId cashSessionId posDeviceId stockEffectStatus stockAdjustments sumupCheckoutId sumupPaymentId sumupRecoveryCancelledAt sumupLateSuccessDetectedAt stornoMeta.refundStatus +sumupRefundCredentials")
+        .lean() as WebhookOrder | null
+    if (!order?.eventId) {
+        return { success: false as const, response: NextResponse.json({ error: "Order not found" }, { status: 404 }) }
     }
 
-    return undefined
+    const credentials = await resolveSumUpCredentialsForOrder(order)
+    if (!credentials.success) {
+        return { success: false as const, response: NextResponse.json({ error: credentials.error }, { status: 409 }) }
+    }
+
+    const [clientLookup, foreignLookup] = await Promise.all([
+        getSumUpTransactionByClientTransactionId({
+            clientTransactionId,
+            merchantCode: credentials.merchantCode,
+            apiKey: credentials.apiKey,
+        }),
+        getSumUpTransactionByForeignTransactionId({
+            foreignTransactionId: orderId,
+            merchantCode: credentials.merchantCode,
+            apiKey: credentials.apiKey,
+        }),
+    ])
+    if (!clientLookup.success || !foreignLookup.success) {
+        return {
+            success: false as const,
+            response: NextResponse.json(
+                { error: !clientLookup.success ? clientLookup.error : foreignLookup.error },
+                { status: 502 },
+            ),
+        }
+    }
+    if (
+        !sumUpTransactionsMatch(clientLookup.transaction, foreignLookup.transaction)
+        || !sumUpTransactionMatchesOrder(clientLookup.transaction, credentials.merchantCode, order)
+    ) {
+        return {
+            success: false as const,
+            response: NextResponse.json({ error: "Transaction verification mismatch" }, { status: 409 }),
+        }
+    }
+
+    if (order.status === "CANCELLED") {
+        return {
+            success: false as const,
+            response: await handleRecoveredCancellation(order, clientLookup.transaction, clientTransactionId),
+        }
+    }
+
+    const linked = await Order.updateOne(
+        {
+            _id: orderId,
+            status: "PENDING",
+            sumupCheckoutId: `initiating:${orderId}`,
+            $or: [
+                { sumupWebhookClaimedAt: { $exists: false } },
+                { sumupWebhookClaimedAt: { $lt: new Date(Date.now() - WEBHOOK_CLAIM_TTL_MS) } },
+            ],
+        },
+        { $set: { sumupCheckoutId: clientTransactionId } },
+    )
+    if (!linked.acknowledged || linked.matchedCount !== 1) {
+        return {
+            success: false as const,
+            response: NextResponse.json({ error: "Payment reconciliation conflict" }, { status: 409 }),
+        }
+    }
+
+    return {
+        success: true as const,
+        order,
+        credentials,
+        transaction: clientLookup.transaction,
+    }
 }
 
 export async function POST(req: NextRequest) {
     try {
-        const rawBody = await req.text();
-        const payload = JSON.parse(rawBody) as Record<string, unknown>;
-
-        const webhookSecret = process.env.SUMUP_WEBHOOK_SECRET;
-        const signatureHeader = req.headers.get("x-sumup-signature")
-            || req.headers.get("sumup-signature")
-            || req.headers.get("x-signature");
-
-        if (!webhookSecret) {
-            if (process.env.NODE_ENV === "production") {
-                console.error("[SumUp Webhook] Missing SUMUP_WEBHOOK_SECRET in production.");
-                return NextResponse.json({ error: "Webhook misconfigured" }, { status: 500 });
-            }
-            console.warn("[SumUp Webhook] Signature verification skipped (missing SUMUP_WEBHOOK_SECRET).");
-        } else {
-            if (!signatureHeader) {
-                return NextResponse.json({ error: "Missing signature" }, { status: 401 });
-            }
-            const isValid = verifyWebhookSignature(rawBody, signatureHeader, webhookSecret);
-            if (!isValid) {
-                return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-            }
-        }
-
+        const payload = JSON.parse(await req.text()) as Record<string, unknown>
         const eventType = typeof payload.event_type === "string" ? payload.event_type : ""
-        const checkoutId = typeof payload.id === "string" ? payload.id : ""
-        console.log(`[SumUp Webhook] event=${eventType || "unknown"} checkout=${checkoutId || "missing"}`);
+        const clientTransactionId = extractPayloadClientTransactionId(payload)
+        console.log(`[SumUp Webhook] event=${eventType || "unknown"} clientTransaction=${clientTransactionId || "missing"}`)
 
-        if (eventType === "checkout.succeeded" && checkoutId) {
-            await dbConnect();
-
-            const claimToken = crypto.randomUUID();
-            const order = await Order.findOneAndUpdate(
-                {
-                    sumupCheckoutId: checkoutId,
-                    status: "PENDING",
-                    $or: [
-                        { sumupWebhookClaimedAt: { $exists: false } },
-                        { sumupWebhookClaimedAt: { $lt: new Date(Date.now() - WEBHOOK_CLAIM_TTL_MS) } }
-                    ]
-                },
-                {
-                    $set: {
-                        sumupWebhookClaimToken: claimToken,
-                        sumupWebhookClaimedAt: new Date()
-                    }
-                },
-                { returnDocument: "after" }
-            );
-
-            if (!order) {
-                const existingOrder = await Order.findOne({ sumupCheckoutId: checkoutId })
-                    .select("status")
-                    .lean() as ({ status?: string } | null);
-                if (existingOrder?.status === "PAID") {
-                    return NextResponse.json({ success: true, message: "Already paid" });
-                }
-                if (existingOrder?.status === "PENDING") {
-                    return NextResponse.json({ success: true, message: "Payment processing" });
-                }
-                console.warn(`[SumUp Webhook] Ordine non trovato per checkoutId: ${checkoutId}`);
-                return NextResponse.json({ error: "Order not found" }, { status: 404 });
-            }
-
-            const preferredMode: StockMode = (order as { stockOverrideApproved?: boolean }).stockOverrideApproved ? "override" : "strict"
-            let appliedAdjustmentsToRollback: StockAdjustment[] = []
-            let stockOverrideApproved = preferredMode === "override"
-            let paymentCompleted = false
-            let paymentClaimToken: string | undefined
-            const cashSessionId = order.cashSessionId?.toString()
-
-            try {
-                if (!cashSessionId) {
-                    return NextResponse.json({ error: "Cash session not found" }, { status: 409 })
-                }
-
-                const paymentClaim = await claimCashSessionPayment(cashSessionId)
-                if (!paymentClaim.success) {
-                    return NextResponse.json({ error: "Cash session is unavailable for SumUp payments" }, { status: 409 })
-                }
-                paymentClaimToken = paymentClaim.token
-                if (paymentClaim.isTest) {
-                    return NextResponse.json({ error: "Cash session is unavailable for SumUp payments" }, { status: 409 })
-                }
-
-                const cartPayload = order.cart.map((item: {
-                    productId: string | { toString(): string }
-                    quantity: number
-                    snapshotName: string
-                    selectedOptions?: Array<{ name: string, priceVariation: number }>
-                    includedComponents?: Array<{ productId: string | { toString(): string }, snapshotName: string, quantity: number }>
-                }) => ({
-                    productId: item.productId.toString(),
-                    snapshotName: item.snapshotName,
-                    quantity: item.quantity,
-                    selectedOptions: item.selectedOptions || [],
-                    includedComponents: Array.isArray(item.includedComponents)
-                        ? item.includedComponents.map((component) => ({
-                            productId: component.productId.toString(),
-                            snapshotName: component.snapshotName,
-                            quantity: component.quantity
-                        }))
-                        : []
-                }))
-
-                const stockResult = await applyStockForPaidOrder(
-                    order.eventId.toString(),
-                    cartPayload,
-                    preferredMode,
-                    Array.isArray(order.ingredientPlan)
-                        ? order.ingredientPlan.map((entry: {
-                            ingredientId?: string | { toString(): string }
-                            quantity?: number
-                        }) => ({
-                            ingredientId: entry.ingredientId?.toString(),
-                            quantity: Number(entry.quantity ?? 0)
-                        }))
-                        : []
-                )
-
-                if (!stockResult.success) {
-                    if (preferredMode === "strict") {
-                        console.warn("[SumUp Webhook] Stock shortage in strict mode, applying override fallback.", stockResult.stockShortages);
-                        const overrideResult = await applyStockForPaidOrder(
-                            order.eventId.toString(),
-                            cartPayload,
-                            "override",
-                            Array.isArray(order.ingredientPlan)
-                                ? order.ingredientPlan.map((entry: {
-                                    ingredientId?: string | { toString(): string }
-                                    quantity?: number
-                                }) => ({
-                                    ingredientId: entry.ingredientId?.toString(),
-                                    quantity: Number(entry.quantity ?? 0)
-                                }))
-                                : []
-                        )
-                        if (!overrideResult.success) {
-                            console.error("[SumUp Webhook] Override stock apply failed.", overrideResult.stockShortages)
-                            return NextResponse.json({ error: "Stock apply failed" }, { status: 409 })
-                        }
-                        appliedAdjustmentsToRollback = overrideResult.appliedAdjustments || []
-                        stockOverrideApproved = true
-                    } else {
-                        console.error("[SumUp Webhook] Stock apply failed in override mode.", stockResult.stockShortages)
-                        return NextResponse.json({ error: "Stock apply failed" }, { status: 409 })
-                    }
-                } else {
-                    appliedAdjustmentsToRollback = stockResult.appliedAdjustments || []
-                }
-
-                if (!await refreshCashSessionPaymentClaim(cashSessionId, paymentClaimToken)) {
-                    throw new Error("Cash session payment claim lost before payment completion")
-                }
-
-                const sumupPaymentId = extractSumUpTransactionId(payload)
-                const paidAt = new Date()
-                const completedOrder = await Order.updateOne(
-                    {
-                        _id: order._id,
-                        status: "PENDING",
-                        sumupWebhookClaimToken: claimToken
-                    },
-                    {
-                        $set: {
-                            status: "PAID",
-                            paidAt,
-                            stockOverrideApproved,
-                            stockAdjustments: appliedAdjustmentsToRollback,
-                            stockEffectStatus: "APPLIED",
-                            ...(sumupPaymentId ? { sumupPaymentId } : {})
-                        },
-                        $unset: {
-                            sumupWebhookClaimToken: 1,
-                            sumupWebhookClaimedAt: 1
-                        }
-                    }
-                );
-                if (!completedOrder.acknowledged || completedOrder.matchedCount !== 1) {
-                    throw new Error("Webhook claim lost before payment completion");
-                }
-                paymentCompleted = true
-                publishStockInvalidation(order.eventId.toString())
-
-                console.log(`[SumUp Webhook] Ordine ${order._id} marcato come PAGATO.`);
-
-                try {
-                    await PrinterService.routeOrderToPrinters(order._id.toString(), order.posDeviceId?.toString());
-                } catch (printError) {
-                    console.error("[SumUp Webhook] Errore durante il trigger delle stampe:", printError);
-                }
-
-                return NextResponse.json({ success: true });
-            } catch (error) {
-                if (appliedAdjustmentsToRollback.length > 0) {
-                    await rollbackStockAdjustments(order.eventId.toString(), appliedAdjustmentsToRollback)
-                }
-                throw error
-            } finally {
-                try {
-                    await releaseCashSessionPaymentClaim(cashSessionId || "", paymentClaimToken)
-                } catch (releaseError) {
-                    console.error("[SumUp Webhook] Cash session payment claim release error:", releaseError);
-                }
-                if (!paymentCompleted) {
-                    await Order.updateOne(
-                        { _id: order._id, sumupWebhookClaimToken: claimToken },
-                        { $unset: { sumupWebhookClaimToken: 1, sumupWebhookClaimedAt: 1 } }
-                    ).catch((releaseError) => {
-                        console.error("[SumUp Webhook] Claim release error:", releaseError);
-                    });
-                }
-            }
+        if (eventType !== "solo.transaction.updated" || !clientTransactionId) {
+            return NextResponse.json({ success: true, message: "Event ignored" })
         }
 
-        return NextResponse.json({ success: true, message: "Event ignored" });
+        await dbConnect()
+        let order = await loadWebhookOrder(clientTransactionId)
+
+        if (order?.status === "PAID") {
+            if (await dispatchSumUpOrderPrints(order) !== "COMPLETED") {
+                return NextResponse.json({ error: "Print recovery pending" }, { status: 503 })
+            }
+            return NextResponse.json({ success: true, message: "Already paid" })
+        }
+        if (order?.status === "CANCELLED" && !order.sumupRecoveryCancelledAt) {
+            return NextResponse.json({ success: true, message: "Already cancelled" })
+        }
+
+        let credentials: Awaited<ReturnType<typeof resolveSumUpCredentialsForOrder>>
+        let transaction: VerifiedSumUpTransaction
+        if (!order) {
+            const reconciliation = await reconcileUncertainCheckout(req, clientTransactionId)
+            if (!reconciliation.success) return reconciliation.response
+            order = reconciliation.order
+            credentials = reconciliation.credentials
+            transaction = reconciliation.transaction
+        } else {
+            if (!order.eventId) {
+                return NextResponse.json({ error: "Order event not found" }, { status: 409 })
+            }
+            credentials = await resolveSumUpCredentialsForOrder(order)
+            if (!credentials.success) {
+                return NextResponse.json({ error: credentials.error }, { status: 409 })
+            }
+            const lookup = await getSumUpTransactionByClientTransactionId({
+                clientTransactionId,
+                merchantCode: credentials.merchantCode,
+                apiKey: credentials.apiKey,
+            })
+            if (!lookup.success) {
+                return NextResponse.json({ error: lookup.error }, { status: 502 })
+            }
+            transaction = lookup.transaction
+        }
+
+        if (!credentials.success || !sumUpTransactionMatchesOrder(transaction, credentials.merchantCode, order)) {
+            return NextResponse.json({ error: "Transaction verification mismatch" }, { status: 409 })
+        }
+
+        if (order.status === "CANCELLED") {
+            return await handleRecoveredCancellation(order, transaction, clientTransactionId)
+        }
+
+        const outcome = getSumUpTransactionOutcome(transaction)
+        if (outcome === "PENDING") {
+            return NextResponse.json({ error: "Transaction not confirmed as final" }, { status: 409 })
+        }
+
+        const claimToken = crypto.randomUUID()
+        const claimedOrder = await Order.findOneAndUpdate(
+            {
+                sumupCheckoutId: clientTransactionId,
+                status: "PENDING",
+                $or: [
+                    { sumupWebhookClaimedAt: { $exists: false } },
+                    { sumupWebhookClaimedAt: { $lt: new Date(Date.now() - WEBHOOK_CLAIM_TTL_MS) } },
+                ],
+            },
+            { $set: { sumupWebhookClaimToken: claimToken, sumupWebhookClaimedAt: new Date() } },
+            { returnDocument: "after" },
+        ) as WebhookOrder | null
+
+        if (!claimedOrder) {
+            const currentOrder = await loadWebhookOrder(clientTransactionId)
+            if (currentOrder?.status === "PAID") {
+                if (await dispatchSumUpOrderPrints(currentOrder) !== "COMPLETED") {
+                    return NextResponse.json({ error: "Print recovery pending" }, { status: 503 })
+                }
+                return NextResponse.json({ success: true, message: "Already paid" })
+            }
+            if (currentOrder?.status === "CANCELLED") {
+                return NextResponse.json({ success: true, message: "Already cancelled" })
+            }
+            if (currentOrder?.status === "PENDING") {
+                return NextResponse.json({ error: "Payment processing" }, { status: 503 })
+            }
+            return NextResponse.json({ error: "Order not found" }, { status: 404 })
+        }
+
+        const finalized = await finalizeClaimedSumUpOrder({
+            order: claimedOrder,
+            transaction,
+            checkoutId: clientTransactionId,
+            claimToken,
+        })
+        if (!finalized.success) {
+            return NextResponse.json({ error: finalized.error }, { status: finalized.httpStatus })
+        }
+        return finalized.status === "CANCELLED"
+            ? NextResponse.json({ success: true, status: "cancelled" })
+            : NextResponse.json({ success: true })
     } catch (error) {
-        console.error("[SumUp Webhook] Error:", error);
-        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+        console.error("[SumUp Webhook] Error:", error)
+        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 })
     }
 }

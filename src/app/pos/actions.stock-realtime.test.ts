@@ -7,7 +7,11 @@ const {
     productFindMock,
     orderCreateMock,
     orderFindOneMock,
+    orderExistsMock,
+    orderUpdateOneMock,
     applyStockForPaidOrderMock,
+    planStockAdjustmentsForPaymentMock,
+    transitionSumUpOrderStockMock,
     rollbackStockAdjustmentsMock,
     claimCashSessionPaymentMock,
     refreshCashSessionPaymentClaimMock,
@@ -21,7 +25,11 @@ const {
     productFindMock: vi.fn(),
     orderCreateMock: vi.fn(),
     orderFindOneMock: vi.fn(),
+    orderExistsMock: vi.fn(),
+    orderUpdateOneMock: vi.fn(),
     applyStockForPaidOrderMock: vi.fn(),
+    planStockAdjustmentsForPaymentMock: vi.fn(),
+    transitionSumUpOrderStockMock: vi.fn(),
     rollbackStockAdjustmentsMock: vi.fn(),
     claimCashSessionPaymentMock: vi.fn(),
     refreshCashSessionPaymentClaimMock: vi.fn(),
@@ -40,7 +48,9 @@ vi.mock("@/models/Ingredient", () => ({ default: { find: vi.fn() } }))
 vi.mock("@/models/Order", () => ({
     default: {
         create: orderCreateMock,
-        findOne: orderFindOneMock
+        findOne: orderFindOneMock,
+        exists: orderExistsMock,
+        updateOne: orderUpdateOneMock
     }
 }))
 vi.mock("@/models/PrintJob", () => ({ default: {} }))
@@ -53,9 +63,10 @@ vi.mock("@/lib/sumup", () => ({ createSumUpCheckout: vi.fn() }))
 vi.mock("@/lib/secrets", () => ({ decryptSecret: vi.fn() }))
 vi.mock("@/lib/stock-operations", () => ({
     applyStockForPaidOrder: applyStockForPaidOrderMock,
-    validateStockForPendingOrder: vi.fn(),
+    planStockAdjustmentsForPayment: planStockAdjustmentsForPaymentMock,
     rollbackStockAdjustments: rollbackStockAdjustmentsMock
 }))
+vi.mock("@/lib/sumup-order-stock", () => ({ transitionSumUpOrderStock: transitionSumUpOrderStockMock }))
 vi.mock("@/lib/cash-session-payment-claim", () => ({
     claimCashSessionPayment: claimCashSessionPaymentMock,
     refreshCashSessionPaymentClaim: refreshCashSessionPaymentClaimMock,
@@ -142,10 +153,14 @@ describe("paid POS stock invalidations", () => {
             success: true,
             appliedAdjustments: [{ entityType: "PRODUCT", entityId: "product-1", quantity: 1 }]
         })
+        planStockAdjustmentsForPaymentMock.mockResolvedValue({ success: true, adjustments: [] })
+        transitionSumUpOrderStockMock.mockResolvedValue({ success: true })
         claimCashSessionPaymentMock.mockResolvedValue({ success: true, token: "claim-1", isTest: false })
         refreshCashSessionPaymentClaimMock.mockResolvedValue(true)
         releaseCashSessionPaymentClaimMock.mockResolvedValue(undefined)
         routeOrderToPrintersMock.mockResolvedValue([])
+        orderExistsMock.mockResolvedValue({ _id: "order-1" })
+        orderUpdateOneMock.mockResolvedValue({ acknowledged: true, matchedCount: 1 })
     })
 
     test("publishes after creating an immediately paid order", async () => {
@@ -193,7 +208,115 @@ describe("paid POS stock invalidations", () => {
         })
 
         expect(result).toMatchObject({ success: true, orderId: "order-1" })
-        expect(order.save).toHaveBeenCalledOnce()
+        expect(order.save).not.toHaveBeenCalled()
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                _id: "order-1",
+                eventId: "event-1",
+                status: "PENDING"
+            }),
+            expect.objectContaining({
+                $set: expect.objectContaining({ status: "PAID", stockEffectStatus: "APPLIED" })
+            })
+        )
         expect(publishStockInvalidationMock).toHaveBeenCalledWith("event-1")
+    })
+
+    test("rolls stock back when another payment wins the final order CAS", async () => {
+        const order = pendingOrder()
+        orderFindOneMock.mockResolvedValue(order)
+        orderUpdateOneMock.mockResolvedValueOnce({ acknowledged: true, matchedCount: 0 })
+
+        const result = await completePendingOrderPayment({
+            eventId: "event-1",
+            orderId: "order-1",
+            paymentMethod: "CASH",
+            posDeviceId: "pos-1"
+        })
+
+        expect(result).toMatchObject({ success: false, error: expect.stringContaining("non più in attesa") })
+        expect(orderUpdateOneMock).toHaveBeenCalledWith(
+            {
+                _id: "order-1",
+                eventId: "event-1",
+                status: "PENDING",
+                $nor: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            },
+            expect.objectContaining({
+                $set: expect.objectContaining({ status: "PAID" })
+            })
+        )
+        expect(rollbackStockAdjustmentsMock).toHaveBeenCalledWith(
+            "event-1",
+            [{ entityType: "PRODUCT", entityId: "product-1", quantity: 1 }]
+        )
+        expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
+        expect(publishStockInvalidationMock).not.toHaveBeenCalled()
+    })
+
+    test("does not manually complete a pending order linked to SumUp", async () => {
+        const order = pendingOrder()
+        order.sumupCheckoutId = "checkout-1"
+        orderFindOneMock.mockResolvedValue(order)
+
+        const result = await completePendingOrderPayment({
+            eventId: "event-1",
+            orderId: "order-1",
+            paymentMethod: "CASH",
+            posDeviceId: "pos-1"
+        })
+
+        expect(result).toMatchObject({ success: false, error: expect.stringContaining("SumUp") })
+        expect(claimCashSessionPaymentMock).not.toHaveBeenCalled()
+        expect(applyStockForPaidOrderMock).not.toHaveBeenCalled()
+        expect(order.save).not.toHaveBeenCalled()
+    })
+
+    test("does not manually complete a pending order with a certified SumUp payment", async () => {
+        const order = pendingOrder()
+        order.sumupPaymentId = "payment-1"
+        orderFindOneMock.mockResolvedValue(order)
+
+        const result = await completePendingOrderPayment({
+            eventId: "event-1",
+            orderId: "order-1",
+            paymentMethod: "CASH",
+            posDeviceId: "pos-1"
+        })
+
+        expect(result).toMatchObject({ success: false, error: expect.stringContaining("SumUp") })
+        expect(claimCashSessionPaymentMock).not.toHaveBeenCalled()
+        expect(applyStockForPaidOrderMock).not.toHaveBeenCalled()
+        expect(order.save).not.toHaveBeenCalled()
+    })
+
+    test("rechecks the pending order after claiming the cash session", async () => {
+        const order = pendingOrder()
+        orderFindOneMock.mockResolvedValue(order)
+        orderExistsMock.mockResolvedValueOnce(null)
+
+        const result = await completePendingOrderPayment({
+            eventId: "event-1",
+            orderId: "order-1",
+            paymentMethod: "CASH",
+            posDeviceId: "pos-1"
+        })
+
+        expect(result).toMatchObject({ success: false, error: expect.stringContaining("SumUp") })
+        expect(orderExistsMock).toHaveBeenCalledWith({
+            _id: "order-1",
+            eventId: "event-1",
+            status: "PENDING",
+            $nor: [
+                { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+            ]
+        })
+        expect(releaseCashSessionPaymentClaimMock).toHaveBeenCalledWith("session-1", "claim-1")
+        expect(applyStockForPaidOrderMock).not.toHaveBeenCalled()
+        expect(order.save).not.toHaveBeenCalled()
     })
 })

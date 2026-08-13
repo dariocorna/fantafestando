@@ -12,7 +12,8 @@ const {
     orderFindOneMock,
     buildPrintQueueLeaseMock,
     claimKitchenPrinterQueueLeaseMock,
-    releaseKitchenPrinterQueueLeaseMock
+    releaseKitchenPrinterQueueLeaseMock,
+    completeSumUpPrintIntentsForSentJobMock
 } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     printJobFindOneAndUpdateMock: vi.fn(),
@@ -22,7 +23,8 @@ const {
     orderFindOneMock: vi.fn(),
     buildPrintQueueLeaseMock: vi.fn(),
     claimKitchenPrinterQueueLeaseMock: vi.fn(),
-    releaseKitchenPrinterQueueLeaseMock: vi.fn()
+    releaseKitchenPrinterQueueLeaseMock: vi.fn(),
+    completeSumUpPrintIntentsForSentJobMock: vi.fn()
 }));
 
 vi.mock("@/lib/mongoose", () => ({
@@ -43,6 +45,10 @@ vi.mock("@/lib/print-queue", () => ({
     claimKitchenPrinterQueueLease: claimKitchenPrinterQueueLeaseMock,
     refreshKitchenPrinterQueueLease: vi.fn(),
     releaseKitchenPrinterQueueLease: releaseKitchenPrinterQueueLeaseMock
+}));
+vi.mock("@/lib/sumup-print-routing", () => ({
+    completeSumUpPrintIntentsForSentJob: completeSumUpPrintIntentsForSentJobMock,
+    completeSumUpPrintIntentsIfSent: vi.fn()
 }));
 
 vi.mock("@/models/Order", () => ({
@@ -96,6 +102,7 @@ describe("PrinterService.retryPrintJobById", () => {
         });
         claimKitchenPrinterQueueLeaseMock.mockResolvedValue(true);
         releaseKitchenPrinterQueueLeaseMock.mockResolvedValue(undefined);
+        completeSumUpPrintIntentsForSentJobMock.mockResolvedValue(false);
         printJobExistsMock.mockResolvedValue(false);
         orderFindOneMock.mockReturnValue({
             select: vi.fn().mockReturnValue({
@@ -206,6 +213,7 @@ describe("PrinterService.retryPrintJobById", () => {
             document: expect.objectContaining({ title: "Ricevuta Demo", copyLabel: "COPIA TEST", orderId: "order-1", shortCode: "D-12345" })
         }));
         expect(result).toEqual({ success: true });
+        expect(completeSumUpPrintIntentsForSentJobMock).toHaveBeenCalledWith("evt-1", "job-1");
         expect(printJobFindOneAndUpdateMock).toHaveBeenCalledWith(
             { _id: "job-1", eventId: "evt-1", status: "FAILED" },
             { $set: { status: "QUEUED", retryClaimedAt: expect.any(Date) } },

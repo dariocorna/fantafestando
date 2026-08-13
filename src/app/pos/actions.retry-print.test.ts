@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { dbConnectMock, printJobFindMock, printJobUpdateManyMock, orderFindOneMock, productFindOneAndUpdateMock, eventExistsMock, retryPrintJobByIdMock, holdFailedKitchenPrintJobsMock, recoverStaleManualPrintRetryClaimsMock, ensureAuthenticatedSessionMock } = vi.hoisted(() => ({
+const { dbConnectMock, printJobFindMock, printJobUpdateManyMock, orderFindOneMock, productFindOneAndUpdateMock, eventExistsMock, retryPrintJobByIdMock, holdFailedKitchenPrintJobsMock, recoverStaleManualPrintRetryClaimsMock, ensureAuthenticatedSessionMock, completeSumUpPrintIntentsIfSentMock } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     printJobFindMock: vi.fn(),
     printJobUpdateManyMock: vi.fn(),
@@ -10,7 +10,8 @@ const { dbConnectMock, printJobFindMock, printJobUpdateManyMock, orderFindOneMoc
     retryPrintJobByIdMock: vi.fn(),
     holdFailedKitchenPrintJobsMock: vi.fn(),
     recoverStaleManualPrintRetryClaimsMock: vi.fn(),
-    ensureAuthenticatedSessionMock: vi.fn()
+    ensureAuthenticatedSessionMock: vi.fn(),
+    completeSumUpPrintIntentsIfSentMock: vi.fn()
 }));
 
 vi.mock("next/cache", () => ({
@@ -42,6 +43,9 @@ vi.mock("@/lib/print-queue", () => ({
     holdFailedKitchenPrintJobs: holdFailedKitchenPrintJobsMock,
     recoverStaleManualPrintRetryClaims: recoverStaleManualPrintRetryClaimsMock
 }));
+vi.mock("@/lib/sumup-print-routing", () => ({
+    completeSumUpPrintIntentsIfSent: completeSumUpPrintIntentsIfSentMock
+}));
 
 vi.mock("@/models/Order", () => ({ default: { findOne: orderFindOneMock } }));
 vi.mock("@/models/PosDevice", () => ({ default: {} }));
@@ -67,6 +71,7 @@ describe("retryFailedOrderPrintJobs", () => {
         orderFindOneMock.mockReturnValue({ select: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue({ eventId: { toString: () => "evt-1" } }) }) });
         printJobUpdateManyMock.mockResolvedValue({ modifiedCount: 0 });
         recoverStaleManualPrintRetryClaimsMock.mockResolvedValue({ recovered: 0 });
+        completeSumUpPrintIntentsIfSentMock.mockResolvedValue(true);
     });
 
     test("returns error when event/order ids are missing", async () => {
@@ -97,6 +102,7 @@ describe("retryFailedOrderPrintJobs", () => {
             failedPrinters: []
         });
         expect(recoverStaleManualPrintRetryClaimsMock).toHaveBeenCalledWith("evt-1", "ord-1");
+        expect(completeSumUpPrintIntentsIfSentMock).not.toHaveBeenCalled();
     });
 
     test("counts partial retry results", async () => {
@@ -117,6 +123,16 @@ describe("retryFailedOrderPrintJobs", () => {
             failed: 1,
             failedPrinters: []
         });
+        expect(completeSumUpPrintIntentsIfSentMock).not.toHaveBeenCalled();
+    });
+
+    test("completes the SumUp print marker after every selected retry succeeds", async () => {
+        mockFindFailedJobs([{ _id: "job-1" }]);
+        retryPrintJobByIdMock.mockResolvedValue({ success: true });
+
+        await retryFailedOrderPrintJobs({ orderId: "ord-1", jobIds: ["job-1"] });
+
+        expect(completeSumUpPrintIntentsIfSentMock).toHaveBeenCalledWith("evt-1", "ord-1");
     });
 
     test("offers hold only for queue-recoverable groups backed by a KITCHEN printer", async () => {

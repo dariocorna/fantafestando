@@ -9,7 +9,8 @@ const {
     recoverStaleManualPrintRetryClaimsMock,
     routeOrderToPrintersMock,
     retryPrintJobByIdMock,
-    revalidatePathMock
+    revalidatePathMock,
+    completeSumUpPrintIntentsIfSentMock
 } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     ensureAdminSessionMock: vi.fn(),
@@ -19,7 +20,8 @@ const {
     recoverStaleManualPrintRetryClaimsMock: vi.fn(),
     routeOrderToPrintersMock: vi.fn(),
     retryPrintJobByIdMock: vi.fn(),
-    revalidatePathMock: vi.fn()
+    revalidatePathMock: vi.fn(),
+    completeSumUpPrintIntentsIfSentMock: vi.fn()
 }))
 
 vi.mock("@/lib/authz", () => ({ ensureAdminSession: ensureAdminSessionMock }))
@@ -39,6 +41,9 @@ vi.mock("@/lib/printer", () => ({
 }))
 vi.mock("@/lib/print-queue", () => ({
     recoverStaleManualPrintRetryClaims: recoverStaleManualPrintRetryClaimsMock
+}))
+vi.mock("@/lib/sumup-print-routing", () => ({
+    completeSumUpPrintIntentsIfSent: completeSumUpPrintIntentsIfSentMock
 }))
 vi.mock("@/lib/secrets", () => ({ decryptSecret: vi.fn() }))
 vi.mock("@/lib/sumup", () => ({
@@ -77,6 +82,7 @@ describe("reprintOrderById", () => {
         routeOrderToPrintersMock.mockResolvedValue([true])
         retryPrintJobByIdMock.mockResolvedValue({ success: true })
         recoverStaleManualPrintRetryClaimsMock.mockResolvedValue({ recovered: 0 })
+        completeSumUpPrintIntentsIfSentMock.mockResolvedValue(true)
     })
 
     test("rejects unauthenticated requests before reading the event", async () => {
@@ -190,6 +196,7 @@ describe("reprintOrderById", () => {
         expect(retryPrintJobByIdMock).toHaveBeenNthCalledWith(1, "event-1", "job-1")
         expect(retryPrintJobByIdMock).toHaveBeenNthCalledWith(2, "event-1", "job-2")
         expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
+        expect(completeSumUpPrintIntentsIfSentMock).toHaveBeenCalledWith("event-1", "order-1")
         expect(revalidatePathMock).toHaveBeenCalledWith("/admin/orders")
     })
 

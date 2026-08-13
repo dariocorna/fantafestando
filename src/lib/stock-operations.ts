@@ -36,6 +36,10 @@ export interface StockOperationResult {
     appliedAdjustments?: StockAdjustment[]
 }
 
+export type StockAdjustmentPlanResult =
+    | { success: true; adjustments: StockAdjustment[] }
+    | { success: false; error: string; stockShortages: StockShortage[] }
+
 export function buildDemandMap(cart: OrderCartPayloadItem[]): Map<string, number> {
     const demandItems: CartStockItem[] = cart.flatMap((item) => {
         if (Array.isArray(item.includedComponents) && item.includedComponents.length > 0) {
@@ -495,22 +499,26 @@ export async function applyStockForPaidOrder(
     }
 }
 
-export async function validateStockForPendingOrder(
+export async function planStockAdjustmentsForPayment(
     eventId: string,
     cart: OrderCartPayloadItem[],
     mode: StockMode,
     ingredientPlan: Array<{ ingredientId?: string, quantity: number }> = []
-): Promise<StockOperationResult> {
+): Promise<StockAdjustmentPlanResult> {
     const demands = buildDemandMap(cart)
     const ingredientDemands = buildIngredientDemandMap(ingredientPlan)
-    if (demands.size === 0 && ingredientDemands.size === 0) return { success: true }
+    if (demands.size === 0 && ingredientDemands.size === 0) {
+        return { success: true, adjustments: [] }
+    }
 
-    const productStocks = demands.size > 0
-        ? await loadProductStocks(eventId, [...demands.keys()])
-        : new Map<string, ProductStockInfo>()
-    const ingredientStocks = ingredientDemands.size > 0
-        ? await loadIngredientStocks(eventId, [...ingredientDemands.keys()])
-        : new Map<string, ProductStockInfo>()
+    const [productStocks, ingredientStocks] = await Promise.all([
+        demands.size > 0
+            ? loadProductStocks(eventId, [...demands.keys()])
+            : Promise.resolve(new Map<string, ProductStockInfo>()),
+        ingredientDemands.size > 0
+            ? loadIngredientStocks(eventId, [...ingredientDemands.keys()])
+            : Promise.resolve(new Map<string, ProductStockInfo>())
+    ])
     const shortages = [
         ...collectStockShortages(demands, productStocks),
         ...collectStockShortages(ingredientDemands, ingredientStocks).map((entry) => ({
@@ -519,7 +527,6 @@ export async function validateStockForPendingOrder(
         }))
     ]
     const { missing, stock } = splitMissingShortages(shortages)
-
     if (missing.length > 0) {
         return {
             success: false,
@@ -527,7 +534,6 @@ export async function validateStockForPendingOrder(
             stockShortages: shortages
         }
     }
-
     if (mode === "strict" && stock.length > 0) {
         return {
             success: false,
@@ -536,5 +542,35 @@ export async function validateStockForPendingOrder(
         }
     }
 
-    return { success: true }
+    const plan = (
+        entityType: StockAdjustment["entityType"],
+        requested: Map<string, number>,
+        available: Map<string, ProductStockInfo>
+    ) => [...requested].flatMap(([entityId, requestedQuantity]) => {
+        const item = available.get(entityId)
+        if (!item || !isStockTracked(item.stockQuantity)) return []
+        const availableQuantity = Math.max(0, item.stockQuantity)
+        const quantity = mode === "strict"
+            ? requestedQuantity
+            : Math.min(availableQuantity, requestedQuantity)
+        return quantity > 0 ? [{ entityType, entityId, quantity }] : []
+    })
+
+    return {
+        success: true,
+        adjustments: [
+            ...plan("PRODUCT", demands, productStocks),
+            ...plan("INGREDIENT", ingredientDemands, ingredientStocks)
+        ]
+    }
+}
+
+export async function validateStockForPendingOrder(
+    eventId: string,
+    cart: OrderCartPayloadItem[],
+    mode: StockMode,
+    ingredientPlan: Array<{ ingredientId?: string, quantity: number }> = []
+): Promise<StockOperationResult> {
+    const result = await planStockAdjustmentsForPayment(eventId, cart, mode, ingredientPlan)
+    return result.success ? { success: true } : result
 }

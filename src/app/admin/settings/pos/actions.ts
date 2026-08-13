@@ -1,9 +1,11 @@
 "use server";
 
 import dbConnect from "@/lib/mongoose";
+import Order from "@/models/Order";
 import Peripheral from "@/models/Peripheral";
 import PosDevice from "@/models/PosDevice";
 import Printer from "@/models/Printer";
+import { claimSumUpEventOperation, releaseSumUpEventOperation } from "@/lib/sumup-event-operation";
 import { revalidatePath } from "next/cache";
 import {
     requireAdminAuthorization,
@@ -14,6 +16,79 @@ import {
 function revalidateHardwareViews() {
     revalidatePath("/admin/settings/hardware");
     revalidatePath("/admin/settings/pos");
+}
+
+const PENDING_SUMUP_HARDWARE_ERROR = "Operazione bloccata: un ordine SumUp in attesa usa questo punto cassa. Completa o recupera il pagamento prima di modificarlo.";
+const LEGACY_SUMUP_REFUND_HARDWARE_ERROR = "Operazione bloccata: un pagamento SumUp non ancora rimborsato usa questo punto cassa. Completa il rimborso prima di modificarlo.";
+const SUMUP_EVENT_OPERATION_ERROR = "Operazione bloccata: un pagamento SumUp o una modifica della festa è già in corso.";
+
+async function hasPendingSumUpCheckout(
+    eventId: string,
+    posDeviceId: string,
+    paymentTerminalId: string
+) {
+    if (!posDeviceId.trim() || !paymentTerminalId.trim()) return false;
+
+    const isSumUpTerminal = await Peripheral.exists({
+        _id: paymentTerminalId,
+        eventId,
+        type: "SUMUP"
+    });
+    if (!isSumUpTerminal) return false;
+
+    return Boolean(await Order.exists({
+        eventId,
+        posDeviceId,
+        $or: [
+            {
+                status: "PENDING",
+                sumupCheckoutId: { $exists: true, $nin: [null, ""] }
+            },
+            {
+                status: "PAID",
+                sumupPrintCompletedAt: { $exists: false },
+                $or: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            }
+        ]
+    }));
+}
+
+async function hasLegacySumUpRefundDependency(
+    eventId: string,
+    posDeviceId: string,
+    paymentTerminalId: string
+) {
+    if (!posDeviceId.trim() || !paymentTerminalId.trim()) return false;
+
+    const isSumUpTerminal = await Peripheral.exists({
+        _id: paymentTerminalId,
+        eventId,
+        type: "SUMUP"
+    });
+    if (!isSumUpTerminal) return false;
+
+    return Boolean(await Order.exists({
+        eventId,
+        posDeviceId,
+        "sumupRefundCredentials.apiKey": { $in: [null, ""] },
+        "stornoMeta.refundStatus": { $ne: "DONE" },
+        $or: [
+            {
+                status: "PAID",
+                $or: [
+                    { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                    { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+                ]
+            },
+            {
+                status: "CANCELLED",
+                sumupLateSuccessDetectedAt: { $exists: true, $ne: null }
+            }
+        ]
+    }));
 }
 
 export async function createPosDeviceAction(formData: FormData) {
@@ -92,14 +167,34 @@ export async function deletePosDeviceAction(formData: FormData) {
     if ("error" in scopedEvent) return { error: scopedEvent.error };
 
     await dbConnect();
-    const deletedDevice = await PosDevice.findOneAndDelete({ _id: id, eventId: scopedEvent.eventId }).select("_id").lean();
-
-    if (!deletedDevice) {
+    const currentDevice = await PosDevice.findOne({ _id: id, eventId: scopedEvent.eventId })
+        .select("_id paymentTerminalId")
+        .lean() as ({ paymentTerminalId?: unknown } | null);
+    if (!currentDevice) {
         return { error: "Punto cassa non trovato nella festa selezionata" };
     }
+    const currentPaymentTerminalId = String(currentDevice.paymentTerminalId ?? "").trim();
+    const operationToken = await claimSumUpEventOperation(scopedEvent.eventId);
+    if (!operationToken) return { error: SUMUP_EVENT_OPERATION_ERROR };
 
-    revalidateHardwareViews();
-    return { success: true };
+    try {
+        if (await hasPendingSumUpCheckout(scopedEvent.eventId, id, currentPaymentTerminalId)) {
+            return { error: PENDING_SUMUP_HARDWARE_ERROR };
+        }
+        if (await hasLegacySumUpRefundDependency(scopedEvent.eventId, id, currentPaymentTerminalId)) {
+            return { error: LEGACY_SUMUP_REFUND_HARDWARE_ERROR };
+        }
+        const deletedDevice = await PosDevice.findOneAndDelete({ _id: id, eventId: scopedEvent.eventId }).select("_id").lean();
+
+        if (!deletedDevice) {
+            return { error: "Punto cassa non trovato nella festa selezionata" };
+        }
+
+        revalidateHardwareViews();
+        return { success: true };
+    } finally {
+        await releaseSumUpEventOperation(scopedEvent.eventId, operationToken);
+    }
 }
 
 export async function updatePosDeviceAction(formData: FormData) {
@@ -154,21 +249,55 @@ export async function updatePosDeviceAction(formData: FormData) {
         }
     }
 
-    const updatedDevice = await PosDevice.findOneAndUpdate(
-        { _id: id, eventId: scopedEventId },
-        {
-            name,
-            printerId,
-            paymentTerminalId: normalizedPaymentTerminalId || null,
-            cashBoxId: normalizedCashBoxId || null
-        },
-        { returnDocument: "after" }
-    ).select("_id").lean();
-
-    if (!updatedDevice) {
+    const currentDevice = await PosDevice.findOne({ _id: id, eventId: scopedEventId })
+        .select("_id printerId paymentTerminalId")
+        .lean() as ({ printerId?: unknown; paymentTerminalId?: unknown } | null);
+    if (!currentDevice) {
         return { error: "Punto cassa non trovato nella festa selezionata" };
     }
+    const currentPrinterId = String(currentDevice.printerId ?? "").trim();
+    const currentPaymentTerminalId = String(currentDevice.paymentTerminalId ?? "").trim();
+    const changesPrinter = currentPrinterId !== printerId;
+    const changesPaymentTerminal = currentPaymentTerminalId !== normalizedPaymentTerminalId;
+    const operationToken = changesPrinter || changesPaymentTerminal
+        ? await claimSumUpEventOperation(scopedEventId)
+        : null;
+    if ((changesPrinter || changesPaymentTerminal) && !operationToken) {
+        return { error: SUMUP_EVENT_OPERATION_ERROR };
+    }
 
-    revalidateHardwareViews();
-    return { success: true };
+    try {
+        if (
+            (changesPrinter || changesPaymentTerminal)
+            && await hasPendingSumUpCheckout(scopedEventId, id, currentPaymentTerminalId)
+        ) {
+            return { error: PENDING_SUMUP_HARDWARE_ERROR };
+        }
+        if (
+            changesPaymentTerminal
+            && await hasLegacySumUpRefundDependency(scopedEventId, id, currentPaymentTerminalId)
+        ) {
+            return { error: LEGACY_SUMUP_REFUND_HARDWARE_ERROR };
+        }
+
+        const updatedDevice = await PosDevice.findOneAndUpdate(
+            { _id: id, eventId: scopedEventId },
+            {
+                name,
+                printerId,
+                paymentTerminalId: normalizedPaymentTerminalId || null,
+                cashBoxId: normalizedCashBoxId || null
+            },
+            { returnDocument: "after" }
+        ).select("_id").lean();
+
+        if (!updatedDevice) {
+            return { error: "Punto cassa non trovato nella festa selezionata" };
+        }
+
+        revalidateHardwareViews();
+        return { success: true };
+    } finally {
+        await releaseSumUpEventOperation(scopedEventId, operationToken);
+    }
 }

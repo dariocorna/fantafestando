@@ -43,6 +43,10 @@ import {
     refreshKitchenPrinterQueueLease,
     releaseKitchenPrinterQueueLease
 } from "./print-queue";
+import {
+    completeSumUpPrintIntentsForSentJob,
+    completeSumUpPrintIntentsIfSent
+} from "./sumup-print-routing";
 
 export interface PrinterCommandJob {
     ip: string;
@@ -53,6 +57,7 @@ export interface PrinterCommandJob {
     queueRecoverable?: boolean;
     source?: PrintJobSource;
     printType?: PrintJobType;
+    idempotencyKey?: string;
     isVirtual?: boolean;
     title: string;
     eventName?: string;
@@ -125,6 +130,7 @@ export interface PrinterRasterImageJob {
     orderId?: string;
     source?: PrintJobSource;
     printType?: PrintJobType;
+    idempotencyKey?: string;
     isVirtual?: boolean;
     title: string;
     eventName?: string;
@@ -177,6 +183,8 @@ type PrintDispatchAttemptResult =
         errorMessage: string;
         automaticRetryCount: number;
     };
+
+type PrintDispatchResult = boolean | "RECOVERY_PENDING" | "RETRY_REQUIRED";
 
 type BufferJsonLike = {
     type?: unknown;
@@ -232,6 +240,7 @@ const PRINTER_LOCAL_CAPTURE_MAX_AGE_MS = readEnvNumber(
     "PRINTER_LOCAL_CAPTURE_MAX_AGE_MS",
     1000 * 60 * 60 * 24 * 3
 );
+const SUMUP_PRINT_CLAIM_LEASE_MS = 5 * 60 * 1000;
 const EPSON_BARCODE_EAN8 = 68;
 const PIZZA_EAN8_PATTERN = /^\d{8}$/;
 const RECEIPT_SEPARATOR = "--------------------------------";
@@ -378,9 +387,10 @@ export class PrinterService {
     }
 
     private static async dispatchJobsSequentiallyPerDestination(
-        entries: Array<{ job: PrinterCommandJob; copies: number }>
-    ): Promise<boolean[]> {
-        const results = new Array<boolean>(entries.length);
+        entries: Array<{ job: PrinterCommandJob; copies: number }>,
+        ensureEventOperationOwned?: () => Promise<boolean>
+    ): Promise<PrintDispatchResult[]> {
+        const results = new Array<PrintDispatchResult>(entries.length);
         const entriesByDestination = new Map<string, Array<{ entry: { job: PrinterCommandJob; copies: number }; index: number }>>();
 
         entries.forEach((entry, index) => {
@@ -405,13 +415,18 @@ export class PrinterService {
                 let destinationFailed = false;
 
                 for (const { entry, index } of destinationEntries) {
+                    if (ensureEventOperationOwned && !await ensureEventOperationOwned()) {
+                        results[index] = "RETRY_REQUIRED";
+                        destinationFailed = true;
+                        continue;
+                    }
                     results[index] = destinationFailed
                         ? await this.printComanda(entry.job, entry.copies, {
                             immediateFailureReason: "Skipped after previous destination failure"
                         })
                         : await this.printComanda(entry.job, entry.copies);
 
-                    if (!results[index]) {
+                    if (results[index] === false) {
                         destinationFailed = true;
                     }
                 }
@@ -1066,14 +1081,19 @@ export class PrinterService {
         errorMessage?: string;
         heldSince?: Date;
         liveClaimExpiresAt?: Date;
-    }): Promise<string | undefined> {
-        if (!params.eventId) return undefined;
+        idempotencyKey?: string;
+    }): Promise<{ id?: string; created: boolean; retryClaimedAt?: Date; recoveryPending?: boolean; persistenceFailed?: boolean }> {
+        if (!params.eventId) return { created: true };
+
+        const retryClaimedAt = params.idempotencyKey?.startsWith("SUMUP_CALLBACK:") && !params.queueRecoverable
+            ? new Date()
+            : undefined;
+        const normalizedOrderId = (typeof params.orderId === "string" && mongoose.Types.ObjectId.isValid(params.orderId))
+            ? params.orderId
+            : undefined;
 
         try {
             await dbConnect();
-            const normalizedOrderId = (typeof params.orderId === "string" && mongoose.Types.ObjectId.isValid(params.orderId))
-                ? params.orderId
-                : undefined;
             const created = await PrintJobModel.create({
                 eventId: params.eventId,
                 printerId: params.printerId || undefined,
@@ -1081,6 +1101,7 @@ export class PrinterService {
                 source: params.source,
                 printType: params.printType,
                 queueRecoverable: Boolean(params.queueRecoverable),
+                idempotencyKey: params.idempotencyKey,
                 status: params.status || "QUEUED",
                 destinationHost: params.destinationHost,
                 destinationPort: params.destinationPort,
@@ -1089,12 +1110,81 @@ export class PrinterService {
                 document: params.document,
                 errorMessage: params.errorMessage,
                 heldSince: params.heldSince,
-                liveClaimExpiresAt: params.liveClaimExpiresAt
+                liveClaimExpiresAt: params.liveClaimExpiresAt,
+                retryClaimedAt
             });
-            return created._id.toString();
+            return { id: created._id.toString(), created: true, retryClaimedAt };
         } catch (error) {
+            if (
+                params.idempotencyKey
+                && typeof error === "object"
+                && error !== null
+                && (error as { code?: unknown }).code === 11000
+            ) {
+                if (!retryClaimedAt) return { created: false };
+
+                const staleClaimBefore = new Date(retryClaimedAt.getTime() - SUMUP_PRINT_CLAIM_LEASE_MS);
+                let reclaimed: { _id: { toString(): string } } | null;
+                try {
+                    reclaimed = await PrintJobModel.findOneAndUpdate(
+                        {
+                            eventId: params.eventId,
+                            source: params.source,
+                            idempotencyKey: params.idempotencyKey,
+                            status: "QUEUED",
+                            queueRecoverable: false,
+                            heldSince: { $exists: false },
+                            ...(normalizedOrderId
+                                ? { orderId: normalizedOrderId }
+                                : { orderId: { $exists: false } }),
+                            $and: [
+                                {
+                                    $or: [
+                                        { retryClaimedAt: { $exists: false } },
+                                        { retryClaimedAt: { $lte: staleClaimBefore } }
+                                    ]
+                                },
+                                {
+                                    $or: [
+                                        { liveClaimExpiresAt: { $exists: false } },
+                                        { liveClaimExpiresAt: { $lte: retryClaimedAt } }
+                                    ]
+                                },
+                                {
+                                    $or: [
+                                        { queueClaimToken: { $exists: false } },
+                                        { queueClaimExpiresAt: { $lte: retryClaimedAt } }
+                                    ]
+                                }
+                            ]
+                        },
+                        { $set: { retryClaimedAt } },
+                        { returnDocument: "after" }
+                    ).select("_id").lean() as ({ _id: { toString(): string } } | null);
+                } catch (reclaimError) {
+                    console.error("Unable to reclaim persisted SumUp print intent:", reclaimError);
+                    return { created: false, persistenceFailed: true };
+                }
+
+                if (reclaimed) {
+                    return { id: reclaimed._id.toString(), created: true, retryClaimedAt };
+                }
+
+                const existing = await PrintJobModel.findOne({
+                    eventId: params.eventId,
+                    source: params.source,
+                    idempotencyKey: params.idempotencyKey,
+                    ...(normalizedOrderId
+                        ? { orderId: normalizedOrderId }
+                        : { orderId: { $exists: false } })
+                }).select("status").lean() as ({ status?: "QUEUED" | "HELD" | "SENT" | "FAILED" } | null);
+
+                return existing?.status === "QUEUED"
+                    ? { created: false, recoveryPending: true }
+                    : { created: false };
+            }
             console.error("Unable to persist print job log:", error);
-            return undefined;
+            return { created: false, persistenceFailed: true };
         }
     }
 
@@ -1431,13 +1521,14 @@ export class PrinterService {
         const canUseKitchenQueueLease = Boolean(job.queueRecoverable && job.eventId && job.printerId);
         const kitchenLease = canUseKitchenQueueLease ? buildPrintQueueLease() : null;
 
-        const logId = await this.createPrintJobLog({
+        const log = await this.createPrintJobLog({
             eventId: job.eventId,
             printerId: job.printerId,
             orderId: job.orderId,
             source: job.source || "ORDER",
             printType,
             queueRecoverable: Boolean(job.queueRecoverable),
+            idempotencyKey: job.idempotencyKey,
             destinationHost: destinationHost || "unknown",
             destinationPort,
             isVirtual: Boolean(job.isVirtual),
@@ -1445,6 +1536,14 @@ export class PrinterService {
             document: document as unknown as Record<string, unknown>,
             liveClaimExpiresAt: kitchenLease?.expiresAt
         });
+        if (!log.created) {
+            if (log.persistenceFailed) {
+                return job.idempotencyKey?.startsWith("SUMUP_CALLBACK:") ? "RETRY_REQUIRED" : false;
+            }
+            return log.recoveryPending ? "RECOVERY_PENDING" : true;
+        }
+        const logId = log.id;
+        if (job.idempotencyKey && !logId) return false;
 
         if (kitchenLease && !logId) return false;
         let kitchenLeaseClaimed = false;
@@ -1467,6 +1566,7 @@ export class PrinterService {
                         await this.updatePrintJobLog(logId, {
                             status: "FAILED",
                             errorMessage: "Stampante reparto non disponibile",
+                            clearRetryClaim: Boolean(log.retryClaimedAt),
                             clearLiveClaim: true
                         });
                         return false;
@@ -1496,6 +1596,7 @@ export class PrinterService {
                 await this.updatePrintJobLog(logId, {
                     status: "FAILED",
                     errorMessage: options.immediateFailureReason,
+                    clearRetryClaim: Boolean(log.retryClaimedAt),
                     clearLiveClaim: Boolean(kitchenLease)
                 });
                 return false;
@@ -1506,6 +1607,7 @@ export class PrinterService {
                 await this.updatePrintJobLog(logId, {
                     status: "FAILED",
                     errorMessage: "No printer destination defined",
+                    clearRetryClaim: Boolean(log.retryClaimedAt),
                     clearLiveClaim: Boolean(kitchenLease)
                 });
                 return false;
@@ -1518,6 +1620,7 @@ export class PrinterService {
                     await this.updatePrintJobLog(logId, {
                         status: "FAILED",
                         errorMessage: "Arbitraggio coda stampa perso",
+                        clearRetryClaim: Boolean(log.retryClaimedAt),
                         clearLiveClaim: true
                     });
                     return false;
@@ -1531,6 +1634,7 @@ export class PrinterService {
                     await this.updatePrintJobLog(logId, {
                         status: "FAILED",
                         errorMessage: "Arbitraggio coda stampa perso",
+                        clearRetryClaim: Boolean(log.retryClaimedAt),
                         clearLiveClaim: true
                     });
                     return false;
@@ -1553,6 +1657,7 @@ export class PrinterService {
                     status: "FAILED",
                     errorMessage: dispatchResult.errorMessage,
                     automaticRetryCount: dispatchResult.automaticRetryCount,
+                    clearRetryClaim: Boolean(log.retryClaimedAt),
                     clearLiveClaim: Boolean(kitchenLease)
                 });
                 return false;
@@ -1562,6 +1667,7 @@ export class PrinterService {
                 status: "SENT",
                 rawCapturePath: dispatchResult.rawCapturePath,
                 automaticRetryCount: dispatchResult.automaticRetryCount,
+                clearRetryClaim: Boolean(log.retryClaimedAt),
                 clearLiveClaim: Boolean(kitchenLease)
             });
             return true;
@@ -1713,23 +1819,33 @@ export class PrinterService {
         const destinationPort = destination.port;
         const destinationLabel = destination.label;
 
-        const logId = await this.createPrintJobLog({
+        const log = await this.createPrintJobLog({
             eventId: job.eventId,
             printerId: job.printerId,
             orderId: job.orderId,
             source: job.source || "MANUAL_TEST",
             printType,
+            idempotencyKey: job.idempotencyKey,
             destinationHost: destinationHost || "unknown",
             destinationPort,
             isVirtual: Boolean(job.isVirtual),
             copies,
             document
         });
+        if (!log.created) {
+            if (log.persistenceFailed) {
+                return job.idempotencyKey?.startsWith("SUMUP_CALLBACK:") ? "RETRY_REQUIRED" : false;
+            }
+            return log.recoveryPending ? "RECOVERY_PENDING" : true;
+        }
+        const logId = log.id;
+        if (job.idempotencyKey && !logId) return false;
 
         if (options?.immediateFailureReason) {
             await this.updatePrintJobLog(logId, {
                 status: "FAILED",
-                errorMessage: options.immediateFailureReason
+                errorMessage: options.immediateFailureReason,
+                clearRetryClaim: Boolean(log.retryClaimedAt)
             });
             return false;
         }
@@ -1737,7 +1853,8 @@ export class PrinterService {
         if (!destinationHost) {
             await this.updatePrintJobLog(logId, {
                 status: "FAILED",
-                errorMessage: "No printer destination defined"
+                errorMessage: "No printer destination defined",
+                clearRetryClaim: Boolean(log.retryClaimedAt)
             });
             return false;
         }
@@ -1756,7 +1873,8 @@ export class PrinterService {
             await this.updatePrintJobLog(logId, {
                 status: "FAILED",
                 errorMessage: dispatchResult.errorMessage,
-                automaticRetryCount: dispatchResult.automaticRetryCount
+                automaticRetryCount: dispatchResult.automaticRetryCount,
+                clearRetryClaim: Boolean(log.retryClaimedAt)
             });
             return false;
         }
@@ -1764,12 +1882,26 @@ export class PrinterService {
         await this.updatePrintJobLog(logId, {
             status: "SENT",
             rawCapturePath: dispatchResult.rawCapturePath,
-            automaticRetryCount: dispatchResult.automaticRetryCount
+            automaticRetryCount: dispatchResult.automaticRetryCount,
+            clearRetryClaim: Boolean(log.retryClaimedAt)
         });
         return true;
     }
 
-    static async routeOrderToPrinters(orderId: string, posDeviceId?: string) {
+    static async routeOrderToPrinters(
+        orderId: string,
+        posDeviceId?: string
+    ): Promise<boolean[] | undefined>;
+    static async routeOrderToPrinters(
+        orderId: string,
+        posDeviceId: string | undefined,
+        options: { idempotencyScope: string; ensureEventOperationOwned?: () => Promise<boolean> }
+    ): Promise<PrintDispatchResult[] | undefined>;
+    static async routeOrderToPrinters(
+        orderId: string,
+        posDeviceId?: string,
+        options?: { idempotencyScope?: string; ensureEventOperationOwned?: () => Promise<boolean> }
+    ) {
         await dbConnect();
         const order = await Order.findById(orderId).lean() as ({
             _id: { toString(): string };
@@ -1785,6 +1917,7 @@ export class PrinterService {
             status?: string;
             paymentMethod?: string;
             totalAmount?: number;
+            sumupPrintCompletedAt?: Date | string;
             customer?: { name?: string; table?: string };
             cart: CartItem[];
             easterEggAttachment?: {
@@ -1796,7 +1929,26 @@ export class PrinterService {
         } | null);
         if (!order) return;
 
+        const idempotencyPrefix = options?.idempotencyScope?.trim()
+            ? `${options.idempotencyScope.trim()}:${order._id.toString()}`
+            : undefined;
+        if (idempotencyPrefix && order.status !== "PAID") return [];
+        if (idempotencyPrefix && order.sumupPrintCompletedAt) return [];
         const eventId = order.eventId?.toString();
+        const printIntentKey = (suffix: string) => idempotencyPrefix
+            ? `${idempotencyPrefix}:${suffix}`
+            : undefined;
+        const completeSumUpPrintIntents = async (results: PrintDispatchResult[]) => {
+            if (!idempotencyPrefix || !eventId || results.some((result) => result === "RETRY_REQUIRED" || result === "RECOVERY_PENDING")) return;
+            if (results.length > 0) {
+                await completeSumUpPrintIntentsIfSent(eventId, order._id.toString());
+                return;
+            }
+            await Order.updateOne(
+                { _id: order._id, status: "PAID", sumupPrintCompletedAt: { $exists: false } },
+                { $set: { sumupPrintCompletedAt: new Date() } }
+            );
+        };
 
         const event = eventId
             ? await Event.findById(eventId).select("name settings.menuHeaderLogoUrl settings.receiptHeaderLogoUrl").lean() as ({ name?: string; settings?: { menuHeaderLogoUrl?: string; receiptHeaderLogoUrl?: string } } | null)
@@ -1984,6 +2136,7 @@ export class PrinterService {
                 const createdJob: PrinterCommandJob = {
                     ...cashierJob,
                     items: [],
+                    idempotencyKey: printIntentKey(`customer:${groupKey}`),
                     footerLines
                 };
                 customerJobsByGroup.set(groupKey, createdJob);
@@ -2063,6 +2216,7 @@ export class PrinterService {
                         printerId: destination.id,
                         eventId,
                         queueRecoverable: destination.queueRecoverable,
+                        idempotencyKey: printIntentKey(`kitchen:${kitchenGroupKey}`),
                         source: "ORDER",
                         printType: "KITCHEN_ORDER",
                         isVirtual: destination.isVirtual,
@@ -2126,6 +2280,7 @@ export class PrinterService {
         if (cashierJob.items.length > 0 && cashierJob.ip) {
             const summaryJob: PrinterCommandJob = {
                 ...cashierJob,
+                idempotencyKey: printIntentKey("cashier-summary"),
                 printType: "CASHIER_SUMMARY",
                 title: "SCONTRINO CASSA",
                 copyLabel: "COPIA CASSA",
@@ -2151,7 +2306,10 @@ export class PrinterService {
                 printJobs.push({ job, copies: 1 });
             });
 
-        const results = await this.dispatchJobsSequentiallyPerDestination(printJobs);
+        const results = await this.dispatchJobsSequentiallyPerDestination(
+            printJobs,
+            options?.ensureEventOperationOwned
+        );
 
         const attachment = order.easterEggAttachment;
         const attachmentRasterData = this.normalizeBinaryPayload(attachment?.rasterData);
@@ -2164,6 +2322,7 @@ export class PrinterService {
             && !attachment?.printedAt;
 
         if (!shouldPrintEasterEgg) {
+            await completeSumUpPrintIntents(results);
             return results;
         }
 
@@ -2181,6 +2340,9 @@ export class PrinterService {
         }).label === rasterDestinationKey);
 
         const rasterPrinted = await this.enqueueJobForDestination(rasterDestinationKey, async () => {
+            if (options?.ensureEventOperationOwned && !await options.ensureEventOperationOwned()) {
+                return "RETRY_REQUIRED" as const;
+            }
             if (cashierHasPriorJobs) {
                 await wait(PRINTER_RASTER_AFTER_ORDER_DELAY_MS);
             }
@@ -2194,6 +2356,7 @@ export class PrinterService {
                 orderId: order._id.toString(),
                 source: "ORDER",
                 printType: "EASTER_EGG_IMAGE",
+                idempotencyKey: printIntentKey("easter-egg"),
                 isVirtual: Boolean(cashierPrinter?.isVirtual),
                 title: "Easter Egg Cliente",
                 eventName,
@@ -2211,7 +2374,7 @@ export class PrinterService {
 
         results.push(rasterPrinted);
 
-        if (rasterPrinted) {
+        if (rasterPrinted === true) {
             await Order.updateOne(
                 { _id: order._id },
                 {
@@ -2226,6 +2389,7 @@ export class PrinterService {
             );
         }
 
+        await completeSumUpPrintIntents(results);
         return results;
     }
 
@@ -2286,7 +2450,7 @@ export class PrinterService {
                 || sanitizePrintableHeaderLogoUrl(event?.settings?.menuHeaderLogoUrl)
         });
 
-        const logId = await this.createPrintJobLog({
+        const log = await this.createPrintJobLog({
             eventId,
             printerId,
             source: "CASH_SESSION",
@@ -2298,6 +2462,7 @@ export class PrinterService {
             copies: 1,
             document: document as unknown as Record<string, unknown>
         });
+        const logId = log.id;
 
         if (!printerHost) {
             console.warn(`No cashier printer configured for POS ${posDeviceId}`);
@@ -2491,6 +2656,9 @@ export class PrinterService {
                         automaticRetryCount: dispatchResult.automaticRetryCount,
                         clearRetryClaim: true
                     });
+                if (dispatchResult.success) {
+                    await completeSumUpPrintIntentsForSentJob(eventId, job._id.toString());
+                }
                 return dispatchResult.success
                     ? { success: true } as const
                     : { success: false, error: "Invio stampa fallito" } as const;
@@ -2557,6 +2725,9 @@ export class PrinterService {
                 await this.updatePrintJobLog(job._id.toString(), dispatchResult.success
                     ? { status: "SENT", rawCapturePath: dispatchResult.rawCapturePath, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true }
                     : { status: "FAILED", errorMessage: dispatchResult.errorMessage, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true });
+                if (dispatchResult.success) {
+                    await completeSumUpPrintIntentsForSentJob(eventId, job._id.toString());
+                }
                 return dispatchResult.success
                     ? { success: true } as const
                     : { success: false, error: "Invio stampa fallito" } as const;
@@ -2584,6 +2755,9 @@ export class PrinterService {
             await this.updatePrintJobLog(job._id.toString(), dispatchResult.success
                 ? { status: "SENT", rawCapturePath: dispatchResult.rawCapturePath, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true }
                 : { status: "FAILED", errorMessage: dispatchResult.errorMessage, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true });
+            if (dispatchResult.success) {
+                await completeSumUpPrintIntentsForSentJob(eventId, job._id.toString());
+            }
             return dispatchResult.success
                 ? { success: true } as const
                 : { success: false, error: "Invio stampa fallito" } as const;
