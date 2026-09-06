@@ -108,7 +108,7 @@ interface IEvent {
 interface IPeripheralRef {
     _id: string
     name: string
-    type: "SUMUP" | "CASH_BOX" | "OTHER"
+    type: "SUMUP" | "ELECTRONIC_MANUAL" | "CASH_BOX" | "OTHER"
 }
 
 interface IPosDevice {
@@ -1676,20 +1676,33 @@ export default function PosPage() {
             if (!completionResult) return
 
             if (completionResult.success) {
-                localStorage.setItem(`${POS_PAYMENT_METHOD_STORAGE_PREFIX}${selectedPosDeviceId}`, effectivePaymentMethod)
+                const sumUpPending = "paymentPending" in completionResult && completionResult.paymentPending
+                const sumUpUncertain = "paymentUncertain" in completionResult && completionResult.paymentUncertain
+                if (!sumUpPending && !sumUpUncertain) {
+                    localStorage.setItem(`${POS_PAYMENT_METHOD_STORAGE_PREFIX}${selectedPosDeviceId}`, effectivePaymentMethod)
+                }
                 setRecentPendingOrders((prev) => prev.filter((order) => order.id !== completedPendingOrderId))
                 resetCheckoutForm(effectivePaymentMethod)
                 resetPendingOrder()
                 setIsCheckoutOpen(false)
                 setIsCartSheetOpen(false)
                 setStockShortages([])
-                const printFailureMessage = buildPrintFailureMessage(completionResult.printSummary)
-                if (printFailureMessage) {
-                    showFeedbackModal(printFailureMessage, "error", "Errore stampa", {
-                        type: "RETRY_FAILED_PRINTS",
-                        orderId: completionResult.orderId,
-                        failedPrinters: completionResult.printSummary?.failedPrinters || []
-                    })
+                if (sumUpUncertain) {
+                    showFeedbackModal(
+                        "Non ripetere il pagamento: la richiesta potrebbe essere già arrivata al terminale SumUp. Verifica l'esito su SumUp prima di qualsiasi nuova operazione.",
+                        "error",
+                        "Esito SumUp da verificare"
+                    )
+                } else {
+                    const printSummary = "printSummary" in completionResult ? completionResult.printSummary : undefined
+                    const printFailureMessage = buildPrintFailureMessage(printSummary)
+                    if (printFailureMessage) {
+                        showFeedbackModal(printFailureMessage, "error", "Errore stampa", {
+                            type: "RETRY_FAILED_PRINTS",
+                            orderId: completionResult.orderId,
+                            failedPrinters: printSummary?.failedPrinters || []
+                        })
+                    }
                 }
             } else {
                 if (completionResult.stockShortages?.length) {
@@ -1732,6 +1745,7 @@ export default function PosPage() {
         if (!result) return
 
         if (result.success) {
+            const printSummary = "printSummary" in result ? result.printSummary : undefined
             if (result.paymentCompleted) {
                 localStorage.setItem(`${POS_PAYMENT_METHOD_STORAGE_PREFIX}${selectedPosDeviceId}`, effectivePaymentMethod)
             }
@@ -1739,13 +1753,21 @@ export default function PosPage() {
             setIsCheckoutOpen(false)
             setIsCartSheetOpen(false)
             setStockShortages([])
-            const printFailureMessage = buildPrintFailureMessage(result.printSummary)
-            if (printFailureMessage) {
-                showFeedbackModal(printFailureMessage, "error", "Errore stampa", {
-                    type: "RETRY_FAILED_PRINTS",
-                    orderId: result.orderId,
-                    failedPrinters: result.printSummary?.failedPrinters || []
-                })
+            if ("paymentUncertain" in result && result.paymentUncertain) {
+                showFeedbackModal(
+                    "Non ripetere il pagamento: la richiesta potrebbe essere già arrivata al terminale SumUp. Verifica l'esito su SumUp prima di qualsiasi nuova operazione.",
+                    "error",
+                    "Esito SumUp da verificare"
+                )
+            } else {
+                const printFailureMessage = buildPrintFailureMessage(printSummary)
+                if (printFailureMessage) {
+                    showFeedbackModal(printFailureMessage, "error", "Errore stampa", {
+                        type: "RETRY_FAILED_PRINTS",
+                        orderId: result.orderId,
+                        failedPrinters: printSummary?.failedPrinters || []
+                    })
+                }
             }
         } else {
             if (result.stockShortages?.length) {

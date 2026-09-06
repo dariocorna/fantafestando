@@ -46,7 +46,7 @@ vi.mock("@/lib/printer", () => ({ PrinterService: {} }));
 vi.mock("@/lib/sumup", () => ({ createSumUpCheckout: vi.fn() }));
 vi.mock("@/lib/secrets", () => ({ decryptSecret: vi.fn() }));
 
-import { loadPendingOrderByCode } from "@/app/pos/actions";
+import { listRecentPendingOrders, loadPendingOrderByCode } from "@/app/pos/actions";
 import { shouldReusePendingIngredientPlan } from "@/lib/pending-ingredient-plan";
 
 const pendingOrderLookupProjection =
@@ -104,6 +104,10 @@ describe("loadPendingOrderByCode", () => {
         expect(orderFindOneMock).toHaveBeenCalledWith({
             eventId: "evt-1",
             status: "PENDING",
+            $nor: [
+                { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+            ],
             pickupNumber: 15
         });
         expect(selectMock).toHaveBeenCalledWith(pendingOrderLookupProjection);
@@ -160,7 +164,14 @@ describe("loadPendingOrderByCode", () => {
 
         const result = await loadPendingOrderByCode({ eventId: "evt-1", code: "ABCD" });
 
-        expect(orderFindMock).toHaveBeenCalledWith({ eventId: "evt-1", status: "PENDING" });
+        expect(orderFindMock).toHaveBeenCalledWith({
+            eventId: "evt-1",
+            status: "PENDING",
+            $nor: [
+                { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+            ]
+        });
         expect(sortMock).toHaveBeenCalledWith({ createdAt: -1 });
         expect(limitMock).toHaveBeenCalledWith(500);
         expect(selectMock).toHaveBeenCalledWith(pendingOrderLookupProjection);
@@ -234,6 +245,26 @@ describe("loadPendingOrderByCode", () => {
                     }
                 ]
             }
+        });
+    });
+
+    test("excludes SumUp checkouts from the recent manual-payment list", async () => {
+        const leanMock = vi.fn().mockResolvedValue([]);
+        const selectMock = vi.fn().mockReturnValue({ lean: leanMock });
+        const limitMock = vi.fn().mockReturnValue({ select: selectMock });
+        const sortMock = vi.fn().mockReturnValue({ limit: limitMock });
+        orderFindMock.mockReturnValue({ sort: sortMock });
+
+        const result = await listRecentPendingOrders({ eventId: "evt-1" });
+
+        expect(result).toEqual({ success: true, orders: [] });
+        expect(orderFindMock).toHaveBeenCalledWith({
+            eventId: "evt-1",
+            status: "PENDING",
+            $nor: [
+                { sumupCheckoutId: { $exists: true, $nin: [null, ""] } },
+                { sumupPaymentId: { $exists: true, $nin: [null, ""] } }
+            ]
         });
     });
 });
