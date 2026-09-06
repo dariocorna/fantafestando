@@ -10,7 +10,8 @@ import PosDevice from "@/models/PosDevice";
 import dbConnect from "@/lib/mongoose";
 import { transitionCashSessionStock } from "@/lib/cash-session-stock";
 import { buildCashSessionTransitionClaim, cashSessionTransitionGuard } from "@/lib/cash-session-transition";
-import { hasPendingSumUpCheckouts, noActivePaymentClaim } from "@/lib/cash-session-payment-claim";
+import { noActivePaymentClaim } from "@/lib/cash-session-payment-claim";
+import { unresolvedSumUpPaymentFilter } from "@/lib/sumup-order-filters";
 import { revalidatePath } from "next/cache";
 import { PrinterService } from "@/lib/printer";
 import { buildCashSessionPrintDocumentV2 } from "@/lib/print-report";
@@ -123,12 +124,11 @@ export async function getClosedCashSessionPrintDocumentAction(sessionId: string,
     return document;
 }
 
-async function hasUnrefundedSumUpOrders(sessionId: string) {
-    return Boolean(await Order.exists({
+async function findBlockingSumUpOrder(sessionId: string) {
+    return Order.findOne({
         cashSessionId: sessionId,
-        status: "PAID",
-        $or: [{ sumupCheckoutId: { $exists: true, $ne: "" } }, { sumupPaymentId: { $exists: true, $ne: "" } }]
-    }))
+        ...unresolvedSumUpPaymentFilter()
+    }).select("status").lean();
 }
 
 export async function setCashSessionTestAction(sessionId: string, isTest: boolean) {
@@ -139,43 +139,51 @@ export async function setCashSessionTestAction(sessionId: string, isTest: boolea
     if (!session) return { success: false as const, error: "Sessione cassa non trovata" };
     if (Boolean(session.isTest) === isTest) return { success: true as const, approximateOrders: 0 };
 
-    if (isTest && await hasUnrefundedSumUpOrders(sessionId)) {
-        return { success: false as const, error: "Storna e rimborsa i pagamenti SumUp prima di classificare la sessione come TEST" };
+    const type = isTest ? "TO_TEST" : "TO_NORMAL";
+    const claim = buildCashSessionTransitionClaim(session.transition, type);
+    if (!claim.success) return { success: false as const, error: claim.error, shortages: undefined };
+    const { token } = claim;
+    const claimedSession = await CashSession.findOneAndUpdate(
+        {
+            _id: sessionId,
+            status: session.status === "OPEN" ? "OPEN" : "CLOSED",
+            isTest: { $ne: isTest },
+            $and: [claim.guard, noActivePaymentClaim(claim.transition.claimedAt)]
+        },
+        { $set: { transition: claim.transition }, $unset: { paymentClaim: 1 } },
+        { returnDocument: "after" }
+    );
+    if (!claimedSession) {
+        return { success: false as const, error: "Chiusura o pagamento in corso sulla sessione", shortages: undefined };
+    }
+
+    const blockingOrder = isTest ? await findBlockingSumUpOrder(sessionId) : null;
+    if (blockingOrder) {
+        await CashSession.updateOne(
+            cashSessionTransitionGuard(sessionId, claim.transition),
+            { $unset: { transition: 1 } }
+        );
+        return {
+            success: false as const,
+            error: blockingOrder.status === "PENDING"
+                ? "Completa o annulla i pagamenti SumUp in attesa prima di classificare la sessione come TEST"
+                : "Storna e rimborsa i pagamenti SumUp prima di classificare la sessione come TEST"
+        };
     }
 
     if (session.status === "OPEN") {
-        if (isTest && await hasPendingSumUpCheckouts(sessionId)) {
-            return { success: false as const, error: "Completa o annulla i pagamenti SumUp in attesa prima di classificare la sessione come TEST" };
-        }
         const updated = await CashSession.updateOne(
-            {
-                _id: sessionId,
-                status: "OPEN",
-                transition: { $exists: false },
-                ...noActivePaymentClaim()
-            },
-            { $set: { isTest }, $unset: { paymentClaim: 1 } }
+            { ...cashSessionTransitionGuard(sessionId, claim.transition), status: "OPEN" },
+            { $set: { isTest }, $unset: { transition: 1 } }
         );
         if ((updated.matchedCount ?? updated.modifiedCount) !== 1) {
-            return { success: false as const, error: "Chiusura o pagamento in corso sulla sessione", shortages: undefined };
+            return { success: false as const, error: "Transizione interrotta: riprova per completarla", shortages: undefined };
         }
         revalidatePath("/admin");
         revalidatePath("/pos");
         return { success: true as const, approximateOrders: 0 };
     }
 
-    const type = isTest ? "TO_TEST" : "TO_NORMAL";
-    const claim = buildCashSessionTransitionClaim(session.transition, type);
-    if (!claim.success) return { success: false as const, error: claim.error, shortages: undefined };
-    const { token } = claim;
-    const claimedSession = await CashSession.findOneAndUpdate(
-        { _id: sessionId, status: "CLOSED", isTest: { $ne: isTest }, ...claim.guard },
-        { $set: { transition: claim.transition } },
-        { returnDocument: "after" }
-    );
-    if (!claimedSession) {
-        return { success: false as const, error: "Un'altra transizione è già in corso sulla sessione" };
-    }
     const result = await transitionCashSessionStock({
         eventId: claimedSession.eventId.toString(),
         sessionId,
@@ -216,14 +224,17 @@ export async function deleteCashSessionAction(sessionId: string, confirmation: s
     if (!eventId) return { success: false as const, error: "Nessuna festa selezionata" };
     const session = await CashSession.findOne({ _id: sessionId, eventId, status: "CLOSED" });
     if (!session) return { success: false as const, error: "È possibile eliminare soltanto una sessione chiusa della festa selezionata" };
-    if (await hasUnrefundedSumUpOrders(sessionId)) return { success: false as const, error: "Storna e rimborsa i pagamenti SumUp prima di eliminare la sessione" };
-
     const type = "DELETE" as const;
     const claim = buildCashSessionTransitionClaim(session.transition, type);
     if (!claim.success) return claim;
     const { token } = claim;
     const claimedSession = await CashSession.findOneAndUpdate(
-        { _id: sessionId, eventId, status: "CLOSED", ...claim.guard },
+        {
+            _id: sessionId,
+            eventId,
+            status: "CLOSED",
+            $and: [claim.guard, noActivePaymentClaim(claim.transition.claimedAt)]
+        },
         {
             $set: {
                 deletionStatus: "IN_PROGRESS",
@@ -233,6 +244,21 @@ export async function deleteCashSessionAction(sessionId: string, confirmation: s
         { returnDocument: "after" }
     );
     if (!claimedSession) return { success: false as const, error: "Un'altra transizione è già in corso sulla sessione" };
+
+    const releaseDeleteClaim = () => CashSession.updateOne(
+        cashSessionTransitionGuard(sessionId, claim.transition),
+        { $unset: { transition: 1, deletionStatus: 1 } }
+    );
+    const blockingOrder = await findBlockingSumUpOrder(sessionId);
+    if (blockingOrder) {
+        await releaseDeleteClaim();
+        return {
+            success: false as const,
+            error: blockingOrder.status === "PENDING"
+                ? "Completa o annulla i pagamenti SumUp in attesa prima di eliminare la sessione"
+                : "Storna e rimborsa i pagamenti SumUp prima di eliminare la sessione"
+        };
+    }
 
     if (claimedSession.stockEffectStatus !== "REVERTED") {
         const stockResult = await transitionCashSessionStock({ eventId: claimedSession.eventId.toString(), sessionId, token, target: "REVERTED" });
