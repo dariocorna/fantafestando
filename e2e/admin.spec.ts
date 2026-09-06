@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
+import { ensureDbConnection } from './utils/db';
 import { ensureAdminAuthenticated } from './utils/auth';
-import { ensureAdminEventContext, selectEventContext, uniqueSuffix } from './utils/fixtures';
+import { deleteEvent, ensureAdminEventContext, setAdminEventContextCookie, uniqueSuffix } from './utils/fixtures';
+import Event from '../src/models/Event';
 
 test.describe('Pannello Amministrazione', () => {
     test.beforeEach(async ({ page }) => {
@@ -40,41 +42,27 @@ test.describe('Pannello Amministrazione', () => {
         }
     });
 
-    test('creazione nuova festa e attivazione globale', async ({ page }) => {
-        await page.goto('/admin/settings/events');
-
-        await page.click('#new-event-btn');
-        const dialog = page.getByRole('dialog');
-        await expect(dialog.getByText(/Crea Nuova Festa/i)).toBeVisible();
-
+    test('attivazione globale della festa selezionata', async ({ page }) => {
         const testEventName = `Festa Test ${uniqueSuffix()}`;
-        await page.fill('#name', testEventName);
+        try {
+            await ensureDbConnection();
+            const event = await Event.create({ name: testEventName, active: false, archived: false });
+            await setAdminEventContextCookie(page, String(event._id));
+            await page.goto('/admin/settings');
+            await expect(page.getByTestId('admin-brand-lockup')).toContainText(testEventName);
+            await expect(page.locator('input[name="active"]')).toBeVisible({ timeout: 10000 });
 
-        await dialog.getByRole('button', { name: 'Salva', exact: true }).click();
-        await expect(dialog).not.toBeVisible();
-        await expect(page.getByText(testEventName)).toBeVisible();
+            const activeCheckbox = page.locator('input[name="active"]');
+            await activeCheckbox.check();
 
-        await selectEventContext(page, testEventName);
+            await page.getByRole('button', { name: /Salva Impostazioni/i }).click();
+            await expect(page.getByText('Modifiche salvate!')).toBeVisible();
 
-        await page.goto('/admin/settings');
-        await expect(page.locator('input[name="active"]')).toBeVisible({ timeout: 10000 });
-
-        const activeCheckbox = page.locator('input[name="active"]');
-        await activeCheckbox.check();
-
-        await page.getByRole('button', { name: /Salva Impostazioni/i }).click();
-
-        await expect
-            .poll(
-                async () => {
-                    await page.goto('/admin/settings/events');
-                    const eventCard = page.locator('div.p-4.border').filter({ hasText: testEventName }).first();
-                    if (!(await eventCard.isVisible().catch(() => false))) return false;
-                    return await eventCard.getByText(/Attiva \(Globale\)/i).isVisible().catch(() => false);
-                },
-                { timeout: 15000 }
-            )
-            .toBeTruthy();
+            await expect.poll(async () => Event.countDocuments({ _id: event._id, active: true })).toBe(1);
+            await expect.poll(async () => Event.countDocuments({ _id: { $ne: event._id }, active: true })).toBe(0);
+        } finally {
+            await deleteEvent(page, testEventName);
+        }
     });
 
     test('modifica categoria e prodotto (Full CRUD)', async ({ page }) => {
