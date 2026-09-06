@@ -17,6 +17,7 @@ export interface IPrintJob extends Document {
     source: PrintJobSource;
     printType: PrintJobType;
     queueRecoverable: boolean;
+    idempotencyKey?: string;
     status: PrintJobStatus;
     destinationHost: string;
     destinationPort: number;
@@ -52,6 +53,7 @@ const PrintJobSchema = new Schema<IPrintJob>({
         default: "CUSTOMER_ORDER"
     },
     queueRecoverable: { type: Boolean, required: true, default: false },
+    idempotencyKey: { type: String, trim: true },
     status: {
         type: String,
         enum: ["QUEUED", "HELD", "SENT", "FAILED"],
@@ -79,6 +81,13 @@ PrintJobSchema.index({ eventId: 1, createdAt: -1 });
 PrintJobSchema.index({ eventId: 1, status: 1, createdAt: -1 });
 PrintJobSchema.index({ printerId: 1, createdAt: -1 });
 PrintJobSchema.index({ printerId: 1, status: 1, createdAt: 1, _id: 1 });
+PrintJobSchema.index(
+    { eventId: 1, source: 1, orderId: 1, idempotencyKey: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { idempotencyKey: { $type: "string" } }
+    }
+);
 
 if (process.env.NODE_ENV === "development") {
     delete mongoose.models.PrintJob;

@@ -1,24 +1,35 @@
+import sift from "sift";
+
 const mocks = vi.hoisted(() => ({
     dbConnect: vi.fn(),
     printJobDistinct: vi.fn(),
+    printJobFind: vi.fn(),
+    printJobFindOne: vi.fn(),
+    printJobExists: vi.fn(),
     printJobUpdateMany: vi.fn(),
     printJobFindOneAndUpdate: vi.fn(),
     printJobUpdateOne: vi.fn(),
     eventDistinct: vi.fn(),
     printerDistinct: vi.fn(),
     printerFindOneAndUpdate: vi.fn(),
-    printerUpdateOne: vi.fn()
+    printerUpdateOne: vi.fn(),
+    orderUpdateOne: vi.fn(),
+    completeSumUpPrintIntentsForSentJob: vi.fn()
 }));
 
 vi.mock("@/lib/mongoose", () => ({ default: mocks.dbConnect }));
 vi.mock("@/models/PrintJob", () => ({
     default: {
         distinct: mocks.printJobDistinct,
+        find: mocks.printJobFind,
+        findOne: mocks.printJobFindOne,
+        exists: mocks.printJobExists,
         updateMany: mocks.printJobUpdateMany,
         findOneAndUpdate: mocks.printJobFindOneAndUpdate,
         updateOne: mocks.printJobUpdateOne
     }
 }));
+vi.mock("@/models/Order", () => ({ default: { updateOne: mocks.orderUpdateOne } }));
 vi.mock("@/models/Event", () => ({
     default: {
         distinct: mocks.eventDistinct
@@ -30,6 +41,9 @@ vi.mock("@/models/Printer", () => ({
         findOneAndUpdate: mocks.printerFindOneAndUpdate,
         updateOne: mocks.printerUpdateOne
     }
+}));
+vi.mock("@/lib/sumup-print-routing", () => ({
+    completeSumUpPrintIntentsForSentJob: mocks.completeSumUpPrintIntentsForSentJob
 }));
 
 import {
@@ -61,11 +75,14 @@ describe("print queue", () => {
         mocks.dbConnect.mockResolvedValue(undefined);
         mocks.printJobUpdateMany.mockResolvedValue({ modifiedCount: 0 });
         mocks.printJobDistinct.mockResolvedValue([]);
+        mocks.printJobFind.mockReturnValue(queryResult([]));
+        mocks.printJobFindOneAndUpdate.mockReturnValue(queryResult(null));
         mocks.printJobUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
-        mocks.eventDistinct.mockResolvedValue(["event-1"]);
+        mocks.eventDistinct.mockImplementation(async (_field, query) => query.active === true ? ["event-1"] : []);
         mocks.printerDistinct.mockResolvedValue([]);
         mocks.printerFindOneAndUpdate.mockReturnValue(queryResult(null));
         mocks.printerUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+        mocks.completeSumUpPrintIntentsForSentJob.mockResolvedValue(false);
     });
 
     test("holds only failed ORDER kitchen jobs backed by a KITCHEN printer", async () => {
@@ -124,7 +141,7 @@ describe("print queue", () => {
                 retryClaimedAt: { $lte: expect.any(Date) }
             },
             {
-                $set: { status: "FAILED", errorMessage: "Reinvio interrotto: riprova" },
+                $set: { status: "FAILED", errorMessage: "Reinvio interrotto: verifica la stampa prima di riprovare" },
                 $unset: { retryClaimedAt: 1 }
             }
         );
@@ -231,7 +248,7 @@ describe("print queue", () => {
             1,
             {
                 printerId: "printer-1",
-                eventId: { $in: ["event-1"] },
+                $or: expect.arrayContaining([{ eventId: { $in: ["event-1"] } }]),
                 status: "HELD",
                 source: "ORDER",
                 printType: "KITCHEN_ORDER",
@@ -279,7 +296,7 @@ describe("print queue", () => {
 
         expect(mocks.printJobUpdateMany).toHaveBeenCalledWith(
             {
-                eventId: { $in: ["event-1"] },
+                $or: expect.arrayContaining([{ eventId: { $in: ["event-1"] } }]),
                 status: "QUEUED",
                 source: "ORDER",
                 printType: "KITCHEN_ORDER",
@@ -300,52 +317,137 @@ describe("print queue", () => {
         );
     });
 
-    test("recovers and drains only active unarchived event queues", async () => {
-        mocks.eventDistinct.mockResolvedValueOnce(["event-active"]);
-        mocks.printJobDistinct.mockResolvedValueOnce(["printer-active"]);
-        mocks.printerFindOneAndUpdate.mockReturnValueOnce(queryResult({ _id: "printer-active" }));
-        queueJobs({ _id: "job-active", eventId: "event-active" });
+    test("drains inactive SumUp queues without resuming inactive manual or archived jobs", async () => {
+        const events = [
+            { _id: "active", active: true, archived: false },
+            { _id: "inactive", active: false, archived: false },
+            { _id: "archived", active: true, archived: true },
+            { _id: "inactive-archived", active: false, archived: true }
+        ];
+        const cases = [
+            ["active-manual", "active", false, "HELD"],
+            ["inactive-sumup", "inactive", true, "HELD"],
+            ["inactive-sumup-stale", "inactive", true, "QUEUED"],
+            ["inactive-manual", "inactive", false, "HELD"],
+            ["inactive-manual-stale", "inactive", false, "QUEUED"],
+            ["archived-sumup", "archived", true, "HELD"],
+            ["archived-sumup-stale", "archived", true, "QUEUED"],
+            ["inactive-archived-sumup", "inactive-archived", true, "HELD"],
+            ["active-live", "active", false, "QUEUED", true],
+            ["inactive-sumup-live", "inactive", true, "QUEUED", true],
+            ["inactive-manual-live", "inactive", false, "QUEUED", true],
+            ["inactive-archived-live", "inactive-archived", true, "QUEUED", true]
+        ] as const;
+        const jobs: Record<string, unknown>[] = cases.map(([_id, eventId, sumup, status, live = false], index) => ({
+            _id, eventId, status, printerId: "printer-1", source: "ORDER", printType: "KITCHEN_ORDER",
+            queueRecoverable: true, createdAt: new Date(index),
+            ...(live ? { liveClaimExpiresAt: new Date(0) } : { heldSince: new Date(0) }),
+            ...(sumup ? { idempotencyKey: `SUMUP_CALLBACK:${_id}` } : {}),
+            ...(status === "QUEUED" && !live ? { queueClaimToken: "expired", queueClaimExpiresAt: new Date(0) } : {})
+        }));
+        function applyUpdate(job: Record<string, unknown>, update: { $set?: object; $unset?: object }) {
+            Object.assign(job, update.$set);
+            for (const key of Object.keys(update.$unset || {})) delete job[key];
+        }
+        mocks.eventDistinct.mockImplementation(async (_field, query) => events.filter(sift(query)).map((event) => event._id));
+        mocks.printJobDistinct.mockImplementation(async (field, query) => [...new Set(jobs.filter(sift(query)).map((job) => job[field]))]);
+        mocks.printJobUpdateMany.mockImplementation(async (query, update) => {
+            const matched = jobs.filter(sift(query));
+            matched.forEach((job) => applyUpdate(job, update));
+            return { modifiedCount: matched.length };
+        });
+        mocks.printerFindOneAndUpdate.mockReturnValue(queryResult({ _id: "printer-1" }));
+        mocks.printJobFindOneAndUpdate.mockImplementation((query, update) => {
+            const job = jobs.find(sift(query));
+            if (job) applyUpdate(job, update);
+            return queryResult(job || null);
+        });
+        mocks.printJobUpdateOne.mockImplementation(async (query, update) => {
+            const job = jobs.find(sift(query));
+            if (job) applyUpdate(job, update);
+            return { matchedCount: job ? 1 : 0 };
+        });
         const dispatcher = vi.fn().mockResolvedValue({ success: true });
 
-        await drainHeldPrintQueues(dispatcher);
+        await expect(drainHeldPrintQueues(dispatcher)).resolves.toEqual({ recovered: 3, sent: 3, held: 0, failed: 0 });
 
-        expect(mocks.eventDistinct).toHaveBeenCalledWith("_id", {
-            active: true,
-            archived: { $ne: true }
-        });
-        expect(mocks.printJobDistinct).toHaveBeenCalledWith("printerId", {
-            eventId: { $in: ["event-active"] },
-            status: "HELD",
-            printerId: { $exists: true },
-            source: "ORDER",
-            printType: "KITCHEN_ORDER",
-            queueRecoverable: true,
-            heldSince: { $exists: true }
-        });
-        expect(mocks.printJobFindOneAndUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ eventId: { $in: ["event-active"] } }),
-            expect.any(Object),
-            expect.any(Object)
-        );
-        expect(dispatcher).toHaveBeenCalledWith("event-active", "job-active");
+        expect(dispatcher.mock.calls).toEqual([
+            ["active", "active-manual"],
+            ["inactive", "inactive-sumup"],
+            ["inactive", "inactive-sumup-stale"]
+        ]);
+        expect(jobs.map((job) => job.status)).toEqual([
+            "SENT", "SENT", "SENT", "HELD", "QUEUED", "HELD", "QUEUED", "HELD",
+            "FAILED", "FAILED", "QUEUED", "QUEUED"
+        ]);
+        expect(mocks.completeSumUpPrintIntentsForSentJob).toHaveBeenCalledTimes(2);
+        expect(mocks.completeSumUpPrintIntentsForSentJob).toHaveBeenCalledWith("inactive", "inactive-sumup-stale");
     });
 
-    test("does not claim inactive or archived event queues", async () => {
-        mocks.eventDistinct.mockResolvedValueOnce([]);
-        const dispatcher = vi.fn();
+    test.each([
+        [true, "HELD"], [false, "HELD"],
+        [true, "CUSTOMER_ORDER"], [false, "CUSTOMER_ORDER"],
+        [true, "EASTER_EGG_IMAGE"], [false, "EASTER_EGG_IMAGE"]
+    ])("reconciles sent SumUp metadata without reprinting (active=%s, origin=%s)", async (active, origin) => {
+        const fromQueue = origin === "HELD";
+        const event = { _id: "event-1", active, archived: false };
+        const job: Record<string, unknown> = {
+            _id: "job-1", eventId: "event-1", orderId: "order-1", printerId: "printer-1",
+            status: fromQueue ? "HELD" : "SENT", source: "ORDER",
+            printType: fromQueue ? "KITCHEN_ORDER" : origin, queueRecoverable: fromQueue,
+            ...(fromQueue ? { heldSince: new Date(0) } : { retryClaimedAt: new Date() }),
+            idempotencyKey: "SUMUP_CALLBACK:order-1:print"
+        };
+        const order: Record<string, unknown> = {
+            _id: "order-1", eventId: "event-1", status: "PAID", sumupCheckoutId: "checkout-1"
+        };
+        const applyUpdate = (record: Record<string, unknown>, update: { $set?: object; $unset?: object }) => {
+            Object.assign(record, update.$set);
+            for (const key of Object.keys(update.$unset || {})) delete record[key];
+        };
+        mocks.eventDistinct.mockImplementation(async (_field, query) => [event].filter(sift(query)).map(({ _id }) => _id));
+        mocks.printJobDistinct.mockImplementation(async (field, query) => [job].filter(sift(query)).map((entry) => entry[field]));
+        mocks.printJobFind.mockImplementation((query) => queryResult([job].filter(sift(query)).map((entry) => ({ ...entry }))));
+        mocks.printJobFindOne.mockImplementation((query) => queryResult(sift(query)(job) ? job : null));
+        mocks.printJobExists.mockImplementation(async (query) => sift(query)(job) ? { _id: job._id } : null);
+        mocks.printerFindOneAndUpdate.mockReturnValue(queryResult({ _id: "printer-1" }));
+        mocks.printJobFindOneAndUpdate.mockImplementation((query, update) => {
+            if (!sift(query)(job)) return queryResult(null);
+            applyUpdate(job, update);
+            return queryResult({ ...job });
+        });
+        mocks.printJobUpdateOne.mockImplementation(async (query, update) => {
+            const matched = sift(query)(job);
+            if (matched) applyUpdate(job, update);
+            return { matchedCount: matched ? 1 : 0 };
+        });
+        mocks.orderUpdateOne.mockRejectedValueOnce(new Error("completion database failure"));
+        mocks.orderUpdateOne.mockImplementation(async (query, update) => {
+            const matched = sift(query)(order);
+            if (matched) applyUpdate(order, update);
+            return { matchedCount: matched ? 1 : 0 };
+        });
+        const actual = await vi.importActual<typeof import("@/lib/sumup-print-routing")>("@/lib/sumup-print-routing");
+        mocks.completeSumUpPrintIntentsForSentJob.mockImplementation(actual.completeSumUpPrintIntentsForSentJob);
+        const dispatcher = vi.fn().mockResolvedValue({ success: true });
 
+        await expect(drainHeldPrintQueues(dispatcher)).rejects.toThrow("completion database failure");
+        expect(job.status).toBe("SENT");
+        expect(fromQueue ? job.queueClaimToken : job.retryClaimedAt).toBeDefined();
+        expect(order.sumupPrintCompletedAt).toBeUndefined();
+
+        await Promise.all([drainHeldPrintQueues(dispatcher), drainHeldPrintQueues(dispatcher)]);
+        expect(order.sumupPrintCompletedAt).toBeInstanceOf(Date);
+        expect(job.status).toBe("SENT");
+        expect(job.queueClaimToken).toBeUndefined();
+        expect(job.retryClaimedAt).toBeUndefined();
+        expect(job.queueClaimExpiresAt).toBeUndefined();
+        expect(dispatcher).toHaveBeenCalledTimes(fromQueue ? 1 : 0);
+
+        const completions = mocks.completeSumUpPrintIntentsForSentJob.mock.calls.length;
         await drainHeldPrintQueues(dispatcher);
-
-        expect(mocks.printJobUpdateMany).toHaveBeenCalledWith(
-            expect.objectContaining({ eventId: { $in: [] } }),
-            expect.any(Object)
-        );
-        expect(mocks.printJobDistinct).toHaveBeenCalledWith(
-            "printerId",
-            expect.objectContaining({ eventId: { $in: [] } })
-        );
-        expect(mocks.printerFindOneAndUpdate).not.toHaveBeenCalled();
-        expect(dispatcher).not.toHaveBeenCalled();
+        expect(mocks.completeSumUpPrintIntentsForSentJob).toHaveBeenCalledTimes(completions);
+        expect(dispatcher).toHaveBeenCalledTimes(fromQueue ? 1 : 0);
     });
 
     test("finalizes success, skips permanent failures, and stops on a recoverable failure", async () => {
@@ -378,6 +480,7 @@ describe("print queue", () => {
                 $set: expect.objectContaining({ status: "SENT", rawCapturePath: "/capture.bin", automaticRetryCount: 1 })
             })
         );
+        expect(mocks.completeSumUpPrintIntentsForSentJob).not.toHaveBeenCalled();
         expect(mocks.printJobUpdateOne).toHaveBeenNthCalledWith(
             2,
             expect.objectContaining({ _id: "job-failed", status: "QUEUED", queueClaimToken: expect.any(String) }),

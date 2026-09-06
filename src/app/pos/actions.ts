@@ -70,7 +70,6 @@ import {
 } from "@/lib/cash-session-payment-claim"
 import { publishStockInvalidation } from "@/lib/pos-stock-realtime"
 import { holdFailedKitchenPrintJobs, recoverStaleManualPrintRetryClaims } from "@/lib/print-queue"
-import { completeSumUpPrintIntentsIfSent } from "@/lib/sumup-print-routing"
 
 interface PrintDispatchSummary {
     attempted: number
@@ -2809,16 +2808,15 @@ export async function retryFailedOrderPrintJobs(data: {
         const results = []
         for (const job of failedJobs) {
             const result = await PrinterService.retryPrintJobById(eventId, job._id.toString())
+            if (!result.success && "requiresPrintVerification" in result && result.requiresPrintVerification) {
+                return { success: false, error: result.error }
+            }
             results.push(result)
             if (!result.success) break
         }
 
         const retried = results.filter((result) => result.success).length
         const failed = results.length - retried
-        if (retried > 0 && failed === 0) {
-            await completeSumUpPrintIntentsIfSent(eventId, data.orderId)
-        }
-
         return {
             success: true,
             attempted: results.length,
