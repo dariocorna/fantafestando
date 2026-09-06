@@ -13,6 +13,7 @@ import CashSession from "@/models/CashSession";
 import Event from "@/models/Event";
 import Ingredient from "@/models/Ingredient";
 import Order from "@/models/Order";
+import { unresolvedSumUpPaymentFilter } from "@/lib/sumup-order-filters";
 import OrderCounter from "@/models/OrderCounter";
 import Peripheral from "@/models/Peripheral";
 import PosDevice from "@/models/PosDevice";
@@ -21,10 +22,13 @@ import PrintJob from "@/models/PrintJob";
 import Product from "@/models/Product";
 import { revalidatePath } from "next/cache";
 import { requireAdminAuthorization } from "../action-context";
+import { claimSumUpEventOperation, releaseSumUpEventOperation } from "@/lib/sumup-event-operation";
 
 function escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+const BLOCKING_SUMUP_EVENT_ERROR = "Operazione bloccata: la festa contiene pagamenti SumUp in attesa o non ancora rimborsati.";
 
 export async function createEventAction(formData: FormData) {
     const authError = await requireAdminAuthorization();
@@ -184,10 +188,26 @@ export async function archiveEventAction(formData: FormData) {
     if (!eventId) return;
 
     await dbConnect();
-    await Event.findByIdAndUpdate(eventId, {
-        archived: true,
-        active: false
-    });
+    const operationToken = await claimSumUpEventOperation(eventId);
+    if (!operationToken) {
+        return { error: "Operazione bloccata: un pagamento SumUp o una modifica della festa è già in corso." };
+    }
+    if (await Order.exists({
+        eventId,
+        ...unresolvedSumUpPaymentFilter(),
+        $nor: [{
+            status: "PAID",
+            sumupPrintCompletedAt: { $exists: true, $ne: null },
+            "stornoMeta.status": { $exists: false }
+        }]
+    })) {
+        await releaseSumUpEventOperation(eventId, operationToken);
+        return { error: "Operazione bloccata: la festa contiene pagamenti, stampe o storni SumUp ancora da completare." };
+    }
+    await Event.findOneAndUpdate(
+        { _id: eventId, "sumupOperationClaim.token": operationToken },
+        { $set: { archived: true, active: false }, $unset: { sumupOperationClaim: 1 } }
+    );
     revalidatePath("/admin/settings/events");
 }
 
@@ -199,6 +219,22 @@ export async function deleteEventAction(formData: FormData) {
     if (!eventId) return;
 
     await dbConnect();
+    const operationToken = await claimSumUpEventOperation(eventId);
+    if (!operationToken) {
+        return { error: "Operazione bloccata: un pagamento SumUp o una modifica della festa è già in corso." };
+    }
+    if (await Order.exists({ eventId, ...unresolvedSumUpPaymentFilter() })) {
+        await releaseSumUpEventOperation(eventId, operationToken);
+        return { error: BLOCKING_SUMUP_EVENT_ERROR };
+    }
+    const eventUnavailable = await Event.findOneAndUpdate(
+        { _id: eventId, "sumupOperationClaim.token": operationToken },
+        { $set: { archived: true, active: false } },
+        { returnDocument: "after" }
+    ).select("_id").lean();
+    if (!eventUnavailable) {
+        return { error: "Operazione bloccata: il controllo esclusivo sulla festa non è più valido." };
+    }
     await PrintJob.deleteMany({ eventId });
     await CashSession.deleteMany({ eventId });
     await Order.deleteMany({ eventId });
@@ -209,7 +245,7 @@ export async function deleteEventAction(formData: FormData) {
     await Product.deleteMany({ eventId });
     await Ingredient.deleteMany({ eventId });
     await Category.deleteMany({ eventId });
-    await Event.findByIdAndDelete(eventId);
+    await Event.findOneAndDelete({ _id: eventId, "sumupOperationClaim.token": operationToken });
 
     revalidatePath("/admin/settings/events");
 }

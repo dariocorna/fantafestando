@@ -9,7 +9,8 @@ const {
     recoverStaleManualPrintRetryClaimsMock,
     routeOrderToPrintersMock,
     retryPrintJobByIdMock,
-    revalidatePathMock
+    revalidatePathMock,
+    completeSumUpPrintIntentsIfSentMock
 } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     ensureAdminSessionMock: vi.fn(),
@@ -19,7 +20,8 @@ const {
     recoverStaleManualPrintRetryClaimsMock: vi.fn(),
     routeOrderToPrintersMock: vi.fn(),
     retryPrintJobByIdMock: vi.fn(),
-    revalidatePathMock: vi.fn()
+    revalidatePathMock: vi.fn(),
+    completeSumUpPrintIntentsIfSentMock: vi.fn()
 }))
 
 vi.mock("@/lib/authz", () => ({ ensureAdminSession: ensureAdminSessionMock }))
@@ -39,6 +41,9 @@ vi.mock("@/lib/printer", () => ({
 }))
 vi.mock("@/lib/print-queue", () => ({
     recoverStaleManualPrintRetryClaims: recoverStaleManualPrintRetryClaimsMock
+}))
+vi.mock("@/lib/sumup-print-routing", () => ({
+    completeSumUpPrintIntentsIfSent: completeSumUpPrintIntentsIfSentMock
 }))
 vi.mock("@/lib/secrets", () => ({ decryptSecret: vi.fn() }))
 vi.mock("@/lib/sumup", () => ({
@@ -77,6 +82,7 @@ describe("reprintOrderById", () => {
         routeOrderToPrintersMock.mockResolvedValue([true])
         retryPrintJobByIdMock.mockResolvedValue({ success: true })
         recoverStaleManualPrintRetryClaimsMock.mockResolvedValue({ recovered: 0 })
+        completeSumUpPrintIntentsIfSentMock.mockResolvedValue(true)
     })
 
     test("rejects unauthenticated requests before reading the event", async () => {
@@ -171,8 +177,9 @@ describe("reprintOrderById", () => {
         expect(revalidatePathMock).not.toHaveBeenCalled()
     })
 
-    test("retries existing failed copies without routing the whole order again", async () => {
+    test("preserves successful copy retries without repeating SumUp metadata work or full routing", async () => {
         mockOrder({ posDeviceId: "pos-1" })
+        completeSumUpPrintIntentsIfSentMock.mockRejectedValue(new Error("metadata unavailable"))
         const firstJobId = { toString: vi.fn().mockReturnValue("job-1") }
         printJobFindMock.mockReturnValue(failedJobsQuery([
             { _id: firstJobId },
@@ -189,7 +196,9 @@ describe("reprintOrderById", () => {
         })
         expect(retryPrintJobByIdMock).toHaveBeenNthCalledWith(1, "event-1", "job-1")
         expect(retryPrintJobByIdMock).toHaveBeenNthCalledWith(2, "event-1", "job-2")
+        expect(retryPrintJobByIdMock).toHaveBeenCalledTimes(2)
         expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
+        expect(completeSumUpPrintIntentsIfSentMock).not.toHaveBeenCalled()
         expect(revalidatePathMock).toHaveBeenCalledWith("/admin/orders")
     })
 
@@ -209,17 +218,19 @@ describe("reprintOrderById", () => {
         expect(retryPrintJobByIdMock).toHaveBeenCalledWith("event-1", "job-2")
     })
 
-    test("reports failed copy retries without creating a new print batch", async () => {
+    test.each([false, true])("reports copy retries with print verification required=%s without a new batch", async (requiresPrintVerification) => {
         mockOrder({ posDeviceId: "pos-1" })
-        printJobFindMock.mockReturnValue(failedJobsQuery([{ _id: "job-1" }, { _id: "job-2" }]))
+        printJobFindMock.mockReturnValue(failedJobsQuery([{ _id: "job-1" }, { _id: "job-2" }, { _id: "job-3" }]))
+        const error = requiresPrintVerification ? "Stampa inviata ma non registrata: verifica la stampa prima di riprovare" : "offline"
         retryPrintJobByIdMock
             .mockResolvedValueOnce({ success: true })
-            .mockResolvedValueOnce({ success: false, error: "offline" })
+            .mockResolvedValueOnce({ success: false, error, requiresPrintVerification })
 
         await expect(reprintOrderById("order-1")).resolves.toEqual({
             success: false,
-            error: "Reinvio non completato: 1 copia non inviata. Riprova."
+            error: requiresPrintVerification ? error : "Reinvio non completato: 1 copia non inviata. Riprova."
         })
+        expect(retryPrintJobByIdMock).toHaveBeenCalledTimes(requiresPrintVerification ? 2 : 3)
         expect(routeOrderToPrintersMock).not.toHaveBeenCalled()
         expect(revalidatePathMock).toHaveBeenCalledWith("/admin/orders")
     })

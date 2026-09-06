@@ -9,7 +9,8 @@ const {
     posDeviceFindByIdMock,
     productFindMock,
     categoryFindMock,
-    printJobExistsMock
+    printJobExistsMock,
+    completeSumUpPrintIntentsIfSentMock
 } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     orderFindByIdMock: vi.fn(),
@@ -18,7 +19,8 @@ const {
     posDeviceFindByIdMock: vi.fn(),
     productFindMock: vi.fn(),
     categoryFindMock: vi.fn(),
-    printJobExistsMock: vi.fn()
+    printJobExistsMock: vi.fn(),
+    completeSumUpPrintIntentsIfSentMock: vi.fn()
 }));
 
 vi.mock("@/lib/mongoose", () => ({
@@ -58,6 +60,10 @@ vi.mock("@/models/Category", () => ({
 
 vi.mock("@/models/PrintJob", () => ({
     default: { exists: printJobExistsMock }
+}));
+
+vi.mock("@/lib/sumup-print-routing", () => ({
+    completeSumUpPrintIntentsIfSent: completeSumUpPrintIntentsIfSentMock
 }));
 
 import { PrinterService } from "@/lib/printer";
@@ -128,6 +134,7 @@ describe("PrinterService.routeOrderToPrinters", () => {
         vi.clearAllMocks();
         orderUpdateOneMock.mockResolvedValue({ acknowledged: true });
         printJobExistsMock.mockResolvedValue(null);
+        completeSumUpPrintIntentsIfSentMock.mockResolvedValue(true);
     });
 
     test("keeps only cashier summary and customer copy when no department printer is configured", async () => {
@@ -168,6 +175,113 @@ describe("PrinterService.routeOrderToPrinters", () => {
             expect.objectContaining({ printType: "CUSTOMER_ORDER", ip: "192.168.178.203", port: 9100 }),
             1
         );
+    });
+
+    test("assigns stable intent keys so a callback retry can create only missing jobs", async () => {
+        mockOrder(buildOrder("order-sumup-recovery"));
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100,
+                isVirtual: false
+            }
+        });
+        mockProducts([{
+            _id: { toString: () => "prod-1" },
+            categoryId: { toString: () => "cat-1" },
+            basePrice: 7
+        }]);
+        mockCategories([{
+            _id: { toString: () => "cat-1" },
+            name: "Griglia",
+            printerId: {
+                _id: "kitchen-printer-1",
+                name: "Stampante Griglia",
+                ip: "192.168.178.210",
+                port: 9100,
+                isVirtual: false
+            }
+        }]);
+
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        await PrinterService.routeOrderToPrinters(
+            "order-sumup-recovery",
+            "pos-1",
+            { idempotencyScope: "SUMUP_CALLBACK" }
+        );
+
+        const keys = printComandaSpy.mock.calls.map(([job]) => job.idempotencyKey);
+        expect(keys).toHaveLength(3);
+        expect(new Set(keys).size).toBe(3);
+        expect(keys.every((key) => key?.startsWith("SUMUP_CALLBACK:order-sumup-recovery:"))).toBe(true);
+        expect(completeSumUpPrintIntentsIfSentMock).toHaveBeenCalledWith("evt-1", "order-sumup-recovery");
+
+        mockOrder(buildOrder("order-sumup-recovery", { sumupPrintCompletedAt: new Date() }));
+        mockCategories([{
+            _id: { toString: () => "cat-1" },
+            name: "Nuovo reparto",
+            printerId: {
+                _id: "kitchen-printer-2",
+                ip: "192.168.178.220",
+                port: 9100
+            }
+        }]);
+
+        await expect(PrinterService.routeOrderToPrinters(
+            "order-sumup-recovery",
+            "pos-1",
+            { idempotencyScope: "SUMUP_CALLBACK" }
+        )).resolves.toEqual([]);
+        expect(printComandaSpy).toHaveBeenCalledTimes(3);
+    });
+
+    test("does not emit SumUp fulfillment tickets after the order is cancelled", async () => {
+        mockOrder(buildOrder("order-refunded", { status: "CANCELLED" }));
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        await expect(PrinterService.routeOrderToPrinters(
+            "order-refunded",
+            "pos-1",
+            { idempotencyScope: "SUMUP_CALLBACK" }
+        )).resolves.toEqual([]);
+
+        expect(printComandaSpy).not.toHaveBeenCalled();
+        expect(eventFindByIdMock).not.toHaveBeenCalled();
+    });
+
+    test("does not start a SumUp print job after event lease ownership is lost", async () => {
+        mockOrder(buildOrder("order-lease-lost"));
+        mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
+        mockPosDevice({
+            printerId: {
+                _id: "cashier-printer-1",
+                ip: "192.168.178.203",
+                port: 9100
+            }
+        });
+        mockProducts([{
+            _id: { toString: () => "prod-1" },
+            categoryId: { toString: () => "cat-1" },
+            basePrice: 7
+        }]);
+        mockCategories([{ _id: { toString: () => "cat-1" } }]);
+        const printComandaSpy = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+
+        const result = await PrinterService.routeOrderToPrinters(
+            "order-lease-lost",
+            "pos-1",
+            {
+                idempotencyScope: "SUMUP_CALLBACK",
+                ensureEventOperationOwned: vi.fn().mockResolvedValue(false)
+            }
+        );
+
+        expect(result).toEqual(["RETRY_REQUIRED", "RETRY_REQUIRED"]);
+        expect(printComandaSpy).not.toHaveBeenCalled();
+        expect(completeSumUpPrintIntentsIfSentMock).not.toHaveBeenCalled();
     });
 
     test("skips all comanda copies when the category is marked as non printable", async () => {

@@ -84,7 +84,7 @@ Il branch si crea partendo dal branch di sviluppo principale corrente.
 
 ## Regole Generali
 
-- **SumUp temporaneamente deprecato**: non configurare o abilitare il pagamento automatico SumUp nei rilasci finché il relativo flusso di recupero non è stato validato; il deploy senza supporto SumUp è quello atteso.
+- **SumUp e sessioni TEST**: il pagamento automatico SumUp è disponibile solo nelle sessioni normali. Le sessioni `TEST` non devono avviare transazioni SumUp reali e una sessione con checkout pendenti o pagamenti SumUp certificati non può essere riclassificata come `TEST`. Il pagamento elettronico manuale resta disponibile in `TEST`: è responsabilità del cassiere non usare realmente il terminale.
 - Utilizzare l'**italiano** come lingua principale per documentazione e testi rivolti all'utente.
 - Mantenere il codice pulito e ben documentato.
 - **Commit atomici**: Realizzare sempre commit piccoli e atomici. **I messaggi di commit devono essere scritti in lingua inglese.** *IMPORTANTE: Esegui i commit in locale, ma non effettuare MAI il push dei branch verso il remote a meno che non ti venga esplicitamente richiesto — il push avviene nella Fase 4. I tag di rilascio fanno eccezione: devono essere annotati e pubblicati su `origin` come previsto dalla Fase 4.*

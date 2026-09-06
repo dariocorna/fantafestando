@@ -90,9 +90,9 @@ export async function selectEventContext(page: Page, eventName: string) {
         : "/admin";
 
     await page.goto(targetPath, { waitUntil: "domcontentloaded" });
-    const selector = page.getByTestId("admin-event-selector");
-    if (await selector.isVisible({ timeout: 5000 }).catch(() => false)) {
-        await expect(selector).toContainText(eventName, { timeout: 15000 });
+    const brandLockup = page.getByTestId("admin-brand-lockup");
+    if (await brandLockup.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await expect(brandLockup).toContainText(eventName, { timeout: 15000 });
     }
 }
 

@@ -40,12 +40,15 @@ describe('resolveSurfaceRedirect', () => {
         expect(resolveSurfaceRedirect('menu', '/api/internal/remote-access')).toBe('/menu');
         expect(resolveSurfaceRedirect('menu', '/api/pizza-console/tickets')).toBe('/menu');
         expect(resolveSurfaceRedirect('menu', '/api/auth/callback/credentials')).toBe('/menu');
+        expect(resolveSurfaceRedirect('menu', '/api/sumup/webhook/extra')).toBe('/menu');
+        expect(resolveSurfaceRedirect('menu', '/menuevil')).toBe('/menu');
     });
 
     test('menu surface keeps serving what the public portal needs', () => {
         expect(resolveSurfaceRedirect('menu', '/api/public/pizza-monitor')).toBeNull();
         expect(resolveSurfaceRedirect('menu', '/api/health')).toBeNull();
         expect(resolveSurfaceRedirect('menu', '/api/pos/init')).toBeNull();
+        expect(resolveSurfaceRedirect('menu', '/api/sumup/webhook')).toBeNull();
         expect(resolveSurfaceRedirect('menu', '/uploads/menu-headers/logo.png')).toBeNull();
         expect(resolveSurfaceRedirect('menu', '/sw-menu.js')).toBeNull();
         expect(resolveSurfaceRedirect('menu', '/manifest-menu.webmanifest')).toBeNull();
