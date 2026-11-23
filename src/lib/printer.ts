@@ -175,6 +175,7 @@ type PrintDispatchAttemptResult =
     | {
         success: false;
         errorMessage: string;
+        recoverable?: boolean;
         automaticRetryCount: number;
     };
 
@@ -1243,8 +1244,31 @@ export class PrinterService {
         document: PrintDocumentV2;
         isVirtual: boolean;
         copies: number;
+        recoveryOrder?: { eventId: string; orderId: string };
     }): Promise<PrintDispatchAttemptResult> {
-        let result = await this.dispatchPrintDocument(params);
+        const dispatchAttempt = async (): Promise<PrintDispatchAttemptResult> => {
+            if (params.recoveryOrder) {
+                const { eventId, orderId } = params.recoveryOrder;
+                try {
+                    const paidOrder = mongoose.isObjectIdOrHexString(orderId)
+                        && await Order.exists({ _id: orderId, eventId, status: "PAID" });
+                    if (!paidOrder) {
+                        return {
+                            success: false, recoverable: false, automaticRetryCount: 0,
+                            errorMessage: "Comanda annullata: ordine assente o non pagato"
+                        };
+                    }
+                } catch (error) {
+                    console.error("Unable to verify order before kitchen print:", error);
+                    return {
+                        success: false, recoverable: true, automaticRetryCount: 0,
+                        errorMessage: "Verifica ordine temporaneamente non disponibile"
+                    };
+                }
+            }
+            return this.dispatchPrintDocument(params);
+        };
+        let result = await dispatchAttempt();
         let automaticRetryCount = 0;
 
         for (
@@ -1261,7 +1285,7 @@ export class PrinterService {
             );
             await wait(delayMs);
             automaticRetryCount += 1;
-            result = await this.dispatchPrintDocument(params);
+            result = await dispatchAttempt();
         }
 
         return {
@@ -1600,6 +1624,7 @@ export class PrinterService {
         })
             .populate("printerId", "ip port isVirtual emulatorSlot type")
             .lean() as ({
+                orderId?: { toString(): string } | null;
                 printerId?: {
                     ip?: string;
                     port?: number;
@@ -1641,7 +1666,8 @@ export class PrinterService {
                     isVirtual: typeof job.printerId?.isVirtual === "boolean"
                         ? job.printerId.isVirtual
                         : Boolean(job.isVirtual),
-                    copies: job.copies || 1
+                    copies: job.copies || 1,
+                    recoveryOrder: { eventId, orderId: job.orderId?.toString() || asString(job.document?.orderId) }
                 })
             );
 
@@ -1653,7 +1679,7 @@ export class PrinterService {
                 }
                 : {
                     success: false,
-                    recoverable: true,
+                    recoverable: dispatchResult.recoverable ?? true,
                     error: dispatchResult.errorMessage || "Invio stampa fallito",
                     automaticRetryCount: dispatchResult.automaticRetryCount
                 };
@@ -2431,7 +2457,10 @@ export class PrinterService {
                 ? job.document as Record<string, unknown>
                 : {};
 
-            if (job.source === "ORDER" && job.printType === "KITCHEN_ORDER" && job.queueRecoverable) {
+            const recoveryOrder = job.source === "ORDER" && job.printType === "KITCHEN_ORDER" && job.queueRecoverable
+                ? { eventId, orderId: job.orderId?.toString() || asString(document.orderId) }
+                : undefined;
+            if (recoveryOrder) {
                 kitchenLeasePrinterId = job.printerId?._id;
                 if (!kitchenLeasePrinterId) {
                     await PrintJobModel.updateOne(
@@ -2596,6 +2625,7 @@ export class PrinterService {
                 destinationPort: destination.port,
                 destinationLabel: destination.label,
                 printType: job.printType,
+                recoveryOrder,
                 document: normalizeLegacyPrintDocument(document),
                 isVirtual: typeof job.printerId?.isVirtual === "boolean" ? job.printerId.isVirtual : Boolean(job.isVirtual),
                 copies: job.copies || 1

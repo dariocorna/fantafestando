@@ -187,4 +187,38 @@ test.describe("Print Queue Recovery", () => {
             await deleteEvent(page, eventName);
         }
     });
+
+    test("skips a cancelled kitchen order and sends the next paid order", async ({ page }) => {
+        const eventName = `Print Queue Storno ${uniqueSuffix()}`;
+        try {
+            const { eventId } = await createActiveEventDirect(eventName);
+            const printer = await Printer.create({
+                eventId, name: "Cucina", type: "KITCHEN", ip: "127.0.0.1", port: 19101,
+                isVirtual: true, emulatorSlot: 2,
+            });
+            const [cancelled, paid] = await Order.create([
+                { eventId, pickupNumber: 1, status: "CANCELLED", totalAmount: 5 },
+                { eventId, pickupNumber: 2, status: "PAID", totalAmount: 5 },
+            ]);
+            const heldSince = new Date();
+            const jobs = await PrintJob.insertMany([cancelled, paid].map((order) => ({
+                eventId, orderId: order._id, printerId: printer._id,
+                source: "ORDER", printType: "KITCHEN_ORDER", queueRecoverable: true,
+                status: "HELD", heldSince, destinationHost: "127.0.0.1", destinationPort: 19101,
+                isVirtual: true, document: { title: "Comanda reparto", items: [{ name: "Panino", quantity: 1 }] },
+            })));
+
+            await page.request.get("/api/health");
+            await expect.poll(async () => {
+                const settled = await PrintJob.find({ eventId }).sort({ _id: 1 }).lean();
+                return settled.map((job) => [String(job.orderId), job.status]);
+            }).toEqual([[String(cancelled._id), "FAILED"], [String(paid._id), "SENT"]]);
+            const skipped = await PrintJob.findById(jobs[0]._id).orFail();
+            expect(skipped.errorMessage).toContain("ordine assente o non pagato");
+            expect(skipped.heldSince).toBeUndefined();
+            expect(skipped.rawCapturePath).toBeUndefined();
+        } finally {
+            await deleteEvent(page, eventName);
+        }
+    });
 });
