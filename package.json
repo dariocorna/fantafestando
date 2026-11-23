@@ -1,6 +1,6 @@
 {
   "name": "fantafestando",
-  "version": "0.26.1",
+  "version": "0.26.2",
   "private": true,
   "license": "AGPL-3.0-only",
   "scripts": {
@@ -45,15 +45,15 @@
     "exceljs": "^4.4.0",
     "framer-motion": "^12.34.3",
     "lucide-react": "^0.575.0",
-    "mongoose": "^9.2.1",
-    "next": "16.2.12",
+    "mongoose": "^9.11.4",
+    "next": "16.4.6",
     "next-auth": "^5.0.0-beta.30",
     "node-thermal-printer": "^4.6.0",
     "qrcode.react": "^4.2.0",
     "radix-ui": "^1.4.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "sharp": "^0.35.3",
+    "sharp": "^0.35.5",
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
@@ -76,8 +76,8 @@
     "vitest": "^4.0.18"
   },
   "overrides": {
-    "next": {
-      "postcss": "8.5.10"
+    "exceljs": {
+      "uuid": "11.1.1"
     }
   }
 }
