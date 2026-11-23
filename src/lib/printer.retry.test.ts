@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { Binary } from "bson";
+import * as easterEggImage from "./easter-egg-image";
 import mongoose from "mongoose";
 import { getThermalContentWidth } from "@/lib/easter-egg-config";
 
@@ -13,7 +14,8 @@ const {
     orderExistsMock,
     buildPrintQueueLeaseMock,
     claimKitchenPrinterQueueLeaseMock,
-    releaseKitchenPrinterQueueLeaseMock
+    releaseKitchenPrinterQueueLeaseMock,
+    orderUpdateOneMock
 } = vi.hoisted(() => ({
     dbConnectMock: vi.fn(),
     printJobFindOneAndUpdateMock: vi.fn(),
@@ -24,7 +26,8 @@ const {
     orderExistsMock: vi.fn(),
     buildPrintQueueLeaseMock: vi.fn(),
     claimKitchenPrinterQueueLeaseMock: vi.fn(),
-    releaseKitchenPrinterQueueLeaseMock: vi.fn()
+    releaseKitchenPrinterQueueLeaseMock: vi.fn(),
+    orderUpdateOneMock: vi.fn()
 }));
 
 vi.mock("@/lib/mongoose", () => ({
@@ -50,7 +53,8 @@ vi.mock("@/lib/print-queue", () => ({
 vi.mock("@/models/Order", () => ({
     default: {
         findOne: orderFindOneMock,
-        exists: orderExistsMock
+        exists: orderExistsMock,
+        updateOne: orderUpdateOneMock
     }
 }));
 vi.mock("@/models/Product", () => ({ default: {} }));
@@ -502,7 +506,9 @@ describe("PrinterService.retryPrintJobById", () => {
         });
     });
 
-    test("retries easter egg jobs using the raster stored on the order before falling back to legacy image URLs", async () => {
+    test.each([
+        "sent", "dispatch failed", "cleanup failed", "job update failed", "already finalized", "already sent"
+    ])("reconciles an order photo retry: %s", async (scenario) => {
         const rasterWidth = getThermalContentWidth();
         mockFindOneJob({
             _id: { toString: () => "job-raster" },
@@ -526,6 +532,7 @@ describe("PrinterService.retryPrintJobById", () => {
             select: vi.fn().mockReturnValue({
                 lean: vi.fn().mockResolvedValue({
                     easterEggAttachment: {
+                        printedAt: scenario === "already finalized" ? new Date() : undefined,
                         rasterWidth,
                         rasterHeight: 20,
                         rasterData: new Binary(Buffer.alloc((rasterWidth / 8) * 20, 0xaa))
@@ -534,19 +541,54 @@ describe("PrinterService.retryPrintJobById", () => {
             })
         });
 
+        if (scenario === "already sent") printJobExistsMock.mockResolvedValueOnce({ _id: "sent-raster" });
+        if (scenario === "cleanup failed") orderUpdateOneMock.mockRejectedValueOnce(new Error("Order update unavailable"));
+        if (scenario === "job update failed") printJobUpdateOneMock.mockRejectedValueOnce(new Error("Job update unavailable"));
         const printRasterSpy = vi.spyOn(
             PrinterService as unknown as { dispatchRasterImageWithAutomaticRetry: (params: unknown) => Promise<unknown> },
             "dispatchRasterImageWithAutomaticRetry"
-        ).mockResolvedValue({ success: true, automaticRetryCount: 0 });
+        ).mockResolvedValue({ success: scenario !== "dispatch failed", automaticRetryCount: 0 });
         const result = await PrinterService.retryPrintJobById("evt-1", "job-raster");
+        expect(result.success).toBe(scenario !== "dispatch failed");
+        if (scenario === "already finalized" || scenario === "already sent") {
+            expect(printRasterSpy).not.toHaveBeenCalled();
+        } else {
+            expect(printRasterSpy).toHaveBeenCalledWith(expect.objectContaining({
+                raster: expect.objectContaining({ width: rasterWidth, height: 20 }), copies: 1
+            }));
+        }
+        if (scenario === "dispatch failed" || scenario === "already finalized") {
+            expect(orderUpdateOneMock).not.toHaveBeenCalled();
+        } else {
+            expect(orderUpdateOneMock).toHaveBeenCalledWith(
+                { _id: "order-1", "easterEggAttachment.printedAt": { $exists: false } },
+                {
+                    $set: { "easterEggAttachment.printedAt": expect.any(Date) },
+                    $unset: { "easterEggAttachment.rasterData": 1, "easterEggAttachment.uploadTokenHash": 1 }
+                }
+            );
+        }
+        expect(printJobUpdateOneMock).toHaveBeenCalledTimes(1);
+        expect(printJobUpdateOneMock).toHaveBeenCalledWith(
+            { _id: "job-raster" },
+            expect.objectContaining({ $set: expect.objectContaining({ status: scenario === "dispatch failed" ? "FAILED" : "SENT" }) })
+        );
+    });
 
-        expect(result).toEqual({ success: true });
-        expect(printRasterSpy).toHaveBeenCalledWith(expect.objectContaining({
-            raster: expect.objectContaining({
-                width: rasterWidth,
-                height: 20
-            }),
-            copies: 1
-        }));
+    test("retries a photo stored only in a legacy job document", async () => {
+        mockFindOneJob({
+            _id: "job-legacy", eventId: "evt-1", source: "MANUAL_TEST", printType: "EASTER_EGG_IMAGE",
+            destinationHost: "printer-emulator", destinationPort: 19100, document: { imageUrl: "/uploads/old.png" }
+        });
+        const raster = { width: 8, height: 1, data: Buffer.from([0xff]) };
+        const prepare = vi.spyOn(easterEggImage, "preparePrintableEasterEggRasterFromUrl").mockResolvedValueOnce(raster);
+        const send = vi.spyOn(
+            PrinterService as unknown as { dispatchRasterImageWithAutomaticRetry: (params: unknown) => Promise<unknown> },
+            "dispatchRasterImageWithAutomaticRetry"
+        ).mockResolvedValueOnce({ success: true, automaticRetryCount: 0 });
+        expect(await PrinterService.retryPrintJobById("evt-1", "job-legacy")).toEqual({ success: true });
+        expect(prepare).toHaveBeenCalledWith("/uploads/old.png", undefined, undefined);
+        expect(send).toHaveBeenCalledWith(expect.objectContaining({ raster }));
+        expect(orderUpdateOneMock).not.toHaveBeenCalled();
     });
 });

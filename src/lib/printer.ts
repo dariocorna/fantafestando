@@ -1795,6 +1795,25 @@ export class PrinterService {
         return true;
     }
 
+    private static hasSentOrderPhoto(eventId: string | undefined, orderId: string) {
+        return PrintJobModel.exists({ eventId, orderId, source: "ORDER", printType: "EASTER_EGG_IMAGE", status: "SENT" });
+    }
+
+    private static async finalizeOrderPhoto(orderId: string) {
+        try {
+            await Order.updateOne(
+                { _id: orderId, "easterEggAttachment.printedAt": { $exists: false } },
+                {
+                    $set: { "easterEggAttachment.printedAt": new Date() },
+                    $unset: { "easterEggAttachment.rasterData": 1, "easterEggAttachment.uploadTokenHash": 1 }
+                }
+            );
+        } catch (error) {
+            // The SENT job also records delivery if the order update needs to be retried.
+            console.error(`Unable to finalize printed order photo ${orderId}:`, error);
+        }
+    }
+
     static async routeOrderToPrinters(orderId: string, posDeviceId?: string) {
         await dbConnect();
         const order = await Order.findById(orderId).lean() as ({
@@ -2226,6 +2245,9 @@ export class PrinterService {
         }).label === rasterDestinationKey);
 
         const rasterPrinted = await this.enqueueJobForDestination(rasterDestinationKey, async () => {
+            if (await this.hasSentOrderPhoto(eventId, orderId)) {
+                return true;
+            }
             if (cashierHasPriorJobs) {
                 await wait(PRINTER_RASTER_AFTER_ORDER_DELAY_MS);
             }
@@ -2256,21 +2278,7 @@ export class PrinterService {
 
         results.push(rasterPrinted);
 
-        if (rasterPrinted) {
-            await Order.updateOne(
-                { _id: order._id },
-                {
-                    $set: {
-                        "easterEggAttachment.printedAt": new Date()
-                    },
-                    $unset: {
-                        "easterEggAttachment.rasterData": 1,
-                        "easterEggAttachment.uploadTokenHash": 1
-                    }
-                }
-            );
-        }
-
+        if (rasterPrinted) await this.finalizeOrderPhoto(orderId);
         return results;
     }
 
@@ -2553,13 +2561,22 @@ export class PrinterService {
                                 rasterWidth?: number;
                                 rasterHeight?: number;
                                 rasterData?: Buffer;
+                                printedAt?: Date;
                             };
                         } | null)
                     : null;
 
-                const orderAttachmentRasterWidth = Number(orderAttachment?.easterEggAttachment?.rasterWidth || 0);
-                const orderAttachmentRasterHeight = Number(orderAttachment?.easterEggAttachment?.rasterHeight || 0);
-                const attachmentRasterBuffer = this.normalizeBinaryPayload(orderAttachment?.easterEggAttachment?.rasterData);
+                const attachment = orderAttachment?.easterEggAttachment;
+                if (job.source === "ORDER" && job.orderId && attachment
+                    && (attachment.printedAt || await this.hasSentOrderPhoto(eventId, job.orderId.toString()))) {
+                    await this.updatePrintJobLog(job._id.toString(), { status: "SENT", clearRetryClaim: true });
+                    if (!attachment.printedAt) await this.finalizeOrderPhoto(job.orderId.toString());
+                    return { success: true } as const;
+                }
+
+                const orderAttachmentRasterWidth = Number(attachment?.rasterWidth || 0);
+                const orderAttachmentRasterHeight = Number(attachment?.rasterHeight || 0);
+                const attachmentRasterBuffer = this.normalizeBinaryPayload(attachment?.rasterData);
                 const attachmentRaster = attachmentRasterBuffer
                     && orderAttachmentRasterWidth > 0
                     && orderAttachmentRasterHeight > 0
@@ -2605,6 +2622,9 @@ export class PrinterService {
                 await this.updatePrintJobLog(job._id.toString(), dispatchResult.success
                     ? { status: "SENT", rawCapturePath: dispatchResult.rawCapturePath, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true }
                     : { status: "FAILED", errorMessage: dispatchResult.errorMessage, automaticRetryCount: dispatchResult.automaticRetryCount, clearRetryClaim: true });
+                if (dispatchResult.success && attachmentRaster && job.orderId) {
+                    await this.finalizeOrderPhoto(job.orderId.toString());
+                }
                 return dispatchResult.success
                     ? { success: true } as const
                     : { success: false, error: "Invio stampa fallito" } as const;
