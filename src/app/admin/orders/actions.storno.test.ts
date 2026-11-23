@@ -38,7 +38,10 @@ vi.mock("@/lib/sumup", () => ({
     refundSumUpTransaction: refundSumUpTransactionMock,
     resolveSumUpTransactionIdByCheckout: resolveTransactionMock
 }))
-vi.mock("@/lib/cash-session-stock", () => ({ transitionClaimedOrderStock: transitionClaimedOrderStockMock }))
+vi.mock("@/lib/cash-session-stock", async (importOriginal) => ({
+    ...await importOriginal<typeof import("@/lib/cash-session-stock")>(),
+    transitionClaimedOrderStock: transitionClaimedOrderStockMock
+}))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
 import { stornoPaidOrderById } from "./actions"
@@ -49,6 +52,39 @@ describe("stornoPaidOrderById stock claim", () => {
         ensureAdminSessionMock.mockResolvedValue({ ok: true })
         getAdminContextEventIdMock.mockResolvedValue("event-1")
         orderUpdateOneMock.mockResolvedValue({ matchedCount: 1 })
+    })
+
+    const legacyCart = [
+        { productId: "menu", quantity: 2, includedComponents: [
+            { productId: { toString: () => "burger" }, quantity: 1 },
+            { productId: "fries", quantity: 3 }
+        ] },
+        { productId: "water", quantity: 1 }
+    ]
+    const actualAdjustment = { entityType: "PRODUCT", entityId: "fries", quantity: 2 }
+
+    test.each([
+        { name: "legacy cart", stored: undefined, expected: [
+            { entityType: "PRODUCT", entityId: "burger", quantity: 2 },
+            { entityType: "PRODUCT", entityId: "fries", quantity: 6 },
+            { entityType: "PRODUCT", entityId: "water", quantity: 1 },
+            { entityType: "INGREDIENT", entityId: "flour", quantity: 5 }
+        ] },
+        { name: "recorded stock adjustments", stored: [actualAdjustment], expected: [actualAdjustment] },
+        { name: "recorded empty snapshot", stored: [], expected: [] }
+    ])("restores stock from the $name", async ({ stored, expected }) => {
+        const lockedOrder = {
+            _id: "order-1", status: "PAID", paymentMethod: "CASH", cart: legacyCart,
+            ingredientPlan: [{ ingredientId: "flour", quantity: 5 }],
+            stockAdjustments: stored
+        }
+        orderFindOneAndUpdateMock.mockReturnValue({ lean: async () => lockedOrder })
+        transitionClaimedOrderStockMock.mockResolvedValue({ success: true })
+
+        expect(await stornoPaidOrderById("order-1")).toMatchObject({ success: true })
+        expect(transitionClaimedOrderStockMock).toHaveBeenCalledWith(expect.objectContaining({
+            orderId: "order-1", target: "REVERTED", adjustments: expected
+        }))
     })
 
     test("does not refund or restore stock when a session transition already claimed the order", async () => {

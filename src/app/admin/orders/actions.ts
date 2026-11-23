@@ -14,53 +14,21 @@ import { PrinterService } from "@/lib/printer";
 import { recoverStaleManualPrintRetryClaims } from "@/lib/print-queue";
 import { decryptSecret } from "@/lib/secrets";
 import { refundSumUpTransaction, resolveSumUpTransactionIdByCheckout } from "@/lib/sumup";
-import { type StockAdjustment } from "@/lib/stock-operations";
-import { transitionClaimedOrderStock } from "@/lib/cash-session-stock";
+import { adjustmentsForOrder, transitionClaimedOrderStock, type OrderStockProjection } from "@/lib/cash-session-stock";
 import { revalidatePath } from "next/cache";
 
-interface OrderForStornoProjection {
-    _id: string | { toString(): string }
+interface OrderForStornoProjection extends OrderStockProjection {
     status: "PENDING" | "PAID" | "CANCELLED"
     paymentMethod?: "CASH" | "CARD" | "OTHER"
     totalAmount?: number
     sumupCheckoutId?: string
     sumupPaymentId?: string
     posDeviceId?: string | { toString(): string }
-    cart: Array<{
-        productId: string | { toString(): string }
-        quantity?: number
-    }>
-    ingredientPlan?: Array<{
-        ingredientId?: string | { toString(): string }
-        quantity?: number
-    }>
-    stockAdjustments?: StockAdjustment[]
-    stockEffectStatus?: "APPLIED" | "REVERTED"
     stornoMeta?: {
         status?: "IN_PROGRESS" | "COMPLETED" | "FAILED"
         refundStatus?: "SKIPPED" | "DONE" | "FAILED"
         refundTransactionId?: string
     }
-}
-
-function buildStockAdjustmentsFromOrder(order: OrderForStornoProjection): StockAdjustment[] {
-    const productAdjustments = order.cart
-        .map((item) => ({
-            entityType: "PRODUCT" as const,
-            entityId: item.productId?.toString(),
-            quantity: Math.max(0, Math.floor(Number(item.quantity ?? 0)))
-        }))
-        .filter((entry) => Boolean(entry.entityId) && entry.quantity > 0) as StockAdjustment[]
-
-    const ingredientAdjustments = (order.ingredientPlan || [])
-        .map((entry) => ({
-            entityType: "INGREDIENT" as const,
-            entityId: entry.ingredientId?.toString(),
-            quantity: Math.max(0, Math.floor(Number(entry.quantity ?? 0)))
-        }))
-        .filter((entry) => Boolean(entry.entityId) && entry.quantity > 0) as StockAdjustment[]
-
-    return [...productAdjustments, ...ingredientAdjustments]
 }
 
 async function resolveSumUpApiKeyForOrder(eventId: string, posDeviceId?: string): Promise<
@@ -447,7 +415,7 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
 
         const stockAdjustments = lockedOrder.stockEffectStatus === "REVERTED"
             ? []
-            : (Array.isArray(lockedOrder.stockAdjustments) ? lockedOrder.stockAdjustments : buildStockAdjustmentsFromOrder(lockedOrder))
+            : adjustmentsForOrder(lockedOrder).adjustments
         try {
             const stockResult = await transitionClaimedOrderStock({
                 eventId,
