@@ -4,8 +4,9 @@ import { isApiPath, normalizeAppSurface, resolveSurfaceRedirect } from './lib/ru
 import { normalizeHostname } from './lib/request-host';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-// Machine-to-machine callers authenticated by their own secret, not by cookies.
-const CSRF_EXEMPT_PREFIXES = ['/api/sumup/webhook', '/api/internal/'];
+// Machine-to-machine callers verify their own request context instead of using cookies.
+const CSRF_EXEMPT_PREFIXES = ['/api/internal/'];
+const CSRF_EXEMPT_EXACT_PATHS = new Set(['/api/sumup/webhook']);
 
 function shouldSkipPath(pathname: string): boolean {
     return pathname.startsWith('/_next/')
@@ -59,6 +60,7 @@ export const proxy = auth((request) => {
 
     if (isApiPath(pathname)
         && MUTATING_METHODS.has(request.method)
+        && !CSRF_EXEMPT_EXACT_PATHS.has(pathname)
         && !CSRF_EXEMPT_PREFIXES.some((prefix) => pathname.startsWith(prefix))
         && isCrossSiteApiRequest(request, requestHostname)) {
         return NextResponse.json({ error: 'Richiesta cross-site non consentita' }, { status: 403 });

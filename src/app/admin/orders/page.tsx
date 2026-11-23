@@ -29,8 +29,13 @@ interface OrderProjection {
     totalAmount: number
     discountApplied?: number
     paymentMethod?: "CASH" | "CARD" | "OTHER"
+    sumupCheckoutId?: string
+    sumupPaymentId?: string
+    sumupInitiatedAt?: Date | string
+    sumupLateSuccessDetectedAt?: Date | string
     stornoMeta?: {
         reason?: string
+        refundStatus?: "SKIPPED" | "DONE" | "FAILED"
     }
 }
 
@@ -67,8 +72,23 @@ export default async function AdminOrders({
     const excludedSessionIds = (await CashSession.find({ eventId, isTest: true }).select("_id").lean() as Array<{ _id: unknown }>).map((session) => session._id)
     const orderFilter = {
         eventId: contextEvent._id,
-        status: { $in: ["PAID", "CANCELLED"] },
-        cashSessionId: { $nin: excludedSessionIds }
+        $or: [
+            {
+                status: { $in: ["PAID", "CANCELLED"] },
+                cashSessionId: { $nin: excludedSessionIds }
+            },
+            {
+                status: "PENDING",
+                sumupCheckoutId: { $type: "string", $ne: "" },
+                sumupPaymentId: { $in: [null, ""] },
+                cashSessionId: { $nin: excludedSessionIds }
+            },
+            {
+                status: "CANCELLED",
+                sumupLateSuccessDetectedAt: { $exists: true, $ne: null },
+                "stornoMeta.refundStatus": { $ne: "DONE" }
+            }
+        ]
     }
     const [totalOrders, revenueSummary] = await Promise.all([
         Order.countDocuments(orderFilter),
@@ -89,7 +109,7 @@ export default async function AdminOrders({
         .sort({ createdAt: -1, _id: -1 })
         .skip((currentPage - 1) * ORDERS_PER_PAGE)
         .limit(ORDERS_PER_PAGE)
-        .select("_id status createdAt customer cart totalAmount discountApplied paymentMethod stornoMeta.reason")
+        .select("_id status createdAt customer cart totalAmount discountApplied paymentMethod stornoMeta.reason stornoMeta.refundStatus sumupCheckoutId sumupPaymentId sumupInitiatedAt sumupLateSuccessDetectedAt")
         .lean() as OrderProjection[]
     const totalRevenue = revenueSummary[0]?.totalRevenue ?? 0
     const firstOrder = totalOrders === 0 ? 0 : (currentPage - 1) * ORDERS_PER_PAGE + 1
@@ -136,7 +156,7 @@ export default async function AdminOrders({
                             </TableRow>
                         ) : (
                             orders.map((order) => (
-                                <TableRow key={String(order._id)}>
+                                <TableRow key={String(order._id)} data-testid={`order-row-${String(order._id)}`}>
                                     <TableCell className="font-medium whitespace-nowrap">
                                         <OrderDateTime value={order.createdAt ? new Date(order.createdAt).toISOString() : null} />
                                     </TableCell>
@@ -144,6 +164,14 @@ export default async function AdminOrders({
                                         {order.status === "PAID" ? (
                                             <span className="inline-flex rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700">
                                                 Pagato
+                                            </span>
+                                        ) : order.status === "PENDING" ? (
+                                            <span className="inline-flex rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800">
+                                                SumUp da verificare
+                                            </span>
+                                        ) : order.sumupLateSuccessDetectedAt && order.stornoMeta?.refundStatus !== "DONE" ? (
+                                            <span className="inline-flex rounded-full bg-orange-100 px-2 py-1 text-xs font-bold text-orange-800">
+                                                SumUp tardivo da rimborsare
                                             </span>
                                         ) : (
                                             <span className="inline-flex rounded-full bg-rose-100 px-2 py-1 text-xs font-bold text-rose-700">
@@ -174,7 +202,9 @@ export default async function AdminOrders({
                                         <OrderRowActions
                                             orderId={String(order._id)}
                                             canReprint={order.status === "PAID"}
-                                            canStorno={order.status === "PAID"}
+                                            canStorno={order.status === "PAID" || Boolean(order.sumupLateSuccessDetectedAt && order.stornoMeta?.refundStatus !== "DONE")}
+                                            isLateSumUpRefund={Boolean(order.sumupLateSuccessDetectedAt && order.stornoMeta?.refundStatus !== "DONE")}
+                                            canRecoverSumUp={order.status === "PENDING" && Boolean(order.sumupCheckoutId?.trim()) && !order.sumupPaymentId?.trim()}
                                         />
                                     </TableCell>
                                 </TableRow>

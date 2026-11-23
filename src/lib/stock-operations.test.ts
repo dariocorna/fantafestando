@@ -128,7 +128,7 @@ vi.mock("@/models/Ingredient", () => ({
     }
 }))
 
-import { aggregateStockAdjustments, applyStockForPaidOrder, rollbackStockAdjustments, syncSoldOutFlags, validateStockForPendingOrder } from "@/lib/stock-operations"
+import { aggregateStockAdjustments, applyStockForPaidOrder, planStockAdjustmentsForPayment, rollbackStockAdjustments, syncSoldOutFlags, validateStockForPendingOrder } from "@/lib/stock-operations"
 
 describe("stock operations", () => {
     beforeEach(() => {
@@ -293,6 +293,159 @@ describe("stock operations", () => {
             availableQuantity: 1
         }])
         expect(ingredientStore.get("ing-1")?.stockQuantity).toBe(1)
+    })
+
+    test("plans exact strict adjustments without mutating tracked stock", async () => {
+        productStore.set("prod-1", {
+            _id: "prod-1",
+            eventId: "evt-1",
+            name: "Panino",
+            stockQuantity: 5
+        })
+        productStore.set("unlimited", {
+            _id: "unlimited",
+            eventId: "evt-1",
+            name: "Acqua",
+            stockQuantity: null
+        })
+        ingredientStore.set("ing-1", {
+            _id: "ing-1",
+            eventId: "evt-1",
+            name: "Pane",
+            stockQuantity: 4
+        })
+
+        const result = await planStockAdjustmentsForPayment(
+            "evt-1",
+            [
+                { productId: "prod-1", snapshotName: "Panino", quantity: 2 },
+                { productId: "unlimited", snapshotName: "Acqua", quantity: 3 }
+            ],
+            "strict",
+            [{ ingredientId: "ing-1", quantity: 1 }]
+        )
+
+        expect(result).toEqual({
+            success: true,
+            adjustments: [
+                { entityType: "PRODUCT", entityId: "prod-1", quantity: 2 },
+                { entityType: "INGREDIENT", entityId: "ing-1", quantity: 1 }
+            ]
+        })
+        expect(productStore.get("prod-1")?.stockQuantity).toBe(5)
+        expect(ingredientStore.get("ing-1")?.stockQuantity).toBe(4)
+    })
+
+    test("rejects a strict adjustment plan on shortage", async () => {
+        productStore.set("prod-1", {
+            _id: "prod-1",
+            eventId: "evt-1",
+            name: "Panino",
+            stockQuantity: 1
+        })
+
+        const result = await planStockAdjustmentsForPayment(
+            "evt-1",
+            [{ productId: "prod-1", snapshotName: "Panino", quantity: 2 }],
+            "strict"
+        )
+
+        expect(result).toEqual({
+            success: false,
+            error: "Scorte non sufficienti per completare l'operazione",
+            stockShortages: [{
+                productId: "prod-1",
+                productName: "Panino",
+                requestedQuantity: 2,
+                availableQuantity: 1
+            }]
+        })
+    })
+
+    test("caps override adjustments at available stock and omits unlimited or zero stock", async () => {
+        productStore.set("prod-1", {
+            _id: "prod-1",
+            eventId: "evt-1",
+            name: "Panino",
+            stockQuantity: 2
+        })
+        productStore.set("unlimited", {
+            _id: "unlimited",
+            eventId: "evt-1",
+            name: "Acqua",
+            stockQuantity: null
+        })
+        productStore.set("empty", {
+            _id: "empty",
+            eventId: "evt-1",
+            name: "Dolce",
+            stockQuantity: 0
+        })
+        ingredientStore.set("ing-1", {
+            _id: "ing-1",
+            eventId: "evt-1",
+            name: "Pane",
+            stockQuantity: 1
+        })
+
+        const result = await planStockAdjustmentsForPayment(
+            "evt-1",
+            [
+                { productId: "prod-1", snapshotName: "Panino", quantity: 5 },
+                { productId: "unlimited", snapshotName: "Acqua", quantity: 4 },
+                { productId: "empty", snapshotName: "Dolce", quantity: 1 }
+            ],
+            "override",
+            [{ ingredientId: "ing-1", quantity: 3 }]
+        )
+
+        expect(result).toEqual({
+            success: true,
+            adjustments: [
+                { entityType: "PRODUCT", entityId: "prod-1", quantity: 2 },
+                { entityType: "INGREDIENT", entityId: "ing-1", quantity: 1 }
+            ]
+        })
+    })
+
+    test("keeps override stock accounting aligned when a positive stock item is flagged sold out", async () => {
+        productStore.set("prod-1", {
+            _id: "prod-1",
+            eventId: "evt-1",
+            name: "Panino",
+            stockQuantity: 5,
+            isSoldOut: true
+        })
+
+        const result = await planStockAdjustmentsForPayment(
+            "evt-1",
+            [{ productId: "prod-1", snapshotName: "Panino", quantity: 2 }],
+            "override"
+        )
+
+        expect(result).toEqual({
+            success: true,
+            adjustments: [{ entityType: "PRODUCT", entityId: "prod-1", quantity: 2 }]
+        })
+    })
+
+    test("preserves missing-entity failures in override plans", async () => {
+        const result = await planStockAdjustmentsForPayment(
+            "evt-1",
+            [{ productId: "missing", snapshotName: "Rimosso", quantity: 1 }],
+            "override"
+        )
+
+        expect(result).toEqual({
+            success: false,
+            error: "Alcuni articoli di magazzino non sono più disponibili",
+            stockShortages: [{
+                productId: "missing",
+                productName: "Prodotto non trovato",
+                requestedQuantity: 1,
+                availableQuantity: 0
+            }]
+        })
     })
 })
 

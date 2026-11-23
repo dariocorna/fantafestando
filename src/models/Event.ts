@@ -44,6 +44,10 @@ export interface IEvent extends Document {
         timezone?: string;
     };
     predefinedTables: string[];
+    sumupOperationClaim?: {
+        token: string;
+        expiresAt: Date;
+    };
 }
 
 const EventSchema = new Schema<IEvent>({
@@ -83,7 +87,11 @@ const EventSchema = new Schema<IEvent>({
         quickStaffDiscountValue: { type: Number, min: 0, default: 50 },
         timezone: { type: String, trim: true, default: "Europe/Rome" }
     },
-    predefinedTables: { type: [String], default: [] }
+    predefinedTables: { type: [String], default: [] },
+    sumupOperationClaim: {
+        token: { type: String, required: true },
+        expiresAt: { type: Date, required: true }
+    }
 }, {
     timestamps: true
 });

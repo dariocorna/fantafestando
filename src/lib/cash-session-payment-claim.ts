@@ -7,7 +7,7 @@ export async function hasPendingSumUpCheckouts(sessionId: string) {
     return Boolean(await Order.exists({
         cashSessionId: sessionId,
         status: "PENDING",
-        sumupCheckoutId: { $exists: true, $ne: "" }
+        sumupCheckoutId: { $exists: true, $nin: [null, ""] }
     }))
 }
 

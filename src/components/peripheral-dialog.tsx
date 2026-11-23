@@ -30,7 +30,9 @@ export function PeripheralDialog({
         name: string;
         type: string;
         config?: {
-            merchantId?: string;
+            merchantCode?: string;
+            readerId?: string;
+            affiliateAppId?: string;
             [key: string]: unknown;
         };
     },
@@ -72,7 +74,7 @@ export function PeripheralDialog({
                     </Button>
                 )}
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-h-[90vh] overflow-y-auto">
                 <form action={handleSubmit}>
                     <DialogHeader>
                         <DialogTitle>{isEdit ? "Modifica Periferica" : "Aggiungi Periferica"}</DialogTitle>
@@ -107,24 +109,56 @@ export function PeripheralDialog({
 
                         {type === "SUMUP" && (
                             <div className="space-y-4 pt-2 border-t mt-2">
-                                <p className="text-sm font-medium text-muted-foreground">Configurazione SumUp</p>
+                                <p className="text-sm font-medium text-muted-foreground">Configurazione SumUp Cloud API</p>
                                 <div className="space-y-2">
-                                    <Label htmlFor="merchantId">Merchant Id</Label>
+                                    <Label htmlFor="merchantCode">Merchant Code</Label>
                                     <Input
-                                        id="merchantId"
-                                        name="merchantId"
-                                        defaultValue={peripheral?.config?.merchantId}
-                                        placeholder="Codice Commerciante"
+                                        id="merchantCode"
+                                        name="merchantCode"
+                                        defaultValue={peripheral?.config?.merchantCode}
+                                        placeholder="Es: MK10CL2A"
                                         required={type === "SUMUP" && !isEdit}
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="affiliateKey">Affiliate Key / API Key</Label>
+                                    <Label htmlFor="readerId">Reader ID</Label>
+                                    <Input
+                                        id="readerId"
+                                        name="readerId"
+                                        defaultValue={peripheral?.config?.readerId}
+                                        placeholder="Es: rdr_..."
+                                        required={type === "SUMUP" && !isEdit}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="apiKey">API Key</Label>
+                                    <Input
+                                        id="apiKey"
+                                        name="apiKey"
+                                        type="password"
+                                        autoComplete="new-password"
+                                        placeholder={isEdit ? "Lascia vuoto per mantenere la chiave attuale" : "Chiave API SumUp"}
+                                        required={type === "SUMUP" && !isEdit}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="affiliateAppId">Affiliate App ID</Label>
+                                    <Input
+                                        id="affiliateAppId"
+                                        name="affiliateAppId"
+                                        defaultValue={peripheral?.config?.affiliateAppId}
+                                        placeholder="Es: it.fantafestando.pos"
+                                        required={type === "SUMUP" && !isEdit}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="affiliateKey">Affiliate Key</Label>
                                     <Input
                                         id="affiliateKey"
                                         name="affiliateKey"
                                         type="password"
-                                        placeholder={isEdit ? "Nuova chiave (lascia vuoto per mantenere quella attuale)" : "Chiave API SumUp"}
+                                        autoComplete="new-password"
+                                        placeholder={isEdit ? "Lascia vuoto per mantenere la chiave attuale" : "Affiliate Key SumUp"}
                                         required={type === "SUMUP" && !isEdit}
                                     />
                                 </div>

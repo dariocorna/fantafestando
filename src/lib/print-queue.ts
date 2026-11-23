@@ -3,6 +3,7 @@ import dbConnect from "@/lib/mongoose";
 import Event from "@/models/Event";
 import PrintJob from "@/models/PrintJob";
 import Printer from "@/models/Printer";
+import { completeSumUpPrintIntentsForSentJob } from "@/lib/sumup-print-routing";
 
 const PRINT_QUEUE_LEASE_MS = 5 * 60 * 1000;
 
@@ -127,6 +128,7 @@ export async function recoverStaleLiveKitchenPrintJobs(scope: {
     eventId: string;
     orderId?: string;
     printerId?: string;
+    idempotencyKey?: RegExp;
 }) {
     await dbConnect();
     const now = new Date();
@@ -135,6 +137,7 @@ export async function recoverStaleLiveKitchenPrintJobs(scope: {
             eventId: scope.eventId,
             ...(scope.orderId ? { orderId: scope.orderId } : {}),
             ...(scope.printerId ? { printerId: scope.printerId } : {}),
+            ...(scope.idempotencyKey ? { idempotencyKey: scope.idempotencyKey } : {}),
             source: "ORDER",
             printType: "KITCHEN_ORDER",
             queueRecoverable: true,
@@ -175,7 +178,7 @@ export async function recoverStaleManualPrintRetryClaims(eventId: string, orderI
             retryClaimedAt: { $lte: new Date(Date.now() - PRINT_QUEUE_LEASE_MS) }
         },
         {
-            $set: { status: "FAILED", errorMessage: "Reinvio interrotto: riprova" },
+            $set: { status: "FAILED", errorMessage: "Reinvio interrotto: verifica la stampa prima di riprovare" },
             $unset: { retryClaimedAt: 1 }
         }
     );
@@ -247,9 +250,20 @@ export async function holdFailedKitchenPrintJobs({
     return { held, busyPrinterIds };
 }
 
+async function reconcileSentSumUpPrintJob(eventId: string, jobId: string, claim: {
+    queueClaimToken?: string;
+    retryClaimedAt?: Date;
+}) {
+    await completeSumUpPrintIntentsForSentJob(eventId, jobId);
+    await PrintJob.updateOne(
+        { _id: jobId, eventId, status: "SENT", ...claim },
+        { $unset: { queueClaimToken: 1, queueClaimExpiresAt: 1, retryClaimedAt: 1 } }
+    );
+}
+
 async function drainPrinterQueue(
     printerId: unknown,
-    activeEventIds: unknown[],
+    jobScope: Record<string, unknown>,
     dispatcher: HeldPrintQueueDispatcher
 ): Promise<{ sent: number; held: number; failed: number }> {
     const lease = buildPrintQueueLease();
@@ -273,7 +287,7 @@ async function drainPrinterQueue(
             const job = await PrintJob.findOneAndUpdate(
                 {
                     printerId,
-                    eventId: { $in: activeEventIds },
+                    ...jobScope,
                     status: "HELD",
                     ...queuedKitchenJob
                 },
@@ -289,7 +303,7 @@ async function drainPrinterQueue(
                     sort: { createdAt: 1, _id: 1 },
                     returnDocument: "after"
                 }
-            ).select("_id eventId").lean() as ({ _id: unknown; eventId: unknown } | null);
+            ).select("_id eventId idempotencyKey").lean() as ({ _id: unknown; eventId: unknown; idempotencyKey?: string } | null);
             if (!job) break;
 
             let dispatchResult: DispatchResult;
@@ -311,6 +325,7 @@ async function drainPrinterQueue(
             const automaticRetryCount = dispatchResult.automaticRetryCount ?? 0;
 
             if (dispatchResult.success) {
+                const isSumUpJob = job.idempotencyKey?.startsWith("SUMUP_CALLBACK:");
                 const successUpdate: Record<string, unknown> = {
                     $set: {
                         status: "SENT",
@@ -324,13 +339,16 @@ async function drainPrinterQueue(
                         heldSince: 1,
                         retryClaimedAt: 1,
                         liveClaimExpiresAt: 1,
-                        queueClaimToken: 1,
-                        queueClaimExpiresAt: 1,
+                        // Keep the SumUp token until order metadata is reconciled, including after a restart.
+                        ...(!isSumUpJob ? { queueClaimToken: 1, queueClaimExpiresAt: 1 } : {}),
                         ...(dispatchResult.rawCapturePath ? {} : { rawCapturePath: 1 })
                     }
                 };
                 const finalized = await PrintJob.updateOne(claim, successUpdate);
                 if ((finalized.matchedCount ?? finalized.modifiedCount) !== 1) break;
+                if (isSumUpJob) {
+                    await reconcileSentSumUpPrintJob(String(job.eventId), String(job._id), { queueClaimToken: lease.token });
+                }
                 sent += 1;
                 continue;
             }
@@ -381,9 +399,34 @@ export async function drainHeldPrintQueues(dispatcher: HeldPrintQueueDispatcher)
         active: true,
         archived: { $ne: true }
     });
+    const inactiveEventIds = await Event.distinct("_id", {
+        active: { $ne: true },
+        archived: { $ne: true }
+    });
+    const jobScope = {
+        $or: [
+            { eventId: { $in: activeEventIds } },
+            { eventId: { $in: inactiveEventIds }, idempotencyKey: /^SUMUP_CALLBACK:/ }
+        ]
+    };
+    const sentJobs = await PrintJob.find({
+        ...jobScope,
+        status: "SENT",
+        source: "ORDER",
+        idempotencyKey: /^SUMUP_CALLBACK:/,
+        $and: [{ $or: [{ queueClaimToken: { $exists: true } }, { retryClaimedAt: { $exists: true } }] }]
+    }).select("_id eventId queueClaimToken retryClaimedAt").lean() as Array<{
+        _id: unknown; eventId: unknown; queueClaimToken?: string; retryClaimedAt?: Date;
+    }>;
+    for (const job of sentJobs) {
+        await reconcileSentSumUpPrintJob(String(job.eventId), String(job._id), {
+            ...(job.queueClaimToken ? { queueClaimToken: job.queueClaimToken } : {}),
+            ...(job.retryClaimedAt ? { retryClaimedAt: job.retryClaimedAt } : {})
+        });
+    }
     const recovered = await PrintJob.updateMany(
         {
-            eventId: { $in: activeEventIds },
+            ...jobScope,
             status: "QUEUED",
             ...queuedKitchenJob,
             queueClaimToken: { $exists: true },
@@ -399,19 +442,22 @@ export async function drainHeldPrintQueues(dispatcher: HeldPrintQueueDispatcher)
             }
         }
     );
-    const recoveredLive = await Promise.all(
-        activeEventIds.map((eventId) => recoverStaleLiveKitchenPrintJobs({ eventId: String(eventId) }))
-    );
+    const recoveredLive = await Promise.all([
+        ...activeEventIds.map((eventId) => recoverStaleLiveKitchenPrintJobs({ eventId: String(eventId) })),
+        ...inactiveEventIds.map((eventId) => recoverStaleLiveKitchenPrintJobs({
+            eventId: String(eventId), idempotencyKey: /^SUMUP_CALLBACK:/
+        }))
+    ]);
     const recoveredLiveCount = recoveredLive.reduce((total, result) => total + result.recovered, 0);
 
     const printerIds = await PrintJob.distinct("printerId", {
-        eventId: { $in: activeEventIds },
+        ...jobScope,
         status: "HELD",
         printerId: { $exists: true },
         ...queuedKitchenJob
     });
     const results = await Promise.all(
-        printerIds.map((printerId) => drainPrinterQueue(printerId, activeEventIds, dispatcher))
+        printerIds.map((printerId) => drainPrinterQueue(printerId, jobScope, dispatcher))
     );
 
     return results.reduce<{ recovered: number; sent: number; held: number; failed: number }>(

@@ -27,11 +27,15 @@ function isStaticAssetPath(pathname: string): boolean {
     return lastSegment.includes('.');
 }
 
+const MENU_SURFACE_ALLOWED_EXACT_PATHS = [
+    '/api/health',
+    '/api/pos/init',
+    '/api/sumup/webhook',
+]
+
 const MENU_SURFACE_ALLOWED_PREFIXES = [
     '/menu',
     '/api/public/',
-    '/api/health',
-    '/api/pos/init',
     '/uploads/',
     '/_next/',
 ];
@@ -43,6 +47,7 @@ const MENU_SURFACE_ALLOWED_PREFIXES = [
  */
 export function isAllowedOnMenuSurface(pathname: string): boolean {
     if (isStaticAssetPath(pathname)) return true;
+    if (MENU_SURFACE_ALLOWED_EXACT_PATHS.includes(pathname)) return true;
     return MENU_SURFACE_ALLOWED_PREFIXES.some(
         (prefix) => pathname === prefix || pathname.startsWith(prefix.endsWith('/') ? prefix : `${prefix}/`)
     );
