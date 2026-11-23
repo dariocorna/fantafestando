@@ -41,6 +41,7 @@ import {
     type PosPaymentCapabilities,
 } from "@/lib/payment-logic"
 import {
+    buildMenuConfigurationKey,
     collectReferencedProductIds,
     getProductUnitBasePrice,
     isProductVisibleInChannel,
@@ -414,9 +415,18 @@ async function buildPersistedIngredientPlan(
     })
 }
 
+function getPendingCartLineKey(item: PosCartItemInput): string {
+    return JSON.stringify([
+        item.productId,
+        item.selectedOptions.map((option) => option.name).sort(),
+        buildMenuConfigurationKey(item.menuSelections)
+    ])
+}
+
 async function computePricingForCart(data: {
     eventId: string
     cart: PosCartItemInput[]
+    persistedPublicCart?: PosCartItemInput[]
     declaredTotalAmount?: number
     orderDiscount?: DiscountInput
     orderDiscounts?: DiscountInput[]
@@ -488,6 +498,12 @@ async function computePricingForCart(data: {
         }
     })
 
+    const remainingWebQuantities = new Map<string, number>()
+    for (const item of data.persistedPublicCart || []) {
+        const key = getPendingCartLineKey(item)
+        remainingWebQuantities.set(key, (remainingWebQuantities.get(key) ?? 0) + item.quantity)
+    }
+
     const resolvedCart = data.cart.map((item) => {
         const product = productById.get(item.productId)
         if (!product) {
@@ -495,7 +511,12 @@ async function computePricingForCart(data: {
         }
 
         if (!isProductVisibleInChannel(product, "POS")) {
-            return { success: false as const, error: "Alcuni prodotti non sono disponibili nel POS" }
+            const key = getPendingCartLineKey(item)
+            const available = remainingWebQuantities.get(key) ?? 0
+            if (!isProductVisibleInChannel(product, "MENU") || available < item.quantity) {
+                return { success: false as const, error: "Alcuni prodotti non sono disponibili nel POS" }
+            }
+            remainingWebQuantities.set(key, available - item.quantity)
         }
 
         const productKind = normalizeProductKind(product.kind)
@@ -2224,6 +2245,8 @@ export async function completePendingOrderPayment(data: {
             pricingResult = await computePricingForCart({
                 eventId: data.eventId,
                 cart: orderCartInput,
+                // Only public checkout assigns a pickup number.
+                persistedPublicCart: order.pickupNumber ? persistedOrderCartInput : undefined,
                 declaredTotalAmount: data.totalAmount,
                 orderDiscount: data.orderDiscount,
                 orderDiscounts: data.orderDiscounts,

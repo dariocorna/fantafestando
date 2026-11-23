@@ -115,7 +115,7 @@ function pendingOrder() {
     return order
 }
 
-describe("paid POS stock invalidations", () => {
+describe("paid POS orders", () => {
     beforeEach(() => {
         vi.clearAllMocks()
         ensurePosAccessMock.mockResolvedValue({ ok: true, user: { id: "cashier-1", role: "CASHIER" } })
@@ -195,5 +195,59 @@ describe("paid POS stock invalidations", () => {
         expect(result).toMatchObject({ success: true, orderId: "order-1" })
         expect(order.save).toHaveBeenCalledOnce()
         expect(publishStockInvalidationMock).toHaveBeenCalledWith("event-1")
+    })
+
+    describe("menu-only products in pending web orders", () => {
+        const line = { productId: "product-1", snapshotName: "Panino", quantity: 1, selectedOptions: [] }
+        const payment = { eventId: "event-1", posDeviceId: "pos-1", paymentMethod: "CASH" as const }
+        const menuOnly = { ...product, salesChannels: ["MENU"] }
+
+        beforeEach(() => {
+            const order = pendingOrder()
+            order.pickupNumber = 12
+            orderFindOneMock.mockResolvedValue(order)
+            productFindMock.mockReturnValue(queryResult([menuOnly]))
+        })
+
+        test("accepts an existing web line together with a new POS-only product", async () => {
+            const extra = { ...product, _id: "product-2", name: "Bibita", salesChannels: ["POS"] }
+            productFindMock.mockReturnValue(queryResult([menuOnly, extra]))
+            const result = await completePendingOrderPayment({
+                ...payment, orderId: "order-1", totalAmount: 10,
+                cart: [line, { ...line, productId: "product-2", snapshotName: "Bibita" }]
+            })
+
+            expect(result).toMatchObject({ success: true })
+            expect(applyStockForPaidOrderMock).toHaveBeenCalledOnce()
+        })
+
+        const rejectedCarts: Array<[string, NonNullable<Parameters<typeof completePendingOrderPayment>[0]["cart"]>]> = [
+            ["larger quantity", [{ ...line, quantity: 2 }]],
+            ["duplicate line", [line, line]],
+            ["different variant", [{ ...line, selectedOptions: [{ name: "Extra", priceVariation: 0 }] }]],
+            ["different menu choice", [{ ...line, menuSelections: [{ groupId: "side", productId: "p2" }] }]],
+            ["different product", [{ ...line, productId: "product-2" }]]
+        ]
+        test.each(rejectedCarts)("rejects a %s outside the persisted cart", async (_, cart) => {
+            if (cart[0].productId === "product-2") {
+                productFindMock.mockReturnValue(queryResult([{ ...menuOnly, _id: "product-2" }]))
+            }
+            const result = await completePendingOrderPayment({
+                ...payment, orderId: "order-1", cart
+            })
+
+            expect(result).toMatchObject({ success: false, error: "Alcuni prodotti non sono disponibili nel POS" })
+            expect(applyStockForPaidOrderMock).not.toHaveBeenCalled()
+        })
+
+        test("keeps menu-only items out of direct POS sales and POS-origin pending orders", async () => {
+            const direct = await createOrder({ ...payment, customer: {}, totalAmount: 5, cart: [line] })
+            orderFindOneMock.mockResolvedValue(pendingOrder())
+            const pending = await completePendingOrderPayment({ ...payment, orderId: "order-1", cart: [line] })
+
+            expect(direct).toMatchObject({ success: false, error: "Alcuni prodotti non sono disponibili nel POS" })
+            expect(pending).toMatchObject({ success: false, error: "Alcuni prodotti non sono disponibili nel POS" })
+            expect(applyStockForPaidOrderMock).not.toHaveBeenCalled()
+        })
     })
 })
