@@ -23,6 +23,9 @@ RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
+# Next.js tracing can omit the native libvips shared library loaded by Sharp.
+COPY --from=deps /app/node_modules/@img ./node_modules/@img
+RUN node -e "require('sharp')"
 
 # Runtime writes optimized image cache and custom uploaded menu headers.
 RUN mkdir -p /app/.next/cache /app/public/uploads/menu-headers \
