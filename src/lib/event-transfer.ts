@@ -173,6 +173,7 @@ interface ExportedProduct {
   kind: "STANDARD" | "FIXED_MENU";
   availableOnlyInMenus: boolean;
   salesChannels: Array<"POS" | "MENU">;
+  splitKitchenPrintPerUnit?: boolean;
   isSoldOut: boolean;
   stockQuantity: number | null;
   availableDays: string[];
@@ -569,6 +570,7 @@ export async function buildEventTransferBundle(eventId: string): Promise<Generat
       salesChannels: Array.isArray(product.salesChannels)
         ? product.salesChannels.filter((value: unknown): value is "POS" | "MENU" => value === "POS" || value === "MENU")
         : ["POS", "MENU"],
+      splitKitchenPrintPerUnit: product.splitKitchenPrintPerUnit === true,
       isSoldOut: Boolean(product.isSoldOut),
       stockQuantity: normalizeStockQuantity((product.stockQuantity as number | null | undefined) ?? null),
       availableDays: normalizeAvailableDays((product.availableDays as string[] | undefined) || []),
@@ -800,6 +802,7 @@ export async function importEventTransferBundle(
         kind: product.kind,
         availableOnlyInMenus: Boolean(product.availableOnlyInMenus),
         salesChannels: Array.isArray(product.salesChannels) ? product.salesChannels : ["POS", "MENU"],
+        splitKitchenPrintPerUnit: product.splitKitchenPrintPerUnit === true,
         isSoldOut: productStockQuantity !== null ? productStockQuantity <= 0 : Boolean(product.isSoldOut),
         stockQuantity: productStockQuantity,
         availableDays: normalizeAvailableDays(product.availableDays || []),
