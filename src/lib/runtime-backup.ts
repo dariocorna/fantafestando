@@ -920,7 +920,6 @@ async function stageUploadsRestore(
 
   await mkdir(uploadsRootDir, { recursive: true });
   await rm(stagedDirPath, { recursive: true, force: true });
-  await rm(backupDirPath, { recursive: true, force: true });
 
   if (uploadsSourceDir && (await pathExists(uploadsSourceDir))) {
     await cp(
@@ -941,29 +940,25 @@ async function stageUploadsRestore(
 
 async function activateStagedUploads(uploads: StagedUploadsRestore) {
   const liveUploadsExist = await pathExists(uploads.liveDirPath);
-  let liveMovedToBackup = false;
+  if (liveUploadsExist) {
+    await rename(uploads.liveDirPath, uploads.backupDirPath);
+  }
 
   try {
-    if (liveUploadsExist) {
-      await rename(uploads.liveDirPath, uploads.backupDirPath);
-      liveMovedToBackup = true;
-    }
-
     await rename(uploads.stagedDirPath, uploads.liveDirPath);
   } catch (error) {
-    await rm(uploads.liveDirPath, { recursive: true, force: true });
-
-    if (liveMovedToBackup && (await pathExists(uploads.backupDirPath))) {
-      await rename(uploads.backupDirPath, uploads.liveDirPath);
+    if (liveUploadsExist) {
+      try {
+        await rename(uploads.backupDirPath, uploads.liveDirPath);
+      } catch (rollbackError) {
+        throw new Error(`Ripristino degli upload originali fallito. Copia di recupero: ${uploads.backupDirPath}`, {
+          cause: rollbackError,
+        });
+      }
     }
 
     throw error;
   }
-}
-
-async function cleanupStagedUploads(uploads: StagedUploadsRestore) {
-  await rm(uploads.stagedDirPath, { recursive: true, force: true });
-  await rm(uploads.backupDirPath, { recursive: true, force: true });
 }
 
 export async function restoreRuntimeBackupBundle(
@@ -1058,10 +1053,11 @@ export async function restoreRuntimeBackupBundle(
         }
         throw error;
       }
+      await rm(stagedUploads.backupDirPath, { recursive: true, force: true });
     } finally {
       await cleanupRestoreCollectionArtifacts(db, stagedCollections);
       if (stagedUploads) {
-        await cleanupStagedUploads(stagedUploads);
+        await rm(stagedUploads.stagedDirPath, { recursive: true, force: true });
       }
     }
 

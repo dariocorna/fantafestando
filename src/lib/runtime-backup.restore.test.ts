@@ -1,11 +1,18 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { promises as fs } from "node:fs";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const execFileAsync = promisify(execFile);
+
+const renameMock = vi.hoisted(() => vi.fn<typeof fs.rename>());
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...original, default: { ...original, rename: renameMock }, rename: renameMock };
+});
 
 type FakeCollectionState = {
   docs: Array<Record<string, unknown>>;
@@ -235,7 +242,7 @@ async function createRestoreBundle(files: Record<string, string>) {
   return archivePath;
 }
 
-function buildManifest(collections: Array<{ collectionName: string; fileName: string }>) {
+function buildManifest(collections: Array<{ collectionName: string; fileName: string }>, uploadsFileCount = 0) {
   return JSON.stringify(
     {
       format: "admin-runtime-backup-v1",
@@ -249,9 +256,9 @@ function buildManifest(collections: Array<{ collectionName: string; fileName: st
         documentCount: 1,
       })),
       uploads: {
-        included: false,
+        included: uploadsFileCount > 0,
         directoryName: "uploads",
-        fileCount: 0,
+        fileCount: uploadsFileCount,
       },
     },
     null,
@@ -260,16 +267,22 @@ function buildManifest(collections: Array<{ collectionName: string; fileName: st
 }
 
 describe("runtime backup restore safeguards", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    renameMock.mockReset().mockImplementation(fs.rename);
     resetRuntimeBackupGlobalState();
     dbConnectMock.mockResolvedValue(undefined);
     findOneAndUpdateMock.mockResolvedValue(undefined);
     fakeMongoose.connection.db = null;
+    const runtimeRoot = await mkdtemp(path.join(tmpdir(), "runtime-backup-test-app-"));
+    createdTempDirs.push(runtimeRoot);
+    await import("./runtime-backup");
+    vi.spyOn(process, "cwd").mockReturnValue(runtimeRoot);
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     resetRuntimeBackupGlobalState();
     fakeMongoose.connection.db = null;
 
@@ -367,5 +380,59 @@ describe("runtime backup restore safeguards", () => {
     expect(fakeDb.getDocs("users")).toEqual([{ _id: "live-user", username: "live-admin" }]);
     expect(fakeDb.getDocs("events")).toEqual([{ _id: "live-event", name: "Sagra live" }]);
     expect(fakeDb.getCollectionNames().some((name) => name.includes("__restore_"))).toBe(false);
+  });
+
+  async function prepareUploadsRestore() {
+    const publicDir = path.join(process.cwd(), "public");
+    const uploadsDir = path.join(publicDir, "uploads");
+    await mkdir(uploadsDir, { recursive: true });
+    await writeFile(path.join(uploadsDir, "logo.png"), "original");
+
+    const db = new FakeDb({ events: { docs: [{ _id: "live-event" }] } });
+    fakeMongoose.connection.db = db;
+    const bundle = await createRestoreBundle({
+      "manifest.json": buildManifest([{ collectionName: "events", fileName: "mongo/events.jsonl" }], 1),
+      "mongo/events.jsonl": '{"_id":"restored-event"}\n',
+      "uploads/logo.png": "replacement",
+    });
+    const { restoreRuntimeBackupBundle } = await import("./runtime-backup");
+    return { publicDir, uploadsDir, db, restore: () => restoreRuntimeBackupBundle(bundle) };
+  }
+
+  test.each(["moving originals", "activating replacements"])("keeps original uploads and collections on failure %s", async (phase) => {
+    const { publicDir, uploadsDir, db, restore } = await prepareUploadsRestore();
+    if (phase === "activating replacements") renameMock.mockImplementationOnce(fs.rename);
+    renameMock.mockRejectedValueOnce(new Error(phase));
+
+    await expect(restore()).rejects.toThrow(phase);
+
+    expect(await readdir(publicDir)).toEqual(["uploads"]);
+    expect(await readFile(path.join(uploadsDir, "logo.png"), "utf8")).toBe("original");
+    expect(db.getDocs("events")).toEqual([{ _id: "live-event" }]);
+  });
+
+  test("retains the original uploads backup when rollback fails", async () => {
+    const { publicDir, db, restore } = await prepareUploadsRestore();
+    renameMock.mockImplementationOnce(fs.rename)
+      .mockRejectedValueOnce(new Error("activation failed"))
+      .mockRejectedValueOnce(new Error("rollback failed"));
+
+    await expect(restore()).rejects.toThrow(/\.uploads-restore-backup-/);
+
+    const entries = await readdir(publicDir);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatch(/^\.uploads-restore-backup-/);
+    expect(await readFile(path.join(publicDir, entries[0], "logo.png"), "utf8")).toBe("original");
+    expect(db.getDocs("events")).toEqual([{ _id: "live-event" }]);
+  });
+
+  test("activates restored uploads and cleans staging and backup directories on success", async () => {
+    const { publicDir, uploadsDir, db, restore } = await prepareUploadsRestore();
+
+    await expect(restore()).resolves.toMatchObject({ restoredUploads: true });
+
+    expect(await readdir(publicDir)).toEqual(["uploads"]);
+    expect(await readFile(path.join(uploadsDir, "logo.png"), "utf8")).toBe("replacement");
+    expect(db.getDocs("events")).toEqual([{ _id: "restored-event" }]);
   });
 });
