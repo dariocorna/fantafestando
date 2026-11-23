@@ -4,7 +4,7 @@ import Product from "@/models/Product"
 import { aggregateStockAdjustments, buildDemandMap, syncSoldOutFlags, type StockAdjustment } from "@/lib/stock-operations"
 import { publishStockInvalidation } from "@/lib/pos-stock-realtime"
 
-type SessionOrder = {
+export type OrderStockProjection = {
     _id: { toString(): string }
     stockAdjustments?: Array<{ entityType: "PRODUCT" | "INGREDIENT"; entityId: { toString(): string } | string; quantity: number }>
     stockEffectStatus?: "APPLIED" | "REVERTED"
@@ -21,7 +21,7 @@ type TransitionResult =
     | { success: true }
     | { success: false; error: string }
 
-function adjustmentsForOrder(order: SessionOrder): { adjustments: StockAdjustment[]; approximate: boolean } {
+export function adjustmentsForOrder(order: OrderStockProjection): { adjustments: StockAdjustment[]; approximate: boolean } {
     if (Array.isArray(order.stockAdjustments)) {
         return {
             adjustments: order.stockAdjustments.map((entry) => ({ ...entry, entityId: entry.entityId.toString() })),
@@ -53,7 +53,7 @@ export async function transitionCashSessionStock(params: {
     const source = params.target === "APPLIED" ? "REVERTED" : "APPLIED"
     const orders = await Order.find({ cashSessionId: params.sessionId, status: "PAID", stockEffectStatus: { $ne: params.target } })
         .select("_id cart ingredientPlan stockAdjustments stockEffectStatus")
-        .lean() as SessionOrder[]
+        .lean() as OrderStockProjection[]
     const plans = orders.map((order) => ({ order, ...adjustmentsForOrder(order) }))
     if (params.target === "APPLIED") {
         const shortages: Array<{ entityType: string; entityId: string; entityName: string; required: number; available: number }> = []
