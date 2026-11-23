@@ -38,7 +38,7 @@ import { categoryColorWithAlpha, getCategoryTheme } from "@/lib/category-colors"
 import { isTableValueValid, normalizeTableValue } from "@/lib/table-presets"
 import { getStockLabel, getStockStatus, type StockShortage } from "@/lib/inventory"
 import { resolveQuickDiscountPresetsFromSettings, type QuickDiscountPreset } from "@/lib/quick-discount-presets"
-import { normalizePosCatalogLayout } from "@/lib/pos-catalog-layout"
+import { buildCompactCatalogColumns, normalizePosCatalogLayout } from "@/lib/pos-catalog-layout"
 import { FixedMenuConfigDialog, type FixedMenuChoiceGroupDto, type FixedMenuComponentDto } from "@/components/fixed-menu-config-dialog"
 import { buildMenuConfigurationKey, type MenuSelectionInput } from "@/lib/fixed-menu"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -799,38 +799,13 @@ export default function PosPage() {
     const selectedModernCategoryId = activeCategory && categories.some((category) => category._id === activeCategory)
         ? activeCategory
         : (categories[0]?._id ?? null)
-    const productsByCategory = categories.reduce<Record<string, IProduct[]>>((acc, category) => {
+    const productsByCategory = useMemo(() => categories.reduce<Record<string, IProduct[]>>((acc, category) => {
         acc[category._id] = products.filter((product) => product.categoryId === category._id)
         return acc
-    }, {})
-    const compactCategoryGroups = useMemo(() => {
-        const maxProductsPerCombinedColumn = 8
-        const shortCategoryProductLimit = 3
-        const groups: ICategory[][] = []
-
-        for (let index = 0; index < categories.length; index += 1) {
-            const category = categories[index]
-            const categoryProductsCount = products.filter((product) => product.categoryId === category._id).length
-            const nextCategory = categories[index + 1]
-            const nextCategoryProductsCount = nextCategory
-                ? products.filter((product) => product.categoryId === nextCategory._id).length
-                : 0
-
-            if (
-                nextCategory
-                && categoryProductsCount <= shortCategoryProductLimit
-                && categoryProductsCount + nextCategoryProductsCount <= maxProductsPerCombinedColumn
-            ) {
-                groups.push([category, nextCategory])
-                index += 1
-            } else {
-                groups.push([category])
-            }
-        }
-
-        return groups
-    }, [categories, products])
-    const categoryColumnsCount = Math.max(compactCategoryGroups.length, 1)
+    }, {}), [categories, products])
+    const compactColumns = useMemo(() => buildCompactCatalogColumns(categories, productsByCategory, !isStockMode),
+        [categories, productsByCategory, isStockMode])
+    const hasSplitCategory = compactColumns.some(({ split }) => split)
     const selectedModernCategory = selectedModernCategoryId
         ? categories.find((category) => category._id === selectedModernCategoryId) || null
         : null
@@ -846,10 +821,10 @@ export default function PosPage() {
     const contextProduct = contextItem ? products.find((product) => product._id === contextItem.productId) || null : null
     const contextRecipeIngredientIds = new Set((contextProduct?.recipeItems || []).map((entry) => entry.ingredientId))
     const contextExtraIngredients = ingredients.filter((ingredient) => !contextRecipeIngredientIds.has(ingredient._id))
-    const getAdaptiveProductRowMinHeight = (productsCount: number): string => {
+    const getAdaptiveProductRowMinHeight = (productsCount: number, hasSplitCategory: boolean): string => {
         const safeCount = Math.max(productsCount, 1)
         const gapPx = 6 // space-y-1.5
-        const reservedVerticalPx = 120
+        const reservedVerticalPx = hasSplitCategory ? 200 : 120
 
         // Viewport-based adaptive sizing per column:
         // - grows on tall screens
@@ -2599,17 +2574,20 @@ export default function PosPage() {
                             ) : (
                                 <div
                                     className="grid content-start gap-1"
-                                    style={{ gridTemplateColumns: isStockMode ? "minmax(0, 1fr)" : `repeat(${categoryColumnsCount}, minmax(0, 1fr))` }}
+                                    style={{ gridTemplateColumns: isStockMode
+                                        ? "minmax(0, 1fr)"
+                                        : hasSplitCategory
+                                            ? "repeat(auto-fit, minmax(140px, 1fr))"
+                                            : `repeat(${Math.max(compactColumns.length, 1)}, minmax(0, 1fr))` }}
                                 >
-                                    {compactCategoryGroups.map((categoryGroup) => {
-                                        const groupProductCount = categoryGroup.reduce((count, category) => count + (productsByCategory[category._id] || []).length, 0)
-                                        const categoryRowMinHeight = getAdaptiveProductRowMinHeight(groupProductCount)
+                                    {compactColumns.map(({ key, sections }) => {
+                                        const groupProductCount = sections.reduce((count, section) => count + section.products.length, 0)
+                                        const categoryRowMinHeight = getAdaptiveProductRowMinHeight(groupProductCount, hasSplitCategory)
 
                                         return (
-                                            <div key={categoryGroup.map((category) => category._id).join("-")} className="min-w-0 space-y-1">
-                                                {categoryGroup.map((cat) => {
+                                            <div key={key} className="min-w-0 space-y-1">
+                                                {sections.map(({ category: cat, products: categoryProducts }) => {
                                                     const catTheme = getCategoryTheme(cat.uiColor)
-                                                    const categoryProducts = productsByCategory[cat._id] || []
 
                                                     return (
                                                         <article
