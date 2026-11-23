@@ -1,5 +1,7 @@
 "use server";
 
+import { Types } from "mongoose";
+import { normalizeProductKind, normalizeSalesChannels } from "@/lib/fixed-menu";
 import dbConnect from "@/lib/mongoose";
 import { normalizeAvailableDays } from "@/lib/product-availability";
 import { normalizeStockQuantity } from "@/lib/inventory";
@@ -18,7 +20,7 @@ import Peripheral from "@/models/Peripheral";
 import PosDevice from "@/models/PosDevice";
 import Printer from "@/models/Printer";
 import PrintJob from "@/models/PrintJob";
-import Product from "@/models/Product";
+import Product, { type IProduct } from "@/models/Product";
 import { revalidatePath } from "next/cache";
 import { requireAdminAuthorization } from "../action-context";
 
@@ -73,35 +75,63 @@ export async function cloneEventAction(formData: FormData) {
     const quickDiscountPresets = resolveQuickDiscountPresetsFromSettings(sourceEvent.settings);
     const legacyQuickDiscount = toLegacyQuickDiscountSettings(quickDiscountPresets);
 
-    const newEvent = await Event.create({
-        name: newName,
-        active: false,
-        archived: false,
-        settings: {
-            askName: sourceEvent.settings?.askName ?? false,
-            askTable: sourceEvent.settings?.askTable ?? false,
-            suppressCashierOrderSummary: sourceEvent.settings?.suppressCashierOrderSummary === true,
-            printOrderByProduct: sourceEvent.settings?.printOrderByProduct === true,
-            menuHeaderLogoUrl: sourceEvent.settings?.menuHeaderLogoUrl,
-            receiptHeaderLogoUrl: sourceEvent.settings?.receiptHeaderLogoUrl,
-            portalEasterEggEnabled: sourceEvent.settings?.portalEasterEggEnabled ?? false,
-            defaultCashierPrinterIp: sourceEvent.settings?.defaultCashierPrinterIp,
-            timezone: sourceEvent.settings?.timezone || "Europe/Rome",
-            quickDiscountPresets,
-            quickStaffDiscountEnabled: legacyQuickDiscount.quickStaffDiscountEnabled,
-            quickStaffDiscountLabel: legacyQuickDiscount.quickStaffDiscountLabel,
-            quickStaffDiscountType: legacyQuickDiscount.quickStaffDiscountType,
-            quickStaffDiscountValue: legacyQuickDiscount.quickStaffDiscountValue
-        },
-        predefinedTables: clonedPredefinedTables
-    });
+    const newEventId = new Types.ObjectId();
+    try {
+        await cloneEventConfiguration(sourceEventId, newEventId);
+        await Event.create({
+            _id: newEventId,
+            name: newName,
+            active: false,
+            archived: false,
+            settings: {
+                askName: sourceEvent.settings?.askName ?? false,
+                askTable: sourceEvent.settings?.askTable ?? false,
+                suppressCashierOrderSummary: sourceEvent.settings?.suppressCashierOrderSummary === true,
+                printOrderByProduct: sourceEvent.settings?.printOrderByProduct === true,
+                menuHeaderLogoUrl: sourceEvent.settings?.menuHeaderLogoUrl,
+                receiptHeaderLogoUrl: sourceEvent.settings?.receiptHeaderLogoUrl,
+                portalEasterEggEnabled: sourceEvent.settings?.portalEasterEggEnabled ?? false,
+                defaultCashierPrinterIp: sourceEvent.settings?.defaultCashierPrinterIp,
+                timezone: sourceEvent.settings?.timezone || "Europe/Rome",
+                quickDiscountPresets,
+                quickStaffDiscountEnabled: legacyQuickDiscount.quickStaffDiscountEnabled,
+                quickStaffDiscountLabel: legacyQuickDiscount.quickStaffDiscountLabel,
+                quickStaffDiscountType: legacyQuickDiscount.quickStaffDiscountType,
+                quickStaffDiscountValue: legacyQuickDiscount.quickStaffDiscountValue
+            },
+            predefinedTables: clonedPredefinedTables
+        });
+    } catch (error) {
+        const message = error instanceof CloneReferenceError ? error.message : "Impossibile clonare la festa.";
+        console.error("Errore durante la clonazione della festa", error);
+        try {
+            await deleteEventData(String(newEventId));
+        } catch (cleanupError) {
+            console.error("Errore durante la pulizia della festa clonata", newEventId, cleanupError);
+            return { error: `${message} Pulizia incompleta: contatta l’amministratore.` };
+        }
+        return { error: message };
+    }
 
+    revalidatePath("/admin/settings/events");
+    return { success: true };
+}
+
+class CloneReferenceError extends Error {}
+
+function requireClonedId(ids: Map<string, Types.ObjectId>, sourceId: unknown, productName: string, reference: string) {
+    const clonedId = ids.get(String(sourceId));
+    if (!clonedId) throw new CloneReferenceError(`Impossibile clonare «${productName}»: ${reference} mancante nel catalogo della festa.`);
+    return clonedId;
+}
+
+async function cloneEventConfiguration(sourceEventId: string, newEventId: Types.ObjectId) {
     const printers = await Printer.find({ eventId: sourceEventId }).lean();
     const printerMap = new Map();
 
     for (const printer of printers) {
         const newPrinter = await Printer.create({
-            eventId: newEvent._id,
+            eventId: newEventId,
             name: printer.name,
             ip: printer.ip,
             port: typeof printer.port === "number" ? printer.port : 9100,
@@ -116,7 +146,7 @@ export async function cloneEventAction(formData: FormData) {
     const peripheralMap = new Map();
     for (const peripheral of peripherals) {
         const newPeripheral = await Peripheral.create({
-            eventId: newEvent._id,
+            eventId: newEventId,
             name: peripheral.name,
             type: peripheral.type,
             config: peripheral.config || {}
@@ -127,7 +157,7 @@ export async function cloneEventAction(formData: FormData) {
     const posDevices = await PosDevice.find({ eventId: sourceEventId }).lean();
     for (const posDevice of posDevices) {
         await PosDevice.create({
-            eventId: newEvent._id,
+            eventId: newEventId,
             name: posDevice.name,
             printerId: posDevice.printerId ? printerMap.get(String(posDevice.printerId)) : null,
             paymentTerminalId: posDevice.paymentTerminalId ? peripheralMap.get(String(posDevice.paymentTerminalId)) : null,
@@ -136,19 +166,39 @@ export async function cloneEventAction(formData: FormData) {
     }
 
     const categories = await Category.find({ eventId: sourceEventId }).lean();
-    const categoryMap = new Map();
+    const categoryMap = new Map<string, Types.ObjectId>();
 
     for (const cat of categories) {
         const newCat = await Category.create({
-            eventId: newEvent._id,
+            eventId: newEventId,
             name: cat.name,
             uiColor: cat.uiColor,
+            printOrder: cat.printOrder ?? 0,
+            skipKitchenPrint: cat.skipKitchenPrint === true,
+            printKitchenCopyAtCashier: cat.printKitchenCopyAtCashier === true,
+            pizzaFlowEnabled: cat.pizzaFlowEnabled === true,
+            pizzaBarcodeEnabled: cat.pizzaBarcodeEnabled === true,
             printerId: cat.printerId ? printerMap.get(String(cat.printerId)) : null
         });
         categoryMap.set(String(cat._id), newCat._id);
     }
 
-    const products = await Product.find({ eventId: sourceEventId }).lean();
+    const ingredientMap = new Map<string, Types.ObjectId>();
+    const ingredients = await Ingredient.find({ eventId: sourceEventId }).lean();
+    for (const ingredient of ingredients) {
+        const copy = await Ingredient.create({
+            eventId: newEventId,
+            name: ingredient.name,
+            shortName: ingredient.shortName,
+            stockQuantity: normalizeStockQuantity(ingredient.stockQuantity),
+            active: ingredient.active !== false
+        });
+        ingredientMap.set(String(ingredient._id), copy._id);
+    }
+
+    const products = await Product.find({ eventId: sourceEventId }).lean<IProduct[]>();
+    const productMap = new Map(products.map((prod) => [String(prod._id), new Types.ObjectId()]));
+
     for (const prod of products) {
         const productStockQuantity = normalizeStockQuantity(prod.stockQuantity ?? null);
         const clonedVariants = (prod.variants || []).map((variant: { optionName: string; priceVariation: number; stockQuantity?: number | null }) => {
@@ -161,21 +211,42 @@ export async function cloneEventAction(formData: FormData) {
         });
 
         await Product.create({
-            eventId: newEvent._id,
-            categoryId: categoryMap.get(String(prod.categoryId)),
+            eventId: newEventId,
+            _id: productMap.get(String(prod._id)),
+            categoryId: requireClonedId(categoryMap, prod.categoryId, prod.name, "categoria"),
             name: prod.name,
             shortName: typeof prod.shortName === "string" ? prod.shortName : undefined,
             description: typeof prod.description === "string" ? prod.description : undefined,
             basePrice: prod.basePrice,
+            volunteerPrice: prod.volunteerPrice ?? null,
+            kind: normalizeProductKind(prod.kind),
+            salesChannels: normalizeSalesChannels(prod.salesChannels),
+            availableOnlyInMenus: prod.availableOnlyInMenus === true,
+            splitKitchenPrintPerUnit: prod.splitKitchenPrintPerUnit === true,
+            recipeItems: (prod.recipeItems ?? []).map((entry) => ({
+                ingredientId: requireClonedId(ingredientMap, entry?.ingredientId, prod.name, "ingrediente"),
+                quantity: entry.quantity
+            })),
+            menuComponents: (prod.menuComponents ?? []).map((component) => ({
+                productId: requireClonedId(productMap, component?.productId, prod.name, "componente"),
+                quantity: component.quantity
+            })),
+            menuChoiceGroups: (prod.menuChoiceGroups ?? []).map((group) => ({
+                id: group.id,
+                name: group.name,
+                minSelections: group.minSelections,
+                maxSelections: group.maxSelections,
+                options: (group.options ?? []).map((option) => ({
+                    productId: requireClonedId(productMap, option?.productId, prod.name, "opzione"),
+                    quantity: option.quantity
+                }))
+            })),
             isSoldOut: productStockQuantity !== null ? productStockQuantity <= 0 : false,
             stockQuantity: productStockQuantity,
             availableDays: normalizeAvailableDays(prod.availableDays || []),
             variants: clonedVariants
         });
     }
-
-    revalidatePath("/admin/settings/events");
-    return { success: true };
 }
 
 export async function archiveEventAction(formData: FormData) {
@@ -201,6 +272,12 @@ export async function deleteEventAction(formData: FormData) {
     if (!eventId) return;
 
     await dbConnect();
+    await deleteEventData(eventId);
+
+    revalidatePath("/admin/settings/events");
+}
+
+async function deleteEventData(eventId: string) {
     await PrintJob.deleteMany({ eventId });
     await CashSession.deleteMany({ eventId });
     await Order.deleteMany({ eventId });
@@ -212,6 +289,4 @@ export async function deleteEventAction(formData: FormData) {
     await Ingredient.deleteMany({ eventId });
     await Category.deleteMany({ eventId });
     await Event.findByIdAndDelete(eventId);
-
-    revalidatePath("/admin/settings/events");
 }
