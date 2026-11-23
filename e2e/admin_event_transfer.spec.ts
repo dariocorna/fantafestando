@@ -171,6 +171,7 @@ async function seedEventTransferFixture(sourceEventName: string, token: string):
     name: `Panino ${token}`,
     shortName: "PAN",
     description: "Panino principale",
+    splitKitchenPrintPerUnit: true,
     basePrice: 6.5,
     kind: "STANDARD",
     availableOnlyInMenus: false,
@@ -457,12 +458,14 @@ test.describe("Admin event export/import", () => {
     expect(String(importedCategory!.printerId)).toBe(String(importedKitchenPrinter!._id));
 
     expect(importedPanino).toMatchObject({
+      splitKitchenPrintPerUnit: true,
       shortName: "PAN",
       basePrice: 6.5,
       kind: "STANDARD",
       stockQuantity: 20,
     });
     expect(importedPatatine).toMatchObject({
+      splitKitchenPrintPerUnit: false,
       shortName: "PAT",
       basePrice: 3,
       stockQuantity: 50,
