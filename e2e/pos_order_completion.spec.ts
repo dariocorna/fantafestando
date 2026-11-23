@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test"
 import Order from "../src/models/Order"
-import { ensureDbConnection } from "./utils/db"
+import { cleanupEventArtifactsByName, ensureDbConnection } from "./utils/db"
 import {
     createAndActivateEvent,
     configureCashPos,
@@ -15,7 +15,7 @@ function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function createCatalogProduct(page: import("@playwright/test").Page, categoryName: string, productName: string, price: string) {
+async function createMenuOnlyProduct(page: import("@playwright/test").Page, categoryName: string, productName: string, price: string) {
     await page.goto("/admin/catalog")
     await page.click("#new-category-btn")
     await page.fill("#cat-name", categoryName)
@@ -25,6 +25,7 @@ async function createCatalogProduct(page: import("@playwright/test").Page, categ
     await page.click("#new-product-btn")
     await page.fill("#prod-name", productName)
     await page.fill('input[name="basePrice"]', price)
+    await page.getByRole("checkbox", { name: "Visibile nel POS" }).uncheck()
     await page.locator('select[name="categoryId"]').selectOption({ label: categoryName })
     await page.getByRole("button", { name: "Salva Prodotto", exact: true }).click()
     await expect(page.getByText(productName)).toBeVisible()
@@ -38,26 +39,10 @@ async function createWebOrderAndGetCode(
     await page.goto("/menu", { waitUntil: "domcontentloaded" })
     await expect(page.getByTestId("menu-brand-shell")).toBeVisible({ timeout: 20000 })
 
-    const setupResult = await page.evaluate(async (targetProductName: string) => {
-        const response = await fetch("/api/pos/init")
-        const data = await response.json()
-        const product = (data.products || []).find((p: { name: string }) => p.name === targetProductName)
-
-        if (!data.event?._id || !product?._id) return { success: false }
-
-        localStorage.setItem("osg_eventId", data.event._id)
-        localStorage.setItem("osg_cart", JSON.stringify([{
-            _id: product._id,
-            name: product.name,
-            basePrice: product.basePrice,
-            quantity: 1,
-        }]))
-        return { success: true }
-    }, productName)
-
-    expect(setupResult.success).toBeTruthy()
-
-    await page.reload()
+    const card = page.locator(".rounded-3xl").filter({
+        has: page.getByRole("heading", { name: productName, level: 3, exact: true })
+    }).first()
+    await card.getByRole("button").click()
     await page.getByRole("button", { name: /Vedi Carrello/i }).click()
     await expect(page.getByRole("button", { name: /INVIA ORDINE/i })).toBeVisible()
     if (options?.tableCode) {
@@ -82,12 +67,15 @@ async function createWebOrderAndGetCode(
 }
 
 test.describe("POS - Completamento ordine da codice", () => {
-    test("chiude un ordine WebApp da POS usando il codice", async ({ page, isMobile }) => {
+    let eventName = ""
+    test.afterEach(async () => { await cleanupEventArtifactsByName(eventName) })
+
+    test("incassa da codice un ordine web con un prodotto visibile solo nel menu", async ({ page, isMobile }) => {
         test.skip(isMobile, "Flusso completo validato su desktop.")
         test.setTimeout(90000)
 
         const suffix = uniqueSuffix()
-        const eventName = `POS Code Event ${suffix}`
+        eventName = `POS Code Event ${suffix}`
         const printerName = `Cashier ${suffix}`
         const cashBoxName = `CashBox ${suffix}`
         const posName = `POS ${suffix}`
@@ -102,12 +90,13 @@ test.describe("POS - Completamento ordine da codice", () => {
             predefinedTables: [tableCode, overrideTableCode, "A01"],
         })
         await configureCashPos(page, printerName, localPrinterIp(), cashBoxName, posName)
-        await createCatalogProduct(page, categoryName, productName, "8.00")
+        await createMenuOnlyProduct(page, categoryName, productName, "8.00")
 
         const orderCode = await createWebOrderAndGetCode(page, productName, { tableCode, usePresetTable: true })
 
         await openPosAndSelectDevice(page, posName)
         await openCashSessionIfRequired(page)
+        await expect(page.getByRole("button", { name: new RegExp(productName) })).toHaveCount(0)
 
         await page.getByRole("button", { name: "Codice", exact: true }).click()
         const loadDialog = page.getByRole("dialog").filter({ hasText: /Carica ordine da codice/i })
