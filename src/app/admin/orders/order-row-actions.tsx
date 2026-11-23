@@ -40,6 +40,8 @@ export function OrderRowActions(props: {
 
             if (result.alreadyCancelled) {
                 window.alert("Ordine già stornato in precedenza")
+            } else if (result.manualCardPayment) {
+                window.alert("Ordine stornato. Gestisci manualmente sul terminale fisico l’eventuale rimborso al cliente.")
             }
         })
     }

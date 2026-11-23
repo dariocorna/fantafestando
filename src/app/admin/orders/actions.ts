@@ -350,10 +350,12 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
         }
         lockedOrder = stockClaimedOrder
 
-        let refundStatus: "SKIPPED" | "DONE" | "FAILED" = lockedOrder.paymentMethod === "CARD" ? "FAILED" : "SKIPPED"
         let refundTransactionId = lockedOrder.stornoMeta?.refundTransactionId?.trim()
+        const requiresSumUpRefund = lockedOrder.paymentMethod === "CARD"
+            && Boolean(lockedOrder.sumupPaymentId?.trim() || lockedOrder.sumupCheckoutId?.trim() || refundTransactionId)
+        let refundStatus: "SKIPPED" | "DONE" | "FAILED" = requiresSumUpRefund ? "FAILED" : "SKIPPED"
 
-        if (lockedOrder.paymentMethod === "CARD") {
+        if (requiresSumUpRefund) {
             const refundAlreadyDone = lockedOrder.stornoMeta?.refundStatus === "DONE" && Boolean(refundTransactionId)
 
             if (!refundAlreadyDone) {
@@ -462,7 +464,7 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                 {
                     $set: {
                         "stornoMeta.status": "FAILED",
-                        "stornoMeta.refundRequired": lockedOrder.paymentMethod === "CARD",
+                        "stornoMeta.refundRequired": requiresSumUpRefund,
                         "stornoMeta.refundStatus": refundStatus,
                         "stornoMeta.refundTransactionId": refundTransactionId,
                         "stornoMeta.refundError": "Ripristino scorte non riuscito"
@@ -481,7 +483,7 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
                     "stornoMeta.status": "COMPLETED",
                     "stornoMeta.reason": normalizedReason || undefined,
                     "stornoMeta.completedAt": new Date(),
-                    "stornoMeta.refundRequired": lockedOrder.paymentMethod === "CARD",
+                    "stornoMeta.refundRequired": requiresSumUpRefund,
                     "stornoMeta.refundStatus": refundStatus,
                     "stornoMeta.refundTransactionId": refundTransactionId,
                     stockEffectStatus: "REVERTED"
@@ -495,7 +497,7 @@ export async function stornoPaidOrderById(orderId: string, reason?: string) {
 
         revalidatePath("/admin/orders")
         revalidatePath("/admin")
-        return { success: true }
+        return { success: true, manualCardPayment: lockedOrder.paymentMethod === "CARD" && !requiresSumUpRefund }
     } catch (error) {
         try {
             await Order.updateOne(
