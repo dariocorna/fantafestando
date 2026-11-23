@@ -5,6 +5,7 @@ import {
     completeCashOrder,
     createVirtualPrinterDirect,
     openCashSessionIfRequired,
+    openPosAndSelectDevice,
     seedActiveEventWithCatalog,
     setAdminEventContextCookie,
     uniqueSuffix,
@@ -93,10 +94,7 @@ test.describe("Layout catalogo POS da impostazioni admin", () => {
             await expect(grouping).toHaveValue("true");
 
             await page.setViewportSize({ width: 1024, height: 768 });
-            await page.goto("/pos");
-            await page.getByRole("dialog", { name: /In quale cassa sei/i })
-                .getByRole("button", { name: new RegExp(posName) }).click();
-            await expect(page.getByRole("dialog", { name: /In quale cassa sei/i })).toBeHidden();
+            await openPosAndSelectDevice(page, posName);
             await openCashSessionIfRequired(page, "0");
             const catalog = page.getByTestId("pos-all-categories-catalog");
             const desserts = catalog.locator("article").filter({ has: page.getByRole("heading", { name: "Dolci", exact: true }) });

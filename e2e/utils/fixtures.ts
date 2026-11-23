@@ -446,14 +446,11 @@ export async function openPosAndSelectDevice(page: Page, posName: string) {
     await page.reload();
     await initResponse;
 
-    const selectorTitle = page.getByText(/In quale cassa sei\?/i);
-    if (await selectorTitle.isVisible()) {
-        const selectorDialog = page.getByRole("dialog", { name: /In quale cassa sei\?/i });
-        const posButton = selectorDialog.getByRole("button", { name: new RegExp(posName) }).first();
-        await expect(posButton).toBeVisible({ timeout: 10000 });
-        await posButton.click();
-        await expect(selectorTitle).toBeHidden();
-    }
+    const selectorDialog = page.getByRole("dialog", { name: /In quale cassa sei\?/i });
+    const posButton = selectorDialog.getByRole("button", { name: new RegExp(posName) }).first();
+    await expect(posButton).toBeVisible({ timeout: 10000 });
+    await posButton.click();
+    await expect(selectorDialog).toBeHidden();
 }
 
 export async function openCashSession(page: Page, openingFloatAmount: string) {
