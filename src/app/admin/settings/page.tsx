@@ -21,6 +21,8 @@ export default async function AdminSettings() {
           askTable: contextEvent.settings?.askTable ?? false,
           portalEasterEggEnabled: contextEvent.settings?.portalEasterEggEnabled ?? false,
           posCatalogLayout: normalizePosCatalogLayout(contextEvent.settings?.posCatalogLayout),
+          suppressCashierOrderSummary: contextEvent.settings?.suppressCashierOrderSummary === true,
+          printOrderByProduct: contextEvent.settings?.printOrderByProduct === true,
           menuHeaderLogoUrl: contextEvent.settings?.menuHeaderLogoUrl || "",
           receiptHeaderLogoUrl: contextEvent.settings?.receiptHeaderLogoUrl || "",
           quickDiscountPresets: resolveQuickDiscountPresetsFromSettings(contextEvent.settings),

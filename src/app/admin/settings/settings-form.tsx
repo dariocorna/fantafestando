@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, useTransition, type FormEvent } from "react";
 import { CardContent, CardFooter } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,8 @@ interface ActiveEventSettingsFormProps {
             askTable?: boolean;
             portalEasterEggEnabled?: boolean;
             posCatalogLayout?: "COMPACT_COLUMNS" | "MODERN_TABS";
+            suppressCashierOrderSummary?: boolean;
+            printOrderByProduct?: boolean;
             menuHeaderLogoUrl?: string;
             receiptHeaderLogoUrl?: string;
             quickDiscountPresets?: Array<{
@@ -65,7 +67,10 @@ function resolveInitialQuickDiscountPresets(event: SettingsFormEvent) {
     }));
 }
 
+const subscribeToHydration = () => () => undefined;
+
 function ActiveEventSettingsFormInner({ event }: ActiveEventSettingsFormProps) {
+    const hydrated = useSyncExternalStore(subscribeToHydration, () => true, () => false);
     const [isPending, startTransition] = useTransition();
     const [saved, setSaved] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -465,6 +470,34 @@ function ActiveEventSettingsFormInner({ event }: ActiveEventSettingsFormProps) {
                     </div>
 
                     <div className="space-y-2 rounded-md border p-4 shadow-sm">
+                        <Label htmlFor="suppressCashierOrderSummary" className="text-sm font-medium">
+                            Riepilogo ordine in cassa
+                        </Label>
+                        <select
+                            id="suppressCashierOrderSummary"
+                            name="suppressCashierOrderSummary"
+                            defaultValue={String(event.settings?.suppressCashierOrderSummary === true)}
+                            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                            <option value="false">Stampa riepilogo</option>
+                            <option value="true">Salta riepilogo</option>
+                        </select>
+                        <Label htmlFor="printOrderByProduct" className="text-sm font-medium">
+                            Raggruppamento comande
+                        </Label>
+                        <select
+                            id="printOrderByProduct"
+                            name="printOrderByProduct"
+                            defaultValue={String(event.settings?.printOrderByProduct === true)}
+                            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                            <option value="false">Come da catalogo</option>
+                            <option value="true">Una comanda per prodotto, con quantità totale</option>
+                        </select>
+                        <p className="text-xs text-muted-foreground">Per i piatti numerati valgono le regole del catalogo.</p>
+                    </div>
+
+                    <div className="space-y-2 rounded-md border p-4 shadow-sm">
                         <Label htmlFor="timezone" className="text-sm font-medium">
                             Fuso orario evento
                         </Label>
@@ -825,7 +858,7 @@ function ActiveEventSettingsFormInner({ event }: ActiveEventSettingsFormProps) {
                     {saved && <span className="text-green-600 flex items-center gap-1 font-medium animate-in fade-in slide-in-from-left-2"><CheckCircle2 className="h-4 w-4" /> Modifiche salvate!</span>}
                     {error && <span className="text-red-600 flex items-center gap-1 font-medium">{error}</span>}
                 </div>
-                <Button type="submit" disabled={isPending} className="px-8 shadow-md">
+                <Button type="submit" disabled={isPending || !hydrated} className="px-8 shadow-md">
                     {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Salva Impostazioni
                 </Button>

@@ -14,6 +14,8 @@ export interface IEvent extends Document {
         askName: boolean;
         askTable: boolean;
         posCatalogLayout?: "COMPACT_COLUMNS" | "MODERN_TABS";
+        suppressCashierOrderSummary?: boolean;
+        printOrderByProduct?: boolean;
         menuHeaderLogoUrl?: string;
         receiptHeaderLogoUrl?: string;
         portalEasterEggEnabled?: boolean;
@@ -52,6 +54,8 @@ const EventSchema = new Schema<IEvent>({
         askName: { type: Boolean, default: false },
         askTable: { type: Boolean, default: false },
         posCatalogLayout: { type: String, enum: ["COMPACT_COLUMNS", "MODERN_TABS"], default: "COMPACT_COLUMNS" },
+        suppressCashierOrderSummary: { type: Boolean, default: false },
+        printOrderByProduct: { type: Boolean, default: false },
         menuHeaderLogoUrl: { type: String, trim: true },
         receiptHeaderLogoUrl: { type: String, trim: true },
         portalEasterEggEnabled: { type: Boolean, default: false },

@@ -80,6 +80,8 @@ export async function cloneEventAction(formData: FormData) {
         settings: {
             askName: sourceEvent.settings?.askName ?? false,
             askTable: sourceEvent.settings?.askTable ?? false,
+            suppressCashierOrderSummary: sourceEvent.settings?.suppressCashierOrderSummary === true,
+            printOrderByProduct: sourceEvent.settings?.printOrderByProduct === true,
             menuHeaderLogoUrl: sourceEvent.settings?.menuHeaderLogoUrl,
             receiptHeaderLogoUrl: sourceEvent.settings?.receiptHeaderLogoUrl,
             portalEasterEggEnabled: sourceEvent.settings?.portalEasterEggEnabled ?? false,

@@ -1799,11 +1799,22 @@ export class PrinterService {
         const eventId = order.eventId?.toString();
 
         const event = eventId
-            ? await Event.findById(eventId).select("name settings.menuHeaderLogoUrl settings.receiptHeaderLogoUrl").lean() as ({ name?: string; settings?: { menuHeaderLogoUrl?: string; receiptHeaderLogoUrl?: string } } | null)
+            ? await Event.findById(eventId)
+                .select("name settings.menuHeaderLogoUrl settings.receiptHeaderLogoUrl settings.suppressCashierOrderSummary settings.printOrderByProduct")
+                .lean() as ({
+                    name?: string;
+                    settings?: {
+                        menuHeaderLogoUrl?: string;
+                        receiptHeaderLogoUrl?: string;
+                        suppressCashierOrderSummary?: boolean;
+                        printOrderByProduct?: boolean;
+                    };
+                } | null)
             : null;
         const eventName = event?.name?.trim() || undefined;
         const brandingLogoUrl = sanitizeReceiptHeaderLogoUrl(event?.settings?.receiptHeaderLogoUrl)
             || sanitizePrintableHeaderLogoUrl(event?.settings?.menuHeaderLogoUrl);
+        const printOrderByProduct = event?.settings?.printOrderByProduct === true;
 
         let cashierPrinter: PrinterDestinationRef | undefined;
         if (posDeviceId) {
@@ -1930,10 +1941,13 @@ export class PrinterService {
             if (!product) return [];
 
             const normalizedQuantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
-            if (!product.splitKitchenPrintPerUnit && !item.splitPrintPerUnit) {
+            const isNumbered = Boolean(categoryById.get(product.categoryId.toString())?.pizzaFlowEnabled);
+            const groupByProduct = printOrderByProduct && !isNumbered;
+            if (groupByProduct || (!product.splitKitchenPrintPerUnit && !item.splitPrintPerUnit)) {
                 return [{
                     ...item,
                     quantity: normalizedQuantity,
+                    groupByProduct,
                     splitSequence: undefined as number | undefined
                 }];
             }
@@ -1941,6 +1955,7 @@ export class PrinterService {
             return Array.from({ length: normalizedQuantity }, () => ({
                 ...item,
                 quantity: 1,
+                groupByProduct: false,
                 splitSequence: splitSequence++
             }));
         });
@@ -2005,7 +2020,8 @@ export class PrinterService {
             const printerName = kitchenPrinter?.name?.trim();
             const isNumberedCategory = Boolean(category?.pizzaFlowEnabled);
             const shouldPrintDishBarcode = isNumberedCategory && Boolean(category?.pizzaBarcodeEnabled);
-            const printFlowKey = isNumberedCategory ? `dish:${String(item.productId)}` : "standard";
+            const printFlowKey = isNumberedCategory ? `dish:${String(item.productId)}`
+                : item.groupByProduct ? `product:${String(item.productId)}` : "standard";
             const baseGroupKey = kitchenPrinter?._id
                 ? `printer:${String(kitchenPrinter._id)}`
                 : `category:${categoryId}`;
@@ -2051,6 +2067,17 @@ export class PrinterService {
             }
 
             const departmentFooterLines = departmentLabel ? [`REPARTO: ${departmentLabel}`] : undefined;
+            const printedName = resolvePrintName(item.productId, item.snapshotName);
+            const appendItem = (job: PrinterCommandJob) => {
+                const matchingLine = item.groupByProduct
+                    ? job.items.find((line) => line.name === printedName && line.notes === item.notes)
+                    : undefined;
+                if (matchingLine) {
+                    matchingLine.quantity += item.quantity;
+                } else {
+                    job.items.push({ name: printedName, quantity: item.quantity, notes: item.notes });
+                }
+            };
             let hasKitchenJob = false;
             destinations.forEach((destination) => {
                 const kitchenGroupKey = `${customerGroupKey}:${destination.groupKey}`;
@@ -2088,11 +2115,7 @@ export class PrinterService {
                         ? getPizzaBarcodeValue(pizzaNumber)
                         : undefined;
                 }
-                kitchenJob.items.push({
-                    name: resolvePrintName(item.productId, item.snapshotName),
-                    quantity: item.quantity,
-                    notes: item.notes
-                });
+                appendItem(kitchenJob);
             });
 
             const customerJob = ensureCustomerJob(customerGroupKey, departmentFooterLines);
@@ -2102,11 +2125,7 @@ export class PrinterService {
                     customerJob.pizzaBarcodeValue = getPizzaBarcodeValue(pizzaNumber);
                 }
             }
-            customerJob?.items.push({
-                name: resolvePrintName(item.productId, item.snapshotName),
-                quantity: item.quantity,
-                notes: item.notes
-            });
+            if (customerJob) appendItem(customerJob);
         });
 
         const involvedDepartmentsLine = involvedDepartments.size > 0
@@ -2123,7 +2142,7 @@ export class PrinterService {
         }
 
         const printJobs: Array<{ job: PrinterCommandJob; copies: number }> = [];
-        if (cashierJob.items.length > 0 && cashierJob.ip) {
+        if (event?.settings?.suppressCashierOrderSummary !== true && cashierJob.items.length > 0 && cashierJob.ip) {
             const summaryJob: PrinterCommandJob = {
                 ...cashierJob,
                 printType: "CASHIER_SUMMARY",
