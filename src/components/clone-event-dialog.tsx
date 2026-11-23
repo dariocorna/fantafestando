@@ -22,11 +22,14 @@ interface CloneEventDialogProps {
 
 export function CloneEventDialog({ sourceEventId, sourceEventName }: CloneEventDialogProps) {
     const [open, setOpen] = useState(false);
+    const [submitError, setSubmitError] = useState<string | null>(null);
     const [isPending, startTransition] = useTransition();
 
     async function handleSubmit(formData: FormData) {
+        setSubmitError(null);
         startTransition(async () => {
             const result = await cloneEventAction(formData);
+            if ("error" in result && result.error) setSubmitError(result.error);
             if ("success" in result && result.success) {
                 setOpen(false);
             }
@@ -34,7 +37,10 @@ export function CloneEventDialog({ sourceEventId, sourceEventName }: CloneEventD
     }
 
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={(nextOpen) => {
+            setOpen(nextOpen);
+            setSubmitError(null);
+        }}>
             <DialogTrigger asChild>
                 <Button variant="outline" size="sm">Clona</Button>
             </DialogTrigger>
@@ -51,6 +57,7 @@ export function CloneEventDialog({ sourceEventId, sourceEventName }: CloneEventD
                         </div>
                         <p className="text-sm text-muted-foreground">Verranno copiati tutti i prodotti, le categorie e le impostazioni della festa. Lo storico ordini partirà da zero.</p>
                     </div>
+                    {submitError && <p role="alert" className="text-sm text-destructive">{submitError}</p>}
                     <DialogFooter>
                         <Button type="submit" disabled={isPending}>
                             {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
