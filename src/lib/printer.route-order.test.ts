@@ -1485,7 +1485,7 @@ describe("PrinterService.routeOrderToPrinters", () => {
             undefined
         );
         expect(orderUpdateOneMock).toHaveBeenCalledWith(
-            { _id: expect.anything() },
+            { _id: "order-raster", "easterEggAttachment.printedAt": { $exists: false } },
             {
                 $set: {
                     "easterEggAttachment.printedAt": expect.any(Date)
@@ -1496,5 +1496,11 @@ describe("PrinterService.routeOrderToPrinters", () => {
                 }
             }
         );
+
+        // A persisted SENT job guards a reprint if the order cleanup failed.
+        printJobExistsMock.mockResolvedValueOnce({ _id: "sent-raster" });
+        await PrinterService.routeOrderToPrinters("order-raster", "pos-1");
+        expect(printRasterSpy).toHaveBeenCalledOnce();
+        expect(orderUpdateOneMock).toHaveBeenCalledTimes(2);
     });
 });
