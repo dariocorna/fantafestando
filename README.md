@@ -82,6 +82,14 @@ Note accesso preparazioni numerate:
 - `/pizza-console` e le API `/api/pizza-console/*` sono pensate per uso operativo interno e richiedono sessione autenticata;
 - `/pizza-monitor` usa la route pubblica `/api/public/pizza-monitor` ed e` pensato per essere mostrato su monitor/schermo cliente.
 
+## Catalogo POS e comande
+
+Il POS desktop compatto distribuisce le categorie con più di otto prodotti su più colonne. I prodotti restano nella loro categoria anche nel menu pubblico.
+
+In **Admin → Impostazioni**, per ciascuna festa puoi saltare il riepilogo di ogni ordine in cassa e scegliere **Una comanda per prodotto, con quantità totale**. Per esempio, tre cioccolate e due tè generano due comande con quantità 3 e 2 per ciascuna destinazione prevista. Le note diverse restano su righe distinte della stessa comanda.
+
+Per i piatti numerati valgono le regole di stampa del catalogo. Il riepilogo di chiusura cassa è indipendente dalle opzioni di stampa dell’ordine.
+
 ## Preparazioni numerate
 
 1. In Admin Catalogo, abilita `Preparazione numerata` sulle categorie che devono entrare nel flusso, ad esempio Pizza e Calamari.

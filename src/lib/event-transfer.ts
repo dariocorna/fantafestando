@@ -55,6 +55,8 @@ type ExportedEventSettings = {
   askName: boolean;
   askTable: boolean;
   posCatalogLayout?: "COMPACT_COLUMNS" | "MODERN_TABS";
+  suppressCashierOrderSummary?: boolean;
+  printOrderByProduct?: boolean;
   menuHeaderLogoUrl?: string;
   menuHeaderLogoAssetPath?: string;
   receiptHeaderLogoUrl?: string;
@@ -349,6 +351,8 @@ async function exportEventSettingsWithAssets(
     askTable: Boolean(settings.askTable),
     posCatalogLayout:
       settings.posCatalogLayout === "MODERN_TABS" ? "MODERN_TABS" : "COMPACT_COLUMNS",
+    suppressCashierOrderSummary: settings.suppressCashierOrderSummary === true,
+    printOrderByProduct: settings.printOrderByProduct === true,
     portalEasterEggEnabled: Boolean(settings.portalEasterEggEnabled),
     portalEasterEggCrop: settings.portalEasterEggCrop as ExportedEventSettings["portalEasterEggCrop"],
     portalEasterEggProcessing:
@@ -693,6 +697,8 @@ export async function importEventTransferBundle(
         askName: Boolean(importedSettings.askName),
         askTable: Boolean(importedSettings.askTable),
         posCatalogLayout: importedSettings.posCatalogLayout === "MODERN_TABS" ? "MODERN_TABS" : "COMPACT_COLUMNS",
+        suppressCashierOrderSummary: importedSettings.suppressCashierOrderSummary === true,
+        printOrderByProduct: importedSettings.printOrderByProduct === true,
         menuHeaderLogoUrl: menuHeaderLogoAsset.url,
         receiptHeaderLogoUrl: receiptHeaderLogoAsset.url,
         portalEasterEggEnabled: Boolean(importedSettings.portalEasterEggEnabled),

@@ -168,6 +168,12 @@ export async function updateEventSettingsAction(formData: FormData) {
         "settings.sumupApiKey": 1
     };
 
+    for (const option of ["suppressCashierOrderSummary", "printOrderByProduct"]) {
+        if (formData.has(option)) {
+            settingsSet[`settings.${option}`] = formData.get(option) === "true";
+        }
+    }
+
     if (nextMenuHeaderLogoUrl !== null && nextMenuHeaderLogoUrl) {
         settingsSet["settings.menuHeaderLogoUrl"] = nextMenuHeaderLogoUrl;
     }

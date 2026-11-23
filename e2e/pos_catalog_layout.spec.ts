@@ -1,20 +1,32 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { Types } from "mongoose";
 import { ensureAdminAuthenticated } from "./utils/auth";
 import {
+    completeCashOrder,
+    createVirtualPrinterDirect,
+    openCashSessionIfRequired,
     seedActiveEventWithCatalog,
+    setAdminEventContextCookie,
     uniqueSuffix,
 } from "./utils/fixtures";
 import { cleanupEventArtifactsByName } from "./utils/db";
+import Category from "../src/models/Category";
+import Peripheral from "../src/models/Peripheral";
+import PosDevice from "../src/models/PosDevice";
+import PrintJob from "../src/models/PrintJob";
+import Product from "../src/models/Product";
 
 async function savePosCatalogLayout(page: Page, layout: "COMPACT_COLUMNS" | "MODERN_TABS") {
     await page.goto("/admin/settings");
+    const save = page.getByRole("button", { name: /Salva Impostazioni/i });
+    await expect(save).toBeEnabled();
     const activeCheckbox = page.locator('input[name="active"]');
     if (!(await activeCheckbox.isChecked())) await activeCheckbox.check();
 
     const layoutSelect = page.locator("#posCatalogLayout");
     await layoutSelect.selectOption(layout);
     await expect(layoutSelect).toHaveValue(layout);
-    await page.getByRole("button", { name: /Salva Impostazioni/i }).click();
+    await save.click();
     await expect(page.getByText(/Modifiche salvate/i)).toBeVisible();
 }
 
@@ -41,6 +53,81 @@ async function openPos(page: Page) {
 }
 
 test.describe("Layout catalogo POS da impostazioni admin", () => {
+    test("divide i dolci a video e stampa una comanda per prodotto con la quantità completa", async ({ page, isMobile }) => {
+        test.skip(isMobile, "Layout compatto desktop.");
+        const suffix = uniqueSuffix();
+        const eventName = `POS catalogo e stampa ${suffix}`;
+        const posName = `Cassa ${suffix}`;
+        const names = Array.from({ length: 9 }, (_, index) => `Dolce ${index + 1}`);
+
+        try {
+            const { eventId } = await seedActiveEventWithCatalog(eventName, "Dolci", names.map((name) => ({ name, price: "2.50" })));
+            const categories: Array<{ _id: Types.ObjectId; name: string }> = await Category.create([
+                { eventId, name: "Bevande", uiColor: "#2563eb", printOrder: -1 },
+                { eventId, name: "Gastronomia", uiColor: "#16a34a", printOrder: 1 },
+            ]);
+            await Product.insertMany(categories.flatMap((category, index) =>
+                Array.from({ length: index === 0 ? 4 : 2 }, (_, product) => ({
+                    eventId, categoryId: category._id, name: `${category.name} ${product}`, basePrice: 2,
+                })),
+            ));
+            await Product.updateMany({ eventId, name: { $in: names } }, { splitKitchenPrintPerUnit: true });
+            const { printerId } = await createVirtualPrinterDirect({ eventName, printerName: posName });
+            const cashBox = await Peripheral.create({ eventId, name: posName, type: "CASH_BOX", config: {} });
+            await PosDevice.create({ eventId, name: posName, printerId, cashBoxId: cashBox._id });
+            await setAdminEventContextCookie(page, eventId);
+            await ensureAdminAuthenticated(page, "/admin/settings");
+
+            const save = page.getByRole("button", { name: /Salva Impostazioni/i });
+            await expect(save).toBeEnabled();
+            const summary = page.getByLabel("Riepilogo ordine in cassa");
+            const grouping = page.getByLabel("Raggruppamento comande");
+            await expect(summary).toHaveValue("false");
+            await expect(grouping).toHaveValue("false");
+            await summary.selectOption("true");
+            await grouping.selectOption("true");
+            await save.click();
+            await expect(page.getByText(/Modifiche salvate/i)).toBeVisible();
+            await page.reload();
+            await expect(summary).toHaveValue("true");
+            await expect(grouping).toHaveValue("true");
+
+            await page.setViewportSize({ width: 1024, height: 768 });
+            await page.goto("/pos");
+            await page.getByRole("dialog", { name: /In quale cassa sei/i })
+                .getByRole("button", { name: new RegExp(posName) }).click();
+            await expect(page.getByRole("dialog", { name: /In quale cassa sei/i })).toBeHidden();
+            await openCashSessionIfRequired(page, "0");
+            const catalog = page.getByTestId("pos-all-categories-catalog");
+            const desserts = catalog.locator("article").filter({ has: page.getByRole("heading", { name: "Dolci", exact: true }) });
+            const productButtons = '[data-testid^="pos-product-"]';
+            await expect(desserts).toHaveCount(2);
+            await expect(desserts.first().locator(productButtons)).toHaveCount(5);
+            await expect(desserts.last().locator(productButtons)).toHaveCount(4);
+            await expect(desserts.locator(productButtons)).toHaveText(names);
+            for (const viewport of [{ width: 1024, height: 768 }, { width: 1280, height: 800 }]) {
+                await page.setViewportSize(viewport);
+                await expect(desserts.last()).toBeInViewport({ ratio: 1 });
+                await expect.poll(() => catalog.evaluate((element) => {
+                    const scrollContainer = element.closest(".overflow-y-auto");
+                    return scrollContainer ? scrollContainer.scrollHeight - scrollContainer.clientHeight : null;
+                })).toBe(0);
+            }
+
+            await completeCashOrder(page, [{ name: names[0], quantity: 3 }, { name: names[5], quantity: 2 }]);
+            const jobs = await PrintJob.find({ eventId, source: "ORDER" }).lean();
+            expect(jobs.map(({ printType, status, document }) => ({
+                printType, status, items: document.items,
+            }))).toEqual(expect.arrayContaining([
+                { printType: "CUSTOMER_ORDER", status: "SENT", items: [expect.objectContaining({ name: names[0], quantity: 3 })] },
+                { printType: "CUSTOMER_ORDER", status: "SENT", items: [expect.objectContaining({ name: names[5], quantity: 2 })] },
+            ]));
+            expect(jobs).toHaveLength(2);
+        } finally {
+            await cleanupEventArtifactsByName(eventName);
+        }
+    });
+
     test("mantiene il layout selezionato anche dopo reload POS", async ({ page, isMobile }) => {
         test.skip(isMobile, "Scenario validato su desktop.");
 

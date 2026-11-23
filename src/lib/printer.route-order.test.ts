@@ -130,6 +130,46 @@ describe("PrinterService.routeOrderToPrinters", () => {
         printJobExistsMock.mockResolvedValue(null);
     });
 
+    test("prints grouped quantities by product ID and preserves numbered tickets", async () => {
+        mockEvent({ settings: { suppressCashierOrderSummary: true, printOrderByProduct: true } });
+        mockPosDevice({ printerId: { _id: "cash", ip: "127.0.0.1", port: 9100 } });
+        mockProducts([
+            { _id: "a", categoryId: "standard", shortName: "Dolce", splitKitchenPrintPerUnit: true },
+            { _id: "b", categoryId: "standard", shortName: "Dolce" },
+            { _id: "dish", categoryId: "numbered", splitKitchenPrintPerUnit: true },
+        ]);
+        const printerId = { _id: "kitchen", ip: "127.0.0.1", port: 9101, type: "KITCHEN" };
+        mockCategories([
+            { _id: "standard", printerId },
+            { _id: "numbered", printerId, pizzaFlowEnabled: true },
+        ]);
+        mockOrder(buildOrder("mixed", {
+            dishTickets: [{ productId: "dish", pizzaNumber: 1 }, { productId: "dish", pizzaNumber: 2 }],
+            cart: [
+                { productId: "a", snapshotName: "Muffin", quantity: 2, splitPrintPerUnit: true },
+                { productId: "a", snapshotName: "Muffin", quantity: 1 },
+                { productId: "a", snapshotName: "Muffin", quantity: 1, customKitchenNotes: "Senza glassa" },
+                { productId: "b", snapshotName: "Torta", quantity: 2 },
+                { productId: "dish", snapshotName: "Pizza", quantity: 2 },
+            ],
+        }));
+
+        const print = vi.spyOn(PrinterService, "printComanda").mockResolvedValue(true);
+        try {
+            await PrinterService.routeOrderToPrinters("mixed", "pos");
+            const jobs = print.mock.calls.map(([job]) => job);
+            expect(jobs).toHaveLength(8);
+            for (const printType of ["CUSTOMER_ORDER", "KITCHEN_ORDER"]) {
+                const copies = jobs.filter((job) => job.printType === printType);
+                expect(copies.map((job) => job.items.map(({ quantity }) => quantity))).toEqual([[3, 1], [2], [1], [1]]);
+                expect(copies[0].items[1].notes).toBe("Senza glassa");
+                expect(copies.slice(2).map((job) => job.pizzaNumber)).toEqual([1, 2]);
+            }
+        } finally {
+            print.mockRestore();
+        }
+    });
+
     test("keeps only cashier summary and customer copy when no department printer is configured", async () => {
         mockOrder(buildOrder("order-1"));
         mockEvent({ name: "Festa dell'Oratorio 2026", settings: {} });
