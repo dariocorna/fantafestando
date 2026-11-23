@@ -288,7 +288,7 @@ test.describe("Dashboard statistiche e reportistica", () => {
             await page.getByRole("button", { name: "Applica filtro" }).click()
 
             await expect(page.getByTestId("dashboard-time-range-error")).toHaveText("La data finale deve essere successiva a quella iniziale.")
-            await expect(page.getByRole("alert")).toHaveText("La data finale deve essere successiva a quella iniziale.")
+            await expect(page.getByTestId("dashboard-time-range-error")).toHaveRole("alert")
             await expect(fromInput).toHaveAttribute("aria-invalid", "true")
             await expect(fromInput).toHaveAttribute("aria-describedby", "dashboard-time-range-error-message")
             await expect(toInput).toHaveAttribute("aria-invalid", "true")
